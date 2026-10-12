@@ -4,7 +4,7 @@
 (defstruct (query-match-parser (:constructor %make-query-match-parser))
   source
   length
-  (position 0 :type (integer 0))
+  (position 0)
   context
   limits
   reference-time)
@@ -89,29 +89,23 @@
 (defun query-match-and (predicates)
   (let ((children '()))
     (dolist (predicate predicates)
-      (if (and (consp predicate) (eq (car predicate) :and))
+      (if (eq (car predicate) :and)
           (setf children (nconc children (copy-list (cdr predicate))))
           (setf children (nconc children (list predicate)))))
-    (cond ((null children) nil)
-          ((null (cdr children)) (car children))
+    (cond ((null (cdr children)) (car children))
           (t (cons :and children)))))
 
 (defun query-match-or (predicates)
   (let ((children '()))
     (dolist (predicate predicates)
-      (if (and (consp predicate) (eq (car predicate) :or))
-          (setf children (nconc children (copy-list (cdr predicate))))
-          (setf children (nconc children (list predicate)))))
-    (cond ((null children) nil)
-          ((null (cdr children)) (car children))
+      (setf children (nconc children (list predicate))))
+    (cond ((null (cdr children)) (car children))
           (t (cons :or children)))))
 
 (defun query-match-negate (predicate)
   (cond
-    ((and (consp predicate) (eq (car predicate) :exists))
+    ((eq (car predicate) :exists)
      (cons :missing (cdr predicate)))
-    ((and (consp predicate) (eq (car predicate) :missing))
-     (cons :exists (cdr predicate)))
     (t (list :not predicate))))
 
 (defun query-match-planning-kind (name)
@@ -169,7 +163,11 @@
                   (when (= (1+ position) length)
                     (query-match-parser-fail parser position
                                              "Incomplete escape in Org match term"))
-                  (write-char (char source (1+ position)) output)
+                  (let ((escaped (char source (1+ position))))
+                    (when (query-match-control-p escaped)
+                      (query-match-parser-fail parser position
+                                               "Control character in Org match term"))
+                    (write-char escaped output))
                   (incf position 2))
                  ((find character '(#\Space #\Tab #\Newline #\Return
                                    #\+ #\- #\& #\| #\/ #\( #\)
@@ -225,7 +223,7 @@
          (start (query-match-parser-position parser))
          (cursor start)
          (length (query-match-parser-length parser)))
-    (when (and (< cursor length) (char= (char source cursor) #\-))
+    (when (char= (char source cursor) #\-)
       (incf cursor))
     (let ((integer-start cursor))
       (loop while (and (< cursor length)
@@ -248,8 +246,7 @@
                (if dot
                    (let* ((whole-text (subseq text (if negative-p 1 0) dot))
                           (fraction-text (subseq text (1+ dot)))
-                          (whole (if (plusp (length whole-text))
-                                     (parse-integer whole-text) 0))
+                          (whole (parse-integer whole-text))
                           (fraction (/ (parse-integer fraction-text)
                                        (expt 10 (length fraction-text)))))
                      (if negative-p (- (+ whole fraction)) (+ whole fraction)))
@@ -364,9 +361,6 @@
                (query-match-parse-property parser name surface operator
                                            operator-position))
              (let ((text (query-match-parse-tag-text parser)))
-               (when (zerop (length text))
-                 (query-match-parser-fail parser (query-match-parser-position parser)
-                                          "Expected an Org match term"))
                (if (eq section :todo)
                    (list :todo := text)
                    (list :tag := text)))))))))
@@ -405,10 +399,6 @@
   (check-type limits limits)
   (when context
     (check-type context query-context))
-  (when (and reference-time
-             (not (cl-date-kit:local-date-time-p reference-time)))
-    (error 'type-error :datum reference-time
-           :expected-type 'cl-date-kit:local-date-time))
   (check-limit limits :max-input-length (length source))
   (when (zerop (length source))
     (query-signal-error source 0 "Org match cannot be empty"))
@@ -420,27 +410,23 @@
     (unless (eql (query-match-parser-peek parser) #\/)
       (setf tag-predicate (query-match-parse-or-expression parser :match)))
     (when (eql (query-match-parser-peek parser) #\/)
-      (let ((slash-position (query-match-parser-position parser)))
-        (incf (query-match-parser-position parser))
-        (let ((todo-only-p (eql (query-match-parser-peek parser) #\!)))
-          (when todo-only-p (incf (query-match-parser-position parser)))
-          (if (query-match-parser-at-end-p parser)
-              (if todo-only-p
-                  (setf todo-predicate '(:todo-present))
-                  (query-match-parser-fail parser (query-match-parser-position parser)
-                                           "TODO section cannot be empty"))
-              (let ((todo-expression
-                      (query-match-parse-or-expression parser :todo)))
-                (setf todo-predicate
-                      (if todo-only-p
-                          (query-match-and (list '(:todo-present) todo-expression))
-                          todo-expression))))
-        (when (eql (query-match-parser-peek parser) #\/)
-          (query-match-parser-fail parser (query-match-parser-position parser)
-                                   "Only one TODO section is allowed"))
-        (when (and (query-match-parser-at-end-p parser)
-                   (not todo-predicate))
-          (query-match-parser-fail parser slash-position "TODO section cannot be empty")))))
+      (incf (query-match-parser-position parser))
+      (let ((todo-only-p (eql (query-match-parser-peek parser) #\!)))
+        (when todo-only-p (incf (query-match-parser-position parser)))
+        (if (query-match-parser-at-end-p parser)
+            (if todo-only-p
+                (setf todo-predicate '(:todo-present))
+                (query-match-parser-fail parser (query-match-parser-position parser)
+                                         "TODO section cannot be empty"))
+            (let ((todo-expression
+                    (query-match-parse-or-expression parser :todo)))
+              (setf todo-predicate
+                    (if todo-only-p
+                        (query-match-and (list '(:todo-present) todo-expression))
+                        todo-expression))))
+      (when (eql (query-match-parser-peek parser) #\/)
+        (query-match-parser-fail parser (query-match-parser-position parser)
+                                 "Only one TODO section is allowed"))))
     (unless (query-match-parser-at-end-p parser)
       (let ((character (query-match-parser-peek parser)))
         (query-match-parser-fail
