@@ -7,15 +7,16 @@
 
 (defstruct (document (:constructor %make-document) (:conc-name %document-)
                      (:copier nil) (:predicate %document-p))
-  "Decoded Org source with its line index, settings and parsed tree."
+  "Decoded Org source with its line index, settings, resource limits and parse state."
   (text "" :type (simple-array character (*)) :read-only t)
   (encoding nil :read-only t)
   (bom-p nil :read-only t)
   (source-name nil :read-only t)
-  (limits nil :read-only t)
   (line-starts #() :type simple-vector :read-only t)
   (root nil)
-  (settings '() :type list))
+  (settings '() :type list)
+  (limits nil :type limits :read-only t)
+  (object-context nil))
 
 (defun line-start-offsets (text)
   "Return a simple vector of the offsets at which each line of TEXT starts.
@@ -36,8 +37,9 @@ Signals ORG-PARSE-ERROR for undecodable octets and ORG-RESOURCE-LIMIT-ERROR for
 oversized input."
   (multiple-value-bind (text used-encoding bom-p) (decode-input input encoding limits)
     (%make-document :text text :encoding used-encoding :bom-p bom-p
-                    :source-name source-name :limits limits
-                    :line-starts (line-start-offsets text))))
+                    :source-name source-name
+                    :line-starts (line-start-offsets text)
+                    :limits limits)))
 
 (defun document-p (object)
   "Return true when OBJECT is a DOCUMENT."
