@@ -414,7 +414,7 @@
                     :limits (make-limits
                              :max-output-length (1- length)))))))
 
-  (it "rejects unrepresentable element trees and escapes example block closers"
+  (it "rejects unrepresentable element trees and raw block closers"
     (let ((empty-section (make-node :section))
           (orphan-property
             (make-node :org-data
@@ -427,17 +427,16 @@
                                                     (list :key "ID"
                                                           :value "x")))))))
           (closing-marker
-            (make-node :example-block
+            (make-node :comment-block
                        :properties
-                       (list :switches nil
-                             :value (format nil "payload~%#+END_EXAMPLE~%")))))
+                       (list :value (format nil "payload~%#+END_COMMENT~%")))))
       (with-soft-assertions
         (signals org-kit-error (emit-org empty-section))
         (signals org-kit-error (emit-org orphan-property))
-        (expect (emit-org closing-marker)
-                :to-equal
-                (format nil
-                        "#+BEGIN_EXAMPLE~%payload~%,#+END_EXAMPLE~%#+END_EXAMPLE~%")))))
+        (expect (search "payload contains its closing marker #+END_COMMENT"
+                        (emitter-test-error-message
+                         (lambda () (emit-org closing-marker))))
+                :to-be-truthy))))
 
   (it "preserves structured headline titles and document heading settings"
     (let* ((tree
