@@ -11,7 +11,9 @@
 
 (defun edit-subtree-test-headline (document title)
   (find title (edit-subtree-test-headlines document)
-        :key (lambda (node) (node-property node :raw-value))
+        :key (lambda (node)
+               (string-right-trim '(#\Return)
+                                  (node-property node :raw-value)))
         :test #'string=))
 
 (defun edit-subtree-test-splice (source start end replacement)
@@ -88,7 +90,7 @@
            (parent (edit-subtree-test-headline document "Parent"))
            (peer (edit-subtree-test-headline document "Peer"))
            (peer-before (org-kit::edit-canonical-node peer))
-           (raw "** Child~%Child body~%")
+           (raw (format nil "** Child~%Child body~%"))
            (offset (search "* Peer" source))
            (expected-source (edit-subtree-test-splice source offset offset raw))
            (expected-tree
@@ -222,6 +224,19 @@
       (edit-subtree-test-assert-edit document edited source expected-source
                                      expected-tree)))
 
+  (it "replaces a headline made only of stars"
+    (let* ((source "*")
+           (document (parse-org source))
+           (target (first (edit-subtree-test-headlines document)))
+           (raw "* Updated")
+           (expected-tree
+             (edit-subtree-test-replace-canonical
+              (edit-subtree-test-canonical document)
+              (org-kit::edit-node-path document target)
+              (edit-subtree-test-fragment-canonical raw)))
+           (edited (replace-subtree document target raw)))
+      (edit-subtree-test-assert-edit document edited source raw expected-tree)))
+
   (it "rejects replacement fragments without exactly one top-level headline"
     (let* ((source (format nil "* Old~%"))
            (document (parse-org source))
@@ -249,7 +264,7 @@
        :invalid-value document source)))
 
   (it "preserves a missing final newline when replacing the final subtree"
-    (let* ((source "* Keep\n* Old")
+    (let* ((source (format nil "* Keep~%* Old"))
            (document (parse-org source))
            (target (edit-subtree-test-headline document "Old"))
            (raw "* New")
@@ -280,6 +295,37 @@
       (edit-subtree-test-assert-edit document edited source expected-source expected-tree)
       (expect (document-final-newline-p edited) :to-be nil)))
 
+  (it "defaults to the last child and preserves bytes around the inserted separator"
+    (let* ((source (format nil "* Parent~%* Peer~%"))
+           (document (parse-org source))
+           (parent (edit-subtree-test-headline document "Parent"))
+           (raw "** Child")
+           (offset (search "* Peer" source))
+           (prefix (subseq source 0 offset))
+           (suffix (subseq source offset))
+           (newline (string #\Newline))
+           (expected-source (concatenate 'string prefix raw newline suffix))
+           (expected-tree
+             (edit-subtree-test-insert-canonical
+              (edit-subtree-test-canonical document)
+              (org-kit::edit-node-path document parent)
+              (length (getf (org-kit::edit-canonical-node parent) :children))
+              (edit-subtree-test-fragment-canonical raw)))
+           (edited (insert-subtree document parent raw))
+           (edited-source (document-text edited))
+           (edited-suffix-offset (+ offset (length raw) (length newline))))
+      (edit-subtree-test-assert-edit document edited source expected-source expected-tree)
+      (with-soft-assertions
+        (expect (cl-codec-kit:string-to-octets
+                 (subseq edited-source 0 offset) :encoding :utf-8)
+                :to-equalp
+                (cl-codec-kit:string-to-octets
+                 (subseq source 0 offset) :encoding :utf-8))
+        (expect (cl-codec-kit:string-to-octets
+                 (subseq edited-source edited-suffix-offset) :encoding :utf-8)
+                :to-equalp
+                (cl-codec-kit:string-to-octets suffix :encoding :utf-8)))))
+
   (it "promotes the target and descendants by one odd logical level"
     (let* ((source (format nil "#+STARTUP: odd~%* Root~%*** Child~%***** Grandchild~%* Peer~%"))
            (document (parse-org source))
@@ -302,6 +348,22 @@
         (expect (org-kit::edit-canonical-node
                  (edit-subtree-test-headline edited "Peer"))
                 :to-equalp peer-before))))
+
+  (it "promotes a skipped odd level without changing its parent"
+    (let* ((source (format nil "#+STARTUP: odd~%* Parent~%***** Child~%"))
+           (document (parse-org source))
+           (target (edit-subtree-test-headline document "Child"))
+           (expected-source (format nil "#+STARTUP: odd~%* Parent~%*** Child~%"))
+           (expected-tree (edit-subtree-test-canonical
+                           (parse-org expected-source)))
+           (edited (promote-subtree document target)))
+      (edit-subtree-test-assert-edit document edited source expected-source
+                                     expected-tree)
+      (with-soft-assertions
+        (expect (node-property (edit-subtree-test-headline edited "Child") :level)
+                :to-equal 2)
+        (expect (node-parent (edit-subtree-test-headline edited "Child"))
+                :to-be (edit-subtree-test-headline edited "Parent")))))
 
   (it "demotes the target and moves it under its previous logical peer"
     (let* ((source (format nil "#+STARTUP: odd~%* Parent~%*** First~%*** Target~%***** Existing~%*** Later~%* Peer~%"))
@@ -428,6 +490,17 @@
            (document (parse-org source))
            (target (edit-subtree-test-headline document "Child"))
            (expected-source (format nil "* Parent~%* Sibling~%"))
+           (expected-tree (edit-subtree-test-canonical
+                           (parse-org expected-source)))
+           (edited (delete-subtree document target)))
+      (edit-subtree-test-assert-edit document edited source expected-source
+                                     expected-tree)))
+
+  (it "deletes a subtree before a standalone short keyword"
+    (let* ((source (format nil "* Parent~%** Child~%body~%#+BAD: note~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-test-headline document "Child"))
+           (expected-source (format nil "* Parent~%* Peer~%"))
            (expected-tree (edit-subtree-test-canonical
                            (parse-org expected-source)))
            (edited (delete-subtree document target)))

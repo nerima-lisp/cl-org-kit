@@ -66,12 +66,9 @@
 (defun edit-subtree-trailing-comment-p (source start end)
   "Return true when the last nonblank line in [START, END) is a comment."
   (loop with line-end = end
-        while (> line-end start)
-        do (when (char= (char source (1- line-end)) #\Newline)
-             (decf line-end)
-             (when (and (> line-end start)
-                        (char= (char source (1- line-end)) #\Return))
-               (decf line-end)))
+        do (decf line-end)
+           (when (char= (char source (1- line-end)) #\Return)
+             (decf line-end))
            (let* ((newline (position #\Newline source :start start :end line-end
                                      :from-end t))
                   (line-start (if newline (1+ newline) start))
@@ -80,8 +77,7 @@
                               (find character '(#\Space #\Tab)))
                             line)
                (return (edit-subtree-comment-line-p line)))
-             (setf line-end line-start))
-        finally (return nil)))
+             (setf line-end line-start))))
 
 (defun edit-subtree-affiliated-keyword-p (line)
   (when (and (>= (length line) 3)
@@ -99,11 +95,17 @@
                     (string= key "ATTR_" :end1 5 :end2 5)))))))
 
 (defun edit-subtree-affiliation-p (source node)
-  (let ((begin (node-begin node))
-        (marker (node-post-affiliated node)))
-    (and (< begin marker)
+  (let* ((marker (node-post-affiliated node))
+         (line-end (position #\Newline source :end marker :from-end t))
+         (previous-line-end
+           (and line-end
+                (position #\Newline source :end line-end :from-end t)))
+         (line-start (and line-end (if previous-line-end
+                                       (1+ previous-line-end)
+                                       0))))
+    (and line-end
          (edit-subtree-affiliated-keyword-p
-          (edit-subtree-line-text source begin marker)))))
+          (edit-subtree-line-text source line-start marker)))))
 
 (defun edit-subtree-check-boundary (document start end next target)
   (when next
@@ -160,8 +162,7 @@
          (prefix-p (and (plusp offset)
                         (not (char= (char source (1- offset)) #\Newline))))
          (raw-final-newline-p
-           (and (plusp (length raw-subtree))
-                (char= (char raw-subtree (1- (length raw-subtree))) #\Newline))))
+           (char= (char raw-subtree (1- (length raw-subtree))) #\Newline)))
     (concatenate 'string
                  (if prefix-p newline "")
                  raw-subtree
@@ -277,9 +278,10 @@
                            "Replacement headline must keep the target logical level"))
       (multiple-value-bind (target-start target-end target-stars)
           (edit-subtree-marker document headline)
+        (declare (ignore target-start target-end))
         (multiple-value-bind (fragment-start fragment-end fragment-stars)
             (edit-subtree-marker fragment fragment-headline)
-          (declare (ignore target-start target-end fragment-start fragment-end))
+          (declare (ignore fragment-start fragment-end))
           (unless (= target-stars fragment-stars)
             (edit-signal-error target :invalid-value
                                "Replacement headline must keep the target source level"))))
