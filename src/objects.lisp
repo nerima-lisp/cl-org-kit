@@ -298,30 +298,12 @@
         when match
           return match))
 
-(defun %valid-object-match-p (match start range-end)
-  (and (object-match-p match)
-       (node-type-p (object-match-type match))
-       (eq (node-type-category (object-match-type match)) :object)
-       (not (eq (object-match-type match) :plain-text))
-       (< start (object-match-end match) (1+ range-end))
-       (<= (object-match-post-blank match) (- (object-match-end match) start))
-       (let ((contents-begin (object-match-contents-begin match))
-             (contents-end (object-match-contents-end match)))
-         (or (and (null contents-begin) (null contents-end))
-             (and contents-begin
-                  contents-end
-                  (<= start
-                      contents-begin
-                      contents-end
-                      (object-match-end match)))))))
-
 (defun %radio-targets-in-range (document start end container-type targets)
   (let ((position start)
         (*object-parse-range-start* start))
     (loop while (< position end)
           for match = (%try-parse-object document position end container-type)
           do (if (and match
-                      (%valid-object-match-p match position end)
                       (%object-type-allowed-p (object-match-type match)
                                               container-type))
                  (progn
@@ -416,7 +398,6 @@ Return source-ordered object and plain-text nodes with nested children."
       (loop while (< position end)
             for match = (%try-parse-object document position end container-type)
             do (if (and match
-                        (%valid-object-match-p match position end)
                         (%object-type-allowed-p (object-match-type match)
                                                 container-type))
                    (progn
