@@ -147,6 +147,14 @@
 
       lispCheckDependencies = ctx: [ (kit ctx "cl-weave" cl-weave [ ]) ];
 
+      # run-tests.lisp compiles the scripts for its warning gate, and the
+      # coverage check runs scripts/check-coverage.pl, so both need scripts/
+      # and Perl inside the build.
+      sourceInclude = [ ./scripts ];
+      packageArgs = ctx: {
+        nativeBuildInputs = [ ctx.pkgs.perl ];
+      };
+
       timeoutSeconds = 600;
       killAfterSeconds = 30;
 
@@ -161,6 +169,15 @@
       ];
 
       extraOutputs = ctx: {
+        # scripts/run-coverage.lisp runs the suite under SB-COVER, then
+        # scripts/check-coverage.pl enforces 100% line and branch coverage
+        # outside the documented exclusions.
+        checks.coverage = ctx.cl.mkCoverageReport {
+          drv = ctx.package;
+          entryPoint = "scripts/run-coverage.lisp";
+          timeoutSeconds = 600;
+          killAfterSeconds = 30;
+        };
         checks.paredit-lint = paredit-cli.lib.${ctx.system}.mkLintCheck {
           src = ./.;
           name = "cl-org-kit-paredit-lint";

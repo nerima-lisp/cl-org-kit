@@ -16,7 +16,9 @@
 Any non-style warning fails, and so does a style warning raised from src/."
   (let* ((root (script-directory))
          (source-directory (merge-pathnames "src/" root))
-         (files (list (merge-pathnames "run-tests.lisp" root)))
+         (files (list (merge-pathnames "run-tests.lisp" root)
+                      (merge-pathnames "scripts/run-coverage.lisp" root)
+                      (merge-pathnames "scripts/run-mutation.lisp" root)))
          (warnings nil))
     (flet ((record-warning (condition)
              (when *compile-file-truename*
