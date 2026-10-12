@@ -16,7 +16,7 @@
   (contents-begin nil)
   (contents-end nil)
   (post-affiliated nil)
-  (post-blank 0)
+  (post-blank 0 :type (integer 0))
   (properties '() :type list)
   ;; Set on a root node only, by (SETF DOCUMENT-ROOT).
   (document nil))
