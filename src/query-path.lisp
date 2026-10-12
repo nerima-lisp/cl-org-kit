@@ -3,12 +3,12 @@
 
 (defstruct (query-path-parser (:constructor %make-query-path-parser))
   source
-  (position 0 :type (integer 0))
-  (end 0 :type (integer 0))
+  (position 0)
+  (end 0)
   context
   limits
   reference-time
-  (node-count 0 :type (integer 0)))
+  (node-count 0))
 
 (defun query-path-control-character-p (character)
   (let ((code (char-code character)))
@@ -63,21 +63,12 @@
         (source-positions '()))
     (query-path-parser-expect parser #\" "Expected a quoted string")
     (let ((content-start (query-path-parser-position parser)))
-      (loop until (query-path-parser-at-end-p parser)
-            for position = (query-path-parser-position parser)
+      (loop for position = (query-path-parser-position parser)
             for character = (query-path-parser-peek parser)
+            until (char= character #\")
             do (cond
-                 ((char= character #\")
-                  (incf (query-path-parser-position parser))
-                  (return-from query-path-parser-quoted-string
-                    (values (coerce (nreverse characters) 'string)
-                            (coerce (nreverse source-positions) 'vector)
-                            start content-start position)))
                  ((char= character #\\)
                   (incf (query-path-parser-position parser))
-                  (when (query-path-parser-at-end-p parser)
-                    (query-path-parser-fail parser position
-                                            "Incomplete quoted-string escape"))
                   (let ((escaped (query-path-parser-peek parser)))
                     (case escaped
                       (#\\ (push #\\ characters))
@@ -96,9 +87,12 @@
                  (t
                   (push character characters)
                   (push position source-positions)
-                  (incf (query-path-parser-position parser))))
-            finally
-               (query-path-parser-fail parser start "Unclosed quoted string")))))
+                  (incf (query-path-parser-position parser)))))
+      (let ((closing-quote (query-path-parser-position parser)))
+        (incf (query-path-parser-position parser))
+        (values (coerce (nreverse characters) 'string)
+                (coerce (nreverse source-positions) 'vector)
+                start content-start closing-quote)))))
 
 (defun query-path-parser-date-literal (parser)
   (query-path-parser-consume parser "date(")
@@ -126,7 +120,7 @@
                (index (and condition-position
                            (- condition-position content-start)))
                (mapped-position
-                 (if (and index (<= 0 index) (< index (length source-map)))
+                 (if (and index (< index (length source-map)))
                      (aref source-map index)
                      closing-quote)))
           (query-path-parser-fail
@@ -213,9 +207,8 @@
              (node-type
                (find-if
                 (lambda (candidate)
-                  (and (keywordp candidate)
-                       (string= name
-                                (string-downcase (symbol-name candidate)))))
+                  (string= name
+                           (string-downcase (symbol-name candidate))))
                 (node-types))))
         (or node-type
             (query-path-parser-fail parser start "Unknown node type"))))))
@@ -482,8 +475,7 @@
     (when (or open-indices close-indices)
       (unless (and (= (length open-indices) 1)
                    (= (length close-indices) 1)
-                   (= (first close-indices) (1- length))
-                   (< (first open-indices) (first close-indices)))
+                   (= (first close-indices) (1- length)))
         (query-signal-error
          source (third (nth (or (first open-indices) (first close-indices)) units))
          "Malformed path index"))
@@ -493,8 +485,7 @@
         (unless (and digits
                      (not (char= (first (first digits)) #\0))
                      (every (lambda (unit)
-                              (and (not (second unit))
-                                   (query-path-ascii-digit-p (first unit))))
+                              (query-path-ascii-digit-p (first unit)))
                             digits))
           (query-signal-error source (third (nth open units))
                               "Path index must be a positive integer"))
@@ -505,7 +496,6 @@
               title-end open)))
     (when star-indices
       (if (and (null index)
-               (= length (length star-indices))
                (member length '(1 2))
                (every (lambda (unit)
                         (and (not (second unit))

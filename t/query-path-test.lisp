@@ -43,7 +43,7 @@
 
 (defun query-path-test-query-error (document source)
   (handler-case
-      (progn (org-kit::query-path document source) nil)
+      (progn (org-kit:query-path document source) nil)
     (org-query-error (condition) condition)))
 
 (defun query-path-test-same-nodes-p (left right)
@@ -52,7 +52,7 @@
 
 (defun query-path-test-list-equivalent-p (document path form reference-time)
   (query-path-test-same-nodes-p
-   (org-kit::query-path document path :reference-time reference-time)
+   (org-kit:query-path document path :reference-time reference-time)
    (org-kit::query-list document form :reference-time reference-time)))
 
 (describe "path and filter queries"
@@ -60,33 +60,33 @@
     (let ((document (query-path-test-document)))
       (with-soft-assertions
         (expect (query-path-test-titles
-                 (org-kit::query-path document "/Root"))
+                 (org-kit:query-path document "/Root"))
                 :to-equal '("Root"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "Root/Child[2]"))
+                 (org-kit:query-path document "Root/Child[2]"))
                 :to-equal '("Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "Root/*"))
+                 (org-kit:query-path document "Root/*"))
                 :to-equal '("Child" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "Root/**"))
+                 (org-kit:query-path document "Root/**"))
                 :to-equal '("Root" "Child" "Deep" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "**/Deep"))
+                 (org-kit:query-path document "**/Deep"))
                 :to-equal '("Deep"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "slash\\/title"))
+                 (org-kit:query-path document "slash\\/title"))
                 :to-equal '("slash/title"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "star\\*title"))
+                 (org-kit:query-path document "star\\*title"))
                 :to-equal '("star*title"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "bracket\\[title\\]"))
+                 (org-kit:query-path document "bracket\\[title\\]"))
                 :to-equal '("bracket[title]"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "back\\\\slash"))
+                 (org-kit:query-path document "back\\\\slash"))
                 :to-equal '("back\\slash"))
-        (expect (org-kit::query-path document "Root/Child[99]") :to-equal nil))))
+        (expect (org-kit:query-path document "Root/Child[99]") :to-equal nil))))
 
   (it "parses filter precedence, parentheses, and path predicates"
     (let* ((document (query-path-test-document))
@@ -128,30 +128,44 @@
                                (string #\Tab)))))
       (with-soft-assertions
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
                   document "**?{tag=\"work\"}"
                   :context (org-kit::make-query-context
                             :tag-inheritance-p nil)))
                 :to-equal '("Root" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
                   document "Root/**?{tag!=\"work\"}"
                   :context (org-kit::make-query-context
                             :tag-inheritance-p nil)))
                 :to-equal '("Deep" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "Root/**?{todo-present}"))
+                 (org-kit:query-path document "Root/**?{todo-present}"))
                 :to-equal '("Root" "Deep" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "Root/**?{todo-missing}"))
+                 (org-kit:query-path document "Root/**?{todo-missing}"))
                 :to-equal nil)
         (expect (query-path-test-titles
-                 (org-kit::query-path document "**?{todo=\"DONE\"}"))
+                 (org-kit:query-path document "**?{todo=\"DONE\"}"))
                 :to-equal '("Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document "**?{todo=regex(\"TO\")}"))
+                 (org-kit:query-path document "**?{todo=regex(\"TO\")}"))
                 :to-equal '("Root" "Deep" "Child"))
-        (let ((blocks (org-kit::query-path
+        (expect (query-path-test-titles
+                 (org-kit:query-path
+                  document "Root/**?{todo!=regex(\"DONE\")}"))
+                :to-equal '("Root" "Deep" "Child"))
+        (expect (query-path-test-titles
+                 (org-kit:query-path document
+                                      "**?{type=:headline&todo-present}"))
+                :to-equal '("Root" "Deep" "Child"))
+        (expect (query-path-test-titles
+                 (org-kit:query-path document "**?{type!=:headline}"))
+                :to-equal nil)
+        (expect (query-path-test-titles
+                 (org-kit:query-path document "Root/**?{!todo=\"DONE\"}"))
+                :to-equal '("Root" "Deep" "Child"))
+        (let ((blocks (org-kit:query-path
                        document "Root/**?{type=:src-block}" :scope :nodes)))
           (expect (length blocks) :to-equal 1)
           (when blocks
@@ -162,49 +176,65 @@
           (reference-time (cl-date-kit:make-local-date 2024 7 2)))
       (with-soft-assertions
         (expect (query-path-test-titles
-                 (org-kit::query-path document "Root/**?{property.EFFORT<2}"))
+                 (org-kit:query-path document "Root/**?{property.EFFORT<2}"))
                 :to-equal '("Root" "Deep" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
+                  document "Root/**?{property.\"EFFORT\"<2}"))
+                :to-equal '("Root" "Deep" "Child"))
+        (expect (query-path-test-titles
+                 (org-kit:query-path
                   document "Root/**?{property.EFFORT<2@missing=nonmatch}"))
                 :to-equal '("Root"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
                   document
                   "Root/**?{property.EFFORT<2@missing=zero&exists.property.EFFORT}"))
                 :to-equal '("Root"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
                   document "Root/**?{missing.property.EFFORT}"))
                 :to-equal '("Deep" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
                   document "Root/**?{property.LABEL=\"second\"}"))
                 :to-equal '("Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
                   document "Root/**?{property.LABEL=regex(\"^s\")}"))
                 :to-equal '("Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
+                  document "Root?{property.LABEL!=regex(\"^s\")}"))
+                :to-equal '("Root"))
+        (expect (org-kit:query-path
+                 document
+                 "Root?{property.MISSING=date(\"<2024-07-02>\")}")
+                :to-equal nil)
+        (expect (query-path-test-titles
+                 (org-kit:query-path
                   document
                   "Root/**?{planning.SCHEDULED>=date(\"<+5d>\")}"
                   :reference-time reference-time))
                 :to-equal '("Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path
+                 (org-kit:query-path
                   document
                   "Root/**?{planning.DEADLINE<=date(\"<today>\")}"
                   :reference-time reference-time))
                 :to-equal '("Root"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document
+                 (org-kit:query-path document
                                       "Root/**?{exists.planning.SCHEDULED}"))
                 :to-equal '("Root" "Child"))
         (expect (query-path-test-titles
-                 (org-kit::query-path document
+                 (org-kit:query-path document
                                       "Root/**?{missing.planning.DEADLINE}"))
-                :to-equal '("Child" "Deep" "Child")))))
+                :to-equal '("Child" "Deep" "Child"))
+        (expect (query-path-test-titles
+                 (org-kit:query-path document
+                                      "Root/**?{missing.planning.CLOSED}"))
+                :to-equal '("Root" "Child" "Deep" "Child")))))
 
   (it "matches list-query results for equivalent path filters"
     (let ((document (query-path-test-document))
@@ -246,19 +276,33 @@
         (expect selector :to-equal '(:**))
         (expect predicate :to-equal '(:level :>= 2)))
       (expect (query-path-test-titles
-               (org-kit::query-path document "**?{level>=2}"))
-              :to-equal '("Child" "Deep" "Child"))))
+               (org-kit:query-path document "**?{level>=2}"))
+              :to-equal '("Child" "Deep" "Child"))
+      (expect (first (query-path-test-titles
+                      (org-kit:query-path document "**?{level>=-1}")))
+              :to-equal "Root")))
 
   (it "rejects malformed paths and filters with source positions"
     (let* ((document (query-path-test-document))
            (bad-paths
-             '("" "/" "Root/" "Root//Child" "Root/a*" "Root/***"
-               "Root/a[0]" "Root/a[01]" "Root/a[1]x"
-               "Root/\\q" "Root?x" "Root?{tag=\"boss\""
-               "Root?{tag=\"boss}"
-               "Root?{}" "Root?{tag=\"boss\"&&todo-present}"
+             '("" "/" "Root/" "Root//Child" "Root/a*" "Root/*a"
+               "Root/a**" "Root/\\**" "Root/*\\*" "Root/***"
+               "Root/a[0]" "Root/a[01]" "Root/a[1]x" "Root/a[2"
+               "Root/a]" "[1]" "Root\\"
+               "Root/\\q" "Root/[\\2]" "Root?x" "Root?" "Root?{tag=\"boss\""
+               "Root?{tag=\"boss}" "Root?{tag=\"x\\}"
+               "Root?{}" "Root?{(todo-present}"
+               "Root?{tag=\"boss\"&&todo-present}"
+               "Root?{tag=\"x\\q\"}" "Root?{!!todo-present}"
+               "Root{suffix}" "Root?{todo-present{}}"
                "Root?{unknown=x}" "Root?{type=:unknown}"
                "Root?{type=src-block}" "Root?{type=:src-block}extra"
+               "Root?{level>=x}" "Root?{todo=1}"
+               "Root?{exists.property.1LABEL}"
+               "Root?{exists.property.\"\"}" "Root?{property.LABEL}"
+               "Root?{property.EFFORT<2@missing=unknown}"
+               "Root?{planning.SCHEDULED>=1}"
+               "Root?{missing.planning.UNKNOWN}"
                "Root?{property.LABEL<regex(\"x\")}"
                "Root?{property.LABEL=\"x\"@missing=zero}"
                "Root?{planning.SCHEDULED>=date(\"not-a-date\")}"
@@ -286,7 +330,32 @@
           (expect condition :to-be-truthy)
           (when condition
             (expect (org-query-error-position condition)
-                    :to-equal (position #\[ source)))))))
+                    :to-equal (position #\[ source))))
+        (let* ((source "A?{tag=regex(\"\\\\(a\\\\{1000\\\\}\\\\)\\\\{1000\\\\}\")}")
+               (limits (make-limits :max-input-length (length source)))
+               (limited-document (make-document "" :limits limits))
+               (condition (query-path-test-query-error limited-document source)))
+          (expect condition :to-be-truthy)
+          (when condition
+            (expect (org-query-error-position condition)
+                    :to-equal (position #\" source :from-end t))))
+        (dolist (source
+                 (list (concatenate 'string "Root?{tag=\"x"
+                                    (string #\Newline) "\"}")
+                       (concatenate 'string "Root/" (string #\Tab))))
+          (let ((condition (query-path-test-query-error document source)))
+            (expect condition :to-be-truthy)
+            (when condition
+              (expect (typep (org-query-error-position condition)
+                             '(integer 0 *))
+                      :to-be t)))))))
+
+  (it "validates scope and context arguments"
+    (let ((document (query-path-test-document)))
+      (signals type-error
+        (org-kit:query-path document "Root" :scope :invalid))
+      (signals type-error
+        (org-kit:query-path document "Root" :context :invalid))))
 
   (it "enforces path input, segment, and filter-depth limits"
     (let ((input-limited
@@ -298,13 +367,13 @@
           (depth-limited
             (make-document "" :limits (make-limits :max-element-depth 2))))
       (signals org-resource-limit-error
-        (org-kit::query-path input-limited "Root"))
+        (org-kit:query-path input-limited "Root"))
       (signals org-resource-limit-error
-        (org-kit::query-path node-limited "A/B"))
+        (org-kit:query-path node-limited "A/B"))
       (signals org-resource-limit-error
-        (org-kit::query-path path-depth-limited "A/B"))
+        (org-kit:query-path path-depth-limited "A/B"))
       (signals org-resource-limit-error
-        (org-kit::query-path
+        (org-kit:query-path
          depth-limited "Root?{((((todo-present))))}"))))
 
   (it "counts boolean predicate depth after adding the path predicate"
@@ -315,14 +384,14 @@
             (parse-org "* A"
                        :limits (make-limits :max-element-depth 3))))
       (signals org-resource-limit-error
-        (org-kit::query-path
+        (org-kit:query-path
          too-shallow "A?{todo-present&todo-missing}"))
-      (expect (org-kit::query-path
+      (expect (org-kit:query-path
                exact-depth "A?{todo-present&todo-missing}")
               :to-equal nil)))
 
   (it "requires reference-time for relative date filters"
     (let ((document (query-path-test-document)))
       (signals org-query-error
-        (org-kit::query-path
+        (org-kit:query-path
          document "Root/**?{planning.DEADLINE<=date(\"<today>\")}")))))
