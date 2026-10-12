@@ -1,0 +1,141 @@
+;;;; src/conditions.lisp
+(in-package #:org-kit)
+
+(defparameter *condition-text-limit* 80
+  "Longest input excerpt, in characters, a condition stores before truncating.")
+
+(defun bounded-text (string)
+  "Return STRING with control characters escaped and its length capped, so an
+input excerpt stored in a condition cannot flood a log or forge a line."
+  (when string
+    (with-output-to-string (out)
+      (loop for char across string
+            for index from 0
+            when (>= index *condition-text-limit*)
+              do (write-string "..." out)
+                 (loop-finish)
+            do (let ((code (char-code char)))
+                 (cond ((char= char #\\) (write-string "\\\\" out))
+                       ((char= char #\Newline) (write-string "\\n" out))
+                       ((char= char #\Return) (write-string "\\r" out))
+                       ((char= char #\Tab) (write-string "\\t" out))
+                       ((or (< code 32) (= code 127))
+                        (format out "\\x~2,'0X" code))
+                       (t (write-char char out))))))))
+
+(define-condition org-kit-error (error)
+  ((message :initarg :message :initform "cl-org-kit error"))
+  (:report (lambda (condition stream)
+             (write-string (org-kit-error-message condition) stream)))
+  (:documentation "Root of every condition cl-org-kit signals."))
+
+(define-condition org-parse-error (org-kit-error)
+  ((offset :initarg :offset :initform nil)
+   (line :initarg :line :initform nil)
+   (column :initarg :column :initform nil)
+   (context :initarg :context :initform nil)
+   (source-name :initarg :source-name :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~@[~A: ~]~A~@[ at line ~D~]~@[, column ~D~]~@[ (offset ~D)~]~@[ near \"~A\"~]"
+                     (org-parse-error-source-name condition)
+                     (org-kit-error-message condition)
+                     (org-parse-error-line condition)
+                     (org-parse-error-column condition)
+                     (org-parse-error-offset condition)
+                     (org-parse-error-context condition))))
+  (:documentation "Signalled when input cannot be decoded or parsed. OFFSET is the
+0-based position (an octet index for decoding failures, a character index
+otherwise), LINE and COLUMN are 1-based, and CONTEXT is a bounded, escaped
+excerpt of the input."))
+
+(define-condition org-query-error (org-kit-error)
+  ((query :initarg :query :initform nil)
+   (position :initarg :position :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ at position ~D~]~@[ in query \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-query-error-position condition)
+                     (org-query-error-query condition))))
+  (:documentation "Signalled for a malformed query. QUERY is a bounded, escaped copy
+of the query text and POSITION the 0-based character index of the fault."))
+
+(define-condition org-edit-error (org-kit-error)
+  ((target :initarg :target :initform nil)
+   (reason :initarg :reason :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ for target ~A~]"
+                     (org-kit-error-message condition)
+                     (org-edit-error-reason condition)
+                     (org-edit-error-target condition))))
+  (:documentation "Signalled when an edit cannot be applied or its result fails
+validation. TARGET is a bounded description of the addressed node and REASON a
+keyword classifying the failure. The input is never modified."))
+
+(define-condition org-resource-limit-error (org-kit-error)
+  ((limit-name :initarg :limit-name)
+   (limit :initarg :limit)
+   (actual :initarg :actual))
+  (:report (lambda (condition stream)
+             (format stream "~A: ~(~A~) is ~D, above the limit of ~D"
+                     (org-kit-error-message condition)
+                     (org-resource-limit-error-limit-name condition)
+                     (org-resource-limit-error-actual condition)
+                     (org-resource-limit-error-limit condition))))
+  (:documentation "Signalled when input or output exceeds a configured limit.
+LIMIT-NAME is the MAKE-LIMITS keyword, LIMIT its value and ACTUAL the measured
+amount that exceeded it."))
+
+;; Readers are plain functions rather than :READER options so each carries a
+;; docstring and is measured by the coverage gate.
+(defun org-kit-error-message (condition)
+  "Return the bounded description of the failure CONDITION reports."
+  (slot-value condition 'message))
+
+(defun org-parse-error-offset (condition)
+  "Return the 0-based position of the fault: an octet index when decoding failed,
+otherwise a character index into the document text. NIL when unknown."
+  (slot-value condition 'offset))
+
+(defun org-parse-error-line (condition)
+  "Return the 1-based line of the fault, or NIL when unknown."
+  (slot-value condition 'line))
+
+(defun org-parse-error-column (condition)
+  "Return the 1-based column of the fault, or NIL when unknown."
+  (slot-value condition 'column))
+
+(defun org-parse-error-context (condition)
+  "Return the bounded, escaped excerpt of the input around the fault, or NIL."
+  (slot-value condition 'context))
+
+(defun org-parse-error-source-name (condition)
+  "Return the :SOURCE-NAME given for the input, or NIL."
+  (slot-value condition 'source-name))
+
+(defun org-query-error-query (condition)
+  "Return the bounded, escaped copy of the query text, or NIL."
+  (slot-value condition 'query))
+
+(defun org-query-error-position (condition)
+  "Return the 0-based character index of the fault in the query, or NIL."
+  (slot-value condition 'position))
+
+(defun org-edit-error-target (condition)
+  "Return the bounded description of the node or path the edit addressed, or NIL."
+  (slot-value condition 'target))
+
+(defun org-edit-error-reason (condition)
+  "Return the keyword classifying why the edit was refused, or NIL."
+  (slot-value condition 'reason))
+
+(defun org-resource-limit-error-limit-name (condition)
+  "Return the MAKE-LIMITS keyword of the exceeded limit."
+  (slot-value condition 'limit-name))
+
+(defun org-resource-limit-error-limit (condition)
+  "Return the configured value of the exceeded limit."
+  (slot-value condition 'limit))
+
+(defun org-resource-limit-error-actual (condition)
+  "Return the measured amount that exceeded the limit."
+  (slot-value condition 'actual))
