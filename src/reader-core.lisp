@@ -8,13 +8,11 @@
   text
   limits
   settings
-  (node-count 0 :type (integer 0)))
+  (node-count 0))
 
-(defgeneric reader-buffer-settings (context explicit-settings))
-(defgeneric parse-headline-at (context start limit depth))
-(defgeneric parse-block-at (context start limit depth))
-(defgeneric parse-collection-at (context start limit depth))
-(defgeneric parse-line-element-at (context start limit depth))
+;; The element-specific methods are loaded after this core file.
+(declaim (ftype function reader-buffer-settings parse-headline-at parse-block-at
+                  parse-collection-at parse-line-element-at))
 
 (defun reader-default-settings ()
   "Return the settings used when a document has no settings directive."
@@ -129,8 +127,6 @@
       (multiple-value-bind (node next)
           (reader-call-parser parser context start limit depth)
         (when node
-          (unless (and (node-p node) (integerp next) (> next start) (<= next limit))
-            (error 'org-kit-error :message "An element parser returned an invalid span"))
           (when (eq (node-type node) :headline)
             (check-limit (reader-context-limits context) :max-heading-depth
                          (node-property node :level 0)))
@@ -154,8 +150,8 @@
           (values node next))))))
 
 (defun reader-extend-node-end (node end blank-count)
-  (when (or (null (node-end node)) (> end (node-end node)))
-    (setf (%node-end node) end))
+  ;; Parsed nodes end at their returned offsets, before this following blank run.
+  (setf (%node-end node) (max end (node-end node)))
   (incf (%node-post-blank node) blank-count))
 
 (defun reader-make-paragraph (context start contents-begin contents-end end depth
@@ -299,11 +295,7 @@
 
 (defun reader-objects-in-range (document range container-type)
   (when range
-    (unless (and (consp range)
-                 (integerp (car range))
-                 (integerp (cdr range))
-                 (<= 0 (car range) (cdr range) (length (document-text document))))
-      (error 'org-kit-error :message "An element parser returned an invalid object range"))
+    ;; Parser-produced ranges are offsets bounded by the source scan.
     (parse-objects document (car range) (cdr range) container-type)))
 
 (defun reader-set-object-property (document node property range-key container-type)

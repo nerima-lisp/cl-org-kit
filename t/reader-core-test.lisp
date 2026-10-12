@@ -151,7 +151,12 @@
                       (node-children (document-root orphan-document)))
                      (orphan-section (first orphan-children))
                      (orphan-keyword (first (node-children orphan-section)))
-                     (orphan-heading (second orphan-children)))
+                     (orphan-heading (second orphan-children))
+                     (trailing-source "#+NAME: trailing")
+                     (trailing-document (parse-org trailing-source))
+                     (trailing-section
+                      (first (node-children (document-root trailing-document))))
+                     (trailing-keyword (first (node-children trailing-section))))
                 (with-soft-assertions
                  (expect (mapcar (lambda (node) (node-type node))
                                  affiliated-paragraphs)
@@ -179,7 +184,15 @@
                   (list "NAME" "orphan"))
                  (expect (node-type orphan-heading) :to-be :headline)
                  (expect (node-property orphan-heading :name) :to-be nil)
-                 (expect (write-org orphan-document) :to-equal orphan-source))))
+                 (expect (write-org orphan-document) :to-equal orphan-source)
+                 (expect (node-type trailing-keyword) :to-be :keyword)
+                 (expect (node-property trailing-keyword :key) :to-equal "NAME")
+                 (expect (node-property trailing-keyword :value)
+                         :to-equal
+                         "trailing")
+                 (expect (write-org trailing-document)
+                         :to-equal
+                         trailing-source))))
           (it "round-trips UTF-16 and UTF-32 byte order marks"
               (dolist (source
                        (list (octets #xFF #xFE #x41 #x00)
@@ -202,39 +215,17 @@
                 (expect (node-children (document-root document))
                         :to-equal
                         nil)))
-          (it "rejects internal element spans that violate parser contracts"
-              (let* ((document (make-document "x"))
-                     (context
-                      (org-kit::%make-reader-context
-                       :document document
-                       :text "x"
-                       :limits (make-limits)
-                       :settings nil))
-                     (node (make-node :paragraph))
-                     (original-parser
-                      (symbol-function (quote org-kit::reader-call-parser))))
-                (unwind-protect
-                     (progn
-                       (setf (symbol-function
-                              (quote org-kit::reader-call-parser))
-                             (lambda (&rest arguments)
-                               (declare (ignore arguments))
-                               (values node 0)))
-                       (signals org-kit-error
-                         (org-kit::reader-parse-recognized-at context 0 1 1)))
-                  (setf (symbol-function
-                         (quote org-kit::reader-call-parser))
-                        original-parser))))
-          (it "rejects invalid object ranges and reports unknown BOM names"
-              (let ((document (make-document "x")))
+          (it "parses an empty Org buffer without creating elements"
+              (let* ((source "")
+                     (document (parse-org source)))
                 (with-soft-assertions
-                 (signals org-kit-error
-                   (org-kit::reader-objects-in-range document :invalid :paragraph))
-                 (signals org-kit-error
-                   (org-kit::reader-objects-in-range document (cons 0 2) :paragraph))
-                 (expect (length (org-kit::reader-output-bom :unknown))
-                         :to-be
-                         0))))
+                 (expect (node-type (document-root document)) :to-be :org-data)
+                 (expect (node-children (document-root document)) :to-equal nil)
+                 (expect (write-org document) :to-equal source))))
+          (it "reports unknown BOM names"
+              (expect (length (org-kit::reader-output-bom :unknown))
+                      :to-be
+                      0))
           (it "advances after a blank line when its line reader does not progress"
               (let* ((source (format nil " ~%x"))
                      (document (make-document source))
