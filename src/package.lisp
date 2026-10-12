@@ -25,6 +25,13 @@
    #:node-post-affiliated #:node-post-blank #:node-property #:node-properties
    #:node-root #:node-document #:node-text #:node-start-position
    #:node-end-position #:node-line-range #:map-nodes
+   ;; Outline
+   #:outline #:outline-entry #:make-outline-entry #:outline-entry-p
+   #:outline-entry-kind #:outline-entry-name #:outline-entry-level
+   #:outline-entry-line #:outline-entry-end-line #:outline-entry-node
+   #:outline-result #:make-outline-result #:outline-result-p
+   #:outline-result-path #:outline-result-lang #:outline-result-symbols
+   #:outline-result-total #:outline-result-truncated
    ;; Reading and writing
    #:parse-org #:write-org
    ;; Timestamp values
