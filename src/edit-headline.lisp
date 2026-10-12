@@ -35,7 +35,7 @@
         do (incf position)
         finally (return position)))
 
-(defun edit-headline-prefix-layout (document headline target)
+(defun edit-headline-prefix-layout (document headline)
   (let* ((source (document-text document))
          (line-end (edit-headline-line-end document headline))
          (marker-end (edit-headline-marker-end document headline))
@@ -48,47 +48,44 @@
     (when todo-keyword
       (setf todo-start position
             todo-end (+ position (length todo-keyword)))
-      (unless (and (<= todo-end line-end)
-                   (string= todo-keyword source
-                            :start2 todo-start :end2 todo-end))
-        (edit-signal-error target :uneditable-structure
-                           "Could not locate the headline TODO keyword"))
       (setf position (edit-headline-skip-space source todo-end line-end)))
     (let ((priority (node-property headline :priority)))
       (when priority
-        (multiple-value-bind (source-priority next)
-            (reader-heading-priority-at source position line-end)
-          (unless (and source-priority (equal source-priority priority))
-            (edit-signal-error target :uneditable-structure
-                               "Could not locate the headline priority"))
-          (setf priority-start position
-                priority-end next))))
+        (setf priority-start position
+              priority-end
+              (nth-value 1 (reader-heading-priority-at source position line-end)))))
     (values marker-end todo-start todo-end priority-start priority-end)))
 
-(defun edit-headline-tag-span (document headline target)
+(defun edit-headline-tag-span (document headline)
   (let* ((source (document-text document))
          (marker-end (edit-headline-marker-end document headline))
          (line-end (edit-headline-line-end document headline)))
-    (multiple-value-bind (source-tags tag-start)
-        (reader-heading-tags-at-end source marker-end line-end)
-      (let ((tags (node-property headline :tags)))
-        (unless (equal source-tags tags)
-          (edit-signal-error target :uneditable-structure
-                             "Could not locate the headline tags"))
-        (when tag-start
-          (values tag-start
-                  (reader-heading-trim-right source marker-end line-end)))))))
+    (let ((tag-start
+            (nth-value 1 (reader-heading-tags-at-end source marker-end line-end))))
+      (when tag-start
+        (values tag-start
+                (reader-heading-trim-right source marker-end line-end))))))
 
-(defun edit-headline-title-span (document headline target)
-  (let* ((range (node-property headline :reader-title-range))
-         (start (and (consp range) (car range)))
-         (end (and (consp range) (cdr range)))
+(defun edit-headline-title-span (document headline)
+  (let* ((source (document-text document))
          (line-end (edit-headline-line-end document headline)))
-    (unless (and (integerp start) (integerp end)
-                 (<= (node-begin headline) start end line-end))
-      (edit-signal-error target :uneditable-structure
-                         "Could not locate the headline title"))
-    (values start end)))
+    (multiple-value-bind (marker-end todo-start todo-end
+                          priority-start priority-end)
+        (edit-headline-prefix-layout document headline)
+      (declare (ignore todo-start priority-start))
+      (let ((position (edit-headline-skip-space
+                       source (or priority-end todo-end marker-end) line-end)))
+        (when (node-property headline :commentedp)
+          (setf position
+                (edit-headline-skip-space source (+ position (length "COMMENT"))
+                                          line-end)))
+        (multiple-value-bind (tag-start tag-end)
+            (edit-headline-tag-span document headline)
+          (declare (ignore tag-end))
+          (let* ((end (reader-heading-trim-right source position
+                                                 (or tag-start line-end)))
+                 (start (edit-headline-skip-space source position end)))
+            (values start end)))))))
 
 (defun edit-headline-expected (document headline changes)
   (let* ((expected (edit-canonical-copy (edit-canonical-document document)))
@@ -119,7 +116,7 @@
   (let* ((headline (edit-headline-resolve-target document target))
          (entry (edit-headline-todo-entry document keyword target)))
     (multiple-value-bind (marker-end todo-start todo-end)
-        (edit-headline-prefix-layout document headline target)
+        (edit-headline-prefix-layout document headline)
       (let ((patches
               (cond (todo-start
                      (if keyword
@@ -155,7 +152,8 @@
     (multiple-value-bind (replacement priority-value)
         (edit-headline-priority-value priority target)
       (multiple-value-bind (marker-end todo-start todo-end priority-start priority-end)
-          (edit-headline-prefix-layout document headline target)
+          (edit-headline-prefix-layout document headline)
+        (declare (ignore todo-start))
         (let ((patches
                 (cond (priority-start
                        (if replacement
@@ -196,10 +194,10 @@
   (let* ((headline (edit-headline-resolve-target document target))
          (title (edit-headline-title-value document raw-title target))
          (normalized (string-trim '(#\Space #\Tab) raw-title)))
-    (multiple-value-bind (start end)
-        (edit-headline-title-span document headline target)
+      (multiple-value-bind (start end)
+        (edit-headline-title-span document headline)
       (multiple-value-bind (tag-start tag-end)
-          (edit-headline-tag-span document headline target)
+          (edit-headline-tag-span document headline)
         (declare (ignore tag-end))
         (let ((replacement
                 (if (and (= start end) tag-start (plusp (length raw-title)))
@@ -228,13 +226,13 @@
 
 (defun edit-headline-tag-patch (document headline target tags)
   (multiple-value-bind (tag-start tag-end)
-      (edit-headline-tag-span document headline target)
+      (edit-headline-tag-span document headline)
     (cond (tag-start
            (list (edit-make-patch tag-start tag-end
                                   (edit-headline-format-tags tags) target)))
           (tags
            (multiple-value-bind (title-start position)
-               (edit-headline-title-span document headline target)
+               (edit-headline-title-span document headline)
              (declare (ignore title-start))
              (list (edit-make-patch
                     position position

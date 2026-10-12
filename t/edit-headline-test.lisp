@@ -46,6 +46,17 @@
         (expect (write-org edited :output-type :octets) :to-equalp expected))
       edited)))
 
+(defun edit-headline-test-octet-insertion
+    (document target operation position insertion)
+  (let* ((source (write-org document :output-type :octets))
+         (expected (edit-headline-test-patched-octets
+                    source position position insertion))
+         (edited (funcall operation document target)))
+    (with-soft-assertions
+      (expect (write-org document :output-type :octets) :to-equalp source)
+      (expect (write-org edited :output-type :octets) :to-equalp expected))
+    edited))
+
 (defun edit-headline-test-only-properties-changed-p
     (original-tree edited path changed-properties)
   (let ((before (org-kit::edit-canonical-copy original-tree))
@@ -71,6 +82,19 @@
     (expect (edit-headline-test-only-properties-changed-p
              original-tree edited path changed-properties)
             :to-be t)))
+
+(defun edit-headline-test-assert-unchanged (document edited source original-tree)
+  (let ((source-octets (write-org document :output-type :octets)))
+    (with-soft-assertions
+      (expect (document-text document) :to-equal source)
+      (expect (write-org document :output-type :octets) :to-equalp source-octets)
+      (expect (write-org edited :output-type :octets) :to-equalp source-octets)
+      (expect (org-kit::edit-canonical-equal-p
+               (org-kit::edit-canonical-document document) original-tree)
+              :to-be t)
+      (expect (org-kit::edit-canonical-equal-p
+               (org-kit::edit-canonical-document edited) original-tree)
+              :to-be t))))
 
 (defun edit-headline-test-expect-invalid-value (document target operation)
   (let ((original-text (document-text document))
@@ -145,6 +169,22 @@
         (expect (node-property (first (edit-headline-test-nodes edited)) :priority)
                 :to-equal 7))))
 
+  (it "edits a final headline without a trailing newline and preserves its bytes"
+    (let* ((source "* Plain")
+           (document (parse-org source))
+           (headline (first (edit-headline-test-nodes document)))
+           (edited
+             (edit-headline-test-octet-edit
+              document headline
+              (lambda (input node) (replace-heading-title input node "New"))
+              (octets #x50 #x6C #x61 #x69 #x6E)
+              (octets #x4E #x65 #x77))))
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal "* New")
+        (expect (node-property (first (edit-headline-test-nodes edited))
+                              :raw-value)
+                :to-equal "New"))))
+
   (it "replaces the raw title while retaining inline objects and tags"
     (let* ((source (format nil "* TODO [#B] Old *bold* :old:~%* Peer~%"))
            (document (parse-org source))
@@ -162,6 +202,23 @@
       (with-soft-assertions
         (expect (node-property edited-headline :raw-value) :to-equal replacement)
         (expect (node-property edited-headline :tags) :to-equal '("old")))))
+
+  (it "replaces a commented title after TODO and priority fields"
+    (let* ((source (format nil "* TODO [#C] COMMENT Old :keep:~%* Peer~%"))
+           (document (parse-org source))
+           (headline (first (edit-headline-test-nodes document)))
+           (original-tree (org-kit::edit-canonical-document document))
+           (path (org-kit::edit-node-path document headline))
+           (title-start (search "Old" source :start2 (node-begin headline)))
+           (replacement "New /italic/")
+           (edited (replace-heading-title document headline replacement))
+           (edited-headline (first (edit-headline-test-nodes edited))))
+      (edit-headline-test-assert-result
+       document edited source original-tree path title-start (+ title-start 3)
+       replacement '(:raw-value :title))
+      (with-soft-assertions
+        (expect (node-property edited-headline :commentedp) :to-be t)
+        (expect (node-property edited-headline :tags) :to-equal '("keep")))))
 
   (it "separates a newly inserted title from an existing tag suffix"
     (let* ((source (format nil "* :keep:~%"))
@@ -261,6 +318,29 @@
       (expect (node-property (first (edit-headline-test-nodes edited)) :tags)
               :to-equal '("new"))))
 
+  (it "adds ARCHIVE through the public tag API and preserves surrounding bytes"
+    (let* ((source (format nil "* Task~%* Peer :peer:~%"))
+           (document (parse-org source))
+           (headline (first (edit-headline-test-nodes document)))
+           (source-octets (write-org document :output-type :octets))
+           (title-start (search (octets #x54 #x61 #x73 #x6B) source-octets))
+           (insert-position (+ title-start 4))
+           (edited
+             (edit-headline-test-octet-insertion
+              document headline
+              (lambda (input node)
+                (replace-heading-tags input node '("ARCHIVE" "work")))
+              insert-position
+              (octets #x20 #x3A #x41 #x52 #x43 #x48 #x49 #x56 #x45
+                      #x3A #x77 #x6F #x72 #x6B #x3A)))
+           (edited-headline (first (edit-headline-test-nodes edited))))
+      (with-soft-assertions
+        (expect (document-text edited)
+                :to-equal (format nil "* Task :ARCHIVE:work:~%* Peer :peer:~%"))
+        (expect (node-property edited-headline :tags)
+                :to-equal '("ARCHIVE" "work"))
+        (expect (node-property edited-headline :archivedp) :to-be t))))
+
   (it "adds TODO and priority tokens to headlines that do not have them"
     (let* ((source (format nil "* Task~%"))
            (document (parse-org source))
@@ -313,6 +393,26 @@
                              :todo-keyword)
               :to-be nil)))
 
+  (it "keeps clearing absent fields and empty tag replacement byte-for-byte stable"
+    (let* ((source (format nil "* Plain~%* Peer~%"))
+           (document (parse-org source))
+           (original-tree (org-kit::edit-canonical-document document))
+           (headline (first (edit-headline-test-nodes document)))
+           (without-todo (set-heading-todo document headline nil))
+           (without-todo-headline
+             (first (edit-headline-test-nodes without-todo)))
+           (without-priority
+             (set-heading-priority without-todo without-todo-headline nil))
+           (without-priority-headline
+             (first (edit-headline-test-nodes without-priority)))
+           (without-tags
+             (replace-heading-tags without-priority without-priority-headline nil)))
+      (edit-headline-test-assert-unchanged document without-todo source original-tree)
+      (edit-headline-test-assert-unchanged without-todo without-priority source
+                                            original-tree)
+      (edit-headline-test-assert-unchanged without-priority without-tags source
+                                            original-tree)))
+
   (it "reports invalid values with bounded target and reason slots"
     (let* ((document (parse-org (format nil "* Task~%")))
            (headline (first (edit-headline-test-nodes document))))
@@ -321,7 +421,13 @@
        (lambda () (set-heading-todo document headline "UNKNOWN")))
       (edit-headline-test-expect-invalid-value
        document headline
+       (lambda () (set-heading-todo document headline :todo)))
+      (edit-headline-test-expect-invalid-value
+       document headline
        (lambda () (set-heading-priority document headline "AB")))
+      (edit-headline-test-expect-invalid-value
+       document headline
+       (lambda () (set-heading-priority document headline :priority)))
       (edit-headline-test-expect-invalid-value
        document headline
        (lambda ()
@@ -329,7 +435,23 @@
                                 (format nil "line one~%line two"))))
       (edit-headline-test-expect-invalid-value
        document headline
-       (lambda () (add-heading-tags document headline '("has space"))))))
+       (lambda () (replace-heading-title document headline 42)))
+      (edit-headline-test-expect-invalid-value
+       document headline
+       (lambda ()
+         (replace-heading-title document headline "Title :embedded:")))
+      (edit-headline-test-expect-invalid-value
+       document headline
+       (lambda () (add-heading-tags document headline '("has space"))))
+      (edit-headline-test-expect-invalid-value
+       document headline
+       (lambda () (add-heading-tags document headline '(:not-a-string))))
+      (edit-headline-test-expect-invalid-value
+       document headline
+       (lambda () (add-heading-tags document headline '("good" . "tail"))))))
+
+  (it "rejects non-document inputs through the public headline API"
+    (signals type-error (set-heading-todo nil nil "TODO")))
 
   (it-property "random headline edit sequences preserve outside text and the input document"
       ((steps (gen-list (gen-integer :min 0 :max 63) :max-length 20)))
