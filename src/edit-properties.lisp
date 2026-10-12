@@ -37,21 +37,15 @@
                 (1+ newline))
         (values (length source) (length source)))))
 
-(defun edit-properties-value-range (document node kind target)
+(defun edit-properties-value-range (document node kind)
   "Return the trimmed value range on NODE's source line."
   (let* ((source (document-text document))
          (line-start (node-begin node)))
-    (unless (and (integerp line-start) (<= 0 line-start (length source)))
-      (edit-signal-error target :uneditable-structure
-                         "Metadata node has no source range"))
     (multiple-value-bind (line-end after-line)
         (edit-properties-line-bounds source line-start)
       (declare (ignore after-line))
       (let* ((delimiter-start (if (eq kind :keyword) (+ line-start 2) (1+ line-start)))
              (delimiter (position #\: source :start delimiter-start :end line-end)))
-        (unless delimiter
-          (edit-signal-error target :uneditable-structure
-                             "Metadata source line has no value delimiter"))
         (let ((value-start (1+ delimiter))
               (value-end line-end))
           (loop while (and (< value-start value-end)
@@ -64,7 +58,7 @@
                 do (decf value-end))
           (values value-start value-end))))))
 
-(defun edit-properties-line-ending (source offset document)
+(defun edit-properties-line-ending (source offset)
   (let ((before (and (plusp offset)
                      (position #\Newline source :end offset :from-end t)))
         (after (position #\Newline source :start offset)))
@@ -77,8 +71,6 @@
             (char= (char source (1- after)) #\Return))
        (format nil "~C~C" #\Return #\Newline))
       (after (string #\Newline))
-      ((eq (document-newline document) :crlf)
-       (format nil "~C~C" #\Return #\Newline))
       (t (string #\Newline)))))
 
 (defun edit-properties-join-lines (lines newline)
@@ -91,7 +83,7 @@
 (defun edit-properties-insertion-text (document offset lines)
   (let* ((source (document-text document))
          (length (length source))
-         (newline (edit-properties-line-ending source offset document))
+         (newline (edit-properties-line-ending source offset))
          (prefix-p (and (plusp offset)
                         (not (char= (char source (1- offset)) #\Newline))))
          (suffix-p (or (< offset length) (document-final-newline-p document))))
@@ -122,7 +114,7 @@
           (string= key (node-property node :key))))
    (node-children drawer)))
 
-(defun edit-properties-property-target (document headline key target)
+(defun edit-properties-property-target (headline key target)
   (let* ((section (edit-properties-headline-section headline))
          (drawer (edit-properties-section-drawer section))
          (matches (and drawer (edit-properties-property-nodes drawer key))))
@@ -131,27 +123,19 @@
                          "Property key occurs more than once in the drawer"))
     (values section drawer (first matches))))
 
-(defun edit-properties-index (node children target)
-  (or (position node children :test #'eq)
-      (edit-signal-error target :uneditable-structure
-                         "Node is absent from its parent's children")))
+(defun edit-properties-index (node children)
+  (position node children :test #'eq))
 
 (defun edit-properties-canonical-insert-child (tree parent-path index child)
   (let* ((parent (edit-canonical-node-at-path tree parent-path))
          (children (getf parent :children)))
-    (unless (and (integerp index) (<= 0 index (length children)))
-      (edit-signal-error parent-path :uneditable-structure
-                         "Cannot locate metadata insertion point"))
     (edit-canonical-set-children
      tree parent-path
      (append (subseq children 0 index) (list child) (nthcdr index children)))))
 
-(defun edit-properties-canonical-remove-child (tree parent-path index target)
+(defun edit-properties-canonical-remove-child (tree parent-path index)
   (let* ((parent (edit-canonical-node-at-path tree parent-path))
          (children (getf parent :children)))
-    (unless (and (integerp index) (<= 0 index) (< index (length children)))
-      (edit-signal-error target :uneditable-structure
-                         "Cannot locate metadata node in the expected tree"))
     (edit-canonical-set-children
      tree parent-path
      (append (subseq children 0 index) (nthcdr (1+ index) children)))))
@@ -202,11 +186,11 @@
                    (document-text document) insertion-offset))))
     (if section
         (let* ((section-index
-                 (edit-properties-index section (node-children headline) headline))
+                 (edit-properties-index section (node-children headline)))
                (section-path (append headline-path (list section-index)))
                (children (node-children section))
                (index (if planning
-                          (1+ (edit-properties-index planning children headline))
+                          (1+ (edit-properties-index planning children))
                           0)))
           (edit-properties-canonical-insert-child expected section-path index drawer))
         (let ((section-canonical
@@ -217,23 +201,23 @@
     expected))
 
 (defun edit-properties-remove-property-expected
-    (document headline section drawer property target)
+    (document headline section drawer property)
   (let* ((expected (edit-canonical-copy (edit-canonical-document document)))
          (headline-path (edit-node-path document headline))
-         (section-index (edit-properties-index section (node-children headline) target))
+         (section-index (edit-properties-index section (node-children headline)))
          (section-path (append headline-path (list section-index)))
-         (drawer-index (edit-properties-index drawer (node-children section) target))
+         (drawer-index (edit-properties-index drawer (node-children section)))
          (drawer-path (append section-path (list drawer-index)))
-         (property-index (edit-properties-index property (node-children drawer) target)))
+         (property-index (edit-properties-index property (node-children drawer))))
     (if (= (length (node-children drawer)) 1)
         (progn
           (edit-properties-canonical-remove-child
-           expected section-path drawer-index target)
+           expected section-path drawer-index)
           (when (null (cdr (node-children section)))
             (edit-properties-canonical-remove-child
-             expected headline-path section-index target)))
+             expected headline-path section-index)))
         (edit-properties-canonical-remove-child
-         expected drawer-path property-index target))
+         expected drawer-path property-index))
     expected))
 
 (defun set-property (document target key value)
@@ -255,7 +239,7 @@
            (headline-path (edit-node-path document headline)))
       (if property
           (multiple-value-bind (value-start value-end)
-              (edit-properties-value-range document property :property target)
+              (edit-properties-value-range document property :property)
             (edit-canonical-set-property
              expected (edit-node-path document property) :value semantic-value)
             (edit-apply-patches
@@ -268,13 +252,13 @@
                   (edit-signal-error target :uneditable-structure
                                      "Property drawer has no closing marker"))
                 (let* ((newline (edit-properties-line-ending
-                                 source close-start document))
+                                 source close-start))
                        (section-index
                          (edit-properties-index section
-                                                (node-children headline) target))
+                                                (node-children headline)))
                        (drawer-index
                          (edit-properties-index drawer
-                                                (node-children section) target))
+                                                (node-children section)))
                        (drawer-path
                          (append headline-path (list section-index drawer-index)))
                        (drawer-canonical
@@ -298,9 +282,6 @@
                      (insertion-offset
                        (and heading-start
                             (edit-properties-line-after source heading-start))))
-                (unless insertion-offset
-                  (edit-signal-error target :uneditable-structure
-                                     "Headline has no source line"))
                 (let* ((text (edit-properties-insertion-text
                               document insertion-offset
                               (list ":PROPERTIES:"
@@ -321,7 +302,7 @@
   (let* ((headline (edit-resolve-node document target '(:headline)))
          (normalized-key (edit-properties-key key target)))
     (multiple-value-bind (section drawer property)
-        (edit-properties-property-target document headline normalized-key target)
+        (edit-properties-property-target headline normalized-key target)
       (unless property
         (edit-signal-error target :target-not-found "Property key was not found"))
       (let* ((start (if (= (length (node-children drawer)) 1)
@@ -332,10 +313,7 @@
                       (node-end property)))
              (expected
                (edit-properties-remove-property-expected
-                document headline section drawer property target)))
-        (unless (and (integerp start) (integerp end))
-          (edit-signal-error target :uneditable-structure
-                             "Property source node has no range"))
+                document headline section drawer property)))
         (edit-apply-patches
          document (list (edit-make-patch start end "" target))
          :target target :expected expected)))))
@@ -375,9 +353,10 @@
         :children nil))
 
 (defun edit-properties-set-planning-expected
-    (document headline section planning kind value target)
+    (document headline section planning kind value)
   (let* ((expected (edit-canonical-copy (edit-canonical-document document)))
          (headline-path (edit-node-path document headline)))
+    (edit-canonical-set-property expected headline-path kind value)
     (if planning
         (edit-canonical-set-property
          expected (edit-node-path document planning) kind value)
@@ -386,7 +365,7 @@
           (if section
               (let ((section-index
                       (edit-properties-index section
-                                             (node-children headline) target)))
+                                             (node-children headline))))
                 (edit-properties-canonical-insert-child
                  expected (append headline-path (list section-index)) 0
                  planning-canonical))
@@ -407,19 +386,15 @@
            (planning (edit-properties-section-planning section))
            (value (edit-properties-planning-value
                    document kind timestamp-text target))
-           (range (and planning
-                       (node-property
-                        planning
-                        (intern (format nil "READER-~A-RANGE"
-                                        (string-upcase (symbol-name kind)))
-                                :keyword))))
+           (range (let ((timestamp (and planning
+                                        (node-property planning kind))))
+                    (and timestamp
+                         (cons (node-begin timestamp)
+                               (node-end timestamp)))))
            (expected (edit-properties-set-planning-expected
-                      document headline section planning kind value target)))
+                      document headline section planning kind value)))
       (cond
         ((and planning (node-property planning kind))
-         (unless (and (consp range) (integerp (car range)) (integerp (cdr range)))
-           (edit-signal-error target :uneditable-structure
-                              "Planning timestamp has no source range"))
          (edit-apply-patches
           document
           (list (edit-make-patch (car range) (cdr range) timestamp-text target))
@@ -430,7 +405,7 @@
                                      (edit-properties-line-bounds source line-start)))
                 (insert (format nil " ~A: ~A"
                                 (edit-properties-planning-label kind)
-                                 timestamp-text)))
+                                timestamp-text)))
            (edit-apply-patches
             document
             (list (edit-make-patch line-end line-end insert target))
@@ -440,9 +415,6 @@
                 (insertion-offset
                   (and heading-start
                        (edit-properties-line-after source heading-start))))
-           (unless insertion-offset
-             (edit-signal-error target :uneditable-structure
-                                "Headline has no source line"))
            (edit-apply-patches
             document
             (list (edit-make-patch
@@ -468,13 +440,8 @@
 (defun edit-properties-planning-removal-range (source planning range kind sole-field-p)
   (let* ((line-start (node-begin planning))
          (line-end (nth-value 0 (edit-properties-line-bounds source line-start)))
-         (value-start (car range))
          (value-end (cdr range))
          (field-start (edit-properties-planning-field-start source range kind)))
-    (unless (and (integerp field-start) (<= line-start field-start value-start)
-                 (<= value-start value-end line-end))
-      (return-from edit-properties-planning-removal-range
-        (values nil nil)))
     (if sole-field-p
         (values line-start (node-end planning))
         (let ((end value-end)
@@ -483,29 +450,29 @@
                            (edit-properties-horizontal-space-p (char source end)))
                 do (incf end))
           (when (= end value-end)
-            (loop while (and (> start line-start)
-                             (edit-properties-horizontal-space-p
-                              (char source (1- start))))
+            (loop while (edit-properties-horizontal-space-p
+                         (char source (1- start)))
                   do (decf start)))
           (values start end)))))
 
 (defun edit-properties-remove-planning-expected
-    (document headline section planning kind has-other-p target)
+    (document headline section planning kind has-other-p)
   (let* ((expected (edit-canonical-copy (edit-canonical-document document)))
          (headline-path (edit-node-path document headline)))
+    (edit-canonical-set-property expected headline-path kind nil)
     (if has-other-p
         (edit-canonical-set-property expected (edit-node-path document planning)
                                      kind nil)
         (let* ((section-index
-                 (edit-properties-index section (node-children headline) target))
+                 (edit-properties-index section (node-children headline)))
                (section-path (append headline-path (list section-index)))
                (planning-index
-                 (edit-properties-index planning (node-children section) target)))
+                 (edit-properties-index planning (node-children section))))
           (edit-properties-canonical-remove-child
-           expected section-path planning-index target)
+           expected section-path planning-index)
           (when (null (cdr (node-children section)))
             (edit-properties-canonical-remove-child
-             expected headline-path section-index target))))
+             expected headline-path section-index))))
     expected))
 
 (defun remove-planning (document target kind)
@@ -520,25 +487,16 @@
       (unless value
         (edit-signal-error target :target-not-found
                            "Planning timestamp was not found"))
-      (let* ((range-key (intern (format nil "READER-~A-RANGE"
-                                        (string-upcase (symbol-name kind)))
-                                :keyword))
-             (range (node-property planning range-key))
+      (let* ((range (cons (node-begin value) (node-end value)))
              (other-kinds (remove kind '(:scheduled :deadline :closed)))
              (has-other-p (some (lambda (candidate)
                                   (node-property planning candidate))
                                 other-kinds))
              (expected (edit-properties-remove-planning-expected
-                        document headline section planning kind has-other-p target)))
-        (unless (and (consp range) (integerp (car range)) (integerp (cdr range)))
-          (edit-signal-error target :uneditable-structure
-                             "Planning timestamp has no source range"))
+                        document headline section planning kind has-other-p)))
         (multiple-value-bind (start end)
             (edit-properties-planning-removal-range
              source planning range kind (not has-other-p))
-          (unless (and start end)
-            (edit-signal-error target :uneditable-structure
-                               "Planning timestamp has no source field"))
           (edit-apply-patches
            document (list (edit-make-patch start end "" target))
            :target target :expected expected))))))
@@ -573,8 +531,7 @@
      (lambda (node)
        (and (eq (node-type node) :keyword)
             (or (null key)
-                (and (stringp (node-property node :key))
-                     (string= key (node-property node :key))))))
+                (string= key (node-property node :key)))))
      children)))
 
 (defun edit-properties-resolve-keyword (document target &key allow-missing)
@@ -614,14 +571,13 @@
         :children nil))
 
 (defun edit-properties-insert-keyword-expected
-    (document key value insertion-offset target)
+    (document key value insertion-offset)
   (let ((expected (edit-canonical-copy (edit-canonical-document document))))
     (multiple-value-bind (container children path)
         (edit-properties-keyword-container document)
       (let* ((index (or (position-if
                          (lambda (node)
-                           (and (node-begin node)
-                                (>= (node-begin node) insertion-offset)))
+                           (>= (node-begin node) insertion-offset))
                          children)
                         (length children)))
              (keyword (edit-properties-keyword-node
@@ -637,19 +593,19 @@
              expected path index keyword))))
     expected))
 
-(defun edit-properties-remove-keyword-expected (document keyword target)
+(defun edit-properties-remove-keyword-expected (document keyword)
   (let* ((expected (edit-canonical-copy (edit-canonical-document document)))
          (path (edit-node-path document keyword))
          (parent-path (butlast path))
          (index (car (last path)))
          (parent (node-parent keyword)))
-    (edit-properties-canonical-remove-child expected parent-path index target)
+    (edit-properties-canonical-remove-child expected parent-path index)
     (when (and (eq (node-type parent) :section)
                (null (cdr (node-children parent))))
       (let* ((grandparent-path (butlast parent-path))
              (parent-index (car (last parent-path))))
         (edit-properties-canonical-remove-child
-         expected grandparent-path parent-index target)))
+         expected grandparent-path parent-index)))
     expected))
 
 (defun set-keyword-value (document target value)
@@ -657,12 +613,11 @@
   (multiple-value-bind (keyword selector-key)
       (edit-properties-resolve-keyword document target :allow-missing t)
     (edit-properties-single-line-value value target)
-    (let* ((source (document-text document))
-           (semantic-value (edit-properties-semantic-value value))
+    (let* ((semantic-value (edit-properties-semantic-value value))
            (expected (edit-canonical-copy (edit-canonical-document document))))
       (if keyword
           (multiple-value-bind (value-start value-end)
-              (edit-properties-value-range document keyword :keyword target)
+              (edit-properties-value-range document keyword :keyword)
             (edit-canonical-set-property
              expected (edit-node-path document keyword) :value semantic-value)
             (edit-apply-patches
@@ -675,7 +630,7 @@
                         (list (format nil "#+~A: ~A" selector-key value))))
                  (expected (edit-properties-insert-keyword-expected
                             document selector-key semantic-value
-                            insertion-offset target)))
+                            insertion-offset)))
             (edit-apply-patches
              document
              (list (edit-make-patch insertion-offset insertion-offset text target))
@@ -688,10 +643,7 @@
     (let ((start (node-begin keyword))
           (end (node-end keyword))
           (expected (edit-properties-remove-keyword-expected
-                     document keyword target)))
-      (unless (and (integerp start) (integerp end))
-        (edit-signal-error target :uneditable-structure
-                           "Keyword node has no source range"))
+                     document keyword)))
       (edit-apply-patches
        document (list (edit-make-patch start end "" target))
        :target target :expected expected))))

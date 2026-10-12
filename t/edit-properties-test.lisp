@@ -129,6 +129,21 @@
                 :to-equalp (edit-properties-test-canonical-headline
                             document "Other")))))
 
+  (it "inserts a property drawer at EOF without adding a final newline"
+    (let* ((source "* Bare")
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (insertion (format nil "~%:PROPERTIES:~%:ID: 7~%:END:"))
+           (edited (set-property document headline "ID" "7")))
+      (edit-properties-test-check-patch document edited source
+                                        (length source) (length source) insertion)
+      (with-soft-assertions
+        (expect (document-final-newline-p edited) :to-be nil)
+        (expect (node-property
+                 (edit-properties-test-property
+                  (edit-properties-test-headline edited) "ID") :value)
+                :to-equal "7"))))
+
   (it "creates a property drawer after planning and before section text"
     (let* ((source (format nil "* Heading~%SCHEDULED: <2026-10-13 Tue>~%body~%* Other~%"))
            (document (parse-org source))
@@ -145,6 +160,23 @@
         (expect (node-property (edit-properties-test-planning
                                 (edit-properties-test-headline edited)) :scheduled)
                 :to-be-truthy))))
+
+  (it "inserts a property drawer before a blank line after a headline"
+    (let* ((source (format nil "* Task~%~%body~%* Other~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (offset (edit-properties-test-line-after
+                    source (node-post-affiliated headline)))
+           (insertion (format nil ":PROPERTIES:~%:ID: 7~%:END:~%"))
+           (expected (edit-properties-test-replace-span
+                      source offset offset insertion))
+           (edited (set-property document headline "ID" "7")))
+      (edit-properties-test-check-patch document edited source offset offset insertion)
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal expected)
+        (expect (org-kit::edit-canonical-document edited)
+                :to-equalp (org-kit::edit-canonical-document
+                            (parse-org expected))))))
 
   (it "adds a property to an existing drawer and removes a non-final property locally"
     (let* ((source (format nil "* Heading~%:PROPERTIES:~%:ID: 7~%:END:~%body~%"))
@@ -174,6 +206,39 @@
                  (edit-properties-test-headline removed) "OWNER")
                 :to-be nil))))
 
+  (it "rejects adding a property to a drawer without an END marker"
+    (let* ((source (format nil "* Heading~%:PROPERTIES:~%:ID: old~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document)))
+      (with-soft-assertions
+        (expect (edit-properties-test-property headline "ID") :to-be-truthy))
+      (edit-properties-test-check-error
+       (lambda () (set-property document headline "OWNER" "Ada"))
+       :uneditable-structure document source)))
+
+  (it "adds a property after non-property drawer children"
+    (let* ((source (format nil "* Heading~%:PROPERTIES:~%# drawer note~%:END:~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (drawer (find :property-drawer
+                         (node-children (edit-properties-test-section headline))
+                         :key #'node-type))
+           (close-start (search ":END:" source :start2 (node-begin drawer)))
+           (insertion (format nil ":ID: 7~%"))
+           (expected (edit-properties-test-replace-span
+                      source close-start close-start insertion))
+           (edited (set-property document headline "ID" "7")))
+      (edit-properties-test-check-patch document edited source
+                                        close-start close-start insertion)
+      (with-soft-assertions
+        (expect (mapcar #'node-type (node-children drawer))
+                :to-equal '(:comment))
+        (expect (document-text edited) :to-equal expected)
+        (expect (node-property
+                 (edit-properties-test-property
+                  (edit-properties-test-headline edited) "ID") :value)
+                :to-equal "7"))))
+
   (it "removes the entire drawer when its last property is removed"
     (let* ((source (format nil "* 見出し~C~C:PROPERTIES:~C~C:ID: 古い値~C~C:END:~C~C本文 A~C~C次 B~C~C"
                            #\Return #\Newline #\Return #\Newline
@@ -193,9 +258,66 @@
         (expect (edit-properties-test-property
                  (edit-properties-test-headline edited) "ID")
                 :to-be nil)
+        (let ((remaining-section
+                (edit-properties-test-section
+                 (edit-properties-test-headline edited))))
+          (expect remaining-section :to-be-truthy)
+          (expect (mapcar #'node-type (node-children remaining-section))
+                  :to-equal '(:paragraph))))))
+
+  (it "removes the section with its only drawer and preserves following bytes"
+    (let* ((source (format nil "* Heading~%:PROPERTIES:~%:ID: one~%:END:~%* Other~%Tail~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (section (edit-properties-test-section headline))
+           (drawer (find :property-drawer (node-children section) :key #'node-type))
+           (start (node-begin drawer))
+           (end (node-end drawer))
+           (expected (edit-properties-test-replace-span source start end ""))
+           (edited (remove-property document headline "ID")))
+      (with-soft-assertions
+        (expect (mapcar #'node-type (node-children section))
+                :to-equal '(:property-drawer)))
+      (edit-properties-test-check-patch document edited source start end "")
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal expected)
         (expect (edit-properties-test-section
                  (edit-properties-test-headline edited))
-                :to-be nil))))
+                :to-be nil)
+        (expect (edit-properties-test-canonical-headline edited "Other")
+                :to-equalp (edit-properties-test-canonical-headline
+                            document "Other")))))
+
+  (it "updates a property value without replacing trailing spaces and tabs"
+    (let* ((source (format nil "* Heading~%:PROPERTIES:~%:ID: old ~C  ~%:END:~%" #\Tab))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (start (search "old" source))
+           (expected (edit-properties-test-replace-span source start (+ start 3) "new"))
+           (edited (set-property document headline "ID" "new")))
+      (edit-properties-test-check-patch document edited source start (+ start 3) "new")
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal expected)
+        (expect (node-property
+                 (edit-properties-test-property
+                  (edit-properties-test-headline edited) "ID") :value)
+                :to-equal "new"))))
+
+  (it "inserts a value after an empty property with trailing space"
+    (let* ((source (format nil "* Heading~%:PROPERTIES:~%:ID: ~%:END:~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (offset (search ":ID: " source))
+           (start (+ offset (length ":ID: ")))
+           (expected (edit-properties-test-replace-span source start start "new"))
+           (edited (set-property document headline "ID" "new")))
+      (edit-properties-test-check-patch document edited source start start "new")
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal expected)
+        (expect (node-property
+                 (edit-properties-test-property
+                  (edit-properties-test-headline edited) "ID") :value)
+                :to-equal "new"))))
 
   (it "preserves UTF-8 property insertion bytes around a BOM and CRLF source"
     (let* ((source (format nil "* 見出し~C~C本文前 café~C~C本文後 東京~C~C"
@@ -233,6 +355,21 @@
        :target-not-found document source)
       (edit-properties-test-check-error
        (lambda () (set-property document headline "ID" (format nil "bad~%value")))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-property document headline "ID" (format nil "bad~Cvalue" #\Return)))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-property document headline (format nil "BAD~%KEY") "x"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-property document headline (format nil "BAD~CKEY" #\Return) "x"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-property document headline "" "x"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-property document headline " ID " "x"))
        :invalid-value document source)))
 
   (it "reports wrong node types and malformed property keys in edit slots"
@@ -428,6 +565,9 @@
        (lambda () (remove-planning document headline :closed))
        :target-not-found document source)
       (edit-properties-test-check-error
+       (lambda () (remove-planning document headline :planning))
+       :invalid-value document source)
+      (edit-properties-test-check-error
        (lambda () (set-planning document headline :planning "<2026-10-13 Tue>"))
        :invalid-value document source))))
 
@@ -469,6 +609,21 @@
                  (first (edit-properties-test-keywords edited "TITLE")) :value)
                 :to-equal "Doc"))))
 
+  (it "inserts a keyword before the first headline using LF or CRLF"
+    (dolist (newline (list (string #\Newline)
+                           (format nil "~C~C" #\Return #\Newline)))
+      (let* ((source (concatenate 'string "* Heading" newline "Body" newline))
+             (document (parse-org source))
+             (insertion (concatenate 'string "#+TITLE: Doc" newline))
+             (expected (concatenate 'string insertion source))
+             (edited (set-keyword-value document '(:keyword-key "TITLE") "Doc")))
+        (edit-properties-test-check-patch document edited source 0 0 insertion)
+        (with-soft-assertions
+          (expect (document-text edited) :to-equal expected)
+          (expect (node-property
+                   (first (edit-properties-test-keywords edited "TITLE")) :value)
+                  :to-equal "Doc")))))
+
   (it "adds to an empty document and removes its only top-level keyword"
     (let* ((source "")
            (document (parse-org source))
@@ -506,6 +661,33 @@
                 :to-equal "ja")
         (expect (document-text edited) :to-equal expected))))
 
+  (it "removes a keyword nested inside a quote block and preserves the block"
+    (let* ((source (format nil "#+BEGIN_QUOTE~%#+TITLE: Quoted~%#+END_QUOTE~%"))
+           (document (parse-org source))
+           (keyword (let ((found nil))
+                      (map-nodes (lambda (node)
+                                   (when (and (eq (node-type node) :keyword)
+                                              (string= (node-property node :key) "TITLE"))
+                                     (setf found node)))
+                                 (document-root document))
+                      found))
+           (start (node-begin keyword))
+           (end (node-end keyword))
+           (expected (edit-properties-test-replace-span source start end ""))
+           (edited (remove-keyword document keyword)))
+      (edit-properties-test-check-patch document edited source start end "")
+      (with-soft-assertions
+        (expect (node-type (node-parent keyword)) :to-be :quote-block)
+        (expect (document-text edited) :to-equal expected)
+        (expect (node-children
+                 (let ((found nil))
+                   (map-nodes (lambda (node)
+                                (when (eq (node-type node) :quote-block)
+                                  (setf found node)))
+                              (document-root edited))
+                   found))
+                :to-be nil))))
+
   (it "rejects ambiguous and missing selectors and invalid values with slots"
     (let* ((source (format nil "#+TITLE: One~%#+TITLE: Two~%* Heading~%"))
            (document (parse-org source)))
@@ -517,6 +699,9 @@
        :ambiguous-target document source)
       (edit-properties-test-check-error
        (lambda () (remove-keyword document '(:keyword-key "TITLE" 3)))
+       :target-not-found document source)
+      (edit-properties-test-check-error
+       (lambda () (remove-keyword document '(:keyword-key "MISSING")))
        :target-not-found document source)
       (edit-properties-test-check-error
        (lambda () (set-keyword-value document '(:keyword-key "EXTRA")
@@ -531,6 +716,12 @@
        :invalid-value document source)
       (edit-properties-test-check-error
        (lambda () (set-keyword-value document '(:keyword-key "TITLE" 0) "new"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-keyword-value document '(:keyword-key "TITLE" "1") "new"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-keyword-value document '(:keyword-key . "TITLE") "new"))
        :invalid-value document source)
       (edit-properties-test-check-error
        (lambda () (remove-keyword document '(:keyword-key "TITLE" 1 2)))
