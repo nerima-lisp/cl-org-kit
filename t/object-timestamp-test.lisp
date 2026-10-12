@@ -2,25 +2,24 @@
 (in-package #:cl-org-kit/test)
 
 (defun timestamp-object-match (source &optional (start 0) (end (length source)))
-  (org-kit::try-parse-timestamp-object (make-document source)
-                                       start
-                                       end
-                                       :paragraph))
+  (let* ((document (make-document source))
+         (objects (org-kit::parse-objects document start end :paragraph)))
+    (find-if (lambda (object) (eq (node-type object) :timestamp)) objects)))
 
-(defun timestamp-object-property (match key)
-  (getf (org-kit::object-match-properties match) key))
+(defun timestamp-object-property (object key)
+  (node-property object key))
 
 (describe "timestamp object recognition"
           (it
            "recognizes fixture 05 active and inactive timestamps with repeaters and warnings"
            (let* ((source "<2026-10-12 Mon 09:30 +1w -2d>")
                   (match (timestamp-object-match source))
-                  (properties (org-kit::object-match-properties match)))
+                  (properties (node-properties match)))
              (with-soft-assertions
-              (expect (org-kit::object-match-type match) :to-be :timestamp)
-              (expect (org-kit::object-match-end match) :to-be (length source))
-              (expect (org-kit::object-match-contents-begin match) :to-be nil)
-              (expect (org-kit::object-match-contents-end match) :to-be nil)
+              (expect (node-type match) :to-be :timestamp)
+              (expect (node-end match) :to-be (length source))
+              (expect (node-contents-begin match) :to-be nil)
+              (expect (node-contents-end match) :to-be nil)
               (expect properties
                       :to-equal
                       '(:type :active
@@ -57,7 +56,7 @@
                               :warning-unit
                               :day))))
            (let ((match (timestamp-object-match "[2026-10-11 Sun]")))
-             (expect (org-kit::object-match-properties match)
+             (expect (node-properties match)
                      :to-equal
                      '(:type :inactive
                              :year-start
@@ -167,7 +166,7 @@
                   (timestamp
                    (make-node :timestamp
                               :properties
-                              (org-kit::object-match-properties match))))
+                   (node-properties match))))
              (with-soft-assertions
               (expect (timestamp-object-property match :type) :to-be :active)
               (expect
@@ -193,10 +192,66 @@
               (expect (timestamp-object-match source) :to-equal nil))
             (let* ((source "<2026-10-12 Mon>--<2026-10-14 Wed")
                    (match (timestamp-object-match source 0 (length source))))
-              (expect (org-kit::object-match-end match) :to-be 16)
+              (expect (node-end match) :to-be 16)
               (expect (timestamp-object-property match :type) :to-be :active))
             (let* ((source "Text <2026-10-12 Mon> tail")
                    (start (search "<2026-10-12" source))
                    (match (timestamp-object-match source start (length source))))
-              (expect (org-kit::object-match-end match) :to-be (+ start 17))
-              (expect (org-kit::object-match-post-blank match) :to-be 1)))))
+              (expect (node-end match) :to-be (+ start 17))
+              (expect (node-post-blank match) :to-be 1)))))
+
+(describe "timestamp parser edge branches"
+  (it "covers all adjustment units and rejects malformed suffix sequences"
+    (let ((hour-repeater (timestamp-object-match "<2026-10-12 +1h>"))
+          (year-repeater (timestamp-object-match "<2026-10-12 +1y>"))
+          (hour-warning (timestamp-object-match "<2026-10-12 -2h>")))
+      (with-soft-assertions
+        (expect (timestamp-object-property hour-repeater :repeater-unit)
+                :to-be
+                :hour)
+        (expect (timestamp-object-property year-repeater :repeater-unit)
+                :to-be
+                :year)
+        (expect (timestamp-object-property hour-warning :warning-unit)
+                :to-be
+                :hour)
+        (expect (timestamp-object-match "<2026-10-12 +x>") :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12 +1q>") :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12 09:00 10:00>")
+                :to-be
+                nil)
+        (expect (timestamp-object-match "<2026-10-12 +1d +2d>")
+                :to-be
+                nil)
+        (expect (timestamp-object-match "<2026-10-12 -1d -2d>")
+                :to-be
+                nil)
+        (expect (timestamp-object-match "<2026-10-12 Mon Tue>")
+                :to-be
+                nil)
+        (expect (timestamp-object-match "<2026-10-12Mon>") :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12 09:00-10:00>")
+                :to-be-truthy))))
+  (it "parses diary Org text with escapes and nested expressions"
+    (let* ((diary
+             (concatenate 'string
+                          "<%%(diary-float \"ignored "
+                          (string #\\)
+                          "\" )\" (nested))>"))
+           (diary-match (timestamp-object-match diary))
+           (nested-range
+             (timestamp-object-match
+              "<%%(diary-float t 4 2)>--<%%(diary-float t 4 3)>")))
+      (with-soft-assertions
+        (expect (node-end diary-match) :to-be (length diary))
+        (expect (timestamp-object-match "<%%x>") :to-be nil)
+        (expect (timestamp-object-match "<%%(open>") :to-be nil)
+        (expect (timestamp-object-property nested-range :type) :to-be :diary)
+        (expect (timestamp-object-property nested-range :day-end) :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12Mon>") :to-be nil)
+        (expect (timestamp-object-match "<2026/10/12>") :to-be nil)
+        (expect (timestamp-object-match "<2026-1x-12>") :to-be nil)
+        (expect (timestamp-object-match
+                 (format nil "<2026-10-12~c>" #\Newline))
+                :to-be
+                nil)))))

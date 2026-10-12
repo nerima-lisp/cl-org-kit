@@ -153,9 +153,6 @@
                                             (%timestamp-token-end text
                                                                   cursor
                                                                   close-position)))
-                                      (when (= token-start token-end)
-                                        (return-from %timestamp-parse-suffix
-                                          (values nil nil)))
                                       (multiple-value-bind (hour minute
                                                                  end-hour
                                                                  end-minute
@@ -230,14 +227,7 @@
                                                   %timestamp-parse-suffix
                                                 (values nil nil)))
                                             (setf weekday-seen-p t)))
-                                        (setf cursor token-end)
-                                        (when
-                                            (and (< cursor close-position)
-                                                 (not
-                                                  (%timestamp-whitespace-p
-                                                   (char text cursor))))
-                                          (return-from %timestamp-parse-suffix
-                                            (values nil nil))))))))
+                                        (setf cursor token-end))))))
 
 (defun %timestamp-diary-expression-end (text start end)
   (when
@@ -271,77 +261,72 @@
        (position #\Return text :start start :end end))))
 
 (defun %parse-single-timestamp (text start end)
-  (when
-      (and (integerp start)
-           (integerp end)
-           (<= 0 start end (length text))
-           (< start end))
-    (let* ((opening (char text start))
-           (closing
-            (case opening
-              (#\< #\>)
-              (#\[ #\]))))
-      (when closing
-        (let* ((inner-start (1+ start))
-               (base-type
-                (if (char= opening #\<)
-                    :active
-                    :inactive))
-               (diary-expression-end
-                (and (<= (+ inner-start 3) end)
-                     (string= text
-                              "%%("
-                              :start1
-                              inner-start
-                              :end1
-                              (+ inner-start 3))
-                     (%timestamp-diary-expression-end text inner-start end)))
-               (close-position
-                (and diary-expression-end
-                     (position closing
-                               text
-                               :start
-                               diary-expression-end
-                               :end
-                               end))))
-          (if diary-expression-end
+  (let* ((opening (char text start))
+         (closing
+          (case opening
+            (#\< #\>)
+            (#\[ #\]))))
+    (when closing
+      (let* ((inner-start (1+ start))
+             (base-type
+              (if (char= opening #\<)
+                  :active
+                  :inactive))
+             (diary-expression-end
+              (and (<= (+ inner-start 3) end)
+                   (string= text
+                            "%%("
+                            :start1
+                            inner-start
+                            :end1
+                            (+ inner-start 3))
+                   (%timestamp-diary-expression-end text inner-start end)))
+             (close-position
+              (and diary-expression-end
+                   (position closing
+                             text
+                             :start
+                             diary-expression-end
+                             :end
+                             end))))
+        (if diary-expression-end
+            (when
+                (and close-position
+                     (%timestamp-single-line-p text start (1+ close-position)))
+              (let ((fields (%make-timestamp-fields :type :diary)))
+                (multiple-value-bind (parsed-fields valid-p)
+                    (%timestamp-parse-suffix text
+                                             diary-expression-end
+                                             close-position
+                                             fields)
+                  (when valid-p
+                    (values parsed-fields (1+ close-position))))))
+            (let ((close-position
+                   (position closing text :start inner-start :end end)))
               (when
                   (and close-position
-                       (%timestamp-single-line-p text start (1+ close-position)))
-                (let ((fields (%make-timestamp-fields :type :diary)))
-                  (multiple-value-bind (parsed-fields valid-p)
-                      (%timestamp-parse-suffix text
-                                               diary-expression-end
-                                               close-position
-                                               fields)
-                    (when valid-p
-                      (values parsed-fields (1+ close-position))))))
-              (let ((close-position
-                     (position closing text :start inner-start :end end)))
-                (when
-                    (and close-position
-                         (%timestamp-single-line-p text
-                                                   start
-                                                   (1+ close-position)))
-                  (multiple-value-bind (year month day date-end)
-                      (%timestamp-date-at text inner-start close-position)
-                    (when date-end
-                      (let ((fields
-                             (%make-timestamp-fields :type
-                                                     base-type
-                                                     :year
-                                                     year
-                                                     :month
-                                                     month
-                                                     :day
-                                                     day)))
-                        (multiple-value-bind (parsed-fields valid-p)
-                            (%timestamp-parse-suffix text
-                                                     date-end
-                                                     close-position
-                                                     fields)
-                          (when valid-p
-                            (values parsed-fields (1+ close-position)))))))))))))))
+                       (%timestamp-single-line-p text
+                                                 start
+                                                 (1+ close-position)))
+                (multiple-value-bind (year month day date-end)
+                    (%timestamp-date-at text inner-start close-position)
+                  (when date-end
+                    (let ((fields
+                           (%make-timestamp-fields :type
+                                                   base-type
+                                                   :year
+                                                   year
+                                                   :month
+                                                   month
+                                                   :day
+                                                   day)))
+                      (multiple-value-bind (parsed-fields valid-p)
+                          (%timestamp-parse-suffix text
+                                                   date-end
+                                                   close-position
+                                                   fields)
+                        (when valid-p
+                          (values parsed-fields (1+ close-position))))))))))))))
 
 (defun %timestamp-end-hour (fields)
   (if (%timestamp-fields-time-range-p fields)
@@ -425,48 +410,42 @@
 (defun try-parse-timestamp-object (document start end container-type)
   "Recognize one Org timestamp starting at START within [START, END)."
   (declare (ignore container-type))
-  (let* ((text (document-text document))
-         (length (length text)))
-    (when
-        (and (integerp start)
-             (integerp end)
-             (<= 0 start end length)
-             (< start end))
-      (multiple-value-bind (start-fields first-end)
-          (%parse-single-timestamp text start end)
-        (when start-fields
-          (let ((timestamp-end first-end)
-                (end-fields nil)
-                (external-range-p nil))
-            (when
-                (and (<= (+ first-end 2) end)
-                     (string= text "--" :start1 first-end :end1 (+ first-end 2))
-                     (not (eq (%timestamp-fields-type start-fields) :diary)))
-              (multiple-value-bind (candidate-fields candidate-end)
-                  (%parse-single-timestamp text (+ first-end 2) end)
-                (when
-                    (and candidate-fields
-                         (eq (%timestamp-fields-type candidate-fields)
-                             (%timestamp-fields-type start-fields)))
-                  (setf end-fields candidate-fields
-                        timestamp-end candidate-end
-                        external-range-p t))))
-            (let* ((post-blank-end
-                    (%timestamp-skip-whitespace text timestamp-end end))
-                   (post-blank (- post-blank-end timestamp-end)))
-              (%make-object-match :type
-                                  :timestamp
-                                  :end
-                                  post-blank-end
-                                  :contents-begin
-                                  nil
-                                  :contents-end
-                                  nil
-                                  :post-blank
-                                  post-blank
-                                  :properties
-                                  (%timestamp-properties start-fields
-                                                         end-fields
-                                                         external-range-p)
-                                  :opaque-p
-                                  nil))))))))
+  (let ((text (document-text document)))
+    (multiple-value-bind (start-fields first-end)
+        (%parse-single-timestamp text start end)
+      (when start-fields
+        (let ((timestamp-end first-end)
+              (end-fields nil)
+              (external-range-p nil))
+          (when
+              (and (< (+ first-end 2) end)
+                   (string= text "--" :start1 first-end :end1 (+ first-end 2))
+                   (not (eq (%timestamp-fields-type start-fields) :diary)))
+            (multiple-value-bind (candidate-fields candidate-end)
+                (%parse-single-timestamp text (+ first-end 2) end)
+              (when
+                  (and candidate-fields
+                       (eq (%timestamp-fields-type candidate-fields)
+                           (%timestamp-fields-type start-fields)))
+                (setf end-fields candidate-fields
+                      timestamp-end candidate-end
+                      external-range-p t))))
+          (let* ((post-blank-end
+                  (%timestamp-skip-whitespace text timestamp-end end))
+                 (post-blank (- post-blank-end timestamp-end)))
+            (%make-object-match :type
+                                :timestamp
+                                :end
+                                post-blank-end
+                                :contents-begin
+                                nil
+                                :contents-end
+                                nil
+                                :post-blank
+                                post-blank
+                                :properties
+                                (%timestamp-properties start-fields
+                                                       end-fields
+                                                       external-range-p)
+                                :opaque-p
+                                nil)))))))
