@@ -1,0 +1,3 @@
+﻿#+title: UTF-8 BOM fixture 🧪
+* Heading after BOM
+BOM を除いてから本文を読む。

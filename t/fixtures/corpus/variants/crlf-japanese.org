@@ -1,0 +1,3 @@
+#+title: CRLF fixture
+* CRLF heading
+日本語の行に絵文字 🐈 を含める。

@@ -1,0 +1,49 @@
+#+title: Element boundaries and empty contents
+
+* Heading with a section
+This section is non-empty.
+* Heading with no section
+** Its child starts immediately.
+*No-space heading candidate stays in the section as text.
+
+#+begin_quote
+#+end_quote
+#+begin_center
+#+end_center
+#+begin_note
+#+end_note
+
+:EMPTY:
+:end:
+
+#+begin: empty-dynamic
+#+end:
+
+[fn:empty]
+[fn:next] A following definition closes the empty one.
+
+* Empty property drawer
+:PROPERTIES:
+:END:
+
+- 
+- Next list item has text.
+
+|  | |
+|--+--|
+| final cell has no trailing bar
+This paragraph follows the table.
+
+CLOCK: => 0:00
+%%()
+#
+: 
+----
+#+EMPTY:
+#+MISSING-COLON
+
+* Planning belongs to a heading
+SCHEDULED: <2026-10-12 Mon>
+
+\begin{align*}
+\end{align*}

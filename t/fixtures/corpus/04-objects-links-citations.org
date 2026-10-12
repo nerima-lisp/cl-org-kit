@@ -1,0 +1,19 @@
+#+title: Links, citations, footnotes, and macros
+
+Radio target definition: <<<radio *target* phrase>>>.
+Later radio link occurrence: radio *target* phrase.
+
+Plain link: https:plain-path.
+Angle link: <https:angle-path>.
+Regular link with object description: [[https:bracket-path][a *bold* description]].
+Regular internal link: [[#local-anchor][anchor link]].
+Target definition: <<local-anchor>>.
+
+Macro calls: {{{title}}} and {{{greet(日本語)}}}.
+Export snippet: @@html:<mark>inline export</mark>@@.
+Boundary snippet: @@html:unclosed export snippet.
+Footnote references: [fn:short] and [fn::inline note].
+Citation with two references: [cite/t: see;@smith2024;@doe-2025 p. 4;as noted].
+Citation reference boundary: [cite @not-a-citation-key].
+
+[fn:short] A footnote definition paired with the reference above.

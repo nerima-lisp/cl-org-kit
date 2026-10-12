@@ -1,0 +1,18 @@
+#+title: Org structure: headings, sections, 日本語, and 🧭
+
+This is the zeroth section. It contains plain text before the first heading.
+The second line stays in the same paragraph.
+
+* Heading with a section
+This section contains a paragraph.
+** TODO [#A] COMMENT Annotated heading with 日本語 and 🧪 :work:docs:
+This child heading has a body.
+*** Deep child
+Text under the deep child.
+* Empty section parent
+** Child begins immediately
+The parent has no section of its own.
+* Archived heading :ARCHIVE:history:
+Archived content.
+*No space after the star is not a heading
+This is another paragraph.

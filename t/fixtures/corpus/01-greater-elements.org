@@ -1,0 +1,62 @@
+#+title: Greater elements
+
+#+begin_quote
+A quote block contains a paragraph.
+#+end_quote
+
+#+begin_center
+Centered text.
+#+end_center
+
+#+begin_note Optional parameters
+A named special block with parameters.
+#+end_note
+
+:NOTES:
+A drawer contains ordinary elements.
+#+begin_example
+The nested example block is a lesser element.
+#+end_example
+:end:
+
+#+begin: clocktable :scope file :maxlevel 2
+Dynamic block contents are parsed as Org elements.
+#+end:
+
+[fn:short] A one-line footnote definition.
+[fn:long] A longer definition with two paragraphs.
+
+The second paragraph belongs to this footnote.
+
+* Property drawer and planning
+SCHEDULED: <2026-10-12 Mon 09:30>
+:PROPERTIES:
+:CUSTOM_ID: property-example
+:OWNER+: Japanese 日本語
+:END:
+The property drawer follows the planning line.
+
+* Lists and tables
+- Unchecked task [ ] with an item body
+  Continuation of the same item.
+  - Nested unordered item
+- Checked task [X]
+3. [@3] Ordered item starting at three
+4. Another ordered item
++ Term :: A descriptive list item
+
+| Name | Value |
+|------+-------|
+| alpha | *bold* |
+| omega | final cell |
+
++-----+------+
+|Name |Value |
++-----+------+
+|one  |two   |
++-----+------+
+
+************** Fourteen stars remain below the default inline-task level
+*************** TODO Inline task
+The inline task may contain a paragraph.
+*************** END

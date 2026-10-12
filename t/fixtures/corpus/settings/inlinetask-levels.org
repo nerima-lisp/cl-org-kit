@@ -1,0 +1,8 @@
+#+title: Inline task level boundary
+
+************** Fourteen stars are below the default minimum.
+*************** TODO Fifteen stars meet the default minimum.
+An inline-task body paragraph.
+*************** END
+*************** TODO Inline task without an explicit END
+* A regular heading after the inline tasks

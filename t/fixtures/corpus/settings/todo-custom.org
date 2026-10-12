@@ -1,0 +1,13 @@
+#+title: Custom TODO keyword sequences
+#+TODO: TODO(t) WAIT(w@/!) | DONE(d!) CANCELLED(c@)
+#+SEQ_TODO: NEXT(n) HOLD(h) | FINISHED(f)
+#+TYP_TODO: IDEA(i) | REJECTED(r)
+
+* TODO Basic sequence todo
+* WAIT Active state from TODO
+* DONE Completed state from TODO
+* NEXT Sequential workflow state
+* FINISHED Completed sequential state
+* IDEA Typed workflow state
+* REJECTED Completed typed state
+* UNKNOWN Remains ordinary title text

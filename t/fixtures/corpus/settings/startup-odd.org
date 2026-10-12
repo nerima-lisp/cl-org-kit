@@ -1,0 +1,6 @@
+#+title: Odd-only startup levels
+#+STARTUP: odd
+
+* First odd level
+*** Second odd level in source
+***** Third odd level in source

@@ -1,0 +1,7 @@
+#+title: Default TODO keywords
+
+* TODO Default todo keyword
+* DONE Default done keyword
+* WAIT Without a custom definition this is title text.
+* NEXT Without a custom definition this is title text.
+* IDEA Without a custom definition this is title text.

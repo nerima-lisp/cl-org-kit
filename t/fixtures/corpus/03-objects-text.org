@@ -1,0 +1,17 @@
+#+title: Text objects
+
+Plain text remains a plain-text object unless a more specific form matches.
+
+Entity forms: \alpha, \nbsp, and a whitespace entity \_   .
+Boundary entity spelling: \notAnEntity and incomplete \alpha{ stay as text.
+
+LaTeX fragments: \(a + b\), \[c^2 = a^2 + b^2\], and \alpha_{i}.
+Boundary fragment: an unclosed \( fragment.
+
+Six markup forms: *bold*, /italic/, _underline_, +strike-through+,
+=verbatim text=, and ~code text~.
+Markup boundaries: a * spaced * marker, / spaced / marker, and x _ y.
+Code and verbatim contents stay literal: ~*not bold*~ and =/not italic/=
+
+Subscript and superscript: H_2O, x^3, x_{i+1}, and x^{y^{z}}.
+Subscript boundary: snake_case and spaced x_ y.

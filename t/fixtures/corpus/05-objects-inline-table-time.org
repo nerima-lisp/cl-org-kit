@@ -1,0 +1,22 @@
+#+title: Inline source, table cells, and timestamps
+
+Inline Babel call: call_sum(1, 2) and call_greet[lang=ja]("こんにちは").
+Inline source: src_emacs-lisp[:results raw]{(+ 1 2)}.
+Inline source boundary: src_ {no language}.
+
+Line break follows this text\\
+and starts a new line in the same paragraph.
+Boundary backslash is ordinary text here: \
+
+Statistics cookies: [2/5] and [40%].
+Boundary cookie: [2 / 5].
+
+Active timestamp <2026-10-12 Mon 09:30 +1w -2d> and inactive [2026-10-11 Sun].
+Active range <2026-10-12 Mon>--<2026-10-14 Wed>.
+Time range <2026-10-12 Mon 09:00-10:30>.
+Diary timestamp <%%(diary-float t 4 2) 12:00-14:00>.
+Timestamp boundary <2026-13-99 NotADay>.
+
+| Cell with *bold* | cell with [[https:table-path][link]] |
+|-----------------+-------------------------------------|
+| Japanese 日本語 | timestamp <2026-10-12 Mon>          |

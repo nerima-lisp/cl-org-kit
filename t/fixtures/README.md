@@ -1,0 +1,45 @@
+# Org fixtures
+
+This directory contains a source corpus and the corresponding trees emitted by Emacs `org-element`.
+The corpus covers the elements and objects in the Org Syntax v2 reference, parser boundaries, common
+settings, and input variants for CRLF, a UTF-8 BOM, a missing final newline, Japanese text, and emoji.
+
+## Layout
+
+- `corpus/` contains the `.org` source files.
+- `expected/` contains one Common Lisp-readable S-expression for each source. The source's relative
+  path is retained and `.sexp` is appended to its filename.
+- `../scripts/generate-org-fixtures.el` generates the expected trees and reports type coverage.
+
+The generated data records Emacs 31.1 and Org 9.8.10. Regenerate and check coverage from the
+repository root with:
+
+```sh
+emacs --batch -Q --script scripts/generate-org-fixtures.el \
+  t/fixtures/corpus t/fixtures/expected
+
+emacs --batch -Q --script scripts/generate-org-fixtures.el \
+  --check-types t/fixtures/corpus t/fixtures/expected
+```
+
+The coverage check reads the generated trees and reports every `org-element` element and object
+type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
+type.
+
+## Tree format and normalization
+
+Each output begins with comments recording the Emacs and Org versions, then one tree rooted at
+`:org-data`. Each node has a type keyword, a property list, and child nodes or strings containing
+plain text. The tree keeps spans and selected semantic properties such as headline state and tags,
+source-block language and body, link type, path and format, timestamps, list items, tables, and
+keyword settings. The property selection in the generator is authoritative.
+
+Offsets are zero-based decoded character positions, and `:end` is exclusive. CR and LF each count
+as one position, so a CRLF pair counts as two. A leading U+FEFF is removed before parsing and is
+excluded from offsets. Text properties are stripped. The generator excludes `:parent`,
+`:standard-properties`, `:pre-blank`, `:post-blank`, `:CATEGORY`, and unselected parser properties
+such as `:raw-link` and `:raw-value`. File-context `:path` is omitted except on link nodes.
+
+Plain, angle, bracket, and radio links all use `:link` nodes. Their `:type`, `:path`, and `:format`
+properties distinguish the forms. The generator explicitly loads `org-inlinetask` and uses its
+default minimum level 15 so the level-14/level-15 boundary is stable.

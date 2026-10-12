@@ -1,0 +1,59 @@
+#+title: Lesser element forms
+
+#+CALL: foo()
+
+#+begin_comment
+Comment block body is kept verbatim.
+#+end_comment
+
+#+begin_example
+Example block body is literal.
+#+end_example
+
+#+begin_export html
+<p>Export block body.</p>
+#+end_export
+
+#+begin_src emacs-lisp -n 1
+(message "source block")
+#+end_src
+
+#+begin_verse
+Verse line one
+  Verse line two with indentation
+#+end_verse
+
+# A regular comment line.
+#+begin_nonexistent
+Unknown block names are greater special blocks, not lesser blocks.
+#+end_nonexistent
+
+CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:42] =>  0:42
+clock: [2026-10-11 Sun]
+CLOCK: => 12:30
+
+%%(org-calendar-holiday)
+
+-----
+: A fixed-width line.
+: Another fixed-width line.
+
+#+author: Org parser fixture
+#+name: attached-name
+#+caption: An affiliated caption parsed as objects.
+[[https:affiliated-path][affiliated target]]
+
+\begin{align*}
+2x - 5y &= 8 \\
+3x + 9y &= -12
+\end{align*}
+
+* Planning and node properties
+DEADLINE: <2026-10-13 Tue -2d>
+CLOSED: [2026-10-10 Sat 15:20]
+:PROPERTIES:
+:ID: node-property-value
+:EMPTY:
+:APPEND+: extra value
+:END:
+A paragraph is the default lesser element.

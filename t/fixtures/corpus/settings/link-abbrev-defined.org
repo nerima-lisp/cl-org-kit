@@ -1,0 +1,4 @@
+#+title: Link abbreviation declared in this buffer
+#+LINK: issue https:tracker/%s
+
+[[issue:42][Issue 42 uses the declared LINK abbreviation]].

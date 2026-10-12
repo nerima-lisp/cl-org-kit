@@ -1,0 +1,29 @@
+#+title: Object boundaries and near misses
+
+Entity boundary: \notAnEntity.
+LaTeX boundary: unclosed inline math \(a+b and \[c=d.
+Export snippet boundary: @@html:<b>unclosed.
+Footnote boundaries: [fn:] [fn:has space] [fn:
+Citation boundary: [cite @missing-colon].
+
+Inline Babel boundary: call_(unclosed arguments.
+Inline source boundary: src_emacs-lisp{unclosed body.
+Line-break boundary: this has one trailing backslash \
+
+Radio-link boundary: <<<unmatched radio marker.
+Plain-link boundary: https: spaced-path.
+Regular-link boundary: [[bracket-path][label].
+Macro boundary: {{{unterminated macro.
+Target boundary: <<unterminated target.
+Radio-target boundary: <<<unterminated radio target>>.
+
+Statistics boundaries: [/ ] [101%] [2 / 5].
+Subscript boundary: word_ and spaced x_ y.
+Superscript boundary: x^ and x^{unclosed.
+Table row edge with omitted final separator:
+| final cell is not followed by a bar
+Timestamp boundary: <2026-10-12 Mon
+
+Markup boundaries: *unclosed bold, /unclosed italic, _unclosed underline,
++unclosed strike, =unclosed verbatim, and ~unclosed code.
+Angle-link boundary: <https:unterminated-angle-path.
