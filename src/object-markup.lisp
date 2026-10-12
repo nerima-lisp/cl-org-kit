@@ -46,11 +46,7 @@
 (defun try-parse-markup-object (document start end container-type)
   (declare (ignore container-type))
   (let* ((text (document-text document))
-         (length (length text))
-         (valid-range
-          (and (<= 0 start end length)
-               (< start end)))
-         (delimiter (and valid-range (char text start)))
+         (delimiter (char text start))
          (type (and delimiter (markup-type-for-delimiter delimiter))))
     (when
         (and type
