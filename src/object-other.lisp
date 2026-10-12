@@ -598,7 +598,7 @@
 
 (defun other-object-valid-range-p (document start end)
   (let ((length (length (document-text document))))
-    (and (integerp start) (integerp end) (<= 0 start end length) (< start end))))
+    (and (<= 0 start end length) (< start end))))
 
 (defun other-object-character-p (text position character end)
   (and (< position end) (char= (char text position) character)))
