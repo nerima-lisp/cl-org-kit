@@ -384,4 +384,123 @@
                 '("spaced comment" "plain comment"))
         (expect (node-property call :call) :to-equal "bare-call")
         (expect (node-property call :arguments) :to-be nil))))
+
+  (it "preserves empty block openers and drawer-like paragraph text"
+    (let* ((source
+            (reader-blocks-test-lines "#+BEGIN:"
+                                      "#+BEGIN_"
+                                      ":A:B:"
+                                      ":END:"))
+           (document (parse-org source))
+           (keywords (reader-blocks-test-elements document :keyword))
+           (paragraphs (reader-blocks-test-elements document :paragraph)))
+      (with-soft-assertions
+        (expect (length keywords) :to-be 1)
+        (expect (node-property (first keywords) :key) :to-equal "BEGIN")
+        (expect (node-property (first keywords) :value) :to-equal "")
+        (expect (length paragraphs) :to-be 1)
+        (expect (node-text (first paragraphs))
+                :to-equal
+                (reader-blocks-test-lines "#+BEGIN_" ":A:B:" ":END:")))))
+
+  (it "checks property drawer contents and planning-line placement"
+    (let* ((planned-source
+            (reader-blocks-test-lines "* Planned"
+                                      "SCHEDULED: <2026-10-12 Mon>"
+                                      ":PROPERTIES:"
+                                      ":OWNER: planner"
+                                      ":END:"))
+           (planned-document (parse-org planned-source))
+           (planned-drawer
+            (first
+             (reader-blocks-test-elements planned-document :property-drawer)))
+           (empty-source
+            (reader-blocks-test-lines "* Empty properties"
+                                      ":PROPERTIES:"
+                                      ":END:"))
+           (empty-document (parse-org empty-source))
+           (empty-drawer
+            (first
+             (reader-blocks-test-elements empty-document :property-drawer)))
+           (plain-source
+            (reader-blocks-test-lines "* Plain drawer content"
+                                      ":PROPERTIES:"
+                                      "plain text"
+                                      ":END:"))
+           (plain-document (parse-org plain-source))
+           (plain-drawer
+            (first (reader-blocks-test-elements plain-document :drawer)))
+           (plain-property-source
+            (reader-blocks-test-lines "* Non-property line"
+                                      ":PROPERTIES:"
+                                      ":DESCRIPTION"
+                                      ":END:"))
+           (plain-property-document (parse-org plain-property-source))
+           (plain-property-drawer
+            (first
+             (reader-blocks-test-elements plain-property-document :drawer)))
+           (short-property-source
+            (reader-blocks-test-lines "* Short property field"
+                                      ":PROPERTIES:"
+                                      "x"
+                                      ":END:"))
+           (short-property-document (parse-org short-property-source))
+           (short-property-drawer
+            (first
+             (reader-blocks-test-elements short-property-document :drawer))))
+      (with-soft-assertions
+        (expect (node-type planned-drawer) :to-be :property-drawer)
+        (expect (node-property (first (node-children planned-drawer)) :key)
+                :to-equal
+                "OWNER")
+        (expect (node-type empty-drawer) :to-be :property-drawer)
+        (expect (node-children empty-drawer) :to-equal '())
+        (expect (node-property plain-drawer :drawer-name)
+                :to-equal
+                "PROPERTIES")
+        (expect (node-type (first (node-children plain-drawer)))
+                :to-be
+                :paragraph)
+        (expect (node-text (first (node-children plain-drawer)))
+                :to-equal
+                (format nil "plain text~%"))
+        (expect (node-property plain-property-drawer :drawer-name)
+                :to-equal
+                "PROPERTIES")
+        (expect (node-type (first (node-children plain-property-drawer)))
+                :to-be
+                :paragraph)
+        (expect (node-text (first (node-children plain-property-drawer)))
+                :to-equal
+                (format nil ":DESCRIPTION~%"))
+        (expect (node-property short-property-drawer :drawer-name)
+                :to-equal
+                "PROPERTIES")
+        (expect (node-type (first (node-children short-property-drawer)))
+                :to-be
+                :paragraph)
+        (expect (node-text (first (node-children short-property-drawer)))
+                :to-equal
+                (format nil "x~%")))))
+
+  (it "parses empty fixed-width content and Babel-call arguments"
+    (let* ((fixed-document (parse-org ":"))
+           (fixed-width
+            (first
+             (reader-blocks-test-elements fixed-document :fixed-width)))
+           (call-document (parse-org "#+CALL: foo(bar)"))
+           (call (first (reader-blocks-test-elements call-document :babel-call)))
+           (example-document
+            (parse-org
+             (reader-blocks-test-lines "#+BEGIN_EXAMPLE" ",#" "#+END_EXAMPLE")))
+           (example
+            (first
+             (reader-blocks-test-elements example-document :example-block))))
+      (with-soft-assertions
+        (expect (node-property fixed-width :value) :to-equal "")
+        (expect (node-property call :call) :to-equal "foo")
+        (expect (node-property call :arguments) :to-equal "bar")
+        (expect (node-property example :value)
+                :to-equal
+                (format nil ",#~%")))))
 )

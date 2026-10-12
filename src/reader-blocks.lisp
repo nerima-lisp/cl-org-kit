@@ -78,7 +78,7 @@
            (char= (char line (1- (length line))) #\:))
     (let ((name (subseq line 1 (1- (length line)))))
       (unless
-          (or (zerop (length name)) (find #\: name) (string-equal name "END"))
+          (or (find #\: name) (string-equal name "END"))
         (string-upcase name)))))
 
 (defun reader-blocks-previous-line-start (context start)
@@ -97,13 +97,53 @@
   (or (reader-blocks-prefix-p line "SCHEDULED:")
       (reader-blocks-prefix-p line "DEADLINE:")))
 
-(defun reader-blocks-property-drawer-p (context start)
-  "Return true when a property drawer follows a heading or planning line."
+(defun reader-blocks-node-property-fields (line)
+  "Return the key and value from a property drawer line."
+  (when (and (> (length line) 2) (char= (char line 0) #\:))
+    (let ((separator (position #\: line :start 1)))
+      (when (and separator (> separator 1))
+        (values (string-upcase (subseq line 1 separator))
+                (reader-blocks-trim (subseq line (1+ separator))))))))
+
+(defun reader-blocks-property-drawer-p (context start content-start content-end)
+  "Return true for a property drawer after a heading or planning line."
   (let ((previous-start (reader-blocks-previous-line-start context start)))
     (when previous-start
-      (or (reader-heading-level context previous-start start)
-          (reader-blocks-planning-line-p
-           (reader-line-text context previous-start))))))
+      (and
+       (or (reader-heading-level context previous-start start)
+           (reader-blocks-planning-line-p
+            (reader-line-text context previous-start)))
+       (loop with position = content-start
+             while (< position content-end)
+             for line = (reader-line-text context position)
+             always (nth-value 0 (reader-blocks-node-property-fields line))
+             do (setf position (min content-end
+                                    (reader-next-line context position))))))))
+
+(defun reader-blocks-example-escape-p (line)
+  (and (> (length line) 1)
+       (char= (char line 0) #\,)
+       (let ((syntax-start
+               (position-if-not (lambda (character) (char= character #\,)) line)))
+         (and syntax-start
+              (or (char= (char line syntax-start) #\*)
+                  (and (< (1+ syntax-start) (length line))
+                       (char= (char line syntax-start) #\#)
+                       (char= (char line (1+ syntax-start)) #\+)))))))
+
+(defun reader-blocks-example-value (body)
+  (with-output-to-string (stream)
+    (loop with start = 0
+          for newline = (position #\Newline body :start start)
+          for end = (or newline (length body))
+          for line = (subseq body start end)
+          do (write-string (if (reader-blocks-example-escape-p line)
+                               (subseq line 1)
+                               line)
+                           stream)
+             (when newline (write-char #\Newline stream))
+          when (null newline) return nil
+          do (setf start (1+ newline)))))
 
 (defun reader-blocks-parse-latex (context start limit depth)
   "Parse a delimited LaTeX environment at START."
@@ -121,22 +161,21 @@
                                       limit
                                       marker)
           (declare (ignore close-start))
-          (when (> after-line start)
-            (values
-             (make-reader-node context
-                               :latex-environment
-                               :begin
-                               start
-                               :end
-                               after-line
-                               :properties
-                               (list :value
-                                     (subseq (reader-context-text context)
-                                             start
-                                             after-line))
-                               :depth
-                               depth)
-             after-line)))))))
+          (values
+           (make-reader-node context
+                             :latex-environment
+                             :begin
+                             start
+                             :end
+                             after-line
+                             :properties
+                             (list :value
+                                   (subseq (reader-context-text context)
+                                           start
+                                           after-line))
+                             :depth
+                             depth)
+           after-line))))))
 
 (defun reader-blocks-standard-type (name arguments body)
   "Return the node type and properties for a standard block opener."
@@ -145,7 +184,9 @@
     ((string= name "center") (values :center-block (list :type nil) :elements))
     ((string= name "comment") (values :comment-block (list :value body) :raw))
     ((string= name "example")
-     (values :example-block (list :switches nil :value body) :raw))
+     (values :example-block
+             (list :switches nil :value (reader-blocks-example-value body))
+             :raw))
     ((string= name "export")
      (values :export-block
              (list :type (string-upcase (or arguments "")) :value body)
@@ -223,10 +264,13 @@
                                 (reader-next-line context start)
                                 limit
                                 ":END:")
-    (let* ((property-drawer-p
+    (let* ((content-start (min limit (reader-next-line context start)))
+           (property-drawer-p
             (and (string= name "PROPERTIES")
-                 (reader-blocks-property-drawer-p context start)))
-           (content-start (min limit (reader-next-line context start)))
+                 (reader-blocks-property-drawer-p context
+                                                  start
+                                                  content-start
+                                                  close-start)))
            (children
             (let ((*reader-inside-drawer* t)
                   (*reader-inside-property-drawer* property-drawer-p))
@@ -403,14 +447,6 @@
             (values node next)))))
     (values nil nil)))
 
-(defun reader-blocks-node-property-fields (line)
-  "Return the key and value from a property drawer line."
-  (when (and (> (length line) 2) (char= (char line 0) #\:))
-    (let ((separator (position #\: line :start 1)))
-      (when (and separator (> separator 1))
-        (values (string-upcase (subseq line 1 separator))
-                (reader-blocks-trim (subseq line (1+ separator))))))))
-
 (defun reader-blocks-fixed-width-p (line)
   "Return true when LINE is a fixed-width line rather than a drawer marker."
   (and (plusp (length line))
@@ -576,8 +612,7 @@
 
 (defmethod parse-line-element-at ((context reader-context) start limit depth)
   (block parse-line-element-at
-    (when (< start limit)
-      (multiple-value-bind (line-end after-line)
+    (multiple-value-bind (line-end after-line)
           (reader-line-bounds context start)
         (let* ((line (reader-line-text context start (min line-end limit)))
                (next (min limit after-line)))
@@ -669,5 +704,5 @@
               (reader-blocks-parse-comment context start limit depth line next)))
           (when (reader-blocks-fixed-width-p line)
             (return-from parse-line-element-at
-              (reader-blocks-parse-fixed-width context start limit depth))))))
+              (reader-blocks-parse-fixed-width context start limit depth)))))
     (values nil nil)))
