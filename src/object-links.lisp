@@ -184,7 +184,8 @@
                            2
                            1)))))
          (abbreviations (getf (document-settings document) :link-abbrevs))
-         (entry (assoc key abbreviations :test #'string=))
+         (entry (and (listp abbreviations)
+                     (assoc key abbreviations :test #'string=)))
          (replacement (and entry (cdr entry))))
     (if (not (stringp replacement))
         link

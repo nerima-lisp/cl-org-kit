@@ -584,6 +584,14 @@
       (expect (link-test-property match :path)
               :to-equal
               "//example.test/manual")))
+  (it "leaves bracket links unchanged when abbreviations are not a list"
+    (let ((link (find :link
+                      (link-test-org-objects "[[web:manual]]"
+                                              :link-abbrevs :invalid)
+                      :key #'node-type)))
+      (expect (node-properties link)
+              :to-equal
+              '(:type "fuzzy" :path "web:manual" :format :bracket))))
   (it "expands empty abbreviation suffixes and preserves unmatched paths"
     (let* ((objects
              (link-test-org-objects
