@@ -9,18 +9,18 @@
   (tag-groups nil :type list)
   (property-inheritance-p nil :type boolean)
   (tag-inheritance-p t :type boolean)
-  (file nil :type (or null string))
-  (category nil :type (or null string))
-  (blocked-provider nil :type (or null function))
-  (clock-sum-provider nil :type (or null function))
-  (clock-sum-today-provider nil :type (or null function))
+  (file nil)
+  (category nil)
+  (blocked-provider nil)
+  (clock-sum-provider nil)
+  (clock-sum-today-provider nil)
   (case-fold-p nil :type boolean))
 
 (defstruct (query-ir (:constructor %make-query-ir (scope predicate context))
                      (:conc-name query-ir-)
                      (:copier nil))
   "Internal canonical query shared by the public query parsers."
-  (scope :headlines :type (member :headlines :nodes))
+  scope
   predicate
   context)
 
