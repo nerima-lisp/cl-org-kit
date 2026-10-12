@@ -12,5 +12,7 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Reference:
+      - Node Model: reference/node-model.md
   - Project:
       - Development: project/development.md
