@@ -185,4 +185,80 @@
         (expect (node-parent link) :to-be object-cell)
         (expect (node-type tag-object) :to-be :italic)
         (expect (node-parent tag-object) :to-be tag-item))))
+
+  (it "keeps numeric-looking text without a list separator in a paragraph"
+    (let* ((source (format nil "123~%1.foo~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (paragraph (first (node-children section))))
+      (with-soft-assertions
+        (expect (node-type paragraph) :to-be :paragraph)
+        (expect (node-text paragraph) :to-equal source))))
+
+  (it "keeps incomplete ordered counters as list item text"
+    (let* ((source (format nil "- [@3~%- [@3x~%- [@34~%- [@] empty~%"))
+           (document (parse-org source))
+           (list (first (node-children (first (node-children (document-root document))))))
+           (items (node-children list)))
+      (with-soft-assertions
+        (expect (node-property list :type) :to-be :unordered)
+        (expect (length items) :to-be 4)
+        (expect (mapcar (lambda (item) (node-property item :counter)) items)
+                :to-equal '(nil nil nil nil))
+        (expect (mapcar (lambda (item) (collection-node-content document item)) items)
+                :to-equal (list (format nil "[@3~%")
+                                (format nil "[@3x~%")
+                                (format nil "[@34~%")
+                                (format nil "[@] empty~%"))))))
+
+  (it "keeps empty descriptive tags and descriptions distinct"
+    (let* ((empty-tag-document (parse-org (format nil "+ :: body~%")))
+           (empty-tag-list
+            (first (node-children
+                    (first (node-children (document-root empty-tag-document))))))
+           (empty-tag-item (first (node-children empty-tag-list)))
+           (empty-description-document (parse-org "+ Term ::"))
+           (empty-description-list
+            (first (node-children
+                    (first (node-children (document-root empty-description-document))))))
+           (empty-description-item (first (node-children empty-description-list))))
+      (with-soft-assertions
+        (expect (node-property empty-tag-list :type) :to-be :unordered)
+        (expect (node-property empty-tag-item :tag) :to-be nil)
+        (expect (collection-node-content empty-tag-document empty-tag-item)
+                :to-equal (format nil ":: body~%"))
+        (expect (node-property empty-description-list :type) :to-be :descriptive)
+        (expect (node-property empty-description-item :tag) :to-equal '("Term"))
+        (expect (node-contents-begin empty-description-item) :to-be nil)
+        (expect (node-contents-end empty-description-item) :to-be nil))))
+
+  (it "preserves trailing list blanks and empty items at end of input"
+    (let* ((trailing-source (format nil "- item~%~%"))
+           (trailing-document (parse-org trailing-source))
+           (trailing-list
+            (first (node-children
+                    (first (node-children (document-root trailing-document))))))
+           (empty-document (parse-org "- "))
+           (empty-list
+            (first (node-children
+                    (first (node-children (document-root empty-document))))))
+           (empty-item (first (node-children empty-list))))
+      (with-soft-assertions
+        (expect (node-type trailing-list) :to-be :plain-list)
+        (expect (length (node-children trailing-list)) :to-be 1)
+        (expect (node-post-blank trailing-list) :to-be 1)
+        (expect (node-contents-begin empty-item) :to-be nil)
+        (expect (node-contents-end empty-item) :to-be nil)
+        (expect (node-children empty-item) :to-equal '()))))
+
+  (it "parses an empty first table cell between adjacent pipes"
+    (let* ((document (parse-org "|| value |"))
+           (table (first (node-children (first (node-children (document-root document))))))
+           (row (first (node-children table)))
+           (cells (node-children row)))
+      (with-soft-assertions
+        (expect (node-type table) :to-be :table)
+        (expect (length cells) :to-be 2)
+        (expect (collection-node-content document (first cells)) :to-equal "")
+        (expect (collection-node-content document (second cells)) :to-equal "value"))))
 )
