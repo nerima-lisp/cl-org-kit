@@ -19,7 +19,7 @@
 
 (defun link-object-valid-range-p (document start end)
   (let ((length (length (document-text document))))
-    (and (integerp start) (integerp end) (<= 0 start end length) (< start end))))
+    (and (<= 0 start end length) (< start end))))
 
 (defun link-object-prefix-at-p (text start end prefix)
   (and (<= (+ start (length prefix)) end)
@@ -74,31 +74,42 @@
           (and context (org-kit::%object-context-radio-targets context)))
          (text (document-text document)))
     (when targets
-      (loop for target in targets
-            for target-end = (+ start (length target))
-            when (and (plusp (length target))
-                      (<= target-end end)
-                      (string-equal target text :start2 start :end2 target-end)
-                      (link-object-boundary-before-p text start)
-                      (link-object-boundary-after-p text target-end end))
-              return (let* ((post-blank-end
-                             (link-object-post-blank-end text target-end end))
-                            (path (copy-seq target)))
-                       (link-object-match :link
-                                          post-blank-end
-                                          :contents-begin
-                                          start
-                                          :contents-end
-                                          target-end
-                                          :post-blank
-                                          (- post-blank-end target-end)
-                                          :properties
-                                          (list :type
-                                                "radio"
-                                                :path
-                                                path
-                                                :format
-                                                :plain)))))))
+      (let ((target
+             (loop with longest = nil
+                   for candidate in targets
+                   for candidate-end = (+ start (length candidate))
+                   when (and (plusp (length candidate))
+                             (<= candidate-end end)
+                             (string-equal candidate
+                                           text
+                                           :start2
+                                           start
+                                           :end2
+                                           candidate-end)
+                             (link-object-boundary-before-p text start)
+                             (link-object-boundary-after-p text
+                                                           candidate-end
+                                                           end))
+                     do (when
+                            (or (null longest)
+                                (> (length candidate) (length longest)))
+                          (setf longest candidate))
+                   finally (return longest))))
+        (when target
+          (let* ((target-end (+ start (length target)))
+                 (post-blank-end
+                  (link-object-post-blank-end text target-end end))
+                 (path (copy-seq target)))
+            (link-object-match :link
+                               post-blank-end
+                               :contents-begin
+                               start
+                               :contents-end
+                               target-end
+                               :post-blank
+                               (- post-blank-end target-end)
+                               :properties
+                               (list :type "radio" :path path :format :plain))))))))
 
 (defun link-object-target-boundary-p (text start end opening closing)
   (let* ((inner-start (+ start (length opening)))
@@ -357,8 +368,7 @@
                ((char= character #\)) (decf depth))) (incf position))
     (loop while (> position path-start)
           for character = (char text (1- position))
-          while (and (find character ".,;:!?\"'!@#$%^&*_+=|{}")
-                     (not (member character '(#\- #\/))))
+          while (find character ".,;:!?\"'!@#$%^&*_+=|{}")
           do (decf position))
     (when (> position path-start)
       position)))
@@ -696,17 +706,16 @@
                    (object-end (1+ close))
                    (post-blank-end
                     (link-object-post-blank-end text object-end end)))
-              (when (<= contents-begin contents-end)
-                (link-object-match :citation
-                                   post-blank-end
-                                   :contents-begin
-                                   contents-begin
-                                   :contents-end
-                                   contents-end
-                                   :post-blank
-                                   (- post-blank-end object-end)
-                                   :properties
-                                   (list :style style :key nil))))))))))
+              (link-object-match :citation
+                                 post-blank-end
+                                 :contents-begin
+                                 contents-begin
+                                 :contents-end
+                                 contents-end
+                                 :post-blank
+                                 (- post-blank-end object-end)
+                                 :properties
+                                 (list :style style :key nil)))))))))
 
 (defun link-object-citation-reference (document start end)
   (let* ((text (document-text document))
@@ -736,26 +745,27 @@
   "Recognize a link or a link-related secondary object at START.
 Return an OBJECT-MATCH or NIL; recursive children and restrictions are handled
 by the shared object parser."
-  (declare (ignore container-type))
   (when (link-object-valid-range-p document start end)
     (let* ((text (document-text document))
            (character (char text start)))
-      (or (link-object-radio-link document start end)
-          (case character
-            (#\[
-             (or (link-object-citation document start end)
-                 (link-object-footnote document start end)
-                 (link-object-bracket document start end)))
-            (#\<
-             (or (link-object-double-angle document start end t)
-                 (link-object-angle-link document start end)
-                 (link-object-double-angle document start end nil)))
-            (#\@
-             (if (link-object-prefix-at-p text start end "@@")
-                 (link-object-export-snippet document start end)
-                 (link-object-citation-reference document start end)))
-            (#\{ (link-object-macro document start end))
-            (otherwise
-             (cond
-               ((alpha-char-p character)
-                (link-object-plain-link document start end)))))))))
+      (or
+       (and (%object-type-allowed-p :link container-type)
+            (link-object-radio-link document start end))
+       (case character
+         (#\[
+          (or (link-object-citation document start end)
+              (link-object-footnote document start end)
+              (link-object-bracket document start end)))
+         (#\<
+          (or (link-object-double-angle document start end t)
+              (link-object-angle-link document start end)
+              (link-object-double-angle document start end nil)))
+         (#\@
+          (if (link-object-prefix-at-p text start end "@@")
+              (link-object-export-snippet document start end)
+              (link-object-citation-reference document start end)))
+         (#\{ (link-object-macro document start end))
+         (otherwise
+          (cond
+            ((alpha-char-p character)
+             (link-object-plain-link document start end)))))))))
