@@ -42,7 +42,8 @@
                (:file "edit-patches")
                (:file "edit-headline")
                (:file "edit-properties")
-               (:file "edit-elements"))
+               (:file "edit-elements")
+               (:file "edit-subtree"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -83,7 +84,8 @@
                (:file "edit-patches-test")
                (:file "edit-headline-test")
                (:file "edit-properties-test")
-               (:file "edit-elements-test"))
+               (:file "edit-elements-test")
+               (:file "edit-subtree-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)

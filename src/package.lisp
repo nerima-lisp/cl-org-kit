@@ -42,5 +42,8 @@
    #:set-keyword-value #:remove-keyword
    ;; Format-preserving element edits
    #:replace-block-body #:set-checkbox-state
+   ;; Format-preserving subtree edits
+   #:insert-subtree #:delete-subtree #:replace-subtree
+   #:promote-subtree #:demote-subtree
    ;; Timestamp values
    #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))

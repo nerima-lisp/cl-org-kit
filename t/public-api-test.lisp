@@ -45,6 +45,9 @@
     "SET-KEYWORD-VALUE" "REMOVE-KEYWORD"
     ;; Format-preserving element edits
     "REPLACE-BLOCK-BODY" "SET-CHECKBOX-STATE"
+    ;; Format-preserving subtree edits
+    "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
+    "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
     ;; Timestamp values
     "TIMESTAMP-START" "TIMESTAMP-END" "TIMESTAMP-REPEATER" "TIMESTAMP-WARNING-DELAY")
   "Every symbol the ORG-KIT package exports. The node contract is documented in
