@@ -19,7 +19,13 @@
                "cl-date-kit")   ; Calendar values behind Org timestamps.
   :pathname "src"
   :serial t
-  :components ((:file "package"))
+  :components ((:file "package")
+               (:file "types")
+               (:file "conditions")
+               (:file "limits")
+               (:file "input")
+               (:file "document")
+               (:file "nodes"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -36,7 +42,13 @@
   :pathname "t"
   :serial t
   :components ((:file "package")
-               (:file "public-api-test"))
+               (:file "public-api-test")
+               (:file "types-test")
+               (:file "conditions-test")
+               (:file "limits-test")
+               (:file "input-test")
+               (:file "document-test")
+               (:file "nodes-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)
