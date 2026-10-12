@@ -414,7 +414,7 @@
                     :limits (make-limits
                              :max-output-length (1- length)))))))
 
-  (it "rejects element trees without a faithful Org representation"
+  (it "rejects unrepresentable element trees and escapes example block closers"
     (let ((empty-section (make-node :section))
           (orphan-property
             (make-node :org-data
@@ -434,7 +434,10 @@
       (with-soft-assertions
         (signals org-kit-error (emit-org empty-section))
         (signals org-kit-error (emit-org orphan-property))
-        (signals org-kit-error (emit-org closing-marker)))))
+        (expect (emit-org closing-marker)
+                :to-equal
+                (format nil
+                        "#+BEGIN_EXAMPLE~%payload~%,#+END_EXAMPLE~%#+END_EXAMPLE~%")))))
 
   (it "preserves structured headline titles and document heading settings"
     (let* ((tree
@@ -696,6 +699,25 @@
                                                    :value (format nil "payload~C~C" #\Return #\Newline))))
             :to-equal
             (format nil "#+BEGIN_EXAMPLE~%payload~%#+END_EXAMPLE~%")))
+
+  (it "round trips parser-escaped example-block lines through the public API"
+    (let* ((source
+             (format nil
+                     (concatenate 'string
+                                  "#+BEGIN_EXAMPLE~%"
+                                  ",#+END_EXAMPLE~%"
+                                  ",,* literal heading~%"
+                                  ",,#+TITLE: literal keyword~%"
+                                  "#+END_EXAMPLE~%")))
+           (root (document-root (parse-org source)))
+           (expected (emitter-test-node-projection root))
+           (output (emit-org root))
+           (actual
+             (emitter-test-node-projection
+              (document-root (parse-org output)))))
+      (with-soft-assertions
+        (expect output :to-equal source)
+        (expect actual :to-equal expected))))
 
   (it "round trips LaTeX environments and rejects incomplete boundaries"
     (let* ((source (format nil "\\begin{align}~%a &= b~%\\end{align}~%"))

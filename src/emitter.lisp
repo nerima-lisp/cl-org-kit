@@ -162,6 +162,21 @@
           do (setf start (1+ newline)))
     body))
 
+(defun emitter-example-escape-body (value)
+  (let ((body (emitter-normalize-newlines value)))
+    (with-output-to-string (stream)
+      (loop with start = 0
+            for newline = (position #\Newline body :start start)
+            for end = (or newline (length body))
+            for line = (subseq body start end)
+            do (when (or (string-equal line "#+END_EXAMPLE")
+                         (reader-blocks-example-escape-p line))
+                 (write-char #\, stream))
+               (write-string line stream)
+               (when newline (write-char #\Newline stream))
+            when (null newline) return nil
+            do (setf start (1+ newline))))))
+
 (defun emitter-raw-block (node opener closer value)
   (let ((body (emitter-raw-block-body node value closer)))
     (format nil "~A~%~A~A~%" opener body closer)))
@@ -596,7 +611,8 @@
        (when (node-property node :switches)
          (emitter-fail node "example switches are not retained by the parser"))
        (emitter-raw-block node "#+BEGIN_EXAMPLE" "#+END_EXAMPLE"
-                          (emitter-required-string node :value)))
+                          (emitter-example-escape-body
+                           (emitter-required-string node :value))))
       (:export-block
        (let ((export-type (emitter-trimmed-line-value
                            node (emitter-required-string node :type)
