@@ -1,0 +1,16 @@
+site_name: cl-org-kit
+site_description: Org mode reader, writer, query and format-preserving editor for Common Lisp
+site_author: cl-org-kit contributors
+site_url: https://nerima-lisp.github.io/cl-org-kit/
+repo_name: nerima-lisp/cl-org-kit
+repo_url: https://github.com/nerima-lisp/cl-org-kit
+docs_dir: src
+site_dir: ../site
+strict: true
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Project:
+      - Development: project/development.md
