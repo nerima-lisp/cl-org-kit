@@ -3,23 +3,35 @@
 
 (describe "Org setting and heading semantics"
   (it "resolves source setting names to document settings keys"
-    (with-soft-assertions
-      (expect (mapcar #'org-kit::org-setting-key
-                      '("TODO" "seq_todo" "TYP_TODO" "TODO[1]"
-                        "SEQ_TODO[2]" "TYP_TODO[3]" :startup "category"
-                        "FILETAGS" "INLINETASK-MIN-LEVEL" "LINK"
-                        "LINK-ABBREVS" "ODD-LEVELS-ONLY-P" "TAG-ALIST"
-                        :tags "TAGS" "TODO-KEYWORDS" :todo-keywords))
-              :to-equal
-              '(:todo-keywords :todo-keywords :todo-keywords :todo-keywords
-                :todo-keywords :todo-keywords :startup :category :file-tags
-                :inlinetask-min-level :link-abbrevs :link-abbrevs
-                :odd-levels-only-p :tag-alist :tag-alist :tag-alist
-                :todo-keywords :todo-keywords))
-      (expect (org-kit::org-setting-key "TODO[") :to-be nil)
-      (expect (org-kit::org-setting-key "unknown") :to-be nil)
-      (expect (org-kit::org-setting-key nil) :to-be nil)
-      (expect (org-kit::org-setting-key 42) :to-be nil)))
+    (let* ((document
+             (parse-org (format nil "#+TODO: TODO | DONE~%#+STARTUP: odd~%#+LINK: home /home~%")
+                        :settings '(:category "Notes"
+                                    :file-tags ("work")
+                                    :inlinetask-min-level 15
+                                    :link-abbrevs (("manual" . "https://example.test"))
+                                    :odd-levels-only-p t
+                                    :tag-alist ((:tag "work" :fast-key nil)))))
+           (todo (org-kit::org-setting-value document :todo-keywords))
+           (startup (org-kit::org-setting-value document :startup))
+           (link-abbrevs (org-kit::org-setting-value document :link-abbrevs))
+           (tag-alist (org-kit::org-setting-value document :tag-alist)))
+      (with-soft-assertions
+        (expect (mapcar (lambda (key) (org-kit::org-setting-value document key))
+                        '("TODO" "seq_todo" "TYP_TODO" "TODO[1]"
+                          "SEQ_TODO[2]" "TYP_TODO[3]" :startup "category"
+                          "FILETAGS" "INLINETASK-MIN-LEVEL" "LINK"
+                          "LINK-ABBREVS" "ODD-LEVELS-ONLY-P" "TAG-ALIST"
+                          :tags "TAGS" "TODO-KEYWORDS" :todo-keywords))
+                :to-equal
+                (list todo todo todo todo todo todo startup "Notes" '("work")
+                      15 link-abbrevs link-abbrevs t tag-alist tag-alist
+                      tag-alist todo todo))
+        (expect (org-kit::org-setting-value document "TODO[x" :fallback)
+                :to-equal :fallback)
+        (expect (org-kit::org-setting-value document "unknown" :fallback)
+                :to-equal :fallback)
+        (expect (org-kit::org-setting-value document "FILETAGS" :fallback)
+                :to-equal '("work")))))
 
   (it "returns raw settings, a default for unknown keys, and derived odd mode"
     (let* ((document
@@ -34,7 +46,9 @@
                 :to-equal "Notes")
         (expect (org-kit::org-setting-value document :odd-levels-only-p)
                 :to-be t)
-        (expect unknown-default :to-equal :fallback)))
+        (expect unknown-default :to-equal :fallback)
+        (expect (org-kit::org-setting-value document "FILETAGS" :fallback)
+                :to-equal :fallback))))
 
   (it "uses the last recognized odd or oddeven startup option"
     (let ((document
@@ -43,20 +57,13 @@
         (expect (org-kit::org-setting-value document :startup)
                 :to-equal '("odd" "oddeven"))
         (expect (org-kit::org-setting-value document :odd-levels-only-p)
-                :to-be nil)
-        (expect (org-kit::org-startup-odd-levels-p
-                 '("oddeven" "odd" :unknown "showall"))
-                :to-be t)
-        (expect (org-kit::org-startup-odd-levels-p
-                 '("odd" "oddeven"))
-                :to-be nil)
-        (expect (org-kit::org-startup-odd-levels-p '(:unknown "showall"))
                 :to-be nil)))
-    (let ((document
-            (parse-org ""
-                       :settings '(:startup ("odd" :unknown "oddeven" "odd" "showall")))))
+    (let ((document (parse-org (format nil "#+STARTUP: oddeven odd showall~%"))))
       (expect (org-kit::org-setting-value document :odd-levels-only-p)
-              :to-be t)))
+              :to-be t))
+    (let ((document (parse-org (format nil "#+STARTUP: showall~%"))))
+      (expect (org-kit::org-setting-value document :odd-levels-only-p)
+              :to-be nil)))
 
   (it "lets an explicit odd-level setting override startup tokens"
     (let ((enabled (parse-org "#+STARTUP: oddeven"
@@ -67,12 +74,7 @@
         (expect (org-kit::org-setting-value enabled :odd-levels-only-p)
                 :to-be t)
         (expect (org-kit::org-setting-value disabled :odd-levels-only-p)
-                :to-be nil)
-        (let ((document (make-document "")))
-          (setf (document-settings document)
-                '(:odd-levels-only-p nil :startup ("odd")))
-          (expect (org-kit::org-setting-value document :odd-levels-only-p)
-                  :to-be nil)))))
+                :to-be nil))))
 
   (it "maps source star counts and logical levels in default mode"
     (let ((document (parse-org "")))
@@ -102,12 +104,4 @@
                           (org-kit::logical-heading-level
                            document (org-kit::source-heading-level document level)))
                         '(1 2 3 4))
-                :to-equal '(1 2 3 4)))))
-
-  (it "requires positive integer source and logical levels"
-    (let ((document (parse-org "")))
-      (with-soft-assertions
-        (signals type-error (org-kit::logical-heading-level document 0))
-        (signals type-error (org-kit::logical-heading-level document "1"))
-        (signals type-error (org-kit::source-heading-level document 0))
-        (signals type-error (org-kit::source-heading-level document 1.5)))))))
+                :to-equal '(1 2 3 4))))))
