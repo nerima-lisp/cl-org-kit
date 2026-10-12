@@ -596,10 +596,6 @@
                              "                    "))
   "Entity names and their Org export representations.")
 
-(defun other-object-valid-range-p (document start end)
-  (let ((length (length (document-text document))))
-    (and (<= 0 start end length) (< start end))))
-
 (defun other-object-character-p (text position character end)
   (and (< position end) (char= (char text position) character)))
 
@@ -1182,19 +1178,18 @@
 
 (defun try-parse-other-object (document start end container-type)
   "Recognize one non-link, non-markup object at START, within END."
-  (when (other-object-valid-range-p document start end)
-    (let* ((text (document-text document))
-           (cell-match
-            (other-object-parse-table-cell text start end container-type)))
-      (or cell-match
-          (case (char text start)
-            (#\\
-             (or (other-object-parse-line-break text start end)
-                 (other-object-try-entity text start end)
-                 (other-object-parse-latex-fragment text start end)))
-            (#\$ (other-object-parse-latex-fragment text start end))
-            (#\[ (other-object-parse-statistics-cookie text start end))
-            (#\_ (other-object-parse-sub-super text start end :subscript #\_))
-            (#\^ (other-object-parse-sub-super text start end :superscript #\^))
-            (#\c (other-object-parse-inline-babel-call text start end))
-            (#\s (other-object-parse-inline-src-block text start end)))))))
+  (let* ((text (document-text document))
+         (cell-match
+          (other-object-parse-table-cell text start end container-type)))
+    (or cell-match
+        (case (char text start)
+          (#\\
+           (or (other-object-parse-line-break text start end)
+               (other-object-try-entity text start end)
+               (other-object-parse-latex-fragment text start end)))
+          (#\$ (other-object-parse-latex-fragment text start end))
+          (#\[ (other-object-parse-statistics-cookie text start end))
+          (#\_ (other-object-parse-sub-super text start end :subscript #\_))
+          (#\^ (other-object-parse-sub-super text start end :superscript #\^))
+          (#\c (other-object-parse-inline-babel-call text start end))
+          (#\s (other-object-parse-inline-src-block text start end))))))
