@@ -201,6 +201,89 @@
                  (expect (reader-headings-test-elements document :example-block)
                          :to-equal
                          '()))))
+          (it
+           "collects category, file tags, and normalized tag declarations"
+           (let* ((source
+                   (reader-headings-test-lines
+                    "#+CATEGORY: Draft"
+                    "#+CATEGORY:"
+                    "#+FILETAGS: :team:private:"
+                    "#+TAGS: @work(w) @home(h)"
+                    "#+TAGS: [ Area : office remote ]"
+                    "#+TAGS: { State : open closed }"
+                    "#+TAGS: [ Project : {P@.+} ]"
+                    "#+TAGS: { @small(s) @large(l) }"
+                    "#+CATEGORY: Final"
+                    "* Entry"))
+                  (document (parse-org source))
+                  (settings (document-settings document)))
+             (with-soft-assertions
+              (expect (getf settings :category) :to-equal "Final")
+              (expect (getf settings :file-tags)
+                      :to-equal
+                      '("team" "private"))
+              (expect (getf settings :tag-alist)
+                      :to-equal
+                      '((:tag "@work" :fast-key #\w)
+                        (:tag "@home" :fast-key #\h)
+                        (:group "Area" :members ("office" "remote")
+                         :exclusive-p nil)
+                        (:group "State" :members ("open" "closed")
+                         :exclusive-p t)
+                        (:group "Project" :members ((:regex "P@.+"))
+                         :exclusive-p nil)
+                        (:group "" :members ("@small" "@large")
+                         :exclusive-p t))))))
+
+          (it "handles escaped TAGS and ignores malformed declarations"
+              (let* ((escaped-document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "#+TAGS: [ Project : {P\\@.+} ]"
+                        "* Entry")))
+                     (escaped-tags
+                      (getf (document-settings escaped-document) :tag-alist))
+                     (malformed-document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "#+TAGS: valid [unfinished group"
+                        "#+FILETAGS: :good:bad/tag:"
+                        "* Entry")))
+                     (malformed-settings
+                      (document-settings malformed-document))
+                     (empty-file-tags-document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "#+FILETAGS:"
+                        "* Entry")))
+                     (empty-settings
+                      (document-settings empty-file-tags-document)))
+                (with-soft-assertions
+                 (expect escaped-tags
+                         :to-equal
+                         '((:group "Project"
+                            :members ((:regex "P\\@.+"))
+                            :exclusive-p nil)))
+                 (expect (getf malformed-settings :tag-alist)
+                         :to-equal
+                         '((:tag "valid" :fast-key nil)))
+                 (expect (getf malformed-settings :file-tags :missing)
+                         :to-be
+                         :missing)
+                 (expect (getf empty-settings :file-tags)
+                         :to-equal
+                         nil))))
+
+          (it "lets explicit category settings override buffer category"
+              (let ((document
+                     (parse-org
+                      (reader-headings-test-lines "#+CATEGORY: Buffer"
+                                                  "* Entry")
+                                :settings '(:category "Explicit"))))
+                (expect (getf (document-settings document) :category)
+                        :to-equal
+                        "Explicit")))
+
           (it "applies STARTUP odd levels to heading levels and ancestry"
               (let* ((document
                       (parse-org
@@ -449,6 +532,9 @@
                         ",#+TODO: HIDDEN | FINISHED"
                         ",#+END_"
                         ",,** Literal comma heading"
+                        "#+CATEGORY: Hidden"
+                        "#+FILETAGS: :hidden:"
+                        "#+TAGS: hidden(h)"
                         "#+end_example"
                         "** Child")))
                      (headlines
@@ -473,12 +559,24 @@
                                   "** Ghost heading"
                                   "#+TODO: HIDDEN | FINISHED"
                                   "#+END_"
-                                  ",** Literal comma heading")))
+                                  ",** Literal comma heading"
+                                  "#+CATEGORY: Hidden"
+                                  "#+FILETAGS: :hidden:"
+                                  "#+TAGS: hidden(h)")))
                  (expect (assoc "HIDDEN"
                                 (getf (document-settings document)
                                       :todo-keywords)
                                 :test
                                 #'string=)
+                         :to-be
+                         nil)
+                 (expect (getf (document-settings document) :category)
+                         :to-be
+                         nil)
+                 (expect (getf (document-settings document) :file-tags)
+                         :to-be
+                         nil)
+                 (expect (getf (document-settings document) :tag-alist)
                          :to-be
                          nil))))
 

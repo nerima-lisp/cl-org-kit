@@ -74,7 +74,10 @@
          (when (and open (char= (char key (1- (length key))) #\]))
            :todo)))
       ((string= key "STARTUP") :startup)
-      ((string= key "LINK") :link))))
+      ((string= key "LINK") :link)
+      ((string= key "CATEGORY") :category)
+      ((string= key "FILETAGS") :file-tags)
+      ((string= key "TAGS") :tag-alist))))
 
 (defun reader-heading-block-end-key (context offset)
   (let* ((line (reader-line-text context offset))
@@ -145,12 +148,183 @@
               (reader-heading-trim-right value replacement-start (length value))))
         (cons name (subseq value replacement-start replacement-end))))))
 
+(defun reader-heading-tag-group-end (text start)
+  (let* ((length (length text))
+         (opening (char text start))
+         (closing (if (char= opening #\[) #\] #\}))
+         (position (1+ start))
+         (brace-depth (if (char= opening #\{) 1 0)))
+    (loop while (< position length)
+          for character = (char text position)
+          do (cond
+               ((char= character #\\)
+                (incf position (if (< (1+ position) length) 2 1)))
+               ((char= character #\{)
+                (incf brace-depth)
+                (incf position))
+               ((char= character #\})
+                (when (plusp brace-depth)
+                  (decf brace-depth))
+                (if (and (char= opening #\{) (zerop brace-depth))
+                    (return-from reader-heading-tag-group-end position)
+                    (incf position)))
+               ((and (zerop brace-depth) (char= character closing))
+                (return-from reader-heading-tag-group-end position))
+               (t
+                (incf position))))))
+
+(defun reader-heading-tag-token-end (text start limit)
+  (let ((position start)
+        (brace-depth 0))
+    (loop while (< position limit)
+          for character = (char text position)
+          do (cond
+               ((char= character #\\)
+                (incf position (if (< (1+ position) limit) 2 1)))
+               ((char= character #\{)
+                (incf brace-depth)
+                (incf position))
+               ((char= character #\})
+                (when (plusp brace-depth)
+                  (decf brace-depth))
+                (incf position))
+               ((and (zerop brace-depth)
+                     (reader-heading-horizontal-space-p character))
+                (return position))
+               (t
+                (incf position)))
+          finally (return limit))))
+
+(defun reader-heading-tag-words (text)
+  (let ((words '())
+        (position 0)
+        (limit (length text)))
+    (loop while (< position limit)
+          do (setf position
+                   (reader-heading-skip-horizontal-space text position limit))
+             (when (< position limit)
+               (let ((end (reader-heading-tag-token-end text position limit)))
+                 (push (subseq text position end) words)
+                 (setf position end))))
+    (nreverse words)))
+
+(defun reader-heading-tag-definition (token)
+  (unless (string= token "\\n")
+    (let ((length (length token))
+          (open (position #\( token :from-end t)))
+      (cond
+        ((and open
+              (= (- length open) 3)
+              (char= (char token (1- length)) #\))
+              (reader-heading-valid-tag-name-p (subseq token 0 open)))
+         (list :tag (subseq token 0 open)
+               :fast-key (char token (1+ open))))
+        ((reader-heading-valid-tag-name-p token)
+         (list :tag token :fast-key nil))))))
+
+(defun reader-heading-tag-regex-member (token)
+  (let ((length (length token)))
+    (when (and (>= length 2)
+               (char= (char token 0) #\{)
+               (char= (char token (1- length)) #\}))
+      (list :regex (subseq token 1 (1- length))))))
+
+(defun reader-heading-tag-group-definition (text start end)
+  (let* ((opening (char text start))
+         (body (subseq text (1+ start) end))
+         (words (reader-heading-tag-words body))
+         (colon (position ":" words :test #'string=))
+         (named-p (and colon (plusp colon)))
+         (group-name
+           (when named-p
+             (let ((definition (reader-heading-tag-definition (first words))))
+               (getf definition :tag))))
+         (member-words
+           (if named-p (nthcdr (1+ colon) words) words))
+         (members
+           (loop for word in member-words
+                 for regex = (reader-heading-tag-regex-member word)
+                 for definition = (and (not regex)
+                                       (reader-heading-tag-definition word))
+                 for member = (or regex (getf definition :tag))
+                 when member collect member)))
+    (when (and members
+               (if (char= opening #\[)
+                   (and named-p group-name)
+                   (or (and named-p group-name)
+                       (not colon))))
+      (list :group (or group-name "")
+            :members members
+            :exclusive-p (char= opening #\{)))))
+
+(defun reader-heading-tag-alist (value)
+  (let ((entries '())
+        (position 0)
+        (limit (length value)))
+    (loop while (< position limit)
+          do (setf position
+                   (reader-heading-skip-horizontal-space value position limit))
+             (when (< position limit)
+               (let ((character (char value position)))
+                 (if (find character '(#\[ #\{))
+                     (let ((end (reader-heading-tag-group-end value position)))
+                       (unless end
+                         (return))
+                       (let ((entry
+                               (reader-heading-tag-group-definition
+                                value position end)))
+                         (when entry
+                           (push entry entries)))
+                       (setf position (1+ end)))
+                     (let* ((end (reader-heading-tag-token-end value
+                                                               position
+                                                               limit))
+                            (entry
+                             (reader-heading-tag-definition
+                              (subseq value position end))))
+                       (when entry
+                         (push entry entries))
+                       (setf position end))))))
+    (nreverse entries)))
+
+(defun reader-heading-file-tag-list (text)
+  (let ((tags '())
+        (start 0)
+        (limit (length text)))
+    (loop for position from 0 to limit
+          do (when (or (= position limit)
+                       (char= (char text position) #\:))
+               (let ((tag (subseq text start position)))
+                 (unless (reader-heading-valid-tag-name-p tag)
+                   (return-from reader-heading-file-tag-list (values nil nil)))
+                 (push tag tags)
+                 (setf start (1+ position)))))
+    (values (nreverse tags) t)))
+
+(defun reader-heading-file-tags (value)
+  (let ((length (length value)))
+    (cond
+      ((zerop length)
+       (values nil t))
+      ((and (>= length 2)
+            (char= (char value 0) #\:)
+            (char= (char value (1- length)) #\:))
+       (reader-heading-file-tag-list (subseq value 1 (1- length))))
+      (t
+       (values nil nil)))))
+
 (defmethod reader-buffer-settings ((context reader-context) explicit-settings)
   (let ((settings (reader-default-settings))
         (todo-keywords nil)
         (todo-seen nil)
         (startup nil)
         (link-abbrevs nil)
+        (category nil)
+        (category-seen nil)
+        (file-tags nil)
+        (file-tags-seen nil)
+        (tag-alist nil)
+        (tag-alist-seen nil)
         (position 0)
         (limit (length (reader-context-text context)))
         (block-end-key nil))
@@ -189,6 +363,21 @@
                                 (when abbreviation
                                   (setf link-abbrevs (append link-abbrevs
                                                              (list abbreviation))))))
+                             (:category
+                              (when (plusp (length value))
+                                (setf category value
+                                      category-seen t)))
+                             (:file-tags
+                              (multiple-value-bind (tags valid-p)
+                                  (reader-heading-file-tags value)
+                                (when valid-p
+                                  (setf file-tags-seen t
+                                        file-tags (append file-tags tags)))))
+                             (:tag-alist
+                              (setf tag-alist-seen t
+                                    tag-alist
+                                    (append tag-alist
+                                            (reader-heading-tag-alist value))))
                              (otherwise nil))
                            (setf position next)))))))
     (when todo-seen
@@ -197,6 +386,12 @@
       (setf (getf settings :startup) startup))
     (when link-abbrevs
       (setf (getf settings :link-abbrevs) link-abbrevs))
+    (when category-seen
+      (setf (getf settings :category) category))
+    (when file-tags-seen
+      (setf (getf settings :file-tags) file-tags))
+    (when tag-alist-seen
+      (setf (getf settings :tag-alist) tag-alist))
     (loop for tail on explicit-settings by (function cddr)
           do (setf (getf settings (first tail)) (second tail)))
     settings))
