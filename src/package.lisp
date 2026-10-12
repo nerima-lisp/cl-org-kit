@@ -45,5 +45,13 @@
    ;; Format-preserving subtree edits
    #:insert-subtree #:delete-subtree #:replace-subtree
    #:promote-subtree #:demote-subtree
+   ;; Queries
+   #:query-context #:make-query-context #:query-context-p
+   #:query-context-tag-groups #:query-context-property-inheritance-p
+   #:query-context-tag-inheritance-p #:query-context-file #:query-context-category
+   #:query-context-blocked-provider #:query-context-clock-sum-provider
+   #:query-context-clock-sum-today-provider #:query-context-case-fold-p
+   #:query-list #:query-path #:query-match-at #:query-match-now
+   #:node-heading-path
    ;; Timestamp values
    #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))
