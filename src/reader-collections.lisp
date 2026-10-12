@@ -382,4 +382,4 @@
         (table-el (reader-parse-table-el context start limit depth))
         (table-row (reader-parse-org-table context start limit depth))
         (marker (reader-parse-plain-list context start limit depth marker))
-          (t (values nil nil)))))
+        (t (values nil nil)))))
