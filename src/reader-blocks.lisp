@@ -105,20 +105,13 @@
         (values (string-upcase (subseq line 1 separator))
                 (reader-blocks-trim (subseq line (1+ separator))))))))
 
-(defun reader-blocks-property-drawer-p (context start content-start content-end)
+(defun reader-blocks-property-drawer-p (context start)
   "Return true for a property drawer after a heading or planning line."
   (let ((previous-start (reader-blocks-previous-line-start context start)))
     (when previous-start
-      (and
-       (or (reader-heading-level context previous-start start)
-           (reader-blocks-planning-line-p
-            (reader-line-text context previous-start)))
-       (loop with position = content-start
-             while (< position content-end)
-             for line = (reader-line-text context position)
-             always (nth-value 0 (reader-blocks-node-property-fields line))
-             do (setf position (min content-end
-                                    (reader-next-line context position))))))))
+      (or (reader-heading-level context previous-start start)
+          (reader-blocks-planning-line-p
+           (reader-line-text context previous-start))))))
 
 (defun reader-blocks-example-escape-p (line)
   (and (> (length line) 1)
@@ -267,10 +260,7 @@
     (let* ((content-start (min limit (reader-next-line context start)))
            (property-drawer-p
             (and (string= name "PROPERTIES")
-                 (reader-blocks-property-drawer-p context
-                                                  start
-                                                  content-start
-                                                  close-start)))
+                 (reader-blocks-property-drawer-p context start)))
            (children
             (let ((*reader-inside-drawer* t)
                   (*reader-inside-property-drawer* property-drawer-p))

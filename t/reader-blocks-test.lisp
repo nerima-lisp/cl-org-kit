@@ -424,7 +424,7 @@
              (reader-blocks-test-elements empty-document :property-drawer)))
            (plain-source
             (reader-blocks-test-lines "* Plain drawer content"
-                                      ":PROPERTIES:"
+                                      ":NOTES:"
                                       "plain text"
                                       ":END:"))
            (plain-document (parse-org plain-source))
@@ -438,7 +438,8 @@
            (plain-property-document (parse-org plain-property-source))
            (plain-property-drawer
             (first
-             (reader-blocks-test-elements plain-property-document :drawer)))
+             (reader-blocks-test-elements plain-property-document
+                                          :property-drawer)))
            (short-property-source
             (reader-blocks-test-lines "* Short property field"
                                       ":PROPERTIES:"
@@ -447,7 +448,18 @@
            (short-property-document (parse-org short-property-source))
            (short-property-drawer
             (first
-             (reader-blocks-test-elements short-property-document :drawer))))
+             (reader-blocks-test-elements short-property-document
+                                          :property-drawer)))
+           (fixed-property-source
+            (reader-blocks-test-lines "* Fixed-width property content"
+                                      ":PROPERTIES:"
+                                      ":"
+                                      ":END:"))
+           (fixed-property-document (parse-org fixed-property-source))
+           (fixed-property-drawer
+            (first
+             (reader-blocks-test-elements fixed-property-document
+                                          :property-drawer))))
       (with-soft-assertions
         (expect (node-type planned-drawer) :to-be :property-drawer)
         (expect (node-property (first (node-children planned-drawer)) :key)
@@ -457,31 +469,35 @@
         (expect (node-children empty-drawer) :to-equal '())
         (expect (node-property plain-drawer :drawer-name)
                 :to-equal
-                "PROPERTIES")
+                "NOTES")
         (expect (node-type (first (node-children plain-drawer)))
                 :to-be
                 :paragraph)
         (expect (node-text (first (node-children plain-drawer)))
                 :to-equal
                 (format nil "plain text~%"))
-        (expect (node-property plain-property-drawer :drawer-name)
-                :to-equal
-                "PROPERTIES")
+        (expect (node-type plain-property-drawer) :to-be :property-drawer)
         (expect (node-type (first (node-children plain-property-drawer)))
                 :to-be
                 :paragraph)
         (expect (node-text (first (node-children plain-property-drawer)))
                 :to-equal
                 (format nil ":DESCRIPTION~%"))
-        (expect (node-property short-property-drawer :drawer-name)
-                :to-equal
-                "PROPERTIES")
+        (expect (node-type short-property-drawer) :to-be :property-drawer)
         (expect (node-type (first (node-children short-property-drawer)))
                 :to-be
                 :paragraph)
         (expect (node-text (first (node-children short-property-drawer)))
                 :to-equal
-                (format nil "x~%")))))
+                (format nil "x~%"))
+        (expect (node-type fixed-property-drawer) :to-be :property-drawer)
+        (expect (node-type (first (node-children fixed-property-drawer)))
+                :to-be
+                :fixed-width)
+        (expect (node-property (first (node-children fixed-property-drawer))
+                               :value)
+                :to-equal
+                ""))))
 
   (it "parses empty fixed-width content and Babel-call arguments"
     (let* ((fixed-document (parse-org ":"))
