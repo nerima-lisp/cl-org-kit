@@ -596,9 +596,6 @@
                              "                    "))
   "Entity names and their Org export representations.")
 
-(defun other-object-character-p (text position character end)
-  (and (< position end) (char= (char text position) character)))
-
 (defun other-object-prefix-p (text start end prefix)
   (and (<= (+ start (length prefix)) end)
        (loop for index below (length prefix)
@@ -615,11 +612,9 @@
 (defun other-object-word-character-p (character)
   (and character (or (alpha-char-p character) (digit-char-p character))))
 
+;; Object recognizers run under PARSE-OBJECTS or the radio-target scanner.
 (defun other-object-active-start-p (start)
-  (or
-   (and (integerp *object-parse-range-start*)
-        (= start *object-parse-range-start*))
-   (and (null *object-parse-range-start*) (zerop start))))
+  (= start *object-parse-range-start*))
 
 (defun other-object-word-boundary-p (text start)
   (or (other-object-active-start-p start)
@@ -639,7 +634,7 @@
                                 &key
                                 contents-begin
                                 contents-end
-                                (post-blank 0)
+                                post-blank
                                 properties
                                 opaque-p)
   (%make-object-match :type
@@ -691,18 +686,17 @@
                                       open-character
                                       close-character)
   "Return contents-begin, contents-end and end for a balanced bracket pair."
-  (when (other-object-character-p text opening open-character end)
-    (let ((depth 1))
-      (loop for position from (1+ opening) below
-            end
-            for character = (char text position)
-            unless (other-object-escaped-p text position)
-              do (cond
-                   ((char= character open-character) (incf depth))
-                   ((char= character close-character)
-                     (decf depth)
-                     (when (zerop depth)
-                       (return (values (1+ opening) position (1+ position))))))))))
+  (let ((depth 1))
+    (loop for position from (1+ opening) below
+          end
+          for character = (char text position)
+          unless (other-object-escaped-p text position)
+            do (cond
+                 ((char= character open-character) (incf depth))
+                 ((char= character close-character)
+                   (decf depth)
+                   (when (zerop depth)
+                     (return (values (1+ opening) position (1+ position)))))))))
 
 (defun other-object-nonblank-string (text start end)
   (let ((value (subseq text start end)))
@@ -721,11 +715,10 @@
                      (progn
                        (write-char #\Space output)
                        (incf position)
-                       (loop while (and (< position (length trimmed))
-                                        (member (char trimmed position)
-                                                '(#\Newline #\Return
-                                                            #\Space
-                                                            #\Tab)))
+                       (loop while (member (char trimmed position)
+                                           '(#\Newline #\Return
+                                                       #\Space
+                                                       #\Tab))
                              do (incf position)))
                      (progn
                        (write-char character output)
@@ -822,32 +815,31 @@
     (loop while (and (< position end)
                      (other-object-ascii-letter-p (char text position)))
           do (incf position))
-    (when (> position (1+ start))
-      (when (and (< position end) (char= (char text position) #\*))
-        (incf position))
-      (loop while (< position end)
-            for opener = (char text position)
-            for closer = (case opener
-                           (#\[ #\])
-                           (#\{ #\}))
-            while closer
-            do (let ((close-position
-                      (loop for candidate from (1+ position) below
-                            end
-                            for character = (char text candidate)
-                            when (and (not (char= character closer))
-                                      (or (char= character #\Newline)
-                                          (and (char= opener #\[)
-                                               (find character "[]{}"))
-                                          (and (char= opener #\{)
-                                               (find character "{}"))))
-                              return nil
-                            when (char= character closer)
-                              return candidate)))
-                 (if close-position
-                     (setf position (1+ close-position))
-                     (return))))
-      position)))
+    (when (and (< position end) (char= (char text position) #\*))
+      (incf position))
+    (loop while (< position end)
+          for opener = (char text position)
+          for closer = (case opener
+                         (#\[ #\])
+                         (#\{ #\}))
+          while closer
+          do (let ((close-position
+                    (loop for candidate from (1+ position) below
+                          end
+                          for character = (char text candidate)
+                          when (and (not (char= character closer))
+                                    (or (char= character #\Newline)
+                                        (and (char= opener #\[)
+                                             (find character "[]{}"))
+                                        (and (char= opener #\{)
+                                             (find character "{}"))))
+                            return nil
+                          when (char= character closer)
+                            return candidate)))
+               (if close-position
+                   (setf position (1+ close-position))
+                   (return))))
+    position))
 
 (defun other-object-dollar-fragment-end (text start end)
   (cond
@@ -911,7 +903,6 @@
 (defun other-object-parse-line-break (text start end)
   (when
       (and (<= (+ start 2) end)
-           (char= (char text start) #\\)
            (char= (char text (1+ start)) #\\)
            (or (zerop start) (not (char= (char text (1- start)) #\\))))
     (let* ((after-slashes
@@ -926,38 +917,42 @@
                (+ after-slashes 2))
               ((char= (char text after-slashes) #\Return) (1+ after-slashes)))))
       (when line-end
-        (other-object-match :line-break line-end :opaque-p t)))))
+        (other-object-match :line-break
+                            line-end
+                            :post-blank
+                            0
+                            :opaque-p
+                            t)))))
 
 (defun other-object-parse-statistics-cookie (text start end)
-  (when (char= (char text start) #\[)
-    (let ((position (1+ start)))
-      (loop while (and (< position end) (digit-char-p (char text position)))
-            do (incf position))
-      (when
-          (and (< position end)
-               (or (char= (char text position) #\%)
-                   (char= (char text position) #\/)))
-        (let ((kind (char text position)))
+  (let ((position (1+ start)))
+    (loop while (and (< position end) (digit-char-p (char text position)))
+          do (incf position))
+    (when
+        (and (< position end)
+             (or (char= (char text position) #\%)
+                 (char= (char text position) #\/)))
+      (let ((kind (char text position)))
+        (incf position)
+        (when (char= kind #\/)
+          (loop while (and (< position end)
+                           (digit-char-p (char text position)))
+                do (incf position)))
+        (when (and (< position end) (char= (char text position) #\]))
           (incf position)
-          (when (char= kind #\/)
-            (loop while (and (< position end)
-                             (digit-char-p (char text position)))
-                  do (incf position)))
-          (when (and (< position end) (char= (char text position) #\]))
-            (incf position)
-            (let ((match-end
-                   (other-object-skip-horizontal-space text position end)))
-              (other-object-match :statistics-cookie
-                                  match-end
-                                  :post-blank
-                                  (- match-end position)
-                                  :properties
-                                  (list :value
-                                        (subseq text start position)
-                                        :type
-                                        nil)
-                                  :opaque-p
-                                  t))))))))
+          (let ((match-end
+                 (other-object-skip-horizontal-space text position end)))
+            (other-object-match :statistics-cookie
+                                match-end
+                                :post-blank
+                                (- match-end position)
+                                :properties
+                                (list :value
+                                      (subseq text start position)
+                                      :type
+                                      nil)
+                                :opaque-p
+                                t)))))))
 
 (defun other-object-parse-inline-babel-call (text start end)
   (when
@@ -1086,8 +1081,7 @@
 (defun other-object-parse-sub-super (text start end type marker)
   (when
       (and (> start 0)
-           (or (not (integerp *object-parse-range-start*))
-               (> start *object-parse-range-start*))
+           (> start *object-parse-range-start*)
            (not (other-object-whitespace-p (char text (1- start))))
            (char= (char text start) marker)
            (< (1+ start) end))
@@ -1143,7 +1137,7 @@
   (when
       (and (eq container-type :table-row)
            (or (other-object-active-start-p start)
-               (and (> start 0) (char= (char text (1- start)) #\|))))
+               (char= (char text (1- start)) #\|)))
     (let ((line-end
            (loop for position from start below
                  end
@@ -1169,6 +1163,8 @@
                     finally (return position))))
         (other-object-match :table-cell
                             cell-end
+                            :post-blank
+                            0
                             :contents-begin
                             contents-begin
                             :contents-end

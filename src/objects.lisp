@@ -3,11 +3,7 @@
 ;;;; Shared object recognition, nesting and resource accounting.
 (in-package #:org-kit)
 
-(defvar *object-parse-range-start*
-  nil)
-
-(defvar *object-parse-depth*
-  0)
+(declaim (special *object-parse-range-start* *object-parse-depth*))
 
 (defstruct
     (object-match
@@ -16,7 +12,7 @@
                          end
                          contents-begin
                          contents-end
-                         (post-blank 0)
+                         post-blank
                          properties
                          opaque-p))
      (:copier nil))
@@ -25,13 +21,15 @@
   end
   contents-begin
   contents-end
-  (post-blank 0)
+  post-blank
   properties
   opaque-p)
 
-(defstruct (%object-context (:constructor %make-object-context))
+(defstruct
+    (%object-context (:constructor %make-object-context
+                                  (&key radio-targets node-count)))
   radio-targets
-  (node-count 0))
+  node-count)
 
 (defparameter *standard-object-types*
   '(:bold :citation
@@ -226,7 +224,7 @@
 (defun prepare-object-parsing (document)
   "Prepare document-local node accounting and syntax-aware radio-target lookup data."
   (check-type document document)
-  (let ((context (%make-object-context))
+  (let ((context (%make-object-context :node-count 0))
         (root (%document-root document))
         (text (%document-text document)))
     (labels ((scan-range (range container-type)
@@ -390,6 +388,9 @@ Return source-ordered object and plain-text nodes with nested children."
   (let ((result '())
         (position start)
         (plain-start start)
+        (*object-parse-depth* (if (boundp '*object-parse-depth*)
+                                  *object-parse-depth*
+                                  0))
         (*object-parse-range-start* start))
     (labels ((flush-plain (plain-end)
                (when (< plain-start plain-end)

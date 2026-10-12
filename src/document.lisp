@@ -8,7 +8,7 @@
 (defstruct (document (:constructor %make-document) (:conc-name %document-)
                      (:copier nil) (:predicate %document-p))
   "Decoded Org source with its line index, settings, resource limits and parse state."
-  (text "" :type (simple-array character (*)) :read-only t)
+  (text "" :read-only t)
   (encoding nil :read-only t)
   (bom-p nil :read-only t)
   (source-name nil :read-only t)

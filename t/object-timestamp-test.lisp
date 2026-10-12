@@ -9,6 +9,14 @@
 (defun timestamp-object-property (object key)
   (node-property object key))
 
+(defun timestamp-test-parse-org-matches (source)
+  (let ((matches nil))
+    (map-nodes (lambda (node)
+                 (when (eq (node-type node) :timestamp)
+                   (push node matches)))
+               (document-root (org-kit:parse-org source)))
+    (nreverse matches)))
+
 (describe "timestamp object recognition"
           (it
            "recognizes fixture 05 active and inactive timestamps with repeaters and warnings"
@@ -143,6 +151,44 @@
                      (timestamp-object-property time-range :minute-end))
                :to-equal
                '(9 0 10 30)))))
+          (it "parses simple and malformed dates through the public Org API"
+              (let* ((source
+                      (format nil
+                              "* Schedule~%~%<2026-10-12 Mon 09:30> <2026-10-13 09:30x> <2026-1x-12> <+026-10-12> <2026-10-14 .x> <2026-10-15 --1d> <2026-10-16 -1d>~%"))
+                     (matches (timestamp-test-parse-org-matches source))
+                     (simple-time (first matches))
+                     (non-range-time (second matches))
+                     (catch-up-warning (third matches))
+                     (all-warning (fourth matches)))
+                (with-soft-assertions
+                  (expect (length matches) :to-be 4)
+                  (expect (mapcar (lambda (match)
+                                    (timestamp-object-property match :day-start))
+                                  matches)
+                          :to-equal
+                          '(12 13 15 16))
+                  (expect (timestamp-object-property simple-time :type)
+                          :to-be
+                          :active)
+                  (expect
+                   (list (timestamp-object-property simple-time :hour-start)
+                         (timestamp-object-property simple-time :minute-start)
+                         (timestamp-object-property simple-time :hour-end)
+                         (timestamp-object-property simple-time :minute-end))
+                   :to-equal
+                   '(9 30 9 30))
+                  (expect
+                   (list (timestamp-object-property non-range-time :hour-start)
+                         (timestamp-object-property non-range-time :minute-start))
+                   :to-equal
+                   '(nil nil))
+                  (expect (timestamp-object-property catch-up-warning
+                                                      :warning-type)
+                          :to-be
+                          :first)
+                  (expect (timestamp-object-property all-warning :warning-type)
+                          :to-be
+                          :all))))
           (it "recognizes diary timestamps without inventing a date"
               (let ((match
                      (timestamp-object-match

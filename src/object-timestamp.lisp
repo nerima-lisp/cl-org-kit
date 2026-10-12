@@ -228,30 +228,28 @@
                                         (setf cursor token-end))))))
 
 (defun %timestamp-diary-expression-end (text start end)
-  (when
-      (and (<= (+ start 3) end)
-           (string= text "%%(" :start1 start :end1 (+ start 3)))
-    (let ((cursor (+ start 3))
-          (depth 1)
-          (in-string-p nil)
-          (escaped-p nil))
-      (loop while (< cursor end)
-            for character = (char text cursor)
-            do (cond
-                 (escaped-p
-                  (setf escaped-p nil))
-                 ((and in-string-p (char= character #\\))
-                  (setf escaped-p t))
-                 ((char= character #\")
-                  (setf in-string-p (not in-string-p)))
-                 ((not in-string-p)
-                  (case character
-                    (#\( (incf depth))
-                    (#\)
-                      (decf depth)
-                      (when (zerop depth)
-                        (return-from %timestamp-diary-expression-end
-                          (1+ cursor))))))) (incf cursor)))))
+  ;; The caller already checked that START begins with "%%(" within END.
+  (let ((cursor (+ start 3))
+        (depth 1)
+        (in-string-p nil)
+        (escaped-p nil))
+    (loop while (< cursor end)
+          for character = (char text cursor)
+          do (cond
+               (escaped-p
+                (setf escaped-p nil))
+               ((and in-string-p (char= character #\\))
+                (setf escaped-p t))
+               ((char= character #\")
+                (setf in-string-p (not in-string-p)))
+               ((not in-string-p)
+                (case character
+                  (#\( (incf depth))
+                  (#\)
+                    (decf depth)
+                    (when (zerop depth)
+                      (return-from %timestamp-diary-expression-end
+                        (1+ cursor))))))) (incf cursor))))
 
 (defun %timestamp-single-line-p (text start end)
   (not

@@ -14,9 +14,9 @@
         (member code '(8232 8233 8239 8287 12288)))))
 
 (defun markup-open-boundary-p (text start)
+  ;; PARSE-OBJECTS binds this to the checked start of the current range.
   (or
-   (and (integerp *object-parse-range-start*)
-        (= start *object-parse-range-start*))
+   (= start *object-parse-range-start*)
    (zerop start)
    (let ((previous (char text (1- start))))
      (or (markup-whitespace-character-p previous) (find previous "-(' \"{")))))

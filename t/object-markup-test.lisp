@@ -81,3 +81,17 @@
         (expect (markup-test-match document 0 (length (document-text document)) 0)
                 :to-be
                 nil)))))
+
+(describe "markup objects from Org parsing"
+  (it "recognizes markup at the beginning of a headline title range"
+    (let* ((document (parse-org "* *bold*"))
+           (headline (first (node-children (document-root document))))
+           (bold (find-if (lambda (segment)
+                            (and (node-p segment)
+                                 (eq (node-type segment) :bold)))
+                          (node-property headline :title))))
+      (with-soft-assertions
+        (expect (node-type bold) :to-be :bold)
+        (expect (node-begin bold) :to-be 2)
+        (expect (node-contents-begin bold) :to-be 3)
+        (expect (node-contents-end bold) :to-be 7)))))
