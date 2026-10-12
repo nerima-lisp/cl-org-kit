@@ -37,5 +37,8 @@
    ;; Format-preserving headline edits
    #:set-heading-todo #:set-heading-priority #:replace-heading-title
    #:add-heading-tags #:remove-heading-tags #:replace-heading-tags
+   ;; Format-preserving metadata edits
+   #:set-property #:remove-property #:set-planning #:remove-planning
+   #:set-keyword-value #:remove-keyword
    ;; Timestamp values
    #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))
