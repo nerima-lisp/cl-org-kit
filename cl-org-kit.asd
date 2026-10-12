@@ -28,7 +28,8 @@
                (:file "nodes")
                (:file "timestamp")
                (:file "objects")
-               (:file "object-markup"))
+               (:file "object-markup")
+               (:file "object-timestamp"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -54,7 +55,8 @@
                (:file "nodes-test")
                (:file "object-parser-test")
                (:file "object-markup-test")
-               (:file "timestamp-test"))
+               (:file "timestamp-test")
+               (:file "object-timestamp-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)
