@@ -25,5 +25,7 @@
    #:node-post-affiliated #:node-post-blank #:node-property #:node-properties
    #:node-root #:node-document #:node-text #:node-start-position
    #:node-end-position #:node-line-range #:map-nodes
+   ;; Reading and writing
+   #:parse-org #:write-org
    ;; Timestamp values
    #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))

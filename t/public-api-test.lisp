@@ -28,6 +28,8 @@
     "NODE-POST-AFFILIATED" "NODE-POST-BLANK" "NODE-PROPERTY" "NODE-PROPERTIES"
     "NODE-ROOT" "NODE-DOCUMENT" "NODE-TEXT" "NODE-START-POSITION"
     "NODE-END-POSITION" "NODE-LINE-RANGE" "MAP-NODES"
+    ;; Reading and writing
+    "PARSE-ORG" "WRITE-ORG"
     ;; Timestamp values
     "TIMESTAMP-START" "TIMESTAMP-END" "TIMESTAMP-REPEATER" "TIMESTAMP-WARNING-DELAY")
   "Every symbol the ORG-KIT package exports. The node contract is documented in
