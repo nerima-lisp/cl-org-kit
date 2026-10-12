@@ -37,6 +37,9 @@
     "OUTLINE-RESULT-TOTAL" "OUTLINE-RESULT-TRUNCATED"
     ;; Reading and writing
     "PARSE-ORG" "WRITE-ORG"
+    ;; Format-preserving headline edits
+    "SET-HEADING-TODO" "SET-HEADING-PRIORITY" "REPLACE-HEADING-TITLE"
+    "ADD-HEADING-TAGS" "REMOVE-HEADING-TAGS" "REPLACE-HEADING-TAGS"
     ;; Timestamp values
     "TIMESTAMP-START" "TIMESTAMP-END" "TIMESTAMP-REPEATER" "TIMESTAMP-WARNING-DELAY")
   "Every symbol the ORG-KIT package exports. The node contract is documented in

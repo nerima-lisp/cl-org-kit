@@ -34,5 +34,8 @@
    #:outline-result-total #:outline-result-truncated
    ;; Reading and writing
    #:parse-org #:write-org
+   ;; Format-preserving headline edits
+   #:set-heading-todo #:set-heading-priority #:replace-heading-title
+   #:add-heading-tags #:remove-heading-tags #:replace-heading-tags
    ;; Timestamp values
    #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))
