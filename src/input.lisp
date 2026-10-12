@@ -38,18 +38,22 @@ Return the text, the encoding used, and whether a BOM was present."
                 (or stripped (and (null encoding) (plusp bom-length))))))))
 
 (defun read-stream-contents (stream limits)
-  "Read STREAM to its end, as a string for a character stream and as an octet
-vector otherwise, signalling once the amount read exceeds :MAX-INPUT-LENGTH."
+  "Read STREAM to its end as a string or octet vector, stopping after one
+unit beyond :MAX-INPUT-LENGTH so the limit can be checked without over-reading."
   (let* ((characterp (subtypep (stream-element-type stream) 'character))
          (element-type (if characterp 'character '(unsigned-byte 8)))
          (buffer (make-array +read-chunk-size+ :element-type element-type))
-         (contents (make-array 0 :element-type element-type :adjustable t :fill-pointer 0)))
-    (loop for count = (read-sequence buffer stream)
+         (contents (make-array 0 :element-type element-type :adjustable t :fill-pointer 0))
+         (maximum (limit-value limits :max-input-length)))
+    (loop for remaining = (- maximum (length contents))
+          for read-end = (min +read-chunk-size+ (1+ remaining))
+          for count = (read-sequence buffer stream :end read-end)
           while (plusp count)
           do (check-limit limits :max-input-length (+ (length contents) count))
              (loop for index below count
                    do (vector-push-extend (aref buffer index) contents)))
     (coerce contents (if characterp 'simple-string '(simple-array (unsigned-byte 8) (*))))))
+
 
 (defun decode-string (string limits)
   (check-limit limits :max-input-length (length string))
