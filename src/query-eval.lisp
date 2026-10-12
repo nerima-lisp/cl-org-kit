@@ -943,8 +943,6 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                  (member missing-as '(:zero :nonmatch))
                  (member operator '(:= :!= :< :<= :> :>= :matches :not-matches)))
       (query-signal-error nil nil "Malformed property predicate in canonical query"))
-    (when (string= name "LEVEL")
-      (query-signal-error nil nil "LEVEL resolution requires the shared Org semantics resolver"))
     (multiple-value-bind (actual present)
         (query-resolve-property (query-evaluation-state-document state)
                                 headline name state)
@@ -1032,6 +1030,18 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
       (otherwise
        (query-signal-error nil nil "Unknown TODO operator in canonical query")))))
 
+(defun query-evaluate-level (predicate headline state)
+  (let* ((arguments (query-predicate-arguments predicate :level 3 state))
+         (operator (first arguments))
+         (expected (second arguments))
+         (actual (node-property headline :level)))
+    (unless (and (member operator '(:= :!= :< :<= :> :>=))
+                 (integerp expected))
+      (query-signal-error nil nil "Malformed LEVEL predicate in canonical query"))
+    (and (integerp actual)
+         (query-compare-values operator expected actual
+                               (query-evaluation-state-reference-time state)))))
+
 (defun query-evaluate-predicate (predicate candidate state)
   (let* ((depth (query-check-predicate predicate state))
          (operator (car predicate))
@@ -1073,6 +1083,8 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                  1)
               headline
               (null (query-todo-keyword headline))))
+        ((eq operator :level)
+         (and headline (query-evaluate-level predicate headline state)))
         ((eq operator :todo)
          (and headline (query-evaluate-todo predicate headline state)))
         ((eq operator :tag)

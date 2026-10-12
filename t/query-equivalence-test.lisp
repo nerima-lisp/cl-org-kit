@@ -13,6 +13,20 @@
    (cl-date-kit:make-local-date 2024 7 2)
    (cl-date-kit:make-local-time 9 30 0)))
 
+(defun query-equivalence-test-odd-document ()
+  (parse-org
+   (query-path-test-lines
+    "#+TODO: TODO | DONE"
+    "#+STARTUP: odd"
+    "* Root"
+    "** Section"
+    "*** Also Section"
+    "**** TODO Logical Three :boss:"
+    "***** TODO Also Three :boss:"
+    "***** DONE Completed Three :boss:"
+    "**** TODO Unmatched"
+    "** TODO Logical Two :boss:")))
+
 (describe "equivalent list, path, and Org match queries"
   (it "returns identical headline nodes in document order for the FR-010 triples"
     (let ((document (query-path-test-document))
@@ -89,37 +103,31 @@
               (expect (list name (query-equivalence-test-titles list-nodes))
                       :to-equal (list name expected-titles))))))))
 
-  (it "parses the LEVEL triple to canonical predicates without evaluating it"
-    (let* ((document (query-path-test-document))
-           (context (org-kit::make-query-context))
-           (limits (document-limits document))
+  (it "returns identical nodes for the FR-010 LEVEL triple in odd-level mode"
+    (let* ((document (query-equivalence-test-odd-document))
            (reference-time (query-equivalence-test-reference-time))
-           (list-form
-             '(:and (:level := 3)
-                    (:tag := "boss")
-                    (:not (:todo := "DONE"))))
-           (expected
-             '(:and (:level := 3)
-                    (:tag := "boss")
-                    (:not (:todo := "DONE")))))
-      (let ((list-predicate
-              (org-kit::query-list-parse-form
-               list-form context limits reference-time
-               "(:and (:level := 3) (:tag := \"boss\") (:not (:todo := \"DONE\")))"))
-            (match-predicate
-              (org-kit::query-parse-org-match
-               "+LEVEL=3+boss-TODO=\"DONE\""
-               context limits reference-time)))
-        (multiple-value-bind (selector path-predicate)
-            (org-kit::query-path-parse-source
-             "**?{level=3&tag=\"boss\"&todo!=\"DONE\"}"
-             context limits reference-time)
-          (with-soft-assertions
-            (expect list-predicate :to-equal expected)
-            (expect match-predicate :to-equal expected)
-            (expect selector :to-equal '(:**))
-            (expect path-predicate
-                    :to-equal
-                    '(:and (:level := 3)
-                           (:tag := "boss")
-                           (:todo :!= "DONE")))))))))
+           (list-nodes
+             (org-kit::query-list
+              document
+              '(:and (:level := 3)
+                     (:tag := "boss")
+                     (:not (:todo := "DONE")))
+              :reference-time reference-time))
+           (path-nodes
+             (org-kit::query-path
+              document "**?{level=3&tag=\"boss\"&todo!=\"DONE\"}"
+              :reference-time reference-time))
+           (match-nodes
+             (org-kit::query-match-at
+              document "+LEVEL=3+boss-TODO=\"DONE\"" reference-time)))
+      (with-soft-assertions
+        (expect (query-equivalence-test-same-nodes-p list-nodes path-nodes)
+                :to-be t)
+        (expect (query-equivalence-test-same-nodes-p list-nodes match-nodes)
+                :to-be t)
+        (expect (query-equivalence-test-same-nodes-p path-nodes match-nodes)
+                :to-be t)
+        (expect (query-equivalence-test-titles list-nodes)
+                :to-equal '("Logical Three" "Also Three"))
+        (expect (mapcar (lambda (node) (node-property node :level)) list-nodes)
+                :to-equal '(3 3))))))

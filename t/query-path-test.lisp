@@ -236,7 +236,7 @@
                      document path form reference-time)
                     :to-be t))))))
 
-  (it "keeps level syntax valid while evaluation awaits the shared resolver"
+  (it "evaluates level filters"
     (let* ((document (query-path-test-document))
            (context (org-kit::make-query-context))
            (limits (document-limits document)))
@@ -245,9 +245,9 @@
                                              context limits nil)
         (expect selector :to-equal '(:**))
         (expect predicate :to-equal '(:level :>= 2)))
-      ;; Replace this temporary assertion when the shared resolver is integrated.
-      (signals org-query-error
-        (org-kit::query-path document "**?{level>=2}"))))
+      (expect (query-path-test-titles
+               (org-kit::query-path document "**?{level>=2}"))
+              :to-equal '("Child" "Deep" "Child"))))
 
   (it "rejects malformed paths and filters with source positions"
     (let* ((document (query-path-test-document))

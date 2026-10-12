@@ -64,6 +64,42 @@
           (query-eval-test-run
            document '(:path ((:name "One" 1 . :tail))))))))
 
+  (it "compares logical heading levels and validates level predicates"
+    (let ((document
+            (parse-org
+             (format nil "~{~A~^~%~}"
+                     '("#+STARTUP: odd" "* Root" "** Section"
+                       "*** Also Section" "**** Logical Three"
+                       "***** TODO Deep :boss:")))))
+      (with-soft-assertions
+        (expect (query-eval-test-titles
+                 (query-eval-test-run document '(:level := 3)))
+                :to-equal '("Logical Three" "Deep"))
+        (expect (query-eval-test-titles
+                 (query-eval-test-run document '(:level :< 3)))
+                :to-equal '("Root" "Section" "Also Section"))
+        (expect (query-eval-test-titles
+                 (query-eval-test-run document '(:level :>= 3)))
+                :to-equal '("Logical Three" "Deep"))
+        (expect (query-eval-test-titles
+                 (query-eval-test-run document '(:level :!= 2)))
+                :to-equal '("Root" "Logical Three" "Deep"))
+        (expect (query-eval-test-titles
+                 (query-eval-test-run document '(:level :<= 2)))
+                :to-equal '("Root" "Section" "Also Section"))
+        (expect (query-eval-test-titles
+                 (query-eval-test-run document '(:level :> 2)))
+                :to-equal '("Logical Three" "Deep"))
+        (expect (query-eval-test-titles
+                 (query-eval-test-run document '(:property "LEVEL" := 3)))
+                :to-equal '("Logical Three" "Deep"))
+        (signals org-query-error
+          (query-eval-test-run document '(:level :matches 3)))
+        (signals org-query-error
+          (query-eval-test-run document '(:level := "3")))
+        (signals org-query-error
+          (query-eval-test-run document '(:level := 3 :extra t))))))
+
   (it "resolves TODO keywords and inherited tag groups from document settings"
     (let* ((document
             (parse-org

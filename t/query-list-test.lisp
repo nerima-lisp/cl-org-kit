@@ -203,7 +203,7 @@
                  (org-kit::query-list document '(:planning-missing :deadline)))
                 :to-equal '("Alpha" "Build" "Build" "Plain")))))
 
-  (it "parses level predicates and leaves their evaluation to the shared resolver"
+  (it "evaluates level predicates"
     (let* ((document (query-list-test-document))
            (context (org-kit::make-query-context))
            (limits (document-limits document))
@@ -212,8 +212,9 @@
              (org-kit::query-list-parse-form
               form context limits nil "(:level :>= 2)")))
       (expect predicate :to-equal '(:level :>= 2))
-      (signals org-query-error
-        (org-kit::query-list document form))))
+      (expect (query-list-test-titles
+               (org-kit::query-list document form))
+              :to-equal '("Build" "Build"))))
 
   (it "rejects malformed forms with org-query-error and no source position"
     (let* ((document (query-list-test-document))
