@@ -531,6 +531,19 @@
       (expect (node-property (second (node-children parsed-root)) :level)
               :to-be 2)))
 
+  (it "honors the final odd-level startup option across tokens and lines"
+    (dolist (source
+             (list (format nil "#+STARTUP: odd oddeven~%** Heading~%")
+                   (format nil "#+STARTUP: odd~%#+STARTUP: oddeven~%** Heading~%")))
+      (let* ((document (parse-org source))
+             (root (document-root document))
+             (output (emit-org root))
+             (round-trip (document-root (parse-org output))))
+        (with-soft-assertions
+          (expect output :to-equal source)
+          (expect (emitter-test-node-projection root)
+                  :to-equal (emitter-test-node-projection round-trip))))))
+
   (it "rejects headline metadata that would be reparsed differently"
     (dolist (headline
              (list

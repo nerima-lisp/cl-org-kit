@@ -143,9 +143,12 @@
         (case (reader-heading-setting-kind key)
           (:todo (emitter-add-todo-setting value))
           (:startup
-           (when (member "odd" (reader-heading-words value)
-                         :test #'string-equal)
-             (setf *emitter-odd-levels* t))))))))
+           (loop for option in (reader-heading-words value)
+                 do (cond
+                      ((string-equal option "odd")
+                       (setf *emitter-odd-levels* t))
+                      ((string-equal option "oddeven")
+                       (setf *emitter-odd-levels* nil))))))))))
 
 (defun emitter-raw-block-body (node value closer)
   (let ((body (emitter-normalize-newlines value)))
