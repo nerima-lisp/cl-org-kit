@@ -38,7 +38,8 @@
                (:file "reader-headings")
                (:file "reader-blocks")
                (:file "writer")
-               (:file "reader-collections"))
+               (:file "reader-collections")
+               (:file "edit-patches"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -75,7 +76,8 @@
                (:file "reader-headings-test")
                (:file "reader-blocks-test")
                (:file "reader-collections-test")
-               (:file "conformance-test"))
+               (:file "conformance-test")
+               (:file "edit-patches-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)
