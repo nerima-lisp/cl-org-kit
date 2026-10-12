@@ -201,24 +201,11 @@
           do (setf (getf settings (first tail)) (second tail)))
     settings))
 
-(defun reader-heading-odd-levels-p (context)
-  (member "odd"
-          (getf (reader-context-settings context) :startup)
-          :test
-          #'string-equal))
-
-(defun reader-heading-effective-level (star-count odd-levels)
-  (if odd-levels
-      (1+ (floor star-count 2))
-      star-count))
-
 (defun reader-heading-inline-minimum-stars (context)
   (let ((minimum (getf (reader-context-settings context) :inlinetask-min-level)))
     (when minimum
       (check-type minimum (integer 1))
-      (if (reader-heading-odd-levels-p context)
-          (1- (* 2 minimum))
-          minimum))))
+      (source-heading-level (reader-context-document context) minimum))))
 
 (defun reader-heading-valid-tag-name-p (name)
   (and (plusp (length name))
@@ -345,9 +332,8 @@
                 (string-trim (list #\Space #\Tab)
                              (subseq text title-start title-end))))
           (list :level
-                (reader-heading-effective-level star-count
-                                                (reader-heading-odd-levels-p
-                                                 context))
+                (logical-heading-level (reader-context-document context)
+                                       star-count)
                 :todo-keyword
                 todo-keyword
                 :todo-type
@@ -680,8 +666,8 @@
 (defmethod parse-headline-at ((context reader-context) start limit depth)
   (let ((star-count (reader-heading-level context start limit)))
     (when star-count
-      (let* ((odd-levels (reader-heading-odd-levels-p context))
-             (level (reader-heading-effective-level star-count odd-levels))
+      (let* ((level (logical-heading-level (reader-context-document context)
+                                           star-count))
              (minimum-stars (reader-heading-inline-minimum-stars context))
              (inlinetask-p (and minimum-stars (>= star-count minimum-stars))))
         (check-limit (reader-context-limits context) :max-heading-depth level)
