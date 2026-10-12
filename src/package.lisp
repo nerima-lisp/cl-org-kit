@@ -24,4 +24,6 @@
    #:append-child #:node-begin #:node-end #:node-contents-begin #:node-contents-end
    #:node-post-affiliated #:node-post-blank #:node-property #:node-properties
    #:node-root #:node-document #:node-text #:node-start-position
-   #:node-end-position #:node-line-range #:map-nodes))
+   #:node-end-position #:node-line-range #:map-nodes
+   ;; Timestamp values
+   #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))

@@ -4,7 +4,8 @@
 (in-package #:cl-org-kit/test)
 
 (defparameter +public-api+
-  '(;; Node types
+  '(
+    ;; Node types
     "NODE-TYPE" "NODE-TYPES" "NODE-TYPE-P" "NODE-TYPE-CATEGORY"
     ;; Conditions
     "ORG-KIT-ERROR" "ORG-KIT-ERROR-MESSAGE"
@@ -26,7 +27,9 @@
     "NODE-BEGIN" "NODE-END" "NODE-CONTENTS-BEGIN" "NODE-CONTENTS-END"
     "NODE-POST-AFFILIATED" "NODE-POST-BLANK" "NODE-PROPERTY" "NODE-PROPERTIES"
     "NODE-ROOT" "NODE-DOCUMENT" "NODE-TEXT" "NODE-START-POSITION"
-    "NODE-END-POSITION" "NODE-LINE-RANGE" "MAP-NODES")
+    "NODE-END-POSITION" "NODE-LINE-RANGE" "MAP-NODES"
+    ;; Timestamp values
+    "TIMESTAMP-START" "TIMESTAMP-END" "TIMESTAMP-REPEATER" "TIMESTAMP-WARNING-DELAY")
   "Every symbol the ORG-KIT package exports. The node contract is documented in
 docs/src/reference/node-model.md.")
 
