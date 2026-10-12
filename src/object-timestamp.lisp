@@ -42,14 +42,12 @@
   (and (char>= character #\0) (char<= character #\9)))
 
 (defun %timestamp-digits-p (text start end)
-  (and (< start end)
-       (loop for position from start below
-             end
-             always (%timestamp-digit-p (char text position)))))
+  (loop for position from start below
+        end
+        always (%timestamp-digit-p (char text position))))
 
 (defun %timestamp-number (text start end)
-  (when (%timestamp-digits-p text start end)
-    (parse-integer text :start start :end end)))
+  (parse-integer text :start start :end end))
 
 (defun %timestamp-date-at (text start end)
   (when

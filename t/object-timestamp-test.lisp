@@ -204,7 +204,9 @@
   (it "covers all adjustment units and rejects malformed suffix sequences"
     (let ((hour-repeater (timestamp-object-match "<2026-10-12 +1h>"))
           (year-repeater (timestamp-object-match "<2026-10-12 +1y>"))
-          (hour-warning (timestamp-object-match "<2026-10-12 -2h>")))
+          (hour-warning (timestamp-object-match "<2026-10-12 -2h>"))
+          (malformed-time
+            (timestamp-object-match "<2026-10-12 09:00-10>")))
       (with-soft-assertions
         (expect (timestamp-object-property hour-repeater :repeater-unit)
                 :to-be
@@ -215,6 +217,10 @@
         (expect (timestamp-object-property hour-warning :warning-unit)
                 :to-be
                 :hour)
+        (expect (timestamp-object-property malformed-time :hour-start)
+                :to-be
+                nil)
+        (expect (timestamp-object-match "<2026-10-12 +>") :to-be nil)
         (expect (timestamp-object-match "<2026-10-12 +x>") :to-be nil)
         (expect (timestamp-object-match "<2026-10-12 +1q>") :to-be nil)
         (expect (timestamp-object-match "<2026-10-12 09:00 10:00>")
@@ -241,16 +247,26 @@
            (diary-match (timestamp-object-match diary))
            (nested-range
              (timestamp-object-match
-              "<%%(diary-float t 4 2)>--<%%(diary-float t 4 3)>")))
+              "<%%(diary-float t 4 2)>--<%%(diary-float t 4 3)>"))
+           (inactive-range
+             (timestamp-object-match "[2026-10-12]--[2026-10-13]")))
       (with-soft-assertions
         (expect (node-end diary-match) :to-be (length diary))
         (expect (timestamp-object-match "<%%x>") :to-be nil)
+        (expect (timestamp-object-match "<%%") :to-be nil)
         (expect (timestamp-object-match "<%%(open>") :to-be nil)
         (expect (timestamp-object-property nested-range :type) :to-be :diary)
         (expect (timestamp-object-property nested-range :day-end) :to-be nil)
+        (expect (timestamp-object-property inactive-range :type)
+                :to-be
+                :inactive-range)
         (expect (timestamp-object-match "<2026-10-12Mon>") :to-be nil)
         (expect (timestamp-object-match "<2026/10/12>") :to-be nil)
         (expect (timestamp-object-match "<2026-1x-12>") :to-be nil)
+        (expect (timestamp-object-match
+                 (format nil "<%%(f~c(x))>" #\Newline))
+                :to-be
+                nil)
         (expect (timestamp-object-match
                  (format nil "<2026-10-12~c>" #\Newline))
                 :to-be
