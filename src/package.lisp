@@ -16,7 +16,7 @@
    #:limits #:make-limits #:limits-p #:limit-value
    ;; Documents
    #:document #:make-document #:document-p #:document-text #:document-encoding
-   #:document-bom-p #:document-source-name #:document-settings #:document-root
+   #:document-bom-p #:document-source-name #:document-limits #:document-settings #:document-root
    #:document-line-count #:document-newline #:document-final-newline-p
    #:offset-line-column #:line-offset
    ;; Nodes

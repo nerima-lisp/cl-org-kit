@@ -33,6 +33,7 @@ Failures:
 | Reader | Value |
 |---|---|
 | `document-text` | the decoded text without BOM; every node offset indexes this string |
+| `document-limits` | the `limits` given to `make-document` (or its defaults), for reparsing the same document under the same ceilings |
 | `document-root` | the `:org-data` node, or `NIL` before parsing; `setf` installs a tree |
 | `document-settings` | plist of in-buffer settings; `setf`-able |
 | `document-newline` | `:lf`, `:crlf`, `:mixed`, or `:none` |

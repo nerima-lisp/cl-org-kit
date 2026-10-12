@@ -24,6 +24,15 @@
       (signals org-resource-limit-error
         (make-document "abc" :limits (make-limits :max-input-length 1)))))
 
+  (it "keeps the limits it was created with"
+    (let* ((limits (make-limits :max-node-count 7))
+           (document (make-document "a" :limits limits)))
+      (with-soft-assertions
+        (expect (document-limits document) :to-be limits)
+        (expect (limits-p (document-limits (make-document "a"))) :to-be t)
+        (expect (limit-value (document-limits (make-document "a")) :max-node-count)
+                :to-be (limit-value (make-limits) :max-node-count)))))
+
   (it "stores in-buffer settings"
     (let ((document (make-document "")))
       (setf (document-settings document) '(:todo-keywords ("TODO")))

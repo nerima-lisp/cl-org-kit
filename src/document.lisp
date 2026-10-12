@@ -12,6 +12,7 @@
   (encoding nil :read-only t)
   (bom-p nil :read-only t)
   (source-name nil :read-only t)
+  (limits nil :read-only t)
   (line-starts #() :type simple-vector :read-only t)
   (root nil)
   (settings '() :type list))
@@ -29,12 +30,13 @@ Only #\\Newline ends a line; the #\\Return of a CRLF pair stays on its line."
 INPUT is a string, a character or octet stream, an octet vector, or a pathname.
 Octet input is decoded with ENCODING, or with the Unicode encoding detected from
 its BOM or null-byte pattern when ENCODING is NIL. A leading BOM is removed from
-the text and recorded by DOCUMENT-BOM-P. LIMITS bounds the input length.
+the text and recorded by DOCUMENT-BOM-P. LIMITS bounds the input length and is
+kept as DOCUMENT-LIMITS for later parses of the same document.
 Signals ORG-PARSE-ERROR for undecodable octets and ORG-RESOURCE-LIMIT-ERROR for
 oversized input."
   (multiple-value-bind (text used-encoding bom-p) (decode-input input encoding limits)
     (%make-document :text text :encoding used-encoding :bom-p bom-p
-                    :source-name source-name
+                    :source-name source-name :limits limits
                     :line-starts (line-start-offsets text))))
 
 (defun document-p (object)
@@ -57,6 +59,10 @@ index into this string."
 (defun document-source-name (document)
   "Return the :SOURCE-NAME given to MAKE-DOCUMENT, or NIL."
   (%document-source-name document))
+
+(defun document-limits (document)
+  "Return the LIMITS object given to MAKE-DOCUMENT, or the defaults it used."
+  (%document-limits document))
 
 (defun document-settings (document)
   "Return the plist of in-buffer settings recorded for DOCUMENT."
