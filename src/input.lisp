@@ -18,7 +18,18 @@ Return the text, the encoding used, and whether a BOM was present."
   (check-limit limits :max-input-length (length octets))
   (multiple-value-bind (detected bom-length)
       (cl-codec-kit:detect-unicode-encoding octets)
-    (let ((decoded
+    (let* ((encoding-name (and encoding (string-downcase (string encoding))))
+           (generic-bom-p
+             (and (plusp bom-length)
+                  (not (null
+                        (cond
+                          ((member encoding-name '("utf-16" "utf16" "ucs-2")
+                                   :test #'string=)
+                           (member detected '(:utf-16be :utf-16le)))
+                          ((member encoding-name '("utf-32" "utf32")
+                                   :test #'string=)
+                           (member detected '(:utf-32be :utf-32le))))))))
+          (decoded
             (handler-case
                 (if encoding
                     (cl-codec-kit:octets-to-string octets :encoding encoding)
@@ -35,7 +46,9 @@ Return the text, the encoding used, and whether a BOM was present."
       (multiple-value-bind (text stripped) (strip-bom decoded)
         (values text
                 (or encoding detected)
-                (or stripped (and (null encoding) (plusp bom-length))))))))
+                (or stripped
+                    (and (null encoding) (plusp bom-length))
+                    generic-bom-p))))))
 
 (defun read-stream-contents (stream limits)
   "Read STREAM to its end as a string or octet vector, stopping after one

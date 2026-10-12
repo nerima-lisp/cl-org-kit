@@ -43,6 +43,10 @@
       (expect (decoded (octets #x61 #xE9) :encoding :latin-1) :to-equal (list "aé" :latin-1 nil))
       (expect (decoded (octets #xEF #xBB #xBF #x62) :encoding :utf-8) :to-equal '("b" :utf-8 t))))
 
+  (it "records a BOM consumed by an explicit generic UTF-16 encoding"
+    (expect (decoded (octets #xFE #xFF #x00 #x61) :encoding :utf-16)
+            :to-equal '("a" :utf-16 t)))
+
   (it "signals ORG-PARSE-ERROR with the octet offset for invalid UTF-8"
     (let ((condition (handler-case (decoded (octets #x61 #xC3 #x28))
                        (org-parse-error (c) c))))
