@@ -47,6 +47,20 @@
     (expect (decoded (octets #xFE #xFF #x00 #x61) :encoding :utf-16)
             :to-equal '("a" :utf-16 t)))
 
+  (it "parses UTF-32 octets with an explicit generic encoding and BOM"
+    (let* ((document
+             (parse-org (octets #x00 #x00 #xFE #xFF
+                                #x00 #x00 #x00 #x2A
+                                #x00 #x00 #x00 #x20
+                                #x00 #x00 #x00 #x61)
+                        :encoding :utf-32)))
+      (with-soft-assertions
+        (expect (document-text document) :to-equal "* a")
+        (expect (node-type (first (node-children (document-root document))))
+                :to-be :headline)
+        (expect (document-encoding document) :to-be :utf-32)
+        (expect (document-bom-p document) :to-be t))))
+
   (it "signals ORG-PARSE-ERROR with the octet offset for invalid UTF-8"
     (let ((condition (handler-case (decoded (octets #x61 #xC3 #x28))
                        (org-parse-error (c) c))))
