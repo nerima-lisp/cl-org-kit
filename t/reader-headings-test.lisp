@@ -74,6 +74,17 @@
               (expect (node-property todo :tags) :to-equal '("work" "ARCHIVE"))
               (expect (node-property todo :commentedp) :to-be t)
               (expect (node-property todo :archivedp) :to-be t))))
+          (it "trims headline titles and keeps empty titles"
+              (let* ((document
+                      (parse-org
+                       (reader-headings-test-lines "* Trimmed   " "* ")))
+                     (headlines
+                       (reader-headings-test-elements document :headline))
+                     (trimmed (first headlines))
+                     (empty (second headlines)))
+                (expect (node-property trimmed :raw-value) :to-equal "Trimmed")
+                (expect (node-property trimmed :title) :to-equal '("Trimmed"))
+                (expect (node-property empty :raw-value) :to-equal "")))
           (it
            "collects custom TODO sequences and lets explicit settings override them"
            (let* ((source
