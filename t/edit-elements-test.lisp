@@ -81,6 +81,37 @@
         (expect (document-text document) :to-equal source)
         (expect (node-property block :value) :to-equal (format nil "old body~%")))))
 
+  (it "uses the opener newline when source block content offsets are absent"
+    (let* ((source (format nil
+                           "before~%#+BEGIN_SRC text~%old body~%#+END_SRC~%#+BEGIN_EXAMPLE~%kept body~%#+END_EXAMPLE~%after~%"))
+           (document (parse-org source))
+           (block (first (edit-elements-test-nodes document :src-block)))
+           (example (first (edit-elements-test-nodes document :example-block)))
+           (replacement (format nil "new body~%"))
+           (expected-source
+             (format nil
+                     "before~%#+BEGIN_SRC text~%new body~%#+END_SRC~%#+BEGIN_EXAMPLE~%kept body~%#+END_EXAMPLE~%after~%"))
+           (expected-tree
+             (org-kit::edit-canonical-copy
+              (org-kit::edit-canonical-document document)))
+           (path (org-kit::edit-node-path document block))
+           (edited (replace-block-body document block replacement)))
+      (org-kit::edit-canonical-set-property expected-tree path :value replacement)
+      (with-soft-assertions
+        (expect (node-contents-begin block) :to-be nil)
+        (expect (node-contents-end block) :to-be nil)
+        (expect (document-text edited) :to-equal expected-source)
+        (expect (org-kit::edit-canonical-document edited) :to-equalp expected-tree)
+        (expect (node-property (first (edit-elements-test-nodes edited :src-block))
+                               :value)
+                :to-equal replacement)
+        (expect (node-property (first (edit-elements-test-nodes edited :example-block))
+                               :value)
+                :to-equal (format nil "kept body~%"))
+        (expect (document-text document) :to-equal source)
+        (expect (node-property block :value) :to-equal (format nil "old body~%"))
+        (expect (node-property example :value) :to-equal (format nil "kept body~%")))))
+
   (it "preserves BOM and exact UTF-8 bytes around a Japanese CRLF block body"
     (let* ((crlf (concatenate 'string (string #\Return) (string #\Newline)))
            (source (concatenate 'string
@@ -162,6 +193,23 @@
                 :to-equal '(:off :on))
         (expect (document-text document) :to-equal source)
         (expect (node-property first-item :checkbox) :to-be :off))))
+
+  (it "updates a lowercase checked marker through the parsed checkbox API"
+    (let* ((source (format nil "- [x] lower~%- [X] peer~%"))
+           (document (parse-org source))
+           (items (edit-elements-test-nodes document :item))
+           (lowercase-item (first items))
+           (peer (second items))
+           (edited (set-checkbox-state document lowercase-item :unchecked))
+           (edited-items (edit-elements-test-nodes edited :item)))
+      (with-soft-assertions
+        (expect (node-property lowercase-item :checkbox) :to-be :on)
+        (expect (document-text edited) :to-equal (format nil "- [ ] lower~%- [X] peer~%"))
+        (expect (mapcar (lambda (item) (node-property item :checkbox)) edited-items)
+                :to-equal '(:off :on))
+        (expect (document-text document) :to-equal source)
+        (expect (node-property lowercase-item :checkbox) :to-be :on)
+        (expect (node-property peer :checkbox) :to-be :on))))
 
   (it "preserves BOM and exact UTF-8 bytes around a Japanese CRLF checkbox"
     (let* ((crlf (concatenate 'string (string #\Return) (string #\Newline)))

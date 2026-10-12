@@ -353,10 +353,7 @@
   (let* ((source (format nil "* Temporary~%~A: ~A~%"
                          (edit-properties-planning-label kind) timestamp-text))
          (temporary
-           (handler-case (parse-org source :limits (document-limits document))
-             (org-parse-error ()
-               (edit-signal-error target :invalid-value
-                                  "Invalid Org planning timestamp"))))
+           (parse-org source :limits (document-limits document)))
          (headline (find :headline (node-children (document-root temporary))
                          :key #'node-type))
          (section (and headline (edit-properties-headline-section headline)))

@@ -109,6 +109,26 @@
         (expect (edit-properties-test-canonical-headline edited "Two")
                 :to-equalp other-before))))
 
+  (it "creates a property drawer for a headline with no section"
+    (let* ((source (format nil "* Bare~%* Other~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (offset (edit-properties-test-line-after
+                    source (node-post-affiliated headline)))
+           (insertion (format nil ":PROPERTIES:~%:ID: 7~%:END:~%"))
+           (edited (set-property document headline "ID" "7")))
+      (with-soft-assertions
+        (expect (edit-properties-test-section headline) :to-be nil))
+      (edit-properties-test-check-patch document edited source offset offset insertion)
+      (with-soft-assertions
+        (expect (node-property
+                 (edit-properties-test-property
+                  (edit-properties-test-headline edited) "ID") :value)
+                :to-equal "7")
+        (expect (edit-properties-test-canonical-headline edited "Other")
+                :to-equalp (edit-properties-test-canonical-headline
+                            document "Other")))))
+
   (it "creates a property drawer after planning and before section text"
     (let* ((source (format nil "* Heading~%SCHEDULED: <2026-10-13 Tue>~%body~%* Other~%"))
            (document (parse-org source))
@@ -262,6 +282,47 @@
                   :to-equalp (edit-properties-test-canonical-headline
                               document "Other"))))))
 
+  (it "creates a planning section for a headline with no section"
+    (let* ((source (format nil "* Bare~%* Other~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (offset (edit-properties-test-line-after
+                    source (node-post-affiliated headline)))
+           (line (format nil "DEADLINE: <2026-10-14 Wed>~%"))
+           (edited (set-planning document headline :deadline
+                                 "<2026-10-14 Wed>")))
+      (with-soft-assertions
+        (expect (edit-properties-test-section headline) :to-be nil))
+      (edit-properties-test-check-patch document edited source offset offset line)
+      (with-soft-assertions
+        (expect (node-property
+                 (edit-properties-test-planning
+                  (edit-properties-test-headline edited)) :deadline)
+                :to-be-truthy)
+        (expect (edit-properties-test-canonical-headline edited "Other")
+                :to-equalp (edit-properties-test-canonical-headline
+                            document "Other")))))
+
+  (it "removes the only planning node and its otherwise empty section"
+    (let* ((source (format nil "* Task~%SCHEDULED: <2026-10-13 Tue>~%~%* Other~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (section (edit-properties-test-section headline))
+           (planning (edit-properties-test-planning headline))
+           (start (node-begin planning))
+           (end (node-end planning))
+           (edited (remove-planning document headline :scheduled)))
+      (with-soft-assertions
+        (expect (length (node-children section)) :to-be 1))
+      (edit-properties-test-check-patch document edited source start end "")
+      (with-soft-assertions
+        (expect (edit-properties-test-section
+                 (edit-properties-test-headline edited))
+                :to-be nil)
+        (expect (edit-properties-test-canonical-headline edited "Other")
+                :to-equalp (edit-properties-test-canonical-headline
+                            document "Other")))))
+
   (it "updates one planning timestamp and adds or removes a field in a shared line"
     (let* ((source (format nil "* Task~%SCHEDULED: <2026-10-13 Tue>~%"))
            (document (parse-org source))
@@ -302,6 +363,29 @@
         (expect (node-property (edit-properties-test-planning
                                 (edit-properties-test-headline removed)) :deadline)
                 :to-be-truthy))))
+
+  (it "removes the last field from the end of a shared planning line"
+    (let* ((source (format nil "* Task~%CLOSED: <2026-10-13 Tue> DEADLINE: <2026-10-14 Wed>~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document))
+           (deadline-label (search "DEADLINE:" source))
+           (timestamp-start (search "<2026-10-14 Wed>" source))
+           (start (1- deadline-label))
+           (end (+ timestamp-start (length "<2026-10-14 Wed>")))
+           (expected-source (edit-properties-test-replace-span
+                             source start end ""))
+           (edited (remove-planning document headline :deadline)))
+      (edit-properties-test-check-patch document edited source start end "")
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal expected-source)
+        (expect (node-property
+                 (edit-properties-test-planning
+                  (edit-properties-test-headline edited)) :closed)
+                :to-be-truthy)
+        (expect (node-property
+                 (edit-properties-test-planning
+                  (edit-properties-test-headline edited)) :deadline)
+                :to-be nil))))
 
   (it "preserves UTF-8 BOM, CRLF and non-ASCII source bytes while adding planning"
     (let* ((source (format nil "* 見出し~C~C本文前 café~C~C本文後 東京~C~C"
@@ -385,6 +469,24 @@
                  (first (edit-properties-test-keywords edited "TITLE")) :value)
                 :to-equal "Doc"))))
 
+  (it "adds to an empty document and removes its only top-level keyword"
+    (let* ((source "")
+           (document (parse-org source))
+           (insertion "#+TITLE: Empty")
+           (added (set-keyword-value document '(:keyword-key "TITLE") "Empty"))
+           (keyword (first (edit-properties-test-keywords added "TITLE")))
+           (start (node-begin keyword))
+           (end (node-end keyword))
+           (removed (remove-keyword added '(:keyword-key "TITLE"))))
+      (edit-properties-test-check-patch document added source 0 0 insertion)
+      (edit-properties-test-check-patch added removed insertion start end "")
+      (with-soft-assertions
+        (expect (node-property
+                 (first (edit-properties-test-keywords added "TITLE")) :value)
+                :to-equal "Empty")
+        (expect (edit-properties-test-keywords removed "TITLE") :to-be nil)
+        (expect (node-children (document-root removed)) :to-be nil))))
+
   (it "removes a selected keyword occurrence and preserves other document keywords"
     (let* ((source (format nil "#+TITLE: One~%#+TITLE: Two~%#+LANGUAGE: ja~%* Heading~%"))
            (document (parse-org source))
@@ -419,4 +521,17 @@
       (edit-properties-test-check-error
        (lambda () (set-keyword-value document '(:keyword-key "EXTRA")
                                      (format nil "bad~%value")))
+       :invalid-value document source)))
+
+  (it "rejects malformed keyword-key selector arity and occurrences"
+    (let* ((source (format nil "#+TITLE: Existing~%"))
+           (document (parse-org source)))
+      (edit-properties-test-check-error
+       (lambda () (set-keyword-value document '(:keyword-key) "new"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (set-keyword-value document '(:keyword-key "TITLE" 0) "new"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda () (remove-keyword document '(:keyword-key "TITLE" 1 2)))
        :invalid-value document source))))

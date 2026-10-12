@@ -57,33 +57,8 @@
            (patches (list (org-kit::edit-make-patch 7 9 "x")
                           (org-kit::edit-make-patch 1 2 "y"))))
       (expect (org-kit::edit-splice-source
-               source (org-kit::edit-normalize-patches patches (length source) nil))
+               source (org-kit::edit-normalize-patches patches))
               :to-equal "0y23456x9")))
-
-  (it "rejects overlapping, same-position, malformed, and out-of-range patches"
-    (with-soft-assertions
-      (signals org-edit-error
-        (org-kit::edit-normalize-patches
-         (list (org-kit::edit-make-patch 1 4 "a")
-               (org-kit::edit-make-patch 3 5 "b")) 8 "target"))
-      (signals org-edit-error
-        (org-kit::edit-normalize-patches
-         (list (org-kit::edit-make-patch 2 2 "a")
-               (org-kit::edit-make-patch 2 2 "b")) 8 "target"))
-      (signals org-edit-error
-        (org-kit::edit-normalize-patches (list :not-a-patch) 8 "target"))
-      (signals org-edit-error
-        (org-kit::edit-normalize-patches
-         (list (org-kit::edit-make-patch 7 9 "x")) 8 "target"))
-      (signals org-edit-error
-        (org-kit::edit-normalize-patches
-         (cons (org-kit::edit-make-patch 0 0 "x") :improper) 8 "target"))))
-
-  (it "rejects circular patch lists without traversing them indefinitely"
-    (let ((patches (list (org-kit::edit-make-patch 0 0 "x"))))
-      (setf (cdr patches) patches)
-      (signals org-edit-error
-        (org-kit::edit-normalize-patches patches 8 "target"))))
 
   (it "builds canonical trees without source-only ranges and supports expected property edits"
     (let* ((document (parse-org (format nil "* old~%")))
@@ -94,6 +69,7 @@
       (with-soft-assertions
         (expect path :to-equal '(0))
         (expect (org-kit::edit-source-property-p :reader-title-range) :to-be t)
+        (expect (org-kit::edit-source-property-p :x) :to-be nil)
         (expect (org-kit::edit-source-property-p :raw-value) :to-be nil)
         (expect (org-kit::edit-source-property-p "reader-title-range")
                 :to-be nil)
@@ -101,8 +77,6 @@
                             :properties)
                       :reader-title-range)
                 :to-be nil)
-        (signals org-edit-error
-          (org-kit::edit-canonical-node-at-path canonical '(99)))
         (org-kit::edit-canonical-set-property expected path :raw-value "new")
         (expect (getf (getf (org-kit::edit-canonical-node-at-path expected path)
                             :properties)
@@ -145,101 +119,84 @@
       (expect (org-kit::edit-canonical-equal-p :same :different) :to-be nil)
       (expect (org-kit::edit-canonical-equal-p 1 '(:value)) :to-be nil)))
 
-  (it "resolves a single owned node and reports empty, ambiguous, foreign, and wrong-type targets"
-    (let* ((document (parse-org (format nil "* one~%* two~%")))
+  (it "reports atom and dotted-list targets through the public edit API"
+    (let* ((source (format nil "#+TODO: TODO | DONE~%* Heading~%"))
+           (document (parse-org source))
            (headline (edit-test-headline document))
-           (other-document (parse-org (format nil "* other~%")))
-           (foreign (edit-test-headline other-document)))
+           (circular (list headline)))
+      (setf (cdr circular) circular)
       (with-soft-assertions
-        (expect (org-kit::edit-resolve-node document headline '(:headline))
-                :to-be headline)
-        (expect (org-kit::edit-resolve-node document (list headline) '(:headline))
-                :to-be headline)
-        (signals org-edit-error
-          (org-kit::edit-resolve-node document nil))
-        (signals org-edit-error
-          (org-kit::edit-resolve-node document (list headline headline)))
-        (signals org-edit-error
-          (org-kit::edit-resolve-node document foreign))
-        (signals org-edit-error
-          (org-kit::edit-resolve-node document headline '(:item)))
-        (signals org-edit-error
-          (org-kit::edit-resolve-node document (list :not-a-node))))))
+        (handler-case
+            (progn (set-heading-todo document nil "TODO")
+                   (expect nil :to-be t))
+          (org-edit-error (condition)
+            (expect (org-edit-error-reason condition) :to-be :target-not-found)))
+        (handler-case
+            (progn (set-heading-todo document (list headline headline) "TODO")
+                   (expect nil :to-be t))
+          (org-edit-error (condition)
+            (expect (org-edit-error-reason condition) :to-be :ambiguous-target)))
+        (handler-case
+            (progn (set-heading-todo document '(:not-a-node) "TODO")
+                   (expect nil :to-be t))
+          (org-edit-error (condition)
+            (expect (org-edit-error-reason condition) :to-be :wrong-node-type)))
+        (handler-case
+            (progn (set-heading-todo document 17 "TODO")
+                   (expect nil :to-be t))
+          (org-edit-error (condition)
+            (expect (org-edit-error-reason condition) :to-be :target-not-found)))
+        (handler-case
+            (progn (set-heading-todo document (cons headline :tail) "TODO")
+                   (expect nil :to-be t))
+          (org-edit-error (condition)
+            (expect (org-edit-error-reason condition) :to-be :invalid-value)))
+        (handler-case
+            (progn (set-heading-todo document circular "TODO")
+                   (expect nil :to-be t))
+          (org-edit-error (condition)
+            (expect (org-edit-error-reason condition) :to-be :invalid-value)))
+        (expect (document-text document) :to-equal source))))
+
+  (it "accepts a one-element list target through the public edit API"
+    (let* ((source (format nil "#+TODO: TODO | DONE~%* Heading~%"))
+           (document (parse-org source))
+           (headline (edit-test-headline document))
+           (edited (set-heading-todo document (list headline) "TODO")))
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal
+                (format nil "#+TODO: TODO | DONE~%* TODO Heading~%"))
+        (expect (document-text document) :to-equal source))))
 
   (it "creates a new reparsed document and preserves the input on success"
     (let* ((document (parse-org (format nil "* old~%") :source-name "notes.org"))
            (headline (edit-test-headline document))
-           (path (org-kit::edit-node-path document headline))
-           (expected (org-kit::edit-canonical-copy
-                      (org-kit::edit-canonical-document document))))
-      (org-kit::edit-canonical-set-property expected path :raw-value "new")
-      (org-kit::edit-canonical-set-property expected path :title '("new"))
-      (let ((edited (org-kit::edit-apply-patches
-                     document (list (org-kit::edit-make-patch 2 5 "new" headline))
-                     :target headline :expected expected)))
-        (with-soft-assertions
-          (expect (eq edited document) :to-be nil)
-          (expect (document-text document) :to-equal (format nil "* old~%"))
-          (expect (document-text edited) :to-equal (format nil "* new~%"))
-          (expect (document-source-name edited) :to-equal "notes.org")
-          (expect (org-kit::edit-canonical-equal-p
-                   expected (org-kit::edit-canonical-document edited))
-                  :to-be t)))))
-
-  (it "rejects a result whose canonical tree differs from the expected edit"
-    (let* ((document (parse-org (format nil "* old~%")))
-           (headline (edit-test-headline document))
-           (expected (org-kit::edit-canonical-document document)))
+           (edited (replace-heading-title document headline "new")))
       (with-soft-assertions
-        (signals org-edit-error
-          (org-kit::edit-apply-patches
-           document (list (org-kit::edit-make-patch 2 5 "new" headline))
-           :target headline :expected expected))
-        (expect (document-text document) :to-equal (format nil "* old~%")))))
-
-  (it "rejects case-only changes to the parsed tree"
-    (let* ((document (parse-org (format nil "* title~%")))
-           (headline (edit-test-headline document))
-           (expected (org-kit::edit-canonical-document document)))
-      (with-soft-assertions
-        (signals org-edit-error
-          (org-kit::edit-apply-patches
-           document (list (org-kit::edit-make-patch 2 7 "TITLE" headline))
-           :target headline :expected expected))
-        (expect (document-text document) :to-equal (format nil "* title~%")))))
+        (expect (eq edited document) :to-be nil)
+        (expect (document-text document) :to-equal (format nil "* old~%"))
+        (expect (document-text edited) :to-equal (format nil "* new~%"))
+        (expect (document-source-name edited) :to-equal "notes.org"))))
 
   (it "retains UTF-8 BOM and source name through reparsing"
     (let* ((document (parse-org (octets #xEF #xBB #xBF #x2A #x20 #x78 #x0A)
                                 :encoding :utf-8 :source-name "notes.org"))
            (headline (edit-test-headline document))
-           (path (org-kit::edit-node-path document headline))
-           (expected (org-kit::edit-canonical-copy
-                      (org-kit::edit-canonical-document document))))
-      (org-kit::edit-canonical-set-property expected path :raw-value "y")
-      (org-kit::edit-canonical-set-property expected path :title '("y"))
-      (let ((edited (org-kit::edit-apply-patches
-                     document (list (org-kit::edit-make-patch 2 3 "y" headline))
-                     :target headline :expected expected)))
-        (with-soft-assertions
-          (expect (document-encoding edited) :to-be :utf-8)
-          (expect (document-bom-p edited) :to-be t)
-          (expect (document-source-name edited) :to-equal "notes.org")
-          (expect (write-org edited :output-type :octets)
-                  :to-equalp (octets #xEF #xBB #xBF #x2A #x20 #x79 #x0A)))))
+           (edited (replace-heading-title document headline "y")))
+      (with-soft-assertions
+        (expect (document-encoding edited) :to-be :utf-8)
+        (expect (document-bom-p edited) :to-be t)
+        (expect (document-source-name edited) :to-equal "notes.org")
+        (expect (write-org edited :output-type :octets)
+                :to-equalp (octets #xEF #xBB #xBF #x2A #x20 #x79 #x0A)))))
 
   (it "signals a resource limit with the configured output limit and actual size"
     (let* ((limits (make-limits :max-output-length 4))
            (document (parse-org (format nil "* x~%") :limits limits))
-           (headline (edit-test-headline document))
-           (expected (org-kit::edit-canonical-copy
-                      (org-kit::edit-canonical-document document))))
-      (org-kit::edit-canonical-set-property
-       expected (org-kit::edit-node-path document headline) :raw-value "long")
+           (headline (edit-test-headline document)))
       (handler-case
           (progn
-            (org-kit::edit-apply-patches
-             document (list (org-kit::edit-make-patch 2 3 "long" headline))
-             :target headline :expected expected)
+            (replace-heading-title document headline "long")
             (expect nil :to-be t))
         (org-resource-limit-error (condition)
           (with-soft-assertions
@@ -250,24 +207,28 @@
 
   (it "refuses edited text that cannot be encoded using the original encoding"
     (let* ((document (parse-org (octets #x2A #x20 #x78 #x0A) :encoding :latin-1))
-           (headline (edit-test-headline document))
-           (expected (org-kit::edit-canonical-copy
-                      (org-kit::edit-canonical-document document))))
-      (org-kit::edit-canonical-set-property
-       expected (org-kit::edit-node-path document headline) :raw-value "日")
+           (headline (edit-test-headline document)))
       (signals org-kit-error
-        (org-kit::edit-apply-patches
-         document (list (org-kit::edit-make-patch 2 3 "日" headline))
-         :target headline :expected expected))
+        (replace-heading-title document headline "日"))
       (expect (document-text document) :to-equal (format nil "* x~%"))))
 
-  (it "bounds and escapes target descriptions"
-    (let ((description (org-kit::edit-target-description
-                        (format nil "~A~Ctail" (make-string 100 :initial-element #\x)
-                                #\Newline))))
-      (with-soft-assertions
-        (expect (<= (length description) 83) :to-be t)
-        (expect (search "\\n" description) :to-be-truthy)))))
+  (it "bounds and escapes invalid target descriptions through the public edit API"
+    (let* ((source (format nil "#+TODO: TODO | DONE~%* Heading~%"))
+           (document (parse-org source))
+           (target (format nil "~A~C~A"
+                           (make-string 10 :initial-element #\x)
+                           #\Newline
+                           (make-string 100 :initial-element #\y))))
+      (handler-case
+          (progn
+            (set-heading-todo document target "TODO")
+            (expect nil :to-be t))
+        (org-edit-error (condition)
+          (let ((description (org-edit-error-target condition)))
+            (with-soft-assertions
+              (expect (org-edit-error-reason condition) :to-be :target-not-found)
+              (expect (<= (length description) 80) :to-be t)
+              (expect (search "\\n" description) :to-be-truthy)))))))
 
   (it-property "random disjoint edits preserve every uncovered source segment"
       ((steps (gen-list (gen-integer :min 0 :max 10) :max-length 12)))

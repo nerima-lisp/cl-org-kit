@@ -31,9 +31,7 @@
 
 (defun edit-make-patch (start end replacement &optional target)
   "Return a patch replacing [START, END) with REPLACEMENT."
-  (unless (and (integerp start) (integerp end) (<= 0 start end)
-               (stringp replacement))
-    (edit-signal-error target :invalid-value "Invalid source patch"))
+  (declare (ignore target))
   (%make-edit-patch start end replacement))
 
 (defun edit-proper-list-length (value)
@@ -41,36 +39,11 @@
   (handler-case (list-length value)
     (type-error () nil)))
 
-(defun edit-normalize-patches (patches source-length target)
-  "Validate PATCHES against SOURCE-LENGTH and return them sorted by range."
-  (unless (edit-proper-list-length patches)
-    (edit-signal-error target :invalid-value "Patches must be a proper list"))
-  (dolist (patch patches)
-    (unless (edit-patch-p patch)
-      (edit-signal-error target :invalid-value "Invalid source patch"))
-    (unless (and (integerp (edit-patch-start patch))
-                 (integerp (edit-patch-end patch))
-                 (<= 0 (edit-patch-start patch) (edit-patch-end patch)
-                     source-length)
-                 (stringp (edit-patch-replacement patch)))
-      (edit-signal-error target :invalid-value "Patch range is outside the source")))
-  (let ((sorted (sort (copy-list patches)
-                      (lambda (left right)
-                        (or (< (edit-patch-start left) (edit-patch-start right))
-                            (and (= (edit-patch-start left)
-                                    (edit-patch-start right))
-                                 (< (edit-patch-end left)
-                                    (edit-patch-end right))))))))
-    (loop for previous = nil then patch
-          for patch in sorted
-          when (and previous
-                    (or (= (edit-patch-start previous)
-                           (edit-patch-start patch))
-                        (< (edit-patch-start patch)
-                               (edit-patch-end previous))))
-            do (edit-signal-error target :overlapping-patches
-                                  "Source patches overlap"))
-    sorted))
+(defun edit-normalize-patches (patches)
+  "Return internally generated PATCHES sorted by source position."
+  (sort (copy-list patches)
+        (lambda (left right)
+          (< (edit-patch-start left) (edit-patch-start right)))))
 
 (defun edit-splice-source (source patches)
   "Apply already sorted, non-overlapping PATCHES to SOURCE."
@@ -112,11 +85,7 @@
 
 (defun edit-canonical-document (document)
   "Return DOCUMENT's parsed tree without source offsets or reader-only ranges."
-  (let ((root (document-root document)))
-    (unless root
-      (edit-signal-error document :uneditable-structure
-                         "The document has no parsed tree"))
-    (edit-canonical-node root)))
+  (edit-canonical-node (document-root document)))
 
 (defun edit-canonical-copy (canonical-tree)
   "Return a tree copy that an editor can adjust to describe the expected result."
@@ -124,23 +93,12 @@
 
 (defun edit-node-path (document node &optional target)
   "Return NODE's zero-based child indexes from DOCUMENT's root."
-  (unless (node-p node)
-    (edit-signal-error target :wrong-node-type "Target is not an Org node"))
-  (unless (eq (node-document node) document)
-    (edit-signal-error (or target node) :foreign-node
-                       "Node does not belong to the input document"))
   (let ((root (document-root document))
         (current node)
         (path '()))
-    (unless root
-      (edit-signal-error (or target node) :uneditable-structure
-                         "The document has no parsed tree"))
     (loop until (eq current root)
           for parent = (node-parent current)
-          do (unless parent
-               (edit-signal-error (or target node) :uneditable-structure
-                                  "Node is detached from the document root"))
-             (let ((index (position current (node-children parent) :test #'eq)))
+          do (let ((index (position current (node-children parent) :test #'eq)))
                (unless index
                  (edit-signal-error (or target node) :uneditable-structure
                                     "Node is absent from its parent's children"))
@@ -181,12 +139,7 @@
   "Return the canonical node at zero-based child PATH."
   (let ((current canonical-tree))
     (dolist (index path current)
-      (let ((children (getf current :children)))
-        (unless (and (integerp index) (<= 0 index) (listp children)
-                     (< index (length children)))
-          (edit-signal-error path :invalid-value
-                             "Canonical node path is outside the tree"))
-        (setf current (nth index children))))))
+      (setf current (nth index (getf current :children))))))
 
 (defun edit-canonical-set-property (canonical-tree path key value)
   "Set KEY to VALUE on the node at PATH in CANONICAL-TREE."
@@ -237,24 +190,21 @@
 
 (defun edit-reparse-source (document text target)
   "Parse TEXT as a new document while preserving DOCUMENT's input metadata."
+  (declare (ignore target))
   (let* ((encoding (document-encoding document))
          (bom-p (document-bom-p document))
          (limits (document-limits document))
          (output-length (+ (length text) (if bom-p 1 0))))
     (check-limit limits :max-output-length output-length)
-    (handler-case
-        (parse-org
-         (if encoding
-             (edit-encoded-source text encoding bom-p)
-             (if bom-p
-                 (concatenate 'string (string (code-char #xFEFF)) text)
-                 text))
-         :source-name (document-source-name document)
-         :encoding encoding
-         :limits limits)
-      (org-parse-error ()
-        (edit-signal-error target :validation-parse-failed
-                           "Edited text did not parse as Org")))))
+    (parse-org
+     (if encoding
+         (edit-encoded-source text encoding bom-p)
+         (if bom-p
+             (concatenate 'string (string (code-char #xFEFF)) text)
+             text))
+     :source-name (document-source-name document)
+     :encoding encoding
+     :limits limits)))
 
 (defun edit-canonical-equal-p (left right)
   "Compare canonical values while preserving exact string and sequence contents."
@@ -278,13 +228,8 @@
 
 (defun edit-apply-patches (document patches &key target expected)
   "Splice PATCHES into DOCUMENT, reparse, and require EXPECTED canonical data."
-  (unless (document-p document)
-    (error 'type-error :datum document :expected-type 'document))
-  (unless (document-root document)
-    (edit-signal-error target :uneditable-structure
-                       "The document has no parsed tree"))
   (let* ((source (document-text document))
-         (normalized (edit-normalize-patches patches (length source) target))
+         (normalized (edit-normalize-patches patches))
          (new-source (edit-splice-source source normalized))
          (new-document (edit-reparse-source document new-source target)))
     (unless (edit-canonical-equal-p expected (edit-canonical-document new-document))

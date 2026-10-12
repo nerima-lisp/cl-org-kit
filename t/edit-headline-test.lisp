@@ -121,6 +121,20 @@
        '(:priority))
       (expect (node-property edited-headline :priority) :to-be (char-code #\A))))
 
+  (it "accepts a one-character string priority through the public API"
+    (let* ((source (format nil "* [#B] Task~%* Peer~%"))
+           (document (parse-org source))
+           (headline (first (edit-headline-test-nodes document)))
+           (original-tree (org-kit::edit-canonical-document document))
+           (path (org-kit::edit-node-path document headline))
+           (priority-start (search "[#B]" source :start2 (node-begin headline)))
+           (edited (set-heading-priority document headline "C"))
+           (edited-headline (first (edit-headline-test-nodes edited))))
+      (edit-headline-test-assert-result
+       document edited source original-tree path
+       priority-start (+ priority-start 4) "[#C]" '(:priority))
+      (expect (node-property edited-headline :priority) :to-equal (char-code #\C))))
+
   (it "sets a digit priority using the parsed numeric value"
     (let* ((source (format nil "* Task~%"))
            (document (parse-org source))
@@ -213,6 +227,25 @@
        '(:tags :archivedp))
       (expect (node-property edited-headline :tags)
               :to-equal '("work" "new"))))
+
+  (it "removes every existing tag when the replacement list is empty"
+    (let* ((source (format nil "* Task :old:ARCHIVE:~%* Peer :peer:~%"))
+           (document (parse-org source))
+           (headline (first (edit-headline-test-nodes document)))
+           (original-tree (org-kit::edit-canonical-document document))
+           (path (org-kit::edit-node-path document headline))
+           (tag-start (search ":old:ARCHIVE:" source
+                              :start2 (node-begin headline)))
+           (tag-end (+ tag-start (length ":old:ARCHIVE:")))
+           (edited (replace-heading-tags document headline nil))
+           (edited-headline (first (edit-headline-test-nodes edited))))
+      (edit-headline-test-assert-result
+       document edited source original-tree path tag-start tag-end ""
+       '(:tags :archivedp))
+      (with-soft-assertions
+        (expect (document-text edited) :to-equal (format nil "* Task ~%* Peer :peer:~%"))
+        (expect (node-property edited-headline :tags) :to-equal nil)
+        (expect (node-property edited-headline :archivedp) :to-be nil))))
 
   (it "inserts a new tag suffix when the headline has no tags"
     (let* ((source (format nil "* Plain~%* Peer~%"))
