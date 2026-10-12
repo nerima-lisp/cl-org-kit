@@ -45,8 +45,7 @@
                (:file "edit-elements")
                (:file "edit-subtree")
                (:file "emitter-objects")
-               (:file "emitter")
-               (:file "reader-collections"))
+               (:file "emitter"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
