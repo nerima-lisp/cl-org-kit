@@ -43,6 +43,8 @@
     ;; Format-preserving metadata edits
     "SET-PROPERTY" "REMOVE-PROPERTY" "SET-PLANNING" "REMOVE-PLANNING"
     "SET-KEYWORD-VALUE" "REMOVE-KEYWORD"
+    ;; Format-preserving element edits
+    "REPLACE-BLOCK-BODY" "SET-CHECKBOX-STATE"
     ;; Timestamp values
     "TIMESTAMP-START" "TIMESTAMP-END" "TIMESTAMP-REPEATER" "TIMESTAMP-WARNING-DELAY")
   "Every symbol the ORG-KIT package exports. The node contract is documented in

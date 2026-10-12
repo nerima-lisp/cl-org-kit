@@ -41,7 +41,8 @@
                (:file "reader-collections")
                (:file "edit-patches")
                (:file "edit-headline")
-               (:file "edit-properties"))
+               (:file "edit-properties")
+               (:file "edit-elements"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -81,7 +82,8 @@
                (:file "conformance-test")
                (:file "edit-patches-test")
                (:file "edit-headline-test")
-               (:file "edit-properties-test"))
+               (:file "edit-properties-test")
+               (:file "edit-elements-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)

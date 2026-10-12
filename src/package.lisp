@@ -40,5 +40,7 @@
    ;; Format-preserving metadata edits
    #:set-property #:remove-property #:set-planning #:remove-planning
    #:set-keyword-value #:remove-keyword
+   ;; Format-preserving element edits
+   #:replace-block-body #:set-checkbox-state
    ;; Timestamp values
    #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))
