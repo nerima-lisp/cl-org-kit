@@ -33,7 +33,7 @@
    #:outline-result-path #:outline-result-lang #:outline-result-symbols
    #:outline-result-total #:outline-result-truncated
    ;; Reading and writing
-   #:parse-org #:write-org
+   #:parse-org #:write-org #:emit-org
    ;; Format-preserving headline edits
    #:set-heading-todo #:set-heading-priority #:replace-heading-title
    #:add-heading-tags #:remove-heading-tags #:replace-heading-tags
