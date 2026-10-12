@@ -190,6 +190,64 @@
         (expect (write-org edited :output-type :octets)
                 :to-equalp (octets #xEF #xBB #xBF #x2A #x20 #x79 #x0A)))))
 
+  (it "retains a character-input BOM and untouched bytes through a public edit"
+    (let* ((source (format nil "* old~%"))
+           (input (concatenate 'string (string (code-char #xFEFF)) source))
+           (document (parse-org input))
+           (original-octets (write-org document :output-type :octets))
+           (headline (edit-test-headline document))
+           (edited (replace-heading-title document headline "new"))
+           (output-octets (write-org edited :output-type :octets))
+           (patches (list (org-kit::edit-make-patch 2 5 "new"))))
+      (with-soft-assertions
+        (expect (document-encoding document) :to-be nil)
+        (expect (document-bom-p document) :to-be t)
+        (expect (document-text document) :to-equal source)
+        (expect (document-text edited) :to-equal (format nil "* new~%"))
+        (expect output-octets
+                :to-equalp (octets #xEF #xBB #xBF #x2A #x20 #x6E #x65 #x77 #x0A))
+        (expect (subseq output-octets 0 5)
+                :to-equalp (subseq original-octets 0 5))
+        (expect (subseq output-octets 8)
+                :to-equalp (subseq original-octets 8))
+        (expect (edit-test-unpatched-ranges-match-p
+                 source (document-text edited) patches)
+                :to-be t)
+        (expect (write-org document :output-type :octets)
+                :to-equalp original-octets))))
+
+  (it "keeps generic UTF-16 BOM output singular through a public edit"
+    (let* ((input-octets (octets #xFE #xFF #x00 #x2A #x00 #x20
+                                 #x00 #x6F #x00 #x6C #x00 #x64 #x00 #x0A))
+           (source (format nil "* old~%"))
+           (document (parse-org input-octets :encoding :utf-16))
+           (original-octets (write-org document :output-type :octets))
+           (headline (edit-test-headline document))
+           (edited (replace-heading-title document headline "new"))
+           (output-octets (write-org edited :output-type :octets))
+           (patches (list (org-kit::edit-make-patch 2 5 "new"))))
+      (with-soft-assertions
+        (expect (document-encoding document) :to-be :utf-16)
+        (expect (document-bom-p document) :to-be t)
+        (expect (document-text document) :to-equal source)
+        (expect original-octets :to-equalp input-octets)
+        (expect (document-text edited) :to-equal (format nil "* new~%"))
+        (expect original-octets
+                :to-equalp (octets #xFE #xFF #x00 #x2A #x00 #x20
+                                   #x00 #x6F #x00 #x6C #x00 #x64 #x00 #x0A))
+        (expect output-octets
+                :to-equalp (octets #xFE #xFF #x00 #x2A #x00 #x20
+                                   #x00 #x6E #x00 #x65 #x00 #x77 #x00 #x0A))
+        (expect (subseq output-octets 0 6)
+                :to-equalp (subseq original-octets 0 6))
+        (expect (subseq output-octets 12)
+                :to-equalp (subseq original-octets 12))
+        (expect (edit-test-unpatched-ranges-match-p
+                 source (document-text edited) patches)
+                :to-be t)
+        (expect (write-org document :output-type :octets)
+                :to-equalp original-octets))))
+
   (it "signals a resource limit with the configured output limit and actual size"
     (let* ((limits (make-limits :max-output-length 4))
            (document (parse-org (format nil "* x~%") :limits limits))
@@ -228,7 +286,13 @@
             (with-soft-assertions
               (expect (org-edit-error-reason condition) :to-be :target-not-found)
               (expect (<= (length description) 80) :to-be t)
-              (expect (search "\\n" description) :to-be-truthy)))))))
+              (expect description
+                      :to-equal
+                      (concatenate 'string
+                                   (make-string 10 :initial-element #\x)
+                                   "\\n"
+                                   (make-string 65 :initial-element #\y)
+                                   "..."))))))))
 
   (it-property "random disjoint edits preserve every uncovered source segment"
       ((steps (gen-list (gen-integer :min 0 :max 10) :max-length 12)))

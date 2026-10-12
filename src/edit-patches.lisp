@@ -12,15 +12,24 @@
 
 (defun edit-target-description (target)
   "Return a bounded, escaped description suitable for an edit condition."
-  (bounded-text
-   (cond ((stringp target) target)
-         ((node-p target) (string-downcase (symbol-name (node-type target))))
-         ((null target) "target")
-         (t (with-output-to-string (stream)
-              (let ((*print-circle* t)
-                    (*print-length* 16)
-                    (*print-level* 4))
-                (prin1 target stream)))))))
+  (let* ((description
+           (cond ((stringp target) target)
+                 ((node-p target)
+                  (string-downcase (symbol-name (node-type target))))
+                 ((null target) "target")
+                 (t (with-output-to-string (stream)
+                      (let ((*print-circle* t)
+                            (*print-length* 16)
+                            (*print-level* 4))
+                        (prin1 target stream))))))
+         (limit *condition-text-limit*))
+    (loop for end downfrom (min (length description) limit) to 0
+          for truncated-p = (< end (length description))
+          for escaped = (bounded-text (subseq description 0 end))
+          when (<= (+ (length escaped) (if truncated-p 3 0)) limit)
+            return (if truncated-p
+                       (concatenate 'string escaped "...")
+                       escaped))))
 
 (defun edit-signal-error (target reason message)
   "Signal an ORG-EDIT-ERROR for TARGET with REASON and MESSAGE."
@@ -218,12 +227,10 @@
         ((consp right) nil)
         ((vectorp left)
          (and (vectorp right)
-              (not (stringp right))
               (= (length left) (length right))
               (loop for left-item across left
                     for right-item across right
                     always (edit-canonical-equal-p left-item right-item))))
-        ((vectorp right) nil)
         (t (equalp left right))))
 
 (defun edit-apply-patches (document patches &key target expected)
