@@ -4,12 +4,17 @@
 (defstruct (limits (:constructor %make-limits) (:conc-name %limits-) (:copier nil)
                    (:predicate %limits-p))
   "Resource ceilings for parsing and writing. Build one with MAKE-LIMITS."
-  (max-input-length 0 :type (integer 0) :read-only t)
-  (max-heading-depth 0 :type (integer 0) :read-only t)
-  (max-element-depth 0 :type (integer 0) :read-only t)
-  (max-object-depth 0 :type (integer 0) :read-only t)
-  (max-node-count 0 :type (integer 0) :read-only t)
-  (max-output-length 0 :type (integer 0) :read-only t))
+  (max-input-length 0 :read-only t)
+  (max-heading-depth 0 :read-only t)
+  (max-element-depth 0 :read-only t)
+  (max-object-depth 0 :read-only t)
+  (max-node-count 0 :read-only t)
+  (max-output-length 0 :read-only t))
+
+(defun checked-limit-value (value)
+  (unless (typep value '(integer 0))
+    (error 'type-error :datum value :expected-type '(integer 0)))
+  value)
 
 (defun make-limits (&key (max-input-length (* 64 1024 1024))
                          (max-heading-depth 256)
@@ -23,12 +28,12 @@ MAX-HEADING-DEPTH bounds headline level; MAX-ELEMENT-DEPTH and MAX-OBJECT-DEPTH
 bound element and object nesting; MAX-NODE-COUNT bounds the nodes in one
 document; MAX-OUTPUT-LENGTH bounds written characters. Exceeding one signals
 ORG-RESOURCE-LIMIT-ERROR."
-  (%make-limits :max-input-length max-input-length
-                :max-heading-depth max-heading-depth
-                :max-element-depth max-element-depth
-                :max-object-depth max-object-depth
-                :max-node-count max-node-count
-                :max-output-length max-output-length))
+  (%make-limits :max-input-length (checked-limit-value max-input-length)
+                :max-heading-depth (checked-limit-value max-heading-depth)
+                :max-element-depth (checked-limit-value max-element-depth)
+                :max-object-depth (checked-limit-value max-object-depth)
+                :max-node-count (checked-limit-value max-node-count)
+                :max-output-length (checked-limit-value max-output-length)))
 
 (defun limits-p (object)
   "Return true when OBJECT is a LIMITS object."

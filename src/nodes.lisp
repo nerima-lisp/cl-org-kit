@@ -16,7 +16,7 @@
   (contents-begin nil)
   (contents-end nil)
   (post-affiliated nil)
-  (post-blank 0 :type (integer 0))
+  (post-blank 0)
   (properties '() :type list)
   ;; Set on a root node only, by (SETF DOCUMENT-ROOT).
   (document nil))
@@ -37,9 +37,12 @@ BEGIN <= POST-AFFILIATED <= CONTENTS-BEGIN <= CONTENTS-END <= END."
 indexes into the document text, with END and CONTENTS-END exclusive; leave them
 NIL for a node built by a program rather than parsed. PROPERTIES is a plist of
 type-specific values. Each of CHILDREN gets the new node as its parent.
-Signals TYPE-ERROR for an unknown TYPE and ORG-KIT-ERROR for unordered offsets."
+POST-BLANK is a non-negative integer. Signals TYPE-ERROR for an unknown TYPE or
+invalid POST-BLANK and ORG-KIT-ERROR for unordered offsets."
   (unless (node-type-p type)
     (error 'type-error :datum type :expected-type 'node-type))
+  (unless (typep post-blank '(integer 0))
+    (error 'type-error :datum post-blank :expected-type '(integer 0)))
   (check-span begin post-affiliated contents-begin contents-end end)
   (let ((node (%make-node :type type :begin begin :end end
                           :contents-begin contents-begin :contents-end contents-end

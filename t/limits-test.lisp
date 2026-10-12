@@ -25,15 +25,22 @@
 
   (it "rejects a negative limit and an unknown limit name"
     (with-soft-assertions
-      (signals type-error (make-limits :max-node-count -1))
+      (dolist (name '(:max-input-length :max-heading-depth :max-element-depth
+                      :max-object-depth :max-node-count :max-output-length))
+        (signals type-error (apply #'make-limits (list name -1))))
       (signals error (limit-value (make-limits) :max-nothing))))
 
-  (it "passes values at the limit and signals above it"
-    (let ((limits (make-limits :max-node-count 3)))
+  (it "passes a limit and signals when public parsing exceeds it"
+    (let* ((document (parse-org "" :limits (make-limits :max-node-count 1)))
+           (node-limit-error
+             (handler-case
+                 (progn (parse-org "" :limits (make-limits :max-node-count 0)) nil)
+               (org-resource-limit-error (condition) condition))))
       (with-soft-assertions
-        (expect (org-kit::check-limit limits :max-node-count 3) :to-be 3)
-        (let ((condition (handler-case (org-kit::check-limit limits :max-node-count 4)
-                           (org-resource-limit-error (c) c))))
-          (expect (org-resource-limit-error-limit-name condition) :to-be :max-node-count)
-          (expect (org-resource-limit-error-limit condition) :to-be 3)
-          (expect (org-resource-limit-error-actual condition) :to-be 4))))))
+        (expect (document-p document) :to-be t)
+        (expect (org-resource-limit-error-limit-name node-limit-error)
+                :to-be :max-node-count)
+        (expect (org-resource-limit-error-limit node-limit-error) :to-be 0)
+        (expect (org-resource-limit-error-actual node-limit-error) :to-be 1)
+        (signals org-resource-limit-error
+          (parse-org "*a /b/*" :limits (make-limits :max-object-depth 1)))))))

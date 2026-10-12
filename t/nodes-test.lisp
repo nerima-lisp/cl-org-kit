@@ -46,7 +46,8 @@
       (signals org-kit-error (make-node :paragraph :begin 0 :end 9 :contents-begin 6
                                                    :contents-end 5))
       (signals org-kit-error (make-node :paragraph :begin -1))
-      (signals org-kit-error (make-node :paragraph :begin "0")))))
+      (signals org-kit-error (make-node :paragraph :begin "0"))
+      (signals type-error (make-node :paragraph :post-blank -1)))))
 
 (describe "node tree editing"
   (it "replaces children and re-parents them"
