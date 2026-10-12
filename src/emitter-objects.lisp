@@ -35,14 +35,30 @@
        (let* ((source (node-text node))
               (post-blank (node-post-blank node))
               (end (- (length source) post-blank)))
-         (unless (and (typep post-blank '(integer 0))
-                      (<= 0 end)
+         (unless (and (<= 0 end)
                       (every (lambda (character)
                                (member character '(#\Space #\Tab)))
                              (subseq source end)))
            (emitter-object-fail node "source text has an invalid post-blank span"))
          (subseq source 0 end)))
       (t (emitter-object-fail node "property ~S or source text is required" key)))))
+
+(defun emitter-object-markup-source-string (node key delimiter)
+  (multiple-value-bind (value present) (node-property node key)
+    (cond
+      (present
+       (unless (stringp value)
+         (emitter-object-fail node "property ~S must be a string" key))
+       value)
+      (t
+       (let* ((source (emitter-object-source-string node key))
+              (length (length source)))
+         (unless (and (>= length 2)
+                      (char= (char source 0) delimiter)
+                      (char= (char source (1- length)) delimiter))
+           (emitter-object-fail node
+                                "source text does not contain its markup delimiters"))
+         (subseq source 1 (1- length)))))))
 
 (defun emitter-object-normalize-newlines (node value)
   (with-output-to-string (stream)
@@ -157,7 +173,7 @@
            (if opaque-p
                (progn
                  (emitter-object-no-children node)
-                 (emitter-object-source-string node :value))
+                 (emitter-object-markup-source-string node :value delimiter))
                (emitter-object-children-string node)))
          (length (length contents)))
     (when (or (position delimiter contents)
@@ -171,15 +187,6 @@
       (write-char delimiter stream)
       (write-string contents stream)
       (write-char delimiter stream))))
-
-(defun emitter-object-delimited-content (node delimiter)
-  (let ((contents (emitter-object-children-string node)))
-    (when (and (plusp (length contents))
-               (or (markup-whitespace-character-p (char contents 0))
-                   (markup-whitespace-character-p
-                    (char contents (1- (length contents))))))
-      (emitter-object-fail node "contents must not begin or end with whitespace"))
-    (concatenate 'string (string delimiter) contents (string delimiter))))
 
 (defun emitter-object-balanced-delimiters-p (text open close)
   (loop with depth = 0
@@ -360,8 +367,6 @@
                        (alpha-char-p (char value 1)))))
       (emitter-object-fail node "LaTeX fragment syntax is invalid"))
     (when (and (char= (char value 0) #\\)
-               (not (member value '("\\(" "\\)" "\\[" "\\]")
-                            :test #'string=))
                (let* ((name-end
                         (loop for position from 1 below length
                               while (alpha-char-p (char value position))
@@ -383,8 +388,7 @@
              (write-char character stream))))
 
 (defun emitter-object-link-known-type-p (type)
-  (and (stringp type)
-       (member type *org-link-object-types* :test #'string=)))
+  (member type *org-link-object-types* :test #'string=))
 
 (defun emitter-object-link-raw-path (node type path)
   (cond
@@ -419,8 +423,7 @@
                   ".,;:!?\"'!@#$%^&*_+=|{}"))))
 
 (defun emitter-object-radio-target-exists-p (path)
-  (and (boundp '*emitter-radio-targets*)
-       (member path (symbol-value '*emitter-radio-targets*) :test #'string=)))
+  (member path (symbol-value '*emitter-radio-targets*) :test #'string=))
 
 (defun emitter-object-link (node)
   (let* ((type (emitter-object-required-string node :type))
@@ -574,8 +577,8 @@
         (month (node-property node month-key))
         (day (node-property node day-key)))
     (unless (and (typep year '(integer 0 9999))
-                 (typep month '(integer 1 12))
-                 (typep day '(integer 1 31)))
+                 (typep month '(integer 0 99))
+                 (typep day '(integer 0 99)))
       (emitter-object-fail node "timestamp date fields are incomplete or invalid"))
     (format nil "~4,'0D-~2,'0D-~2,'0D" year month day)))
 
@@ -763,9 +766,6 @@
 
 (defun emitter-object-string (node)
   "Return canonical Org text for one object node, without element delimiters."
-  (unless (and (node-p node)
-               (eq (node-type-category (node-type node)) :object))
-    (error 'org-kit-error :message "Cannot emit a non-object node as an object"))
   (let* ((type (node-type node))
          (value
            (case type
@@ -793,12 +793,8 @@
              (:superscript (emitter-object-sub-super node #\^))
              (:table-cell (emitter-object-table-cell node))
              (:target (emitter-object-target node))
-             (:timestamp (emitter-object-timestamp node))
-             (otherwise
-              (emitter-object-fail node "no object serializer is defined"))))
+             (:timestamp (emitter-object-timestamp node))))
          (post-blank (node-post-blank node)))
-    (unless (typep post-blank '(integer 0))
-      (emitter-object-fail node "post-blank must be a non-negative integer"))
     (if (eq type :table-cell)
         (progn
           (unless (zerop post-blank)
