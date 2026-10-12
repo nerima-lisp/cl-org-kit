@@ -71,3 +71,25 @@
         (expect (org-kit::object-match-end match) :to-be 8)
         (expect (org-kit::object-match-post-blank match) :to-be 2)
         (expect no-close :to-be nil)))))
+
+(describe "markup range edge branches"
+  (it "rejects invalid ranges and whitespace before closing delimiters"
+    (let ((document (make-document "*word *")))
+      (with-soft-assertions
+        (expect (org-kit::try-parse-markup-object document 2 1 :paragraph)
+                :to-be
+                nil)
+        (expect (org-kit::try-parse-markup-object document 0 8 :paragraph)
+                :to-be
+                nil)
+        (expect (org-kit::try-parse-markup-object document 0 7 :paragraph)
+                :to-be
+                nil)
+        (expect (org-kit::markup-open-boundary-p "x*" 1) :to-be nil)
+        (let ((org-kit::*object-parse-range-start* 1))
+          (expect (org-kit::markup-open-boundary-p "x*" 1) :to-be t))
+        (let ((org-kit::*object-parse-range-start* 0))
+          (expect (org-kit::markup-open-boundary-p "x*" 1) :to-be nil))
+        (expect (org-kit::markup-open-boundary-p "*x" 0) :to-be t)
+        (expect (org-kit::markup-close-boundary-p "x!" 1 2)
+                :to-be-truthy)))))

@@ -48,9 +48,7 @@
   (let* ((text (document-text document))
          (length (length text))
          (valid-range
-          (and (integerp start)
-               (integerp end)
-               (<= 0 start end length)
+          (and (<= 0 start end length)
                (< start end)))
          (delimiter (and valid-range (char text start)))
          (type (and delimiter (markup-type-for-delimiter delimiter))))
