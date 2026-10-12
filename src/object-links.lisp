@@ -17,10 +17,6 @@
             "shortdoc")
   "Org link protocols understood without user-defined link registrations.")
 
-(defun link-object-valid-range-p (document start end)
-  (let ((length (length (document-text document))))
-    (and (<= 0 start end length) (< start end))))
-
 (defun link-object-prefix-at-p (text start end prefix)
   (and (<= (+ start (length prefix)) end)
        (string= prefix text :start2 start :end2 (+ start (length prefix)))))
@@ -487,8 +483,7 @@
                 (and (< suffix-start close)
                      (char= (char text suffix-start) #\())
               (when
-                  (and (> close suffix-start)
-                       (char= (char text (1- close)) #\)))
+                (char= (char text (1- close)) #\))
                 (setf args (link-object-macro-arguments
                             (subseq text (1+ suffix-start) (1- close))))
                 (setf suffix-start close)))
@@ -745,27 +740,26 @@
   "Recognize a link or a link-related secondary object at START.
 Return an OBJECT-MATCH or NIL; recursive children and restrictions are handled
 by the shared object parser."
-  (when (link-object-valid-range-p document start end)
-    (let* ((text (document-text document))
-           (character (char text start)))
-      (or
-       (and (%object-type-allowed-p :link container-type)
-            (link-object-radio-link document start end))
-       (case character
-         (#\[
-          (or (link-object-citation document start end)
-              (link-object-footnote document start end)
-              (link-object-bracket document start end)))
-         (#\<
-          (or (link-object-double-angle document start end t)
-              (link-object-angle-link document start end)
-              (link-object-double-angle document start end nil)))
-         (#\@
-          (if (link-object-prefix-at-p text start end "@@")
-              (link-object-export-snippet document start end)
-              (link-object-citation-reference document start end)))
-         (#\{ (link-object-macro document start end))
-         (otherwise
-          (cond
-            ((alpha-char-p character)
-             (link-object-plain-link document start end)))))))))
+  (let* ((text (document-text document))
+         (character (char text start)))
+    (or
+     (and (%object-type-allowed-p :link container-type)
+          (link-object-radio-link document start end))
+     (case character
+       (#\[
+        (or (link-object-citation document start end)
+            (link-object-footnote document start end)
+            (link-object-bracket document start end)))
+       (#\<
+        (or (link-object-double-angle document start end t)
+            (link-object-angle-link document start end)
+            (link-object-double-angle document start end nil)))
+       (#\@
+        (if (link-object-prefix-at-p text start end "@@")
+            (link-object-export-snippet document start end)
+            (link-object-citation-reference document start end)))
+       (#\{ (link-object-macro document start end))
+       (otherwise
+        (cond
+          ((alpha-char-p character)
+           (link-object-plain-link document start end))))))))
