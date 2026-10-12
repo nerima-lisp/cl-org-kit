@@ -1,0 +1,2 @@
+/t/fixtures/corpus/** -text
+/t/fixtures/expected/** -text

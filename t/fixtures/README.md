@@ -22,6 +22,10 @@ emacs --batch -Q --script scripts/generate-org-fixtures.el \
   --check-types t/fixtures/corpus t/fixtures/expected
 ```
 
+Files under `corpus/` and `expected/` are byte-sensitive test data; do not reformat them or
+normalize their whitespace or line endings. Git text conversion is disabled for both trees because
+CRLF, BOM, missing final newlines, and intentional trailing spaces are part of these parser inputs.
+
 The coverage check reads the generated trees and reports every `org-element` element and object
 type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
 type.
