@@ -3,7 +3,6 @@
 ;;;; Canonical Org serialization for detached or parsed node trees.
 (in-package #:org-kit)
 
-(defvar *emitter-active-nodes* nil)
 (defvar *emitter-node-count* 0)
 (defvar *emitter-radio-targets* nil)
 (defvar *emitter-element-depth* 0)
@@ -65,18 +64,15 @@
                (t (write-char character stream))))))
 
 (defun emitter-ensure-newline (string)
-  (if (and (plusp (length string))
-           (char= (char string (1- (length string))) #\Newline))
+  (if (char= (char string (1- (length string))) #\Newline)
       string
       (concatenate 'string string (string #\Newline))))
 
 (defun emitter-without-post-blank (node value)
   (let ((end (length value))
         (blank-count (node-post-blank node)))
-    (unless (typep blank-count '(integer 0))
-      (emitter-fail node "post-blank must be a non-negative integer"))
     (loop repeat blank-count
-          do (when (and (plusp end) (char= (char value (1- end)) #\Newline))
+          do (when (char= (char value (1- end)) #\Newline)
                (decf end))
              (let ((line-start
                      (1+ (or (position #\Newline value :end end :from-end t) -1))))
@@ -89,35 +85,40 @@
 
 (defun emitter-append-post-blank (string node)
   (let ((blank-count (node-post-blank node)))
-    (unless (typep blank-count '(integer 0))
-      (emitter-fail node "post-blank must be a non-negative integer"))
     (concatenate 'string
                  (emitter-ensure-newline string)
                  (make-string blank-count :initial-element #\Newline))))
 
 (defun emitter-format-affiliations (node)
-  (let ((properties (node-properties node)))
+  (let* ((properties (node-properties node))
+         (affiliations
+           (loop for (key value) on properties by #'cddr
+                 for name = (case key
+                              (:name "NAME")
+                              (:caption "CAPTION")
+                              (:header "HEADER")
+                              (:plot "PLOT")
+                              (:results "RESULTS")
+                              (otherwise
+                               (let ((symbol-name (and (keywordp key)
+                                                       (symbol-name key))))
+                                 (when (and symbol-name
+                                            (>= (length symbol-name) 5)
+                                            (string= "ATTR_" symbol-name
+                                                     :end2 5))
+                                   symbol-name))))
+                 when (and name
+                           (not (and (eq key :name)
+                                     (null value))))
+                   collect (list name key value))))
     (with-output-to-string (stream)
-      (loop for (key value) on properties by #'cddr
-            for name = (case key
-                         (:name "NAME")
-                         (:caption "CAPTION")
-                         (:header "HEADER")
-                         (:plot "PLOT")
-                         (:results "RESULTS")
-                         (otherwise
-                          (let ((symbol-name (and (keywordp key)
-                                                  (symbol-name key))))
-                            (when (and symbol-name
-                                       (>= (length symbol-name) 5)
-                                       (string= "ATTR_" symbol-name
-                                                :end2 5))
-                              symbol-name))))
-            when name
-              do (format stream "#+~A: ~A~%"
-                         name
-                         (emitter-trimmed-line-value
-                          node value "affiliated keyword value"))))))
+      (dolist (affiliation (reverse affiliations))
+        (destructuring-bind (name key value) affiliation
+          (declare (ignore key))
+          (format stream "#+~A: ~A~%"
+                  name
+                  (emitter-trimmed-line-value
+                   node value "affiliated keyword value")))))))
 
 (defun emitter-element-sequence (nodes)
   (emitter-join
@@ -193,9 +194,19 @@
                       (setf text-run "")
                       (write-string (emitter-render segment) stream))))
               (when (plusp (length text-run))
-                (emitter-object-plain-text
-                 (make-node :plain-text :properties (list :value text-run)))))))
-        (emitter-required-string node :raw-value))))
+                (let ((validation-run
+                        (if (char= (char text-run (1- (length text-run)))
+                                   #\Return)
+                            (subseq text-run 0 (1- (length text-run)))
+                            text-run)))
+                  (emitter-object-plain-text
+                   (make-node :plain-text
+                              :properties (list :value validation-run))))))))
+        (let ((raw-value (emitter-required-string node :raw-value)))
+          (when (emitter-object-recognized-inline-object-p raw-value)
+            (emitter-fail node
+                          "raw title contains inline-object syntax and needs a structured title"))
+          raw-value))))
 
 (defun emitter-title-metadata-prefix-p (title todo-keywords)
   (some (lambda (entry)
@@ -222,6 +233,11 @@
 (defun emitter-headline (node inline-task-p)
   (let* ((level (node-property node :level))
          (title (emitter-headline-title node))
+         (validation-title
+           (if (and (plusp (length title))
+                    (char= (char title (1- (length title))) #\Return))
+               (subseq title 0 (1- (length title)))
+               title))
          (todo (node-property node :todo-keyword))
          (todo-type (node-property node :todo-type))
          (priority (node-property node :priority))
@@ -235,8 +251,6 @@
                           effective-level))
                     (emitter-fail node
                                   "headline level must be a positive integer"))))
-    (unless (typep stars '(integer 1))
-      (emitter-fail node "headline level must be a positive integer"))
     (check-limit *emitter-current-limits* :max-heading-depth level)
     (unless (member (node-property node :commentedp) '(nil t))
       (emitter-fail node "commentedp must be boolean"))
@@ -267,17 +281,20 @@
                                               tag)))
                                 tags))))
       (emitter-fail node "tags contain an invalid tag name"))
-    (when (or (position #\Newline title) (position #\Return title))
+    (when (or (position #\Newline validation-title)
+              (position #\Return validation-title))
       (emitter-fail node "headline titles must be a single line"))
     (when (not (eql (not (null (member "ARCHIVE" tags :test #'string=)))
                     (not (null (node-property node :archivedp)))))
       (emitter-fail node "archivedp must agree with the ARCHIVE tag"))
-    (unless (string= title (string-trim '(#\Space #\Tab) title))
+    (unless (string= validation-title
+                    (string-trim '(#\Space #\Tab) validation-title))
       (emitter-fail node "headline title cannot have surrounding whitespace"))
-    (when (or (emitter-title-metadata-prefix-p title *emitter-todo-keywords*)
-              (emitter-title-priority-prefix-p title)
-              (emitter-title-comment-prefix-p title)
-              (emitter-title-tag-suffix-p title))
+    (when (or (emitter-title-metadata-prefix-p validation-title
+                                               *emitter-todo-keywords*)
+              (emitter-title-priority-prefix-p validation-title)
+              (emitter-title-comment-prefix-p validation-title)
+              (emitter-title-tag-suffix-p validation-title))
       (emitter-fail node "headline title begins or ends with parsed metadata"))
     (let ((header
             (with-output-to-string (stream)
@@ -303,9 +320,7 @@
           (concatenate 'string header
                        (emitter-element-sequence (node-children node)))))))
 
-(defun emitter-check-enter-node (node)
-  (when (member node *emitter-active-nodes* :test #'eq)
-    (emitter-fail node "the node tree contains a cycle"))
+(defun emitter-check-enter-node ()
   (incf *emitter-node-count*)
   (check-limit *emitter-current-limits*
                :max-node-count
@@ -313,11 +328,8 @@
 
 (defun emitter-object-child-string (node)
   (check-type node node)
-  (unless (eq (node-type-category (node-type node)) :object)
-    (emitter-fail node "expected an inline object"))
-  (emitter-check-enter-node node)
-  (let ((*emitter-object-depth* (1+ *emitter-object-depth*))
-        (*emitter-active-nodes* (cons node *emitter-active-nodes*)))
+  (emitter-check-enter-node)
+  (let ((*emitter-object-depth* (1+ *emitter-object-depth*)))
     (check-limit *emitter-current-limits* :max-object-depth
                  *emitter-object-depth*)
     (emitter-object-string node)))
@@ -328,11 +340,8 @@
     (if (eq category :object)
         (emitter-object-child-string node)
         (progn
-          (unless (member category '(:document :greater-element :lesser-element))
-            (emitter-fail node "unknown node category"))
-          (emitter-check-enter-node node)
-          (let ((*emitter-element-depth* (1+ *emitter-element-depth*))
-                (*emitter-active-nodes* (cons node *emitter-active-nodes*)))
+          (emitter-check-enter-node)
+          (let ((*emitter-element-depth* (1+ *emitter-element-depth*)))
             (check-limit *emitter-current-limits* :max-element-depth
                          *emitter-element-depth*)
             (let ((text (emitter-render-element node)))
@@ -349,7 +358,9 @@
          (prefix "\\begin{")
          (environment-end
            (and (>= (length first-line) (length prefix))
-                (string-equal prefix first-line :end1 (length prefix))
+                (string-equal prefix first-line
+                              :end1 (length prefix)
+                              :end2 (length prefix))
                 (position #\} first-line :start (length prefix))))
          (environment
            (and environment-end
@@ -363,8 +374,7 @@
           (found-close nil))
       (loop with start = (1+ first-newline)
             for newline = (position #\Newline value :start start)
-            for end = (or newline (length value))
-            for line = (subseq value start end)
+            for line = (subseq value start newline)
             do (when (string-equal (string-trim '(#\Space #\Tab) line) closer)
                  (unless (and newline (= (1+ newline) (length value)))
                    (emitter-fail node "LaTeX close marker must be the final line"))
@@ -386,11 +396,7 @@
          (emitter-fail node "an empty section has no Org representation"))
        (loop for child in children
              for position from 0
-             when (or (eq (node-type child) :property-drawer)
-                      (and (eq (node-type child) :drawer)
-                           (stringp (node-property child :drawer-name))
-                           (string-equal (node-property child :drawer-name)
-                                         "PROPERTIES")))
+             when (eq (node-type child) :property-drawer)
                unless (or (eql position 0)
                           (eq (node-type (nth (1- position) children))
                               :planning))
@@ -500,6 +506,8 @@
       (:table
        (case (node-property node :type)
          (:org
+          (unless children
+            (emitter-fail node "an empty Org table has no representation"))
           (unless (every (lambda (child)
                            (eq (node-type child) :table-row))
                          children)
@@ -507,19 +515,28 @@
           (emitter-element-sequence children))
          (:table.el
           (let ((source (node-text node)))
-            (unless source
-              (emitter-fail node "detached table.el nodes have no row data"))
-            (let* ((normalized (emitter-normalize-newlines source))
-                   (begin (node-begin node))
-                   (affiliated (node-post-affiliated node))
-                   (prefix-length
-                     (if (and (integerp begin) (integerp affiliated))
-                         (- affiliated begin)
-                         0)))
-              (unless (<= 0 prefix-length (length normalized))
-                (emitter-fail node "table.el affiliated span is invalid"))
-              (emitter-without-post-blank
-               node (subseq normalized prefix-length)))))
+            (if source
+                (let* ((normalized (emitter-normalize-newlines source))
+                       (begin (node-begin node))
+                       (affiliated (node-post-affiliated node))
+                       (prefix-length
+                         (if (integerp affiliated)
+                             (- affiliated begin)
+                             0)))
+                  (unless (<= 0 prefix-length (length normalized))
+                    (emitter-fail node "table.el affiliated span is invalid"))
+                  (let ((table-source (subseq normalized prefix-length)))
+                    (unless (some (lambda (character)
+                                    (not (find character
+                                               '(#\Space #\Tab #\Newline #\Return))))
+                                  table-source)
+                      (emitter-fail node "table.el source has no table data"))
+                    (emitter-without-post-blank node table-source)))
+                (if (and (null children)
+                         (null (node-property node :tblfm)))
+                    (format nil "+-+~%")
+                    (emitter-fail node
+                                  "detached table.el nodes have no row data")))))
          (otherwise
           (emitter-fail node "unknown table type ~S"
                         (node-property node :type)))))
@@ -548,13 +565,17 @@
       (:clock
        (let ((timestamp (node-property node :value))
              (status (node-property node :status)))
-         (unless (node-p timestamp)
-           (emitter-fail node "a clock needs its timestamp node"))
+         (unless (or (null timestamp) (node-p timestamp))
+           (emitter-fail node "clock timestamp must be a node when present"))
          (unless (member status '(:running :closed))
            (emitter-fail node "clock status must be :RUNNING or :CLOSED"))
-         (format nil "CLOCK: ~A~@[ => 0:00~]~%"
-                 (emitter-render timestamp)
-                 (eq status :closed))))
+         (format nil "CLOCK:~@[ ~A~]~@[~A=> 0:00~]~%"
+                 (and timestamp (emitter-render timestamp))
+                 (and (eq status :closed)
+                      (if (and timestamp
+                               (plusp (node-post-blank timestamp)))
+                          ""
+                          " ")))))
       (:comment
        (format nil "# ~A~%"
                (emitter-line-value node
@@ -632,10 +653,11 @@
                                            (emitter-required-string node :language)
                                            "source language"))
              (switches (node-property node :switches)))
-         (when (and (plusp (length language))
-                    (position-if (lambda (character)
-                                   (find character '(#\Space #\Tab)))
-                                 language))
+         (when (zerop (length language))
+           (emitter-fail node "source language must not be empty"))
+         (when (position-if (lambda (character)
+                              (find character '(#\Space #\Tab)))
+                            language)
            (emitter-fail node "source language must be a single word"))
          (when (and switches
                     (or (not (stringp switches))
@@ -643,11 +665,9 @@
                         (not (string= switches
                                       (string-trim '(#\Space #\Tab) switches)))))
            (emitter-fail node "source switches must be non-empty and trimmed"))
-         (when (and (zerop (length language)) switches)
-           (emitter-fail node "source switches require a language"))
          (emitter-raw-block node
-                            (format nil "#+BEGIN_SRC~@[ ~A~]~@[ ~A~]"
-                                    (and (plusp (length language)) language)
+                            (format nil "#+BEGIN_SRC ~A~@[ ~A~]"
+                                    language
                                     (and switches
                                          (emitter-line-value node switches
                                                              "source switches")))
@@ -678,9 +698,7 @@
                       children)
          (emitter-fail node "verse blocks can contain only inline objects"))
        (emitter-raw-block node "#+BEGIN_VERSE" "#+END_VERSE"
-                          (emitter-join (mapcar #'emitter-render children))))
-      (otherwise
-       (emitter-fail node "no element serializer is defined")))))
+                          (emitter-join (mapcar #'emitter-render children)))))))
 
 (defun emitter-fixed-width (node)
   (let ((value (emitter-normalize-newlines
@@ -742,20 +760,42 @@
     (emitter-join
      (mapcar (lambda (item) (emitter-item item indentation)) items))))
 
-(defun emitter-valid-list-bullet-p (bullet list-type)
+(defun emitter-valid-list-bullet-p (bullet list-type &optional allow-mixed-p)
   (and (stringp bullet)
-       (if (eq list-type :ordered)
-           (let ((end (position-if-not #'digit-char-p bullet)))
-             (and end
-                  (<= (+ end 2) (length bullet))
-                  (find (char bullet end) '(#\. #\)))
-                  (find (char bullet (1+ end)) '(#\Space #\Tab))
-                  (= (+ end 2) (length bullet))))
-           (and (= (length bullet) 2)
-                (find (char bullet 0) '(#\- #\+ #\*))
-                (find (char bullet 1) '(#\Space #\Tab))))))
+       (let ((ordered-p
+               (let ((end (position-if-not #'digit-char-p bullet)))
+                 (and end
+                      (<= (+ end 2) (length bullet))
+                      (find (char bullet end) '(#\. #\)))
+                      (find (char bullet (1+ end)) '(#\Space #\Tab))
+                      (= (+ end 2) (length bullet)))))
+             (unordered-p
+               (and (= (length bullet) 2)
+                    (find (char bullet 0) '(#\- #\+ #\*))
+                    (find (char bullet 1) '(#\Space #\Tab)))))
+         (and (or ordered-p unordered-p)
+              (or allow-mixed-p
+                  (if (eq list-type :ordered)
+                      ordered-p
+                      unordered-p))))))
 
-(defun emitter-item-marker (node list-type)
+(defun emitter-item-markup-types (nodes)
+  (loop for node in nodes
+        when (and (node-p node)
+                  (member (node-type node)
+                          '(:bold :italic :underline :strike-through :code :verbatim)))
+          collect (node-type node)))
+
+(defun emitter-item-markup-reparses-p (tag text)
+  (let ((expected (emitter-item-markup-types tag)))
+    (or (null expected)
+        (let ((document (make-document text)))
+          (prepare-object-parsing document)
+          (equal expected
+                 (emitter-item-markup-types
+                  (parse-objects document 0 (length text) :paragraph)))))))
+
+(defun emitter-item-marker (node list-type first-item-p)
   (let* ((bullet (node-property node :bullet))
          (checkbox (node-property node :checkbox))
          (counter (node-property node :counter))
@@ -765,16 +805,17 @@
     (when (and counter (not (typep counter '(integer 1))))
       (emitter-fail node "item counter must be a positive integer"))
     (when (and tag (not (listp tag)))
-      (emitter-fail node "item tag must be a list of inline nodes"))
-    (unless (emitter-valid-list-bullet-p bullet list-type)
+      (emitter-fail node "item tag must be a list of text and inline objects"))
+    (unless (emitter-valid-list-bullet-p bullet list-type (not first-item-p))
       (emitter-fail node "item bullet is not valid for its list type"))
     (when (and tag
                (not (every (lambda (child)
-                             (and (node-p child)
-                                  (eq (node-type-category (node-type child))
-                                      :object)))
+                             (or (stringp child)
+                                 (and (node-p child)
+                                      (eq (node-type-category (node-type child))
+                                          :object))))
                            tag)))
-      (emitter-fail node "item tags can contain only inline objects"))
+      (emitter-fail node "item tags can contain only text and inline objects"))
     (with-output-to-string (stream)
       (write-string bullet stream)
       (when checkbox
@@ -786,15 +827,34 @@
       (when counter
         (format stream "[@~D] " counter))
       (when tag
-        (let ((tag-text (emitter-join (mapcar #'emitter-render tag))))
+        (let ((tag-text
+                (with-output-to-string (tag-stream)
+                  (let ((text-run ""))
+                    (dolist (segment tag)
+                      (if (stringp segment)
+                          (setf text-run (concatenate 'string text-run segment))
+                          (progn
+                            (when (plusp (length text-run))
+                              (emitter-object-plain-text
+                               (make-node :plain-text
+                                          :properties (list :value text-run)))
+                              (write-string text-run tag-stream)
+                              (setf text-run ""))
+                            (write-string (emitter-render segment) tag-stream))))
+                    (when (plusp (length text-run))
+                      (emitter-object-plain-text
+                       (make-node :plain-text
+                                  :properties (list :value text-run)))
+                      (write-string text-run tag-stream))))))
           (when (or (position #\Newline tag-text)
                     (position #\Return tag-text)
                     (search "::" tag-text)
                     (not (string= tag-text
                                   (string-trim '(#\Space #\Tab) tag-text))))
             (emitter-fail node "item tag cannot be reparsed exactly"))
-          (format stream "~A :: " tag-text)))
-      (get-output-stream-string stream))))
+          (unless (emitter-item-markup-reparses-p tag tag-text)
+            (emitter-fail node "item tag markup cannot be reparsed exactly"))
+          (format stream "~A :: " tag-text))))))
 
 (defun emitter-item-paragraph-string (node indentation first-paragraph-p)
   (let ((text (emitter-render node)))
@@ -823,8 +883,10 @@
   (unless (and (node-p (node-parent node))
                (eq (node-type (node-parent node)) :plain-list))
     (emitter-fail node "items must be inside a plain list"))
-  (let* ((list-type (node-property (node-parent node) :type))
-         (marker (emitter-item-marker node list-type))
+  (let* ((parent (node-parent node))
+         (list-type (node-property parent :type))
+         (first-item-p (eq node (first (node-children parent))))
+         (marker (emitter-item-marker node list-type first-item-p))
          (children (node-children node))
          (line-prefix (make-string indentation :initial-element #\Space)))
     (when (and (zerop indentation) (string= marker "* "))
@@ -884,15 +946,12 @@
         finally (return nil)))
 
 (defun emitter-radio-target-would-link-p (root target)
-  (labels ((visit-value (value active)
+  (labels ((visit-value (value)
              (typecase value
-               (node (visit-node value active))
-               (cons (some (lambda (item) (visit-value item active)) value))))
-           (visit-node (node active)
-             (when (member node active :test #'eq)
-               (emitter-fail node "the node tree contains a cycle"))
-             (let* ((next-active (cons node active))
-                    (type (node-type node))
+               (node (visit-node value))
+               (cons (some #'visit-value value))))
+           (visit-node (node)
+             (let* ((type (node-type node))
                     (parent (node-parent node))
                     (container-type (if (node-p parent)
                                         (node-type parent)
@@ -906,13 +965,12 @@
                              "")))
                    (and (not (eq type :radio-target))
                         (or (some (lambda (child)
-                                    (visit-node child next-active))
+                                    (visit-node child))
                                   (node-children node))
                             (some (lambda (key)
-                                    (visit-value (node-property node key)
-                                                 next-active))
+                                    (visit-value (node-property node key)))
                                   '(:title :tag))))))))
-    (visit-node root nil)))
+    (visit-node root)))
 
 (defun emit-org (node &key (limits (make-limits)))
   "Return canonical Org text for NODE without performing stream or encoding I/O.
@@ -920,8 +978,7 @@ Signal ORG-KIT-ERROR when the tree has no lossless Org representation and
 ORG-RESOURCE-LIMIT-ERROR when the serialized text exceeds MAX-OUTPUT-LENGTH."
   (check-type node node)
   (check-type limits limits)
-  (let* ((*emitter-active-nodes* nil)
-         (*emitter-node-count* 0)
+  (let* ((*emitter-node-count* 0)
          (*emitter-radio-targets* nil)
          (*emitter-element-depth* 0)
          (*emitter-object-depth* 0)
@@ -930,35 +987,46 @@ ORG-RESOURCE-LIMIT-ERROR when the serialized text exceeds MAX-OUTPUT-LENGTH."
          (*emitter-odd-levels* nil)
          (*emitter-current-limits* limits)
          (root node))
-    (labels ((scan (current active seen settings-suppressed)
+    (labels ((scan (current active settings-suppressed)
                (when (member current active :test #'eq)
                  (emitter-fail current "the node tree contains a cycle"))
-               (unless (member current seen :test #'eq)
-                 (unless settings-suppressed
-                   (emitter-track-settings current))
-                 (when (eq (node-type current) :radio-target)
-                   (let ((value (node-property current :value)))
-                     (when (stringp value)
-                       (pushnew value *emitter-radio-targets* :test #'string=))))
-                 (let ((child-settings-suppressed
-                         (or settings-suppressed
-                             (member (node-type current)
-                                     '(:center-block :quote-block :special-block
-                                       :comment-block :example-block :export-block
-                                       :src-block :verse-block)))))
+               (unless settings-suppressed
+                 (emitter-track-settings current))
+               (when (eq (node-type current) :radio-target)
+                 (let ((value (node-property current :value)))
+                   (when (stringp value)
+                     (pushnew value *emitter-radio-targets* :test #'string=))))
+               (let ((child-settings-suppressed
+                       (or settings-suppressed
+                           (member (node-type current)
+                                   '(:center-block :quote-block :special-block
+                                     :comment-block :example-block :export-block
+                                     :src-block :verse-block)))))
                  (dolist (child (node-children current))
-                   (scan child (cons current active) (cons current seen)
-                         child-settings-suppressed))
-                 (dolist (key '(:title :tag))
+                   (scan child (cons current active) child-settings-suppressed))
+                 (dolist (key '(:value :title :tag))
                    (let ((value (node-property current key)))
-                     (when (listp value)
-                       (dolist (child value)
-                         (when (node-p child)
-                           (scan child (cons current active)
-                                 (cons current seen)
-                                 child-settings-suppressed))))))))))
-      (scan root nil nil nil))
-    (let ((text (emitter-render node)))
+                     (cond
+                       ((node-p value)
+                        (scan value (cons current active)
+                              child-settings-suppressed))
+                       ((listp value)
+                        (dolist (child value)
+                          (when (node-p child)
+                            (scan child (cons current active)
+                                  child-settings-suppressed))))))))))
+      (scan root nil nil))
+    (let* ((document (node-document node))
+           (rendered-text (emitter-render node))
+           (text (if (and document
+                          (eq node (document-root document))
+                          (not (document-final-newline-p document))
+                          (plusp (length rendered-text))
+                          (char= (char rendered-text
+                                       (1- (length rendered-text)))
+                                 #\Newline))
+                     (subseq rendered-text 0 (1- (length rendered-text)))
+                     rendered-text)))
       (dolist (target *emitter-radio-targets*)
         (when (emitter-radio-target-would-link-p root target)
           (emitter-fail node
