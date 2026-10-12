@@ -159,6 +159,48 @@
                 override-headlines)
                :to-equal
                '(("REVIEW" :todo) ("CLOSED" :done))))))
+          (it "leaves an empty TODO keyword name unrecognized"
+              (let* ((document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "#+TODO: (TODO) DONE"
+                        "* TODO Item")))
+                     (headline
+                      (first
+                       (reader-headings-test-elements document :headline))))
+                (with-soft-assertions
+                 (expect (node-property headline :todo-keyword) :to-be nil)
+                 (expect (node-property headline :raw-value)
+                         :to-equal
+                         "TODO Item"))))
+          (it "ignores an unterminated bracketed TODO setting key"
+              (let* ((document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "#+SEQ_TODO[flow: NEXT | DONE"
+                        "* NEXT Item")))
+                     (headline
+                      (first
+                       (reader-headings-test-elements document :headline))))
+                (with-soft-assertions
+                 (expect (node-property headline :todo-keyword) :to-be nil)
+                 (expect (node-property headline :raw-value)
+                         :to-equal
+                         "NEXT Item"))))
+          (it "does not treat an unnamed BEGIN_ keyword as a block"
+              (let* ((document
+                      (parse-org
+                       (reader-headings-test-lines "#+BEGIN_" "* Heading")))
+                     (headlines
+                      (reader-headings-test-elements document :headline)))
+                (with-soft-assertions
+                 (expect (mapcar (lambda (node) (node-property node :raw-value))
+                                 headlines)
+                         :to-equal
+                         '("Heading"))
+                 (expect (reader-headings-test-elements document :example-block)
+                         :to-equal
+                         '()))))
           (it "applies STARTUP odd levels to heading levels and ancestry"
               (let* ((document
                       (parse-org
@@ -403,8 +445,10 @@
                         "* Parent"
                         ""
                         "#+begin_example"
-                        "** Ghost heading"
-                        "#+TODO: HIDDEN | FINISHED"
+                        ",** Ghost heading"
+                        ",#+TODO: HIDDEN | FINISHED"
+                        ",#+END_"
+                        ",,** Literal comma heading"
                         "#+end_example"
                         "** Child")))
                      (headlines
@@ -412,16 +456,24 @@
                      (parent (first headlines))
                      (child (second headlines))
                      (section
-                      (find :section (node-children parent) :key #'node-type)))
+                      (find :section (node-children parent) :key #'node-type))
+                     (example-block
+                      (find :example-block (node-children section)
+                            :key #'node-type)))
                 (with-soft-assertions
                  (expect (mapcar (lambda (node) (node-property node :raw-value))
                                  headlines)
                          :to-equal
                          '("Parent" "Child"))
                  (expect (node-parent child) :to-be parent)
-                 (expect (find :example-block (node-children section)
-                               :key #'node-type)
-                         :to-be-truthy)
+                 (expect (node-property example-block :value)
+                         :to-equal
+                         (format nil "~A~%"
+                                 (reader-headings-test-lines
+                                  "** Ghost heading"
+                                  "#+TODO: HIDDEN | FINISHED"
+                                  "#+END_"
+                                  ",** Literal comma heading")))
                  (expect (assoc "HIDDEN"
                                 (getf (document-settings document)
                                       :todo-keywords)
@@ -430,18 +482,45 @@
                          :to-be
                          nil))))
 
+          (it "keeps an incomplete named block end marker as content"
+              (let* ((document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "* Parent"
+                        "#+BEGIN_QUOTE"
+                        "#+END_"
+                        "#+END_QUOTE"
+                        "* Child")))
+                     (headlines
+                      (reader-headings-test-elements document :headline))
+                     (quote-block
+                      (first
+                       (reader-headings-test-elements document :quote-block))))
+                (with-soft-assertions
+                 (expect (mapcar (lambda (node) (node-property node :raw-value))
+                                 headlines)
+                         :to-equal
+                         '("Parent" "Child"))
+                 (expect (node-text (first (node-children quote-block)))
+                         :to-equal
+                         (format nil "#+END_~%")))))
+
           (it "parses numeric priority and special tags, preserving title objects"
               (let* ((document
                       (parse-org
                        (reader-headings-test-lines
                         "* [#42] Numeric :_team:@private:%draft:"
                         "* [#65] Invalid :bad/tag:"
+                        "* Empty tags ::"
+                        "* [#100] Long priority"
                         "* Object /styled/")))
                      (headlines
                       (reader-headings-test-elements document :headline))
                      (numeric (first headlines))
                      (invalid (second headlines))
-                     (styled (third headlines))
+                     (empty-tags (third headlines))
+                     (long-priority (fourth headlines))
+                     (styled (fifth headlines))
                      (italic
                       (find-if #'node-p (node-property styled :title))))
                 (with-soft-assertions
@@ -454,6 +533,14 @@
                  (expect (node-property invalid :raw-value)
                          :to-equal
                          "[#65] Invalid :bad/tag:")
+                 (expect (node-property empty-tags :tags) :to-be nil)
+                 (expect (node-property empty-tags :raw-value)
+                         :to-equal
+                         "Empty tags ::")
+                 (expect (node-property long-priority :priority) :to-be nil)
+                 (expect (node-property long-priority :raw-value)
+                         :to-equal
+                         "[#100] Long priority")
                  (expect (node-type italic) :to-be :italic)
                  (expect (node-parent italic) :to-be styled))))
 

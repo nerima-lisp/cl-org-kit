@@ -143,8 +143,7 @@
               (reader-heading-skip-horizontal-space value end (length value)))
              (replacement-end
               (reader-heading-trim-right value replacement-start (length value))))
-        (when (and (< start end) (< replacement-start replacement-end))
-          (cons name (subseq value replacement-start replacement-end)))))))
+        (cons name (subseq value replacement-start replacement-end))))))
 
 (defmethod reader-buffer-settings ((context reader-context) explicit-settings)
   (let ((settings (reader-default-settings))
