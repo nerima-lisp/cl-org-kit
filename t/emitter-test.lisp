@@ -544,6 +544,34 @@
           (expect (emitter-test-node-projection root)
                   :to-equal (emitter-test-node-projection round-trip))))))
 
+  (it "preserves title text that follows emitted headline metadata"
+    (dolist (headline
+             (list
+              (make-node :headline
+                         :properties (list :level 1
+                                           :todo-keyword "TODO"
+                                           :todo-type :todo
+                                           :title (list "TODO task")))
+              (make-node :headline
+                         :properties (list :level 1
+                                           :priority 65
+                                           :title (list "[#A] task")))
+              (make-node :headline
+                         :properties (list :level 1
+                                           :commentedp t
+                                           :title (list "COMMENT task")))
+              (make-node :headline
+                         :properties (list :level 1
+                                           :tags (list "outer")
+                                           :title (list "task :inner:")))))
+      (let* ((output (emit-org headline))
+             (parsed (first (node-children (document-root (parse-org output))))))
+        (expect (emitter-test-generated-projection parsed)
+                :to-equal (emitter-test-generated-projection headline))
+        (dolist (key '(:todo-keyword :todo-type :priority :commentedp :tags))
+          (expect (node-property parsed key)
+                  :to-equal (node-property headline key))))))
+
   (it "rejects headline metadata that would be reparsed differently"
     (dolist (headline
              (list

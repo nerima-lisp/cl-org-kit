@@ -308,11 +308,18 @@
     (unless (string= validation-title
                     (string-trim '(#\Space #\Tab) validation-title))
       (emitter-fail node "headline title cannot have surrounding whitespace"))
-    (when (or (emitter-title-metadata-prefix-p validation-title
-                                               *emitter-todo-keywords*)
-              (emitter-title-priority-prefix-p validation-title)
-              (emitter-title-comment-prefix-p validation-title)
-              (emitter-title-tag-suffix-p validation-title))
+    (when (or (and (null todo)
+                   (null priority)
+                   (not commented)
+                   (emitter-title-metadata-prefix-p validation-title
+                                                    *emitter-todo-keywords*))
+              (and (null priority)
+                   (not commented)
+                   (emitter-title-priority-prefix-p validation-title))
+              (and (not commented)
+                   (emitter-title-comment-prefix-p validation-title))
+              (and (null tags)
+                   (emitter-title-tag-suffix-p validation-title)))
       (emitter-fail node "headline title begins or ends with parsed metadata"))
     (let ((header
             (with-output-to-string (stream)
