@@ -150,7 +150,10 @@
       # run-tests.lisp compiles the scripts for its warning gate, and the
       # coverage check runs scripts/check-coverage.pl, so both need scripts/
       # and Perl inside the build.
-      sourceInclude = [ ./scripts ];
+      sourceInclude = [
+        ./scripts
+        ./t/fixtures
+      ];
       packageArgs = ctx: {
         nativeBuildInputs = [ ctx.pkgs.perl ];
       };
