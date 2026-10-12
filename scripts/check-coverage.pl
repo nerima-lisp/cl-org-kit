@@ -110,21 +110,226 @@ sub exclusion_rules {
   return \@rules;
 }
 
+sub source_code_lines {
+  my ($lines) = @_;
+  my @code = map { '' } @$lines;
+  my $source = join '', @$lines;
+  my ($line, $offset) = (0, 0);
+  my ($in_string, $string_escape, $in_symbol, $symbol_escape, $line_comment)
+    = (0, 0, 0, 0, 0);
+  my $block_comment_depth = 0;
+
+  while ($offset < length($source)) {
+    my $character = substr($source, $offset, 1);
+    if ($character eq "\n") {
+      $code[$line++] .= "\n";
+      $line_comment = 0;
+      $string_escape = 0 if $in_string;
+      $symbol_escape = 0 if $in_symbol;
+      $offset++;
+      next;
+    }
+
+    if ($line_comment) {
+      $code[$line] .= ' ';
+      $offset++;
+      next;
+    }
+
+    if ($block_comment_depth) {
+      my $pair = substr($source, $offset, 2);
+      if ($pair eq '#|') {
+        $block_comment_depth++;
+        $code[$line] .= '  ';
+        $offset += 2;
+      } elsif ($pair eq '|#') {
+        $block_comment_depth--;
+        $code[$line] .= '  ';
+        $offset += 2;
+      } else {
+        $code[$line] .= ' ';
+        $offset++;
+      }
+      next;
+    }
+
+    if ($in_string) {
+      if ($string_escape) {
+        $string_escape = 0;
+      } elsif ($character eq '\\') {
+        $string_escape = 1;
+      } elsif ($character eq '"') {
+        $in_string = 0;
+      }
+      $code[$line] .= ' ';
+      $offset++;
+      next;
+    }
+
+    if ($in_symbol) {
+      if ($symbol_escape) {
+        $symbol_escape = 0;
+        $code[$line] .= 'x';
+      } elsif ($character eq '\\') {
+        $symbol_escape = 1;
+        $code[$line] .= 'x';
+      } elsif ($character eq '|') {
+        $in_symbol = 0;
+        $code[$line] .= '|';
+      } else {
+        $code[$line] .= 'x';
+      }
+      $offset++;
+      next;
+    }
+
+    my $pair = substr($source, $offset, 2);
+    if ($pair eq '#\\') {
+      $code[$line] .= '  ';
+      $offset += 2;
+      if ($offset < length($source)) {
+        my $literal = substr($source, $offset, 1);
+        if ($literal =~ /[A-Za-z]/) {
+          while ($offset < length($source)
+                 && substr($source, $offset, 1) =~ /[A-Za-z0-9-]/) {
+            $code[$line] .= ' ';
+            $offset++;
+          }
+        } else {
+          if ($literal eq "\n") {
+            $code[$line++] .= "\n";
+          } else {
+            $code[$line] .= ' ';
+          }
+          $offset++;
+        }
+      }
+    } elsif ($pair eq '#|') {
+      $block_comment_depth = 1;
+      $code[$line] .= '  ';
+      $offset += 2;
+    } elsif ($character eq '"') {
+      $in_string = 1;
+      $code[$line] .= ' ';
+      $offset++;
+    } elsif ($character eq ';') {
+      $line_comment = 1;
+      $code[$line] .= ' ';
+      $offset++;
+    } elsif ($character eq '|') {
+      $in_symbol = 1;
+      $code[$line] .= '|';
+      $offset++;
+    } elsif ($character eq '\\') {
+      $code[$line] .= 'x';
+      $offset++;
+      if ($offset < length($source)) {
+        if (substr($source, $offset, 1) eq "\n") {
+          $code[$line++] .= "\n";
+        } else {
+          $code[$line] .= 'x';
+        }
+        $offset++;
+      }
+    } else {
+      $code[$line] .= $character;
+      $offset++;
+    }
+  }
+
+  return \@code;
+}
+
+sub defun_header_end_line {
+  my ($lines, $start) = @_;
+  my $text = join '', @$lines[$start .. $#$lines];
+  pos($text) = 0;
+  fail("cannot locate DEFUN header at line " . ($start + 1))
+    unless $text =~ /\G\s*\(\s*(?:defun|defmacro)\b/gc;
+  $text =~ /\G\s*/gc;
+  my $name_character = substr($text, pos($text), 1);
+  if ($name_character eq '(') {
+    my $name_depth = 0;
+    while (pos($text) < length($text)) {
+      my $character = substr($text, pos($text), 1);
+      pos($text)++;
+      $name_depth++ if $character eq '(';
+      $name_depth-- if $character eq ')';
+      last if $name_depth == 0;
+    }
+  } elsif ($name_character eq '|') {
+    pos($text)++;
+    my $closed = 0;
+    while (pos($text) < length($text)) {
+      my $character = substr($text, pos($text), 1);
+      pos($text)++;
+      if ($character eq '\\') {
+        pos($text)++ if pos($text) < length($text);
+      } elsif ($character eq '|') {
+        $closed = 1;
+        last;
+      }
+    }
+    fail("unterminated escaped DEFUN name at line " . ($start + 1))
+      unless $closed;
+  } else {
+    my $name_start = pos($text);
+    while (pos($text) < length($text)) {
+      my $character = substr($text, pos($text), 1);
+      last if $character =~ /\s/ || $character eq '(' || $character eq ')';
+      if ($character eq '\\') {
+        pos($text)++;
+        pos($text)++ if pos($text) < length($text);
+      } else {
+        pos($text)++;
+      }
+    }
+    fail("cannot locate DEFUN name at line " . ($start + 1))
+      if pos($text) == $name_start;
+  }
+  $text =~ /\G\s*/gc;
+  fail("cannot locate DEFUN lambda list at line " . ($start + 1))
+    unless substr($text, pos($text), 1) eq '(';
+
+  my $depth = 0;
+  my $closing;
+  for (my $index = pos($text); $index < length($text); $index++) {
+    my $character = substr($text, $index, 1);
+    $depth++ if $character eq '(';
+    if ($character eq ')') {
+      $depth--;
+      if ($depth == 0) {
+        $closing = $index;
+        last;
+      }
+    }
+  }
+  fail("unterminated DEFUN lambda list at line " . ($start + 1))
+    unless defined $closing;
+
+  my $before = substr($text, 0, $closing);
+  my $line = $start + 1 + (() = $before =~ /\n/g);
+  my $line_end = index($text, "\n", $closing);
+  $line_end = length($text) if $line_end < 0;
+  my $after = substr($text, $closing + 1, $line_end - $closing - 1);
+  return $line - 1 if $after =~ /\S/;
+  return $line;
+}
+
 sub source_exclusion_lines {
   my ($path, $rules) = @_;
   open my $handle, '<', $path or fail("cannot read source $path: $!");
   my @lines = <$handle>;
   close $handle or fail("cannot read source $path: $!");
-  my %allowed = map { $_->{head} => 1 } @$rules;
+  my $code = source_code_lines(\@lines);
+  my %allowed = map { $_->{head} => 1 }
+    grep { $_->{kind} eq 'top-level-form' } @$rules;
   my @excluded;
   my $depth = 0;
   my $start;
   for my $index (0 .. $#lines) {
-    my $line = $lines[$index];
-    my $clean = $line;
-    $clean =~ s/;.*//;
+    my $clean = $code->[$index];
     my $countable = $clean;
-    $countable =~ s/"(?:\\.|[^"\\])*"//g;
     my $opens = () = $countable =~ /\(/g;
     my $closes = () = $countable =~ /\)/g;
     if ($depth == 0 && $clean =~ /\(\s*([A-Za-z0-9*+!?_-]+)/) {
@@ -134,9 +339,7 @@ sub source_exclusion_lines {
         my $balance = 0;
         my $end = $index;
         for my $j ($index .. $#lines) {
-          my $part = $lines[$j];
-          $part =~ s/;.*//;
-          $part =~ s/"(?:\\.|[^"\\])*"//g;
+          my $part = $code->[$j];
           $balance += (() = $part =~ /\(/g);
           $balance -= (() = $part =~ /\)/g);
           if ($balance <= 0) {
@@ -146,21 +349,11 @@ sub source_exclusion_lines {
         }
         push @excluded, [$start, $end + 1, $head];
       } elsif ($head eq 'defun' || $head eq 'defmacro') {
-        my $balance = 0;
-        my $header_end = $index + 1;
-        for my $j ($index .. $#lines) {
-          my $part = $lines[$j];
-          $part =~ s/;.*//;
-          $part =~ s/"(?:\\.|[^"\\])*"//g;
-          $balance += (() = $part =~ /\(/g);
-          $balance -= (() = $part =~ /\)/g);
-          if ($j > $index && $part =~ /\(\s*[^\s()]+/ && $balance <= 1) {
-            $header_end = $j;
-            last;
-          }
+        if (grep { $_->{kind} eq 'defun-header' } @$rules) {
+          my $header_end = defun_header_end_line($code, $index);
+          push @excluded, [$start, $header_end, $head]
+            if $header_end >= $start;
         }
-        push @excluded, [$start, $header_end, $head]
-          if grep { $_->{kind} eq 'defun-header' } @$rules;
       }
     }
     $depth += $opens - $closes;
@@ -271,11 +464,16 @@ for my $row (@$rows) {
   }
   if (@reasons) {
     my $uncovered = $row->{uncovered};
-    my $residual_is_excluded = $uncovered eq '-'
+    my $branch_is_below_minimum
+      = defined $values[1] && $values[1] < $minimum[1];
+    # The summary has no branch locations, so line exclusions cannot justify
+    # a branch coverage deficit.
+    my $residual_is_excluded = !$branch_is_below_minimum
+      && ($uncovered eq '-'
       ? @$ranges
       : all { my $line = $_; line_is_excluded($line, $ranges) }
             map { my ($start, $end) = split /-/, $_; $end //= $start;
-                  ($start .. $end) } split /,/, $uncovered;
+                  ($start .. $end) } split /,/, $uncovered);
     push @failures, { file => $row->{file}, reasons => \@reasons }
       unless $residual_is_excluded;
   }
