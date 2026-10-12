@@ -84,7 +84,8 @@
                      (empty (second headlines)))
                 (expect (node-property trimmed :raw-value) :to-equal "Trimmed")
                 (expect (node-property trimmed :title) :to-equal '("Trimmed"))
-                (expect (node-property empty :raw-value) :to-equal "")))
+                (expect (node-property empty :raw-value) :to-equal "")
+                (expect (node-property empty :title) :to-equal '(""))))
           (it
            "collects custom TODO sequences and lets explicit settings override them"
            (let* ((source

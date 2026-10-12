@@ -315,14 +315,17 @@
           (setf (%node-parent object) node))
         (setf (node-property node property) object)))))
 
-(defun reader-title-segments (document node range)
-  (loop for object in (reader-objects-in-range document range (node-type node))
-        collect (if (eq (node-type object) :plain-text)
-                    (subseq (document-text document)
-                            (node-begin object) (node-end object))
-                    (progn
-                      (setf (%node-parent object) node)
-                      object))))
+(defun reader-title-segments (document node range &optional empty-title-p)
+  (let ((objects (reader-objects-in-range document range (node-type node))))
+    (if (and empty-title-p range (= (car range) (cdr range)))
+        (list "")
+        (loop for object in objects
+              collect (if (eq (node-type object) :plain-text)
+                          (subseq (document-text document)
+                                  (node-begin object) (node-end object))
+                          (progn
+                            (setf (%node-parent object) node)
+                            object))))))
 
 (defun reader-parse-object-ranges (document root)
   (prepare-object-parsing document)
@@ -332,7 +335,7 @@
          (reader-take-property node :reader-title-range)
        (when has-title-range
          (setf (node-property node :title)
-               (reader-title-segments document node title-range))))
+               (reader-title-segments document node title-range t))))
      (multiple-value-bind (tag-range has-tag-range)
          (reader-take-property node :reader-tag-range)
        (when has-tag-range
