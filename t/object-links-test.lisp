@@ -28,6 +28,29 @@
 (defun link-test-property (object key)
   (node-property object key))
 
+(defun link-test-org-objects (source &rest parse-org-arguments)
+  (let ((document (apply #'parse-org source parse-org-arguments)))
+    (labels ((collect (node)
+               (append
+                (when (member (node-type node)
+                              '(:bold
+                                :citation
+                                :citation-reference
+                                :code
+                                :export-snippet
+                                :footnote-reference
+                                :italic
+                                :link
+                                :macro
+                                :radio-target
+                                :strike-through
+                                :target
+                                :underline
+                                :verbatim))
+                  (list node))
+                (mapcan #'collect (node-children node)))))
+      (mapcan #'collect (node-children (document-root document))))))
+
 (describe "link-related object recognition"
           (it
            "recognizes plain, angle, and bracket links with Org property values"
@@ -560,4 +583,277 @@
               "https")
       (expect (link-test-property match :path)
               :to-equal
-              "//example.test/manual"))))
+              "//example.test/manual")))
+  (it "expands empty abbreviation suffixes and preserves unmatched paths"
+    (let* ((objects
+             (link-test-org-objects
+              "[[web:]] [[other:manual]] [[empty:]]"
+              :link-abbrevs
+              '(("web" . "https://example.test/%s")
+                ("empty" . "%s"))))
+           (links (remove-if-not (lambda (object)
+                                   (eq (node-type object) :link))
+                                 objects)))
+      (with-soft-assertions
+        (expect (mapcar (lambda (object)
+                          (list (node-property object :type)
+                                (node-property object :path)))
+                        links)
+                :to-equal
+                '(("https" "//example.test/")
+                  ("fuzzy" "other:manual")
+                  ("fuzzy" ""))))))
+  (it "parses escaped paths, radio precedence, and link variants through parse-org"
+    (let* ((radio-objects
+             (link-test-org-objects "<<<a b c>>> <<<a b>>> a b c"))
+           (radio-link
+             (find :link radio-objects :key #'node-type))
+           (path-cases
+             '(("[[./chapter]]" "file" "./chapter")
+               ("[[#]]" "custom-id" "")
+               ("[[my_scheme:target]]" "fuzzy" "my_scheme:target")
+               ("[[(symbol]]" "fuzzy" "(symbol")
+               ("[[(symbol)]]" "coderef" "symbol")
+               ("[[foo\\[bar\\]]]" "fuzzy" "foo[bar]")
+               ("[[foo\\\\bar]]" "fuzzy" "foo\\bar")
+               ("[[foo\\q]]" "fuzzy" "foo\\q")
+               ("[[tail\\\\]]" "fuzzy" "tail\\")
+               ("[[trail  ]]" "fuzzy" "trail  ")
+               ("[[two  words]]" "fuzzy" "two  words")))
+           (newline-object
+             (find :link
+                   (link-test-org-objects
+                    (format nil "[[first~%  second]]"))
+                   :key
+                   #'node-type))
+           (trailing-newline-object
+             (find :link
+                   (link-test-org-objects (format nil "[[first~%]]"))
+                   :key
+                   #'node-type))
+           (shadowed-objects
+             (link-test-org-objects "<<<outer <<<inner>>> tail>>>"))
+           (identifier-source "<<<target>>> target_name x-target")
+           (identifier-boundary-objects
+             (link-test-org-objects identifier-source))
+           (identifier-links
+             (remove-if-not (lambda (object)
+                              (eq (node-type object) :link))
+                            identifier-boundary-objects))
+           (citation-objects
+             (link-test-org-objects
+              "{{{join(alpha, beta,)}}} [cite: @key note]"))
+           (public-objects
+             (link-test-org-objects
+              "@@html5-custom:value@@ [fn:short] <https:angle-path>"))
+           (macro
+             (find :macro citation-objects :key #'node-type))
+           (citation
+             (find :citation citation-objects :key #'node-type))
+           (citation-reference
+             (find :citation-reference citation-objects :key #'node-type))
+           (export-object
+             (find :export-snippet public-objects :key #'node-type))
+           (footnote
+             (find :footnote-reference public-objects :key #'node-type))
+           (angle-link
+             (find :link public-objects :key #'node-type))
+           (invalid-style-objects
+             (link-test-org-objects "[cite/: @key]"))
+           (abbrev-link
+             (find :link
+                   (link-test-org-objects
+                    "[[web:manual]]"
+                    :link-abbrevs
+                    '(("web" . "https://docs.example/")))
+                   :key
+                   #'node-type)))
+      (with-soft-assertions
+        (expect (node-type radio-link) :to-be :link)
+        (expect (link-test-property radio-link :path)
+                :to-equal
+                "a b c")
+        (dolist (case path-cases)
+          (destructuring-bind (source type path) case
+            (let* ((object (find :link
+                                 (link-test-org-objects source)
+                                 :key
+                                 #'node-type)))
+              (expect (link-test-property object :type) :to-equal type)
+              (expect (link-test-property object :path) :to-equal path))))
+        (expect (link-test-property newline-object :path)
+                :to-equal
+                "first second")
+        (expect (link-test-property trailing-newline-object :path)
+                :to-equal
+                "first ")
+        (expect (find :radio-target shadowed-objects :key #'node-type)
+                :to-be
+                nil)
+        (expect (mapcar #'node-contents-begin identifier-links)
+                :to-equal
+                (list (search "target" identifier-source :from-end t)))
+        (expect (node-property macro :args) :to-equal '("alpha" "beta" ""))
+        (expect (node-type citation) :to-be :citation)
+        (expect (node-property citation-reference :key) :to-equal "key")
+        (expect (node-property citation-reference :suffix)
+                :to-equal
+                '(" note"))
+        (expect (node-properties export-object)
+                :to-equal
+                '(:back-end "html5-custom" :value "value"))
+        (expect (node-properties footnote)
+                :to-equal
+                '(:label "short" :type :standard))
+        (expect (node-properties angle-link)
+                :to-equal
+                '(:type "https" :path "angle-path" :format :angle))
+        (expect (find :citation invalid-style-objects :key #'node-type)
+                :to-be
+                nil)
+        (expect (node-properties abbrev-link)
+                :to-equal
+                '(:type "https"
+                        :path "//docs.example/manual"
+                        :format :bracket)))))
+  (it "recognizes a plain link at a parsed heading-title boundary"
+    (let* ((document (parse-org "* https:heading-link"))
+           (headline (first (node-children (document-root document))))
+           (link (find-if (lambda (segment)
+                            (and (node-p segment)
+                                 (eq (node-type segment) :link)))
+                          (node-property headline :title))))
+      (with-soft-assertions
+        (expect (node-type link) :to-be :link)
+        (expect (node-properties link)
+                :to-equal
+                '(:type "https" :path "heading-link" :format :plain)))))
+  (it "leaves incomplete and unsupported link spellings as text through parse-org"
+    (dolist (source '("<<<>>>" "<<< bad>>>" "<<<bad >>>" "<<>>" "<<unclosed"
+                      "[[dest]" "[[dest]x" "[[dest][label]" "[[unclosed"
+                      "[fn::]" "[fn:unclosed" "[fn::unclosed" "[cite"
+                      "[cite/" "[cite:" "https:"
+                      "<" "<https:>" "<unknown:target>"
+                      "@@html:value" "@@bad_backend:value@@"))
+      (expect (link-test-org-objects source) :to-be nil)))
+  (it "chooses the longest overlapping radio target in either registration order"
+    (labels ((final-link (source)
+               (let* ((start (search "alpha beta" source :from-end t))
+                      (objects (link-test-org-objects source)))
+                 (find-if (lambda (object)
+                            (and (eq (node-type object) :link)
+                                 (= (node-begin object) start)))
+                          objects))))
+      (let ((short-first
+              (final-link "<<<alpha>>> <<<alpha beta>>> alpha beta"))
+            (long-first
+              (final-link "<<<alpha beta>>> <<<alpha>>> alpha beta")))
+        (with-soft-assertions
+          (expect (node-property short-first :path) :to-equal "alpha beta")
+          (expect (node-property long-first :path) :to-equal "alpha beta")))))
+  (it "covers nested delimiters and path boundaries through parse-org"
+    (let* ((nested-description-source "[[dest][outer [inner] text]]")
+           (nested-description-link
+             (find :link
+                   (link-test-org-objects nested-description-source)
+                   :key
+                   #'node-type))
+           (escaped-description-source "[[dest][outer \\] literal]]")
+           (escaped-description-link
+             (find :link
+                   (link-test-org-objects escaped-description-source)
+                   :key
+                   #'node-type))
+           (nested-plain-link
+             (find :link
+                   (link-test-org-objects "https:path(a(b)c)")
+                   :key
+                   #'node-type))
+           (closing-paren-link
+             (find :link
+                   (link-test-org-objects "https:closing)")
+                   :key
+                   #'node-type))
+           (double-colon-link
+             (find :link
+                   (link-test-org-objects
+                    "[[web::manual]]"
+                    :link-abbrevs
+                    '(("web" . "https://docs.example/%s")))
+                   :key
+                   #'node-type))
+           (footnote-source "intro [fn::outer [inner\\] note] tail]")
+           (footnote
+             (find :footnote-reference
+                   (link-test-org-objects footnote-source)
+                   :key
+                   #'node-type))
+           (citation-source
+             "[cite: intro [nested\\] note;@key suffix;@other   ]]")
+           (citation-objects (link-test-org-objects citation-source))
+           (citation
+             (find :citation
+                   citation-objects
+                   :key
+                   #'node-type))
+           (citation-references
+             (remove-if-not
+              (lambda (object)
+                (eq (node-type object) :citation-reference))
+              citation-objects))
+           (simple-citation-source "[cite: @key   ]")
+           (simple-citation
+             (find :citation
+                   (link-test-org-objects simple-citation-source)
+                   :key
+                   #'node-type))
+           (empty-macro
+             (find :macro
+                   (link-test-org-objects "{{{empty()}}}")
+                   :key
+                   #'node-type))
+           (angle-cr-links
+             (remove-if-not
+              (lambda (object) (eq (node-type object) :link))
+              (link-test-org-objects
+               (concatenate 'string
+                            "<https:line"
+                            (string #\Return)
+                            "break>")))))
+      (with-soft-assertions
+        (expect (link-test-property nested-description-link :path)
+                :to-equal
+                "dest")
+        (expect (link-test-property escaped-description-link :path)
+                :to-equal
+                "dest")
+        (expect (link-test-property nested-plain-link :path)
+                :to-equal
+                "path(a(b)c)")
+        (expect (link-test-property closing-paren-link :path)
+                :to-equal
+                "closing")
+        (expect (node-properties double-colon-link)
+                :to-equal
+                '(:type "https"
+                        :path "//docs.example/manual"
+                        :format :bracket))
+        (expect (node-properties footnote)
+                :to-equal
+                '(:label nil :type :inline))
+        (expect (node-type citation) :to-be :citation)
+        (expect (mapcar (lambda (object) (node-property object :key))
+                        citation-references)
+                :to-equal
+                '("key" "other"))
+        (expect (node-type simple-citation) :to-be :citation)
+        (expect (node-contents-end simple-citation)
+                :to-be
+                (search "   ]" simple-citation-source))
+        (expect (node-properties empty-macro)
+                :to-equal
+                '(:key "empty" :args nil :value "{{{empty()}}}"))
+        (expect (length angle-cr-links) :to-be 1)
+        (expect (node-properties (first angle-cr-links))
+                :to-equal
+                '(:type "https" :path "line" :format :plain))))))

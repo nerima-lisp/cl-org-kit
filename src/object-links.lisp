@@ -52,9 +52,9 @@
                       nil))
 
 (defun link-object-boundary-before-p (text start)
+  ;; PARSE-OBJECTS binds this to the checked start of the current range.
   (or (zerop start)
-      (and (integerp *object-parse-range-start*)
-           (= start *object-parse-range-start*))
+      (= start *object-parse-range-start*)
       (not
        (or (alphanumericp (char text (1- start)))
            (char= (char text (1- start)) #\_)))))
@@ -65,17 +65,16 @@
         (not (or (alphanumericp character) (char= character #\_))))))
 
 (defun link-object-radio-link (document start end)
+  ;; PARSE-OBJECTS ensures context; radio-target parsing rejects empty contents.
   (let* ((context (%document-object-context document))
-         (targets
-          (and context (org-kit::%object-context-radio-targets context)))
+         (targets (org-kit::%object-context-radio-targets context))
          (text (document-text document)))
     (when targets
       (let ((target
              (loop with longest = nil
                    for candidate in targets
                    for candidate-end = (+ start (length candidate))
-                   when (and (plusp (length candidate))
-                             (<= candidate-end end)
+                   when (and (<= candidate-end end)
                              (string-equal candidate
                                            text
                                            :start2
@@ -120,9 +119,7 @@
                                     '(#\< #\> #\Newline #\Return))))))))
 
 (defun link-object-radio-target-shadowed-p (text start end)
-  (loop with position = (if (integerp *object-parse-range-start*)
-                            *object-parse-range-start*
-                            0)
+  (loop with position = *object-parse-range-start*
         for opener = (search "<<<" text :start2 position :end2 start)
         while opener
         for close = (search ">>>" text :start2 (+ opener 3) :end2 end)
@@ -187,8 +184,7 @@
                            2
                            1)))))
          (abbreviations (getf (document-settings document) :link-abbrevs))
-         (entry
-          (and (listp abbreviations) (assoc key abbreviations :test #'string=)))
+         (entry (assoc key abbreviations :test #'string=))
          (replacement (and entry (cdr entry))))
     (if (not (stringp replacement))
         link
@@ -234,12 +230,12 @@
       (t (values "fuzzy" expanded)))))
 
 (defun link-object-unescape-path (path)
+  ;; A trailing escape consumes the closing bracket and prevents link recognition.
   (with-output-to-string (output)
     (loop with position = 0
           while (< position (length path))
           for character = (char path position)
           do (if (and (char= character #\\)
-                      (< (1+ position) (length path))
                       (find (char path (1+ position)) "[]\\"))
                  (progn
                    (write-char (char path (1+ position)) output)
@@ -370,10 +366,9 @@
       position)))
 
 (defun link-object-plain-link (document start end)
+  ;; The dispatcher calls this helper only for alphabetic candidates.
   (let ((text (document-text document)))
-    (when
-        (and (link-object-boundary-before-p text start)
-             (alpha-char-p (char text start)))
+    (when (link-object-boundary-before-p text start)
       (let ((colon
              (loop for position from (1+ start) below
                    end
@@ -407,11 +402,11 @@
                                              :plain))))))))))))
 
 (defun link-object-angle-link (document start end)
+  ;; The dispatcher calls this helper only for '<' candidates.
   (let* ((text (document-text document))
          (type-start (1+ start)))
     (when
-        (and (char= (char text start) #\<)
-             (< type-start end)
+        (and (< type-start end)
              (alpha-char-p (char text type-start)))
       (let* ((colon (position #\: text :start type-start :end end))
              (close (and colon (position #\> text :start (1+ colon) :end end))))
@@ -504,12 +499,12 @@
                                          (subseq text start object-end)))))))))))
 
 (defun link-object-export-snippet (document start end)
+  ;; The dispatcher calls this helper only after matching the '@@' prefix.
   (let* ((text (document-text document))
          (backend-start (+ start 2))
          (colon (position #\: text :start backend-start :end end)))
     (when
-        (and (link-object-prefix-at-p text start end "@@")
-             colon
+        (and colon
              (> colon backend-start)
              (loop for position from backend-start below colon
                    always (let ((character (char text position)))
@@ -627,12 +622,11 @@
                  (return position)))) (incf position)))
 
 (defun link-object-citation (document start end)
+  ;; The dispatcher calls this helper only for '[' candidates.
   (let* ((text (document-text document))
          (position (+ start 5))
          (style nil))
-    (when
-        (and (char= (char text start) #\[)
-             (link-object-prefix-at-p text start end "[cite"))
+    (when (link-object-prefix-at-p text start end "[cite")
       (when (and (< position end) (char= (char text position) #\/))
         (let ((style-start (1+ position)))
           (setf position style-start)
@@ -678,15 +672,14 @@
                                         '(#\Space #\Tab #\Newline #\Return))
                           finally (return (1+ cursor))))
                    (last-separator
-                    (and (> body-end position)
-                         (position #\;
-                                   text
-                                   :start
-                                   position
-                                   :end
-                                   body-end
-                                   :from-end
-                                   t)))
+                    (position #\;
+                              text
+                              :start
+                              position
+                              :end
+                              body-end
+                              :from-end
+                              t))
                    (key-after-separator
                     (and last-separator
                          (loop for cursor from (1+ last-separator) below body-end
