@@ -122,6 +122,32 @@
       (read stream))))
 
 (describe "Effective heading tags and properties"
+  (it "bounds effective selector regexes by document limits"
+    (let* ((input-limited-document
+             (parse-org "* Root"
+                        :limits (make-limits :max-input-length 6)))
+           (size-limited-document
+             (parse-org "* Root"
+                        :limits (make-limits :max-input-length 10)))
+           (depth-limited-document
+             (parse-org "* Root"
+                        :limits (make-limits :max-element-depth 2)))
+           (input-limited-heading
+             (first (org-semantics-test-headings input-limited-document)))
+           (size-limited-heading
+             (first (org-semantics-test-headings size-limited-document)))
+           (depth-limited-heading
+             (first (org-semantics-test-headings depth-limited-document))))
+      (signals org-resource-limit-error
+        (effective-heading-tags input-limited-document input-limited-heading
+                                :inherit '(:regexp "toolong")))
+      (signals org-query-error
+        (effective-heading-tags size-limited-document size-limited-heading
+                                :inherit '(:regexp "a{1000}")))
+      (signals org-query-error
+        (effective-heading-tags depth-limited-document depth-limited-heading
+                                :inherit '(:regexp "(((x)))")))))
+
   (it "matches Org's nearest-position tag oracle and selector modes"
     (let* ((source-path
              (asdf:system-relative-pathname

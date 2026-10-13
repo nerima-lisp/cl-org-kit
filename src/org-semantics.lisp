@@ -112,7 +112,7 @@ In odd-level mode this returns the odd star count that maps to LOGICAL-LEVEL."
     (t (effective-query-error selector 0
                               "Selector entries must be strings or symbols"))))
 
-(defun effective-selector-predicate (selector)
+(defun effective-selector-predicate (selector limits)
   (labels ((compile-selector (spec nested-p)
              (cond
                ((null spec) (constantly nil))
@@ -130,16 +130,23 @@ In odd-level mode this returns the odd star count that maps to LOGICAL-LEVEL."
                   (effective-query-error selector 0
                                          "Regexp selector must contain one string"))
                 (let* ((pattern (second spec))
-                       (regex
-                         (handler-case
-                             (cl-regex-kit:compile-regex pattern)
-                           (cl-regex-kit:regex-syntax-error (condition)
-                             (effective-query-error
-                              selector
-                              (cl-regex-kit:regex-syntax-error-position condition)
-                              "Invalid regexp selector")))))
-                  (lambda (candidate)
-                    (cl-regex-kit:is-match-p regex candidate))))
+                       (max-pattern-length
+                         (limit-value limits :max-input-length))
+                       (max-depth (limit-value limits :max-element-depth)))
+                  (check-limit limits :max-input-length (length pattern))
+                  (let ((regex
+                          (handler-case
+                              (cl-regex-kit:compile-regex
+                               pattern
+                               :size-limit (max 1 max-pattern-length)
+                               :nest-limit max-depth)
+                            (cl-regex-kit:regex-syntax-error (condition)
+                              (effective-query-error
+                               selector
+                               (cl-regex-kit:regex-syntax-error-position condition)
+                               "Invalid regexp selector")))))
+                    (lambda (candidate)
+                      (cl-regex-kit:is-match-p regex candidate)))))
                ((and (consp spec) (eq (first spec) :exclude))
                 (unless (effective-proper-list-p spec)
                   (effective-query-error selector 0
@@ -178,7 +185,8 @@ In odd-level mode this returns the odd star count that maps to LOGICAL-LEVEL."
   "Return unique effective tags for HEADING, using INHERIT to select ancestors.
 The nearest occurrence of a tag determines its position in the result."
   (let* ((heading (effective-semantics-heading document heading))
-         (matches-p (effective-selector-predicate inherit))
+         (matches-p (effective-selector-predicate
+                     inherit (document-limits document)))
          (ancestors (effective-heading-ancestors heading))
          (tags nil))
     (when inherit
@@ -261,7 +269,8 @@ The source is a heading node, a root-to-local contributor list when PROPERTY+
 contributes, :DOCUMENT for a #+PROPERTY fallback, or NIL when absent."
   (let* ((heading (effective-semantics-heading document heading))
          (name (effective-property-name name))
-         (matches-p (effective-selector-predicate inherit))
+         (matches-p (effective-selector-predicate
+                     inherit (document-limits document)))
          (inherit-p (funcall matches-p name))
          (headings (append
                     (when inherit-p
