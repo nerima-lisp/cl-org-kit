@@ -55,6 +55,9 @@ including `tasks:nil`, `tasks:todo`, `tasks:done`, and `tex:nil`; these selectio
 recognized here even though the export contract does not list them. The kit accepts only
 `expand-links:nil`, because enabling link expansion would read environment variables from file
 links. It accepts only `broken-links:nil` and keeps its fail-closed broken-link policy.
+E1's supported source-block header interpretation lets `:exports none` suppress code and results.
+E1 ignores `#+HEADER:` and `#+PROPERTY: header-args`, so those forms cannot be relied on to hide
+code; it may still appear in the export.
 
 The coverage check reads the generated trees and reports every `org-element` element and object
 type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
