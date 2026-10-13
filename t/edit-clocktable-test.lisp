@@ -280,6 +280,55 @@
         (expect (write-org document :output-type :octets)
                 :to-equalp source-octets))))
 
+  (it "covers unencoded, padded, wide and sparse clocktable rows"
+    (let* ((source (format nil "#+BEGIN: clocktable :ignore t~%old body~%  #+END:  ~%"))
+           (document (parse-org source))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (range (edit-clocktable-test-range))
+           (result
+             (make-clocktable-result
+              :total-minutes 3840
+              :range range
+              :rows
+              (list (make-clocktable-row
+                     :level 2 :title "Pipe | title" :range range :minutes 600)
+                    (make-clocktable-row
+                     :level 1 :title "Plain title" :range range :minutes 1))))
+           (edit (write-clocktable document target result))
+           (updated-source
+             (document-text (edit-result-updated-document edit))))
+      (with-soft-assertions
+        (expect (document-encoding document) :to-be nil)
+        (expect (search "64:00" updated-source) :to-be-truthy)
+        (expect (search "10:00" updated-source) :to-be-truthy)
+        (expect (search "Plain title" updated-source) :to-be-truthy)
+        (expect (search "#+END:  " updated-source) :to-be-truthy))))
+
+  (it "preserves a UTF-8 BOM through a clocktable body edit"
+    (let* ((source (format nil "#+BEGIN: clocktable~%stale~%#+END:~%"))
+           (source-octets
+             (concatenate '(vector (unsigned-byte 8))
+                          #(239 187 191)
+                          (cl-codec-kit:string-to-octets
+                           source :encoding :utf-8)))
+           (document (parse-org source-octets))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (case
+             (edit-clocktable-test-case
+              (getf (edit-clocktable-test-fixture "cases") :cases)
+              "empty-default-table"))
+           (result (edit-clocktable-test-result case))
+           (edit (write-clocktable document target result))
+           (output-octets
+             (write-org (edit-result-updated-document edit)
+                        :output-type :octets)))
+      (with-soft-assertions
+        (expect (document-encoding document) :to-be :utf-8)
+        (expect (document-bom-p document) :to-be t)
+        (expect (subseq output-octets 0 3) :to-equalp #(239 187 191))
+        (expect (write-org document :output-type :octets)
+                :to-equalp source-octets))))
+
   (it "signals bounded edit errors for a missing or non-clocktable target"
     (let* ((cases (getf (edit-clocktable-test-fixture "cases") :cases))
            (case (edit-clocktable-test-case
