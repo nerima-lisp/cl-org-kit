@@ -70,6 +70,8 @@
                ;; Unit E1 export core
                (:file "export-types")
                (:file "export-core")
+               ;; Unit E2 HTML export
+               (:file "export-html")
                (:file "agenda"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
@@ -138,7 +140,9 @@
                (:file "agenda-test")
                ;; Unit E1 export core
                (:file "clocktable-test")
-               (:file "export-core-test"))
+               (:file "export-core-test")
+               ;; Unit E2 HTML export
+               (:file "export-html-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)

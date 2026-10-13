@@ -150,7 +150,9 @@
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-BACKEND"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-SOURCE"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-POSITION"
-    "ORG-EXPORT-UNSUPPORTED-SYNTAX-FEATURE")
+    "ORG-EXPORT-UNSUPPORTED-SYNTAX-FEATURE"
+    ;; Unit E2 HTML export
+    "EXPORT-ORG")
   "Every symbol the ORG-KIT package exports. The node contract is documented in
 docs/src/reference/node-model.md.")
 

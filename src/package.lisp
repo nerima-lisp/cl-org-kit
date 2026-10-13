@@ -145,4 +145,6 @@
    #:org-export-unsupported-syntax-backend
    #:org-export-unsupported-syntax-source
    #:org-export-unsupported-syntax-position
-   #:org-export-unsupported-syntax-feature))
+   #:org-export-unsupported-syntax-feature
+   ;; Unit E2 HTML export
+   #:export-org))

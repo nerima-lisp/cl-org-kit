@@ -137,6 +137,50 @@
   (let ((code (char-code character)))
     (or (<= code #x1f) (<= #x7f code #x9f))))
 
+(defun export-whitespace-character-p (character)
+  (let ((code (char-code character)))
+    (or (<= #x09 code #x0d)
+        (= code #x20)
+        (member code '(#x85 #xa0 #x1680 #x2028 #x2029 #x202f #x205f #x3000))
+        (<= #x2000 code #x200a))))
+
+(defun export-ascii-alpha-p (character)
+  (let ((code (char-code character)))
+    (or (<= #x41 code #x5a) (<= #x61 code #x7a))))
+
+(defun export-ascii-scheme-character-p (character)
+  (or (export-ascii-alpha-p character)
+      (let ((code (char-code character)))
+        (or (<= #x30 code #x39)
+            (find character '(#\+ #\. #\-))))))
+
+(defun export-explicit-url-scheme (destination)
+  (let ((colon (position #\: destination)))
+    (when (and colon
+               (plusp colon)
+               (export-ascii-alpha-p (char destination 0))
+               (loop for position from 1 below colon
+                     always (export-ascii-scheme-character-p
+                             (char destination position))))
+      (subseq destination 0 colon))))
+
+(defun export-safe-url-p (raw-destination expanded-destination)
+  "Return true when an expanded destination uses an allowed scheme or is relative."
+  (and (stringp raw-destination)
+       (stringp expanded-destination)
+       (notany #'export-control-character-p raw-destination)
+       (notany #'export-control-character-p expanded-destination)
+       (plusp (length expanded-destination))
+       (not (export-whitespace-character-p (char expanded-destination 0)))
+       (not (find #\\ expanded-destination))
+       (not (and (>= (length expanded-destination) 2)
+                 (string= "//" expanded-destination :end2 2)))
+       (let ((scheme (export-explicit-url-scheme expanded-destination)))
+         (or (null scheme)
+             (not (null
+                   (member scheme '("http" "https" "mailto")
+                           :test #'string-equal)))))))
+
 (defun export-utf8-length (text backend)
   (loop with total = 0
         for character across text
@@ -687,10 +731,17 @@
     (if mode-seen-p mode :code)))
 
 (defun export-results-adjacent-p (source-node results-node)
-  (and results-node
-       (node-property results-node :RESULTS)
-       (zerop (node-post-blank source-node))
-       (= (node-end source-node) (node-begin results-node))))
+  (let* ((document (node-document source-node))
+         (text (document-text document))
+         (start (node-end source-node))
+         (end (and results-node (node-begin results-node))))
+    (and results-node
+         (node-property results-node :RESULTS)
+         (stringp text)
+         (integerp start)
+         (integerp end)
+         (<= 0 start end (length text))
+         (every #'export-whitespace-character-p (subseq text start end)))))
 
 (defun export-tag-intersection-p (tags selected-tags)
   (some (lambda (tag) (member tag selected-tags :test #'string=)) tags))
@@ -712,20 +763,32 @@
     count))
 
 (defun export-limits-with-node-budget (limits node-budget)
-  (apply #'make-limits
-         (loop for name in '(:max-input-length :max-heading-depth
-                             :max-element-depth :max-object-depth :max-node-count
-                             :max-output-length :max-output-octets
-                             :max-agenda-range-days :max-agenda-entries
-                             :max-future-repeats :max-export-expansion-depth
-                             :max-export-expanded-characters
-                             :max-export-expanded-nodes :max-formula-tokens
-                             :max-formula-ast-depth :max-formula-precision
-                             :max-formula-exponent :max-formula-work)
-               append (list name
-                            (if (eq name :max-node-count)
-                                node-budget
-                                (limit-value limits name))))))
+  (let ((arguments nil)
+        (node-limit-found-p nil))
+    (dolist (slot (sb-mop:class-slots (find-class 'limits)))
+      (let* ((slot-name (sb-mop:slot-definition-name slot))
+             (name (intern (string-upcase (symbol-name slot-name)) :keyword))
+             (accessor (find-symbol
+                        (concatenate 'string "%LIMITS-"
+                                     (string-upcase (symbol-name slot-name)))
+                        (find-package "ORG-KIT")))
+             (value (if (eq name :max-node-count)
+                        (progn
+                          (setf node-limit-found-p t)
+                          node-budget)
+                        (progn
+                          (unless (and accessor (fboundp accessor))
+                            (export-error :export :incomplete-limits nil
+                                          "A limits slot has no accessor"))
+                          (funcall (symbol-function accessor) limits)))))
+        (push (cons name value) arguments)))
+    (unless node-limit-found-p
+      (export-error :export :incomplete-limits nil
+                    "The limits structure has no node-count slot"))
+    (apply #'make-limits
+           (mapcan (lambda (argument)
+                     (list (car argument) (cdr argument)))
+                   (nreverse arguments)))))
 
 (defun export-validate-keywords (records backend &key fragment-p)
   (dolist (record records)
@@ -1119,7 +1182,9 @@
     (min heading-depth (or explicit-toc-depth 6))))
 
 (defun export-collect-toc (views options)
-  (let ((toc (cdr (assoc :toc options)))
+  (let ((toc (if (assoc :toc options)
+                 (cdr (assoc :toc options))
+                 t))
         (depth-limit (export-heading-depth-limit options)))
     (when (or (eq toc t) (and (integerp toc) (plusp toc)))
       (loop for view in (export-collect-views views)
@@ -1133,3 +1198,21 @@
 
 (defun export-check-expansion-depth (depth limits)
   (check-limit limits :max-export-expansion-depth depth))
+
+(defgeneric export-render-preparation (preparation backend))
+
+(defmethod export-render-preparation ((preparation export-preparation) backend)
+  (declare (ignore preparation))
+  (export-error backend :unsupported-backend nil
+                "No renderer is available for this export backend"))
+
+(defun export-org (document backend
+                   &key include-resolver allow-raw-html
+                     (output-type :string) stream context)
+  "Export DOCUMENT with BACKEND and return its requested output representation."
+  (let* ((preparation
+           (export-prepare document backend :include-resolver include-resolver
+                           :allow-raw-html allow-raw-html :context context))
+         (text (export-render-preparation preparation backend)))
+    (export-write-output text (document-limits document) output-type
+                         :stream stream :backend backend)))
