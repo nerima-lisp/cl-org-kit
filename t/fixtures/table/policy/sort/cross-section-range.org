@@ -1,0 +1,16 @@
+# T5b policy fixture: an explicit range spanning hline sections is invalid.
+# Sort type: numeric
+# Order: ascending
+# Column: 1
+# Start: 2
+# End: 5
+# Expected condition: :invalid-range
+# Org region sorting skips hlines and can move selected rows across sections.
+
+| key | id |
+|-----+----|
+| 3   | a  |
+| 1   | b  |
+|-----+----|
+| 4   | c  |
+| 2   | d  |

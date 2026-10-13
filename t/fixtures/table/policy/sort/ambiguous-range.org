@@ -1,0 +1,15 @@
+# T5b policy fixture: omitted range is ambiguous when the table has multiple hline sections.
+# Sort type: lexical
+# Order: ascending
+# Column: 1
+# Start: omitted
+# End: omitted
+# Expected condition: :ambiguous-range
+
+| key | id |
+|-----+----|
+| z   | a  |
+| a   | b  |
+|-----+----|
+| y   | c  |
+| b   | d  |

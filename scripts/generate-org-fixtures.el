@@ -1744,6 +1744,133 @@
 
 (advice-add 'org-fixture--main :around #'org-fixture--agenda-main-around)
 
+;;; T5b stable table sort fixtures
+
+(defconst org-fixture--t5b-required-metadata
+  '("T5b fixture metadata: GNU Emacs 31.1; Org 9.8.10"
+    "Generator mode: org-table-sort-lines"
+    "Backend: none"
+    "Encoding: UTF-8"))
+
+(defun org-fixture--t5b-metadata (file key)
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8-unix))
+      (insert-file-contents file))
+    (goto-char (point-min))
+    (unless (re-search-forward
+             (concat "^# " (regexp-quote key) ": \\(.+\\)$") nil t)
+      (error "Missing T5b metadata %s in %s" key file))
+    (string-trim (match-string 1))))
+
+(defun org-fixture--t5b-positive-integer (file key)
+  (let ((text (org-fixture--t5b-metadata file key)))
+    (unless (string-match-p "\\`[1-9][0-9]*\\'" text)
+      (error "Invalid T5b integer metadata %s in %s" key file))
+    (string-to-number text)))
+
+(defun org-fixture--t5b-hline-p ()
+  (looking-at "^[ \t]*|[-+| \t]+|[ \t]*$"))
+
+(defun org-fixture--t5b-row-position (file row column)
+  (goto-char (point-min))
+  (unless (re-search-forward "^[ \t]*|" nil t)
+    (error "No Org pipe table in %s" file))
+  (beginning-of-line)
+  (let ((remaining row)
+        found)
+    (while (and (> remaining 0) (looking-at "^[ \t]*|"))
+      (unless (org-fixture--t5b-hline-p)
+        (setq remaining (1- remaining))
+        (when (= remaining 0)
+          (setq found (point))))
+      (unless found
+        (forward-line 1)))
+    (unless found
+      (error "T5b row %d is outside the table in %s" row file))
+    (goto-char found)
+    (let ((line-position (line-beginning-position)))
+      (org-table-goto-column column)
+      (unless (and (org-at-table-p)
+                   (= (org-table-current-column) column))
+        (error "T5b column %d is outside row %d in %s" column row file))
+      line-position)))
+
+(defun org-fixture--t5b-render-file (file)
+  (dolist (metadata org-fixture--t5b-required-metadata)
+    (unless (with-temp-buffer
+              (let ((coding-system-for-read 'utf-8-unix))
+                (insert-file-contents file))
+              (goto-char (point-min))
+              (re-search-forward (concat "^# " (regexp-quote metadata) "$") nil t))
+      (error "Missing T5b fixture metadata %S in %s" metadata file)))
+  (let* ((type (org-fixture--t5b-metadata file "Sort type"))
+         (order (org-fixture--t5b-metadata file "Order"))
+         (sort-type
+          (cond
+           ((and (equal type "lexical") (equal order "ascending")) ?a)
+           ((and (equal type "lexical") (equal order "descending")) ?A)
+           ((and (equal type "numeric") (equal order "ascending")) ?n)
+           ((and (equal type "numeric") (equal order "descending")) ?N)
+           (t (error "Invalid T5b sort type/order in %s" file))))
+         (column (org-fixture--t5b-positive-integer file "Column"))
+         (start (org-fixture--t5b-positive-integer file "Start"))
+         (end (org-fixture--t5b-positive-integer file "End")))
+    (unless (<= start end)
+      (error "Invalid T5b row range in %s" file))
+    (with-temp-buffer
+      (org-fixture--read-buffer file)
+      (let ((start-position (org-fixture--t5b-row-position file start column))
+            (end-position (org-fixture--t5b-row-position file end column)))
+        ;; Org moves to region-beginning before checking it again, so keep point there.
+        (set-mark end-position)
+        (goto-char start-position)
+        (setq-local transient-mark-mode t)
+        (setq mark-active t)
+        (cl-letf (((symbol-function 'read-number)
+                   (lambda (&rest _arguments) column)))
+          (org-table-sort-lines nil sort-type nil nil t)))
+      (org-fixture--check-output (buffer-string)))))
+
+(defun org-fixture-generate-table-sort (corpus-directory expected-directory)
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "T5b oracle requires Emacs 31.1 and Org 9.8.10; found %s and %s"
+           emacs-version (org-version)))
+  (unless (file-directory-p corpus-directory)
+    (error "T5b corpus directory does not exist: %s" corpus-directory))
+  (let ((files (sort (directory-files-recursively corpus-directory "\\.org\\'")
+                     #'string<)))
+    (unless files
+      (error "No T5b table-sort fixtures found under %s" corpus-directory))
+    (dolist (file files)
+      (let* ((relative (file-relative-name file corpus-directory))
+             (output (expand-file-name relative expected-directory))
+             (content (org-fixture--t5b-render-file file)))
+        (make-directory (file-name-directory output) t)
+        (let ((coding-system-for-write 'utf-8-unix))
+          (write-region content nil output nil 'silent))
+        (princ (format "Wrote %s\n" relative))))
+    (princ (format "Generated %d T5b table-sort fixtures.\n" (length files)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
+(defun org-fixture--t5b-main-around (original)
+  (let ((arguments (if (equal (car command-line-args-left) "--")
+                       (cdr command-line-args-left)
+                     command-line-args-left)))
+    (if (equal (car arguments) "--table-sort")
+        (progn
+          (setq command-line-args-left nil)
+          (unless (= (length arguments) 3)
+            (error (concat
+                    "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+                    "--table-sort CORPUS-DIR EXPECTED-DIR")))
+          (org-fixture-generate-table-sort
+           (expand-file-name (nth 1 arguments))
+           (expand-file-name (nth 2 arguments))))
+      (funcall original))))
+
+(advice-add 'org-fixture--dispatch-main :around #'org-fixture--t5b-main-around)
+
 (org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here

@@ -1,0 +1,14 @@
+# T5b policy fixture: strict decimal parsing rejects numeric prefixes with trailing text.
+# Sort type: numeric
+# Order: ascending
+# Column: 1
+# Start: 2
+# End: 4
+# Expected condition: :invalid-number
+# Org 9.8.10 treats 1tail as numeric key 1.
+
+| key   | id     |
+|-------+--------|
+| 10    | ten    |
+| 1tail | prefix |
+| 2     | two    |

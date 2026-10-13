@@ -1,0 +1,13 @@
+# T5b policy fixture: Infinity is not part of the safe decimal grammar.
+# Sort type: numeric
+# Order: ascending
+# Column: 1
+# Start: 2
+# End: 3
+# Expected condition: :invalid-number
+# Org 9.8.10 treats Inf as numeric key 0.
+
+| key | id  |
+|-----+-----|
+| Inf | inf |
+| 1   | one |

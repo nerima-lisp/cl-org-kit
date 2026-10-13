@@ -1,0 +1,13 @@
+# T5b policy expected output: empty numeric fields sort last.
+# Sort type: numeric
+# Order: ascending
+# Column: 1
+# Start: 2
+# End: 5
+
+| key | id    |
+|-----+-------|
+| -1  | neg   |
+| 2   | two   |
+| 3   | three |
+|     | empty |
