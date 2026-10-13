@@ -74,6 +74,15 @@ nix develop -c emacs --batch -Q --script scripts/generate-org-fixtures.el \
 The generated results record Emacs 31.1 and Org 9.8.10. The generator accepts only formulas in
 its literal allowlist.
 
+`table-calc/policy/corpus/` and `table-calc/policy/expected/` record Org results for formula forms
+that T4b deliberately leaves outside its supported subset. Regenerate them with:
+
+```sh
+nix develop -c emacs --batch -Q --script scripts/generate-org-fixtures.el \
+  --table-calc t/fixtures/table-calc/policy/corpus \
+  t/fixtures/table-calc/policy/expected
+```
+
 The coverage check reads the generated trees and reports every `org-element` element and object
 type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
 type.
