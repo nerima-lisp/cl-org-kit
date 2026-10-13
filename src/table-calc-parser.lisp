@@ -281,7 +281,7 @@
                (t
                 (table-calc-fail formula (table-calc-position parser)
                                  :invalid-reference))))))
-      ((eql (table-calc-current-kind parser) :dollar)
+      (t
        (table-calc-advance parser)
        (setf row-kind :current)
        (cond
@@ -293,8 +293,7 @@
           (setf column-kind :name
                 column-value (table-calc-token-value (table-calc-advance parser))))
          (t
-          (table-calc-fail formula (table-calc-position parser) :invalid-reference))))
-      )
+          (table-calc-fail formula (table-calc-position parser) :invalid-reference)))))
     (let* ((last-token (nth (1- (table-calc-parser-cursor parser))
                             (table-calc-parser-tokens parser)))
            (end (table-calc-token-end last-token)))
@@ -452,7 +451,6 @@
   (let* ((length (length text))
          (digits-end (1- length)))
     (unless (and (>= length 4)
-                 (char= (char text 0) #\%)
                  (char= (char text 1) #\.)
                  (char= (char text digits-end) #\f)
                  (loop for index from 2 below digits-end
