@@ -469,11 +469,10 @@ for my $row (@$rows) {
     # The summary has no branch locations, so line exclusions cannot justify
     # a branch coverage deficit.
     my $residual_is_excluded = !$branch_is_below_minimum
-      && ($uncovered eq '-'
-      ? @$ranges
-      : all { my $line = $_; line_is_excluded($line, $ranges) }
-            map { my ($start, $end) = split /-/, $_; $end //= $start;
-                  ($start .. $end) } split /,/, $uncovered);
+      && $uncovered ne '-'
+      && all { my $line = $_; line_is_excluded($line, $ranges) }
+           map { my ($start, $end) = split /-/, $_; $end //= $start;
+                 ($start .. $end) } split /,/, $uncovered;
     push @failures, { file => $row->{file}, reasons => \@reasons }
       unless $residual_is_excluded;
   }
