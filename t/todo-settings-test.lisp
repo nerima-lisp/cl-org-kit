@@ -77,6 +77,38 @@
                   ("NEXT" :todo) ("FINISHED" :done)
                   ("IDEA" :todo) ("REJECTED" :done))))))
 
+  (it "computes recognized TODO keywords once for each parsed document"
+    (let ((original
+            (symbol-function 'org-kit::reader-heading-recognized-todo-keywords))
+          (calls 0))
+      (unwind-protect
+           (progn
+             (setf (symbol-function
+                    'org-kit::reader-heading-recognized-todo-keywords)
+                   (lambda (settings)
+                     (incf calls)
+                     (funcall original settings)))
+             (let* ((document
+                      (parse-org
+                       (todo-settings-test-source
+                        "#+TODO: OPEN | CLOSED"
+                        "* OPEN First"
+                        "* CLOSED Second"
+                        "* OPEN Third")))
+                    (headlines (todo-settings-test-headlines document)))
+               (with-soft-assertions
+                 (expect calls :to-be 1)
+                 (expect (mapcar (lambda (headline)
+                                   (cons (node-property headline :todo-keyword)
+                                         (node-property headline :todo-type)))
+                                 headlines)
+                         :to-equal '(("OPEN" . :todo)
+                                     ("CLOSED" . :done)
+                                     ("OPEN" . :todo)))))
+        (setf (symbol-function
+               'org-kit::reader-heading-recognized-todo-keywords)
+              original))))
+
   (it "keeps logging modes when keywords have no fast key"
     (let* ((settings
              (document-settings

@@ -8,6 +8,7 @@
   text
   limits
   settings
+  recognized-todo-keywords
   (node-count 0))
 
 ;; The element-specific methods are loaded after this core file.

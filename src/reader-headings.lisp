@@ -715,6 +715,8 @@
          (setf (getf settings :todo-keywords)
                (reader-heading-flatten-todo-sequences
                 (getf settings :todo-sequences))))))
+    (setf (reader-context-recognized-todo-keywords context)
+          (reader-heading-recognized-todo-keywords settings))
     settings))
 
 (defun reader-heading-inline-minimum-stars (context)
@@ -802,8 +804,7 @@
                                                   (+ start star-count)
                                                   line-end))
            (todo-keywords
-            (reader-heading-recognized-todo-keywords
-             (reader-context-settings context)))
+            (reader-context-recognized-todo-keywords context))
            (todo-keyword nil)
            (todo-type nil)
            (priority nil)
