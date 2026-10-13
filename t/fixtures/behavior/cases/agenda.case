@@ -1,0 +1,59 @@
+(:source "agenda.org"
+ :properties ("REGION")
+ :snapshots
+ ((:name :warning-d4
+   :reference-time "2025-03-03T12:00:00+00:00"
+   :start-date "2025-03-03" :end-date "2025-03-03"
+   :warning-days 14 :scheduled-delay 2 :future-repeats :all)
+  (:name :warning-d3
+   :reference-time "2025-03-04T12:00:00+00:00"
+   :start-date "2025-03-04" :end-date "2025-03-04"
+   :warning-days 14 :scheduled-delay 2 :future-repeats :all)
+  (:name :warning-d1
+   :reference-time "2025-03-06T12:00:00+00:00"
+   :start-date "2025-03-06" :end-date "2025-03-06"
+   :warning-days 14 :scheduled-delay 2 :future-repeats :all)
+  (:name :warning-d0
+   :reference-time "2025-03-07T12:00:00+00:00"
+   :start-date "2025-03-07" :end-date "2025-03-07"
+   :warning-days 14 :scheduled-delay 2 :future-repeats :all)
+  (:name :warning-after-due
+   :reference-time "2025-03-08T12:00:00+00:00"
+   :start-date "2025-03-08" :end-date "2025-03-08"
+   :warning-days 14 :scheduled-delay 0 :future-repeats :all)
+  (:name :scheduled-delay-d2
+   :reference-time "2025-03-05T12:00:00+00:00"
+   :start-date "2025-03-05" :end-date "2025-03-05"
+   :warning-days 14 :scheduled-delay 2 :future-repeats :all)
+  (:name :repeating-warning-prewarning
+   :reference-time "2025-03-02T12:00:00+00:00"
+   :start-date "2025-03-02" :end-date "2025-03-02"
+   :warning-days 14 :scheduled-delay 0 :future-repeats :all)
+  (:name :repeating-delay-cycle
+   :reference-time "2025-03-03T12:00:00+00:00"
+   :start-date "2025-03-03" :end-date "2025-03-06"
+   :warning-days 14 :scheduled-delay 0 :future-repeats :all)
+  (:name :repeating-warning-and-delay
+   :reference-time "2025-03-06T12:00:00+00:00"
+   :start-date "2025-03-03" :end-date "2025-03-10"
+   :warning-days 14 :scheduled-delay 0 :future-repeats :all)
+  (:name :repeaters-all
+   :reference-time "2025-03-06T12:00:00+00:00"
+   :start-date "2025-03-06" :end-date "2025-03-10"
+   :warning-days 14 :scheduled-delay 0 :future-repeats :all)
+  (:name :repeaters-next
+   :reference-time "2025-03-06T12:00:00+00:00"
+   :start-date "2025-03-06" :end-date "2025-03-10"
+   :warning-days 14 :scheduled-delay 0 :future-repeats :next)
+  (:name :repeaters-none
+   :reference-time "2025-03-06T12:00:00+00:00"
+   :start-date "2025-03-06" :end-date "2025-03-10"
+   :warning-days 14 :scheduled-delay 0 :future-repeats :none))
+ :match-cases
+ ((:name :no-match :match "tag-that-does-not-exist")
+  (:name :matched-todo :match "TODO=\"TODO\"")
+  (:name :inherited-parent-tag :match "outer"))
+ :todo-cases
+ ((:name :all-todo :match nil)
+  (:name :no-match :match "tag-that-does-not-exist")
+  (:name :matched-todo :match "TODO=\"TODO\"")))

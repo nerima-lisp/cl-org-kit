@@ -1,0 +1,57 @@
+#+FILETAGS: :filetag:
+#+TODO: TODO NEXT | DONE
+#+PROPERTY: REGION global
+
+* Parent :outer:duplicate:
+:PROPERTIES:
+:REGION: parent
+:END:
+** TODO Child property override :local:
+:PROPERTIES:
+:REGION: child
+:END:
+<2025-03-07 Fri>
+** TODO Deadline warning -3d :local:duplicate:
+DEADLINE: <2025-03-07 Fri -3d>
+** TODO Deadline default warning
+DEADLINE: <2025-03-06 Thu>
+** TODO Deadline default D-14
+DEADLINE: <2025-03-17 Mon>
+** TODO Deadline default D-15
+DEADLINE: <2025-03-18 Tue>
+** TODO Deadline repeating warning -1d
+DEADLINE: <2025-03-03 Mon ++2d -1d>
+** TODO Scheduled delay
+SCHEDULED: <2025-03-03 Mon --2d>
+** TODO Scheduled repeating delay --1d
+SCHEDULED: <2025-03-03 Mon ++2d --1d>
+** TODO Repeater plus
+SCHEDULED: <2025-03-03 Mon +2d>
+** TODO Repeater restart
+SCHEDULED: <2025-03-03 Mon ++2d>
+** TODO Repeater from now
+SCHEDULED: <2025-03-03 Mon .+2d>
+** TODO Stale repeater plus
+SCHEDULED: <2025-02-01 Sat +2d>
+** TODO Stale repeater restart
+SCHEDULED: <2025-02-01 Sat ++2d>
+** TODO Stale repeater from now
+SCHEDULED: <2025-02-01 Sat .+2d>
+** TODO Active date range
+<2025-03-03 Mon>--<2025-03-10 Mon>
+** TODO Active single date
+<2025-03-07 Fri>
+** TODO Inactive single date
+[2025-03-07 Fri]
+** TODO Habit scheduled
+SCHEDULED: <2025-03-07 Fri .+1d>
+:PROPERTIES:
+:STYLE: habit
+:END:
+** DONE Completed deadline
+DEADLINE: <2025-03-07 Fri -3d>
+
+* TODO Global property fallback
+<2025-03-07 Fri>
+
+%%(error "agenda must not evaluate diary sexp")

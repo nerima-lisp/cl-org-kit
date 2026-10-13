@@ -929,5 +929,360 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
 (org-fixture--dispatch-main)
+;;; Behavior agenda oracle action
+
+(defun org-fixture--agenda-read-case (file)
+  (with-temp-buffer
+    (insert-file-contents file)
+    (goto-char (point-min))
+    (let ((case (read (current-buffer))))
+      (condition-case nil
+          (progn
+            (read (current-buffer))
+            (error "Expected exactly one agenda case in %s" file))
+        (end-of-file nil))
+      case)))
+
+(defun org-fixture--agenda-parse-date (text)
+  (unless (and (stringp text)
+               (string-match
+                "\\`\\([0-9][0-9][0-9][0-9]\\)-\\([0-9][0-9]\\)-\\([0-9][0-9]\\)\\'"
+                text))
+    (error "Invalid agenda fixture date: %s" text))
+  (let* ((year (string-to-number (match-string 1 text)))
+         (month (string-to-number (match-string 2 text)))
+         (day (string-to-number (match-string 3 text)))
+         (date (list month day year))
+         (absolute (calendar-absolute-from-gregorian date)))
+    (unless (equal date (calendar-gregorian-from-absolute absolute))
+      (error "Invalid agenda fixture date: %s" text))
+    date))
+
+(defun org-fixture--agenda-parse-reference-time (text)
+  (unless (and (stringp text)
+               (string-match
+                "\\`\\([0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\\)T\\([0-9][0-9]\\):\\([0-9][0-9]\\):\\([0-9][0-9]\\)\\+00:00\\'"
+                text))
+    (error "Agenda fixture reference-time must be UTC ISO-8601: %s" text))
+  (let* ((date-text (match-string 1 text))
+         (hour (string-to-number (match-string 2 text)))
+         (minute (string-to-number (match-string 3 text)))
+         (second (string-to-number (match-string 4 text)))
+         (date (org-fixture--agenda-parse-date date-text)))
+    (encode-time second minute hour (nth 1 date) (car date) (nth 2 date) t)))
+
+(defun org-fixture--agenda-iso-date (date)
+  (let ((date (if (numberp date)
+                  (calendar-gregorian-from-absolute date)
+                date)))
+    (and (consp date)
+         (format "%04d-%02d-%02d" (nth 2 date) (car date) (nth 1 date)))))
+
+(defun org-fixture--agenda-kind (type)
+  (cond
+   ((member type '("deadline" "upcoming-deadline")) :deadline)
+   ((member type '("scheduled" "past-scheduled")) :scheduled)
+   ((member type '("timestamp" "block")) :timestamp)
+   (t nil)))
+
+(defun org-fixture--agenda-row-data (row date kind match-function properties)
+  (let* ((marker (and row (get-text-property 0 'org-hd-marker row)))
+         (type (and row (get-text-property 0 'type row)))
+         (kind (or kind (org-fixture--agenda-kind type))))
+    (unless marker
+      (error "Org agenda row has no heading marker"))
+    (with-current-buffer (marker-buffer marker)
+      (save-excursion
+        (goto-char marker)
+        (let* ((selected-day (and date
+                                  (calendar-absolute-from-gregorian
+                                   (org-fixture--agenda-parse-date date))))
+               (timestamp-day (and row (get-text-property 0 'ts-date row)))
+               (row-time (and row (get-text-property 0 'dotime row)))
+               (scheduled-timestamp (org-entry-get nil "SCHEDULED"))
+               (deadline-timestamp (org-entry-get nil "DEADLINE"))
+               (timestamp
+                (or (and (stringp row-time) (substring-no-properties row-time))
+                    (pcase kind
+                      (:deadline deadline-timestamp)
+                      (:scheduled scheduled-timestamp)
+                      (_ nil))))
+               (warning-days (and (eq kind :deadline) timestamp
+                                  (org-get-wdays timestamp)))
+               (delay-days (and (eq kind :scheduled) timestamp
+                                (org-get-wdays timestamp t)))
+               (tags (org-get-tags nil nil))
+               (headline (substring-no-properties (org-get-heading t t t t)))
+               (path (mapcar #'substring-no-properties (org-get-outline-path t)))
+               (todo (or (and row (get-text-property 0 'todo-state row))
+                         (org-get-todo-state)))
+               (property-values
+                (mapcar (lambda (name)
+                          (cons name (org-entry-get nil name t)))
+                        properties))
+               (match-p (and match-function
+                             (funcall match-function
+                                      todo tags
+                                      (org-reduced-level (org-outline-level)))))
+               (warning-state
+                (and (eq kind :deadline)
+                     (cond
+                      ((equal type "upcoming-deadline") :prewarning)
+                      ((and selected-day timestamp-day
+                            (= selected-day timestamp-day)) :due)
+                      ((and selected-day timestamp-day
+                            (< selected-day timestamp-day)) :prewarning)
+                      ((and selected-day timestamp-day
+                            (> selected-day timestamp-day)) :overdue))))
+               (delay-state
+                (and (eq kind :scheduled) delay-days (> delay-days 0)
+                     (equal type "past-scheduled") :delayed)))
+          (list :date date
+                :kind kind
+                :org-type type
+                :org-date (and row
+                               (org-fixture--agenda-iso-date
+                                (get-text-property 0 'date row)))
+                :timestamp timestamp
+                :timestamp-date (and timestamp-day
+                                     (org-fixture--agenda-iso-date timestamp-day))
+                :scheduled-timestamp scheduled-timestamp
+                :deadline-timestamp deadline-timestamp
+                :headline headline
+                :heading-path path
+                :warning-state warning-state
+                :warning-days warning-days
+                :scheduled-delay-state delay-state
+                :scheduled-delay-days delay-days
+                :todo-state todo
+                :effective-tags (mapcar #'substring-no-properties tags)
+                :property-values property-values
+                :habit-p (and row (get-text-property 0 'org-habit-p row) t)
+                :source-line (line-number-at-pos (marker-position marker))
+                :match-p (and match-p t)))))))
+
+(defun org-fixture--agenda-matcher (match)
+  (when match
+    (unless (stringp match)
+      (error "Agenda fixture match must be a string or nil"))
+    (let ((org--matcher-tags-todo-only nil))
+      (cdr (org-make-tags-matcher match)))))
+
+(defun org-fixture--agenda-entry-kind-order (entry)
+  (or (cl-position (plist-get entry :kind)
+                   '(:deadline :scheduled :timestamp :todo))
+      4))
+
+(defun org-fixture--agenda-sort-entries (entries)
+  ;; Org's display order can differ from the stable order promised by the API.
+  (cl-stable-sort
+   entries
+   (lambda (left right)
+     (let ((left-date (or (plist-get left :date) ""))
+           (right-date (or (plist-get right :date) ""))
+           (left-kind (org-fixture--agenda-entry-kind-order left))
+           (right-kind (org-fixture--agenda-entry-kind-order right))
+           (left-line (or (plist-get left :source-line) 0))
+           (right-line (or (plist-get right :source-line) 0)))
+       (cond
+        ((not (equal left-date right-date))
+         (string< left-date right-date))
+        ((/= left-kind right-kind)
+         (< left-kind right-kind))
+        (t (< left-line right-line)))))))
+
+(defun org-fixture--agenda-render-snapshot (file snapshot properties match-function)
+  (let* ((reference-time (plist-get snapshot :reference-time))
+         (reference (org-fixture--agenda-parse-reference-time reference-time))
+         (reference-date (substring reference-time 0 10))
+         (start-date (plist-get snapshot :start-date))
+         (end-date (plist-get snapshot :end-date))
+         (start-day (calendar-absolute-from-gregorian
+                     (org-fixture--agenda-parse-date start-date)))
+         (end-day (calendar-absolute-from-gregorian
+                   (org-fixture--agenda-parse-date end-date)))
+         (warning-days (plist-get snapshot :warning-days))
+         (scheduled-delay (plist-get snapshot :scheduled-delay))
+         (future-mode (pcase (plist-get snapshot :future-repeats)
+                        (:all t)
+                        (:next 'next)
+                        (:none nil)
+                        (_ (error "Invalid future-repeats mode in agenda case"))))
+         entries)
+    (unless (<= start-day end-day)
+      (error "Agenda fixture range start exceeds end"))
+    (unless (and (integerp warning-days) (>= warning-days 0)
+                 (integerp scheduled-delay) (>= scheduled-delay 0))
+      (error "Agenda fixture warning/delay values must be non-negative integers"))
+    (let ((calendar-time-zone 0)
+          (org-deadline-warning-days warning-days)
+          (org-scheduled-delay-days scheduled-delay)
+          (org-agenda-show-future-repeats future-mode)
+          (org-agenda-include-inactive-timestamps nil)
+          (org-agenda-show-inherited-tags t)
+          (org-agenda-use-tag-inheritance '(agenda))
+          (org-use-tag-inheritance t)
+          (org-agenda-skip-scheduled-if-deadline-is-shown nil)
+          (org-agenda-skip-timestamp-if-deadline-is-shown nil)
+          (org-agenda-skip-timestamp-if-done nil)
+          (org-agenda-entry-types '(:deadline :scheduled :timestamp)))
+      (cl-letf (((symbol-function 'current-time)
+                 (lambda () reference))
+                ((symbol-function 'current-time-string)
+                 (lambda (&optional _time _zone)
+                   (format-time-string "%a %b %e %T %Y" reference t)))
+                ((symbol-function 'org-today)
+                 (lambda ()
+                   (calendar-absolute-from-gregorian
+                    (org-fixture--agenda-parse-date reference-date)))))
+        (let ((day start-day))
+          (while (<= day end-day)
+            (let ((selected-date (org-fixture--agenda-iso-date day)))
+              (dolist (row (org-agenda-get-day-entries
+                            file (calendar-gregorian-from-absolute day)
+                            :deadline :scheduled :timestamp))
+                (push (org-fixture--agenda-row-data
+                       row selected-date nil match-function properties)
+                      entries)))
+            (setq day (1+ day))))))
+    (append (list :name (plist-get snapshot :name)
+                  :reference-time reference-time
+                  :start-date start-date
+                  :end-date end-date
+                  :warning-days warning-days
+                  :scheduled-delay scheduled-delay
+                  :future-repeats (plist-get snapshot :future-repeats)
+                  :entries (org-fixture--agenda-sort-entries
+                            (nreverse entries))))))
+
+(defun org-fixture--agenda-map-entries (file match properties)
+  (let ((match-function (org-fixture--agenda-matcher match)))
+    (with-current-buffer (org-get-agenda-file-buffer file)
+      (org-map-entries
+       (lambda ()
+         (let ((row (org-add-props " " nil
+                      'org-hd-marker (copy-marker (point))
+                      'type nil 'date nil 'ts-date nil
+                      'tags (org-get-tags nil nil)
+                      'todo-state (org-get-todo-state)
+                      'org-habit-p (and (fboundp 'org-is-habit-p)
+                                        (org-is-habit-p)))))
+           (org-fixture--agenda-row-data
+            row nil nil match-function properties)))
+       match 'file))))
+
+(defun org-fixture--agenda-todo-case (file todo-case properties)
+  (let* ((match (plist-get todo-case :match))
+         (match-function (org-fixture--agenda-matcher match))
+         (rows (with-current-buffer (org-get-agenda-file-buffer file)
+                 (org-agenda-get-todos)))
+         (entries
+          (mapcar (lambda (row)
+                    (org-fixture--agenda-row-data
+                     row nil :todo match-function properties))
+                  rows)))
+    (list :name (plist-get todo-case :name)
+          :match match
+          :entries (if match-function
+                       (cl-remove-if-not (lambda (entry)
+                                           (plist-get entry :match-p))
+                                         entries)
+                     entries))))
+
+(defun org-fixture--agenda-pretty-data (data)
+  (require 'pp)
+  (pp-to-string (car (read-from-string (org-fixture--cl-value data)))))
+
+(defun org-fixture--agenda-render-case (case-file corpus-directory)
+  (let* ((case (org-fixture--agenda-read-case case-file))
+         (source (plist-get case :source))
+         (properties (plist-get case :properties))
+         (source-file (and (stringp source)
+                           (not (file-name-absolute-p source))
+                           (expand-file-name source corpus-directory)))
+         (match (plist-get case :match))
+         (match-function (org-fixture--agenda-matcher match))
+         (match-cases (plist-get case :match-cases))
+         (todo-cases (plist-get case :todo-cases)))
+    (unless (and source-file (file-exists-p source-file)
+                 (listp properties) (cl-every #'stringp properties))
+      (error "Invalid agenda fixture case: %s" case-file))
+    (require 'org-habit)
+    (let ((org-habit-show-habits t)
+          (org-habit-show-habits-only-for-today nil)
+          (org-agenda-show-inherited-tags t)
+          (org-agenda-use-tag-inheritance '(agenda))
+          (org-use-tag-inheritance t))
+      (let* ((snapshots
+              (mapcar (lambda (snapshot)
+                        (org-fixture--agenda-render-snapshot
+                         source-file snapshot properties match-function))
+                      (plist-get case :snapshots)))
+             (matching
+              (mapcar (lambda (match-case)
+                        (list :name (plist-get match-case :name)
+                              :match (plist-get match-case :match)
+                              :entries
+                              (org-fixture--agenda-map-entries
+                               source-file (plist-get match-case :match) properties)))
+                      match-cases))
+             (todos
+              (mapcar (lambda (todo-case)
+                        (org-fixture--agenda-todo-case
+                         source-file todo-case properties))
+                      todo-cases))
+             (data (list :source source
+                         :emacs-version emacs-version
+                         :org-version (org-version)
+                         :snapshots snapshots
+                         :match-cases matching
+                         :todo-cases todos)))
+        (org-fixture--check-output
+         (concat
+          (format "; Generated from Org agenda APIs with Emacs %s and Org %s.\n"
+                  emacs-version (org-version))
+          "; Fixed reference times and UTC calendar dates come from the case data.\n"
+          "; Agenda and TODO rows use Org APIs; the fixture's diary sexp is not evaluated.\n"
+          (org-fixture--agenda-pretty-data data)))))))
+
+(defun org-fixture-generate-agenda (corpus-directory case-directory expected-directory)
+  (unless (file-directory-p corpus-directory)
+    (error "Agenda corpus directory does not exist: %s" corpus-directory))
+  (unless (file-directory-p case-directory)
+    (error "Agenda case directory does not exist: %s" case-directory))
+  (let ((files (sort (directory-files-recursively case-directory "\\.case\\'")
+                     #'string<)))
+    (unless files
+      (error "No agenda .case files found under %s" case-directory))
+    (dolist (file files)
+      (let* ((relative (concat (file-relative-name file case-directory) ".sexp"))
+             (output (expand-file-name relative expected-directory))
+             (content (org-fixture--agenda-render-case file corpus-directory)))
+        (make-directory (file-name-directory output) t)
+        (let ((coding-system-for-write 'utf-8-unix))
+          (write-region content nil output nil 'silent))
+        (princ (format "Wrote %s\n" relative))))
+    (princ (format "Generated %d agenda fixture files.\n" (length files)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
+(defun org-fixture--agenda-main-around (original)
+  (let ((arguments (if (equal (car command-line-args-left) "--")
+                       (cdr command-line-args-left)
+                     command-line-args-left)))
+    (if (equal (car arguments) "--agenda")
+        (progn
+          (setq command-line-args-left nil)
+          (unless (= (length arguments) 4)
+            (error (concat
+                    "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+                    "--agenda CORPUS-DIR CASE-DIR EXPECTED-DIR")))
+          (org-fixture-generate-agenda
+           (expand-file-name (nth 1 arguments))
+           (expand-file-name (nth 2 arguments))
+           (expand-file-name (nth 3 arguments))))
+      (funcall original))))
+
+(advice-add 'org-fixture--main :around #'org-fixture--agenda-main-around)
+
 
 ;;; generate-org-fixtures.el ends here

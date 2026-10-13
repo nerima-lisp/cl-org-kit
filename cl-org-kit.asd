@@ -56,7 +56,9 @@
                (:file "query-path")
                (:file "query-match")
                (:file "clock")
-               (:file "clocktable"))
+               (:file "clocktable")
+               ;; F agenda
+               (:file "agenda"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -112,6 +114,7 @@
                (:file "query-match-test")
                (:file "query-equivalence-test")
                (:file "clock-test")
+               (:file "agenda-test")
                (:file "clocktable-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))

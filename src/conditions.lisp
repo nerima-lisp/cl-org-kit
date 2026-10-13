@@ -213,11 +213,29 @@ REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
 (defun org-time-error-context (condition)
   "Return the bounded, escaped time or zone excerpt, or NIL."
   (slot-value condition 'context))
-
 (defun org-clock-error-reason (condition)
   "Return the keyword classifying why the clock operation failed."
   (slot-value condition 'reason))
 
 (defun org-clock-error-context (condition)
   "Return the bounded, escaped CLOCK line or option excerpt, or NIL."
+  (slot-value condition 'context))
+
+(define-condition org-agenda-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ near \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-agenda-error-reason condition)
+                     (org-agenda-error-context condition))))
+  (:documentation "Signalled when an agenda option or entry cannot be handled.
+REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
+
+(defun org-agenda-error-reason (condition)
+  "Return the keyword classifying the agenda failure CONDITION reports."
+  (slot-value condition 'reason))
+
+(defun org-agenda-error-context (condition)
+  "Return the bounded, escaped agenda option or entry excerpt, or NIL."
   (slot-value condition 'context))

@@ -100,5 +100,21 @@
    #:org-timestamp-view-warning-unit #:org-timestamp-view-warning-mode
    #:timestamp-view
    #:org-time-interval-kind #:org-time-interval-amount #:org-time-interval-unit
+   ;; F agenda
+   #:org-agenda-error #:org-agenda-error-reason #:org-agenda-error-context
+   #:agenda-entry #:make-agenda-entry #:agenda-entry-p
+   #:agenda-entry-date #:agenda-entry-kind #:agenda-entry-headline
+   #:agenda-entry-heading-path #:agenda-entry-timestamp
+   #:agenda-entry-warning-state #:agenda-entry-scheduled-delay-state
+   #:agenda-entry-todo-state #:agenda-entry-effective-tags
+   #:agenda-entry-habit-p #:agenda-entry-source-node
+   #:agenda-result #:make-agenda-result #:agenda-result-p
+   #:agenda-result-entries #:agenda-result-start-date #:agenda-result-end-date
+   #:agenda-result-time-context
+   #:agenda-match-entry #:make-agenda-match-entry #:agenda-match-entry-p
+   #:agenda-match-entry-document #:agenda-match-entry-node
+   #:agenda-match-entry-heading-path #:agenda-match-entry-line
+   #:agenda-match-entry-end-line
+   #:agenda #:agenda-todo-list #:agenda-match
    ;; Effective Org semantics
    #:effective-heading-tags #:effective-property))
