@@ -1060,8 +1060,7 @@
 (defun export-html-output-ends-with-newline-p (state)
   (let* ((output (export-html-state-output state))
          (length (fill-pointer output)))
-    (and (plusp length)
-         (char= (char output (1- length)) #\Newline))))
+    (char= (char output (1- length)) #\Newline)))
 
 (defun export-html-render-example-block (state node)
   (let ((reference (export-html-reference state node))
