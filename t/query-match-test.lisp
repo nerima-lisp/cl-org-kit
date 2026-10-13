@@ -250,9 +250,25 @@
                         +query-match-test-reference-time+))))
 
   (it "captures one current reference time for the convenience API"
-    (let ((document (parse-org "* TODO Current")))
-      (expect (query-match-test-titles (query-match-now document "/!"))
-              :to-equal '("Current"))))
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* TODO Due today~%DEADLINE: <2026-10-13>~%* TODO Due tomorrow~%DEADLINE: <2026-10-14>")))
+           (original
+             (symbol-function 'org-kit::query-match-current-reference-time))
+           (calls 0))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::query-match-current-reference-time)
+                   (lambda ()
+                     (incf calls)
+                     +query-match-test-reference-time+))
+             (expect (query-match-test-titles
+                      (query-match-now document "DEADLINE<=\"<today>\""))
+                     :to-equal '("Due today"))
+             (expect calls :to-be 1))
+        (setf (symbol-function 'org-kit::query-match-current-reference-time)
+              original))))
 
   (it "requires a date-time reference for match evaluation"
     (let ((document (parse-org "* TODO Task")))
