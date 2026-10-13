@@ -1,0 +1,11 @@
+# T2 fixture metadata: Unicode 17.0.0 policy fixture; expected output is hand-fixed
+# Backend: none
+# Encoding: UTF-8
+# Policy: widths sum code-point widths; combining marks are zero-width and East Asian Width A is narrow.
+| ASCII |
+| 日本 |
+| é |
+| ¡ |
+| 🧑 |
+| 🇯🇵 |
+| 👩‍💻 |

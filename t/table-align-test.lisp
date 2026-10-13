@@ -20,8 +20,10 @@
             (org-edit-error-target condition)))
     (org-table-error (condition)
       (list :table
+            (org-kit-error-message condition)
             (org-table-error-reason condition)
-            (org-table-error-target condition)))))
+            (org-table-error-target condition)
+            (princ-to-string condition)))))
 
 (defun table-align-test-utf8-bom-octets (text)
   (let* ((body (cl-codec-kit:string-to-octets text :encoding :utf-8))
@@ -32,20 +34,17 @@
     octets))
 
 (describe "table width and alignment"
-  (it "uses Unicode 17 code-point widths without grapheme shaping"
-    (with-soft-assertions
-      (expect org-kit::+unicode-width-table-version+ :to-equal "17.0.0")
-      (expect (org-kit::table-string-width "ASCII") :to-be 5)
-      (expect (org-kit::table-string-width "日本") :to-be 4)
-      (expect (org-kit::table-string-width "é") :to-be 1)
-      (expect (org-kit::table-string-width "¡") :to-be 1)
-      (expect (org-kit::table-string-width "🧑") :to-be 2)
-      (expect (org-kit::table-string-width "🇯🇵") :to-be 2)
-      (expect (org-kit::table-string-width "👩‍💻") :to-be 5)
-      (expect (org-kit::table-string-width "[2/5]") :to-be 5)
-      (expect (org-kit::table-string-width "[40%]") :to-be 5)
-      (expect (org-kit::table-code-point-width #x4DBF) :to-be 2)
-      (expect (org-kit::table-code-point-width #x0301) :to-be 0)))
+  (it "aligns code-point width cases through the public table API"
+    (let* ((source (table-align-test-fixture
+                    "policy/align/code-point-widths.org"))
+           (expected (table-align-test-fixture
+                      "policy/expected/align/code-point-widths.org"))
+           (document (parse-org source))
+           (table (table-align-test-find-node (document-root document) :table))
+           (updated (edit-result-updated-document (table-align document table))))
+      (with-soft-assertions
+        (expect (document-text updated) :to-equal expected)
+        (expect (document-text document) :to-equal source))))
 
   (it "matches the checked-in Org align fixtures where the policies agree"
     (dolist (fixture '("corpus/align/ascii.org"
@@ -116,6 +115,30 @@
       (with-soft-assertions
         (expect (document-text (edit-result-updated-document result))
                 :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
+  (it "treats East Asian Ambiguous characters as narrow by kit policy"
+    (let* ((source (table-align-test-fixture
+                    "policy/align/ambiguous-narrow.org"))
+           (expected (table-align-test-fixture
+                      "policy/expected/align/ambiguous-narrow.org"))
+           (document (parse-org source))
+           (table (table-align-test-find-node (document-root document) :table))
+           (updated (edit-result-updated-document (table-align document table))))
+      (with-soft-assertions
+        (expect (document-text updated) :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
+  (it "collapses excess hline segments to the logical table width"
+    (let* ((source (table-align-test-fixture
+                    "regression/align/extra-hline-segments.org"))
+           (expected (table-align-test-fixture
+                      "regression/expected/align/extra-hline-segments.org"))
+           (document (parse-org source))
+           (table (table-align-test-find-node (document-root document) :table))
+           (updated (edit-result-updated-document (table-align document table))))
+      (with-soft-assertions
+        (expect (document-text updated) :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
   (it "lets an emoji sequence determine the aligned column width"
@@ -204,7 +227,10 @@
       (with-soft-assertions
         (expect (table-align-test-condition
                  (lambda () (table-align table-el-document table-el)))
-                :to-equal '(:table :unsupported-table-type "table"))
+                :to-equal
+                '(:table "Only Org pipe tables can be aligned"
+                  :unsupported-table-type "table"
+                  "Only Org pipe tables can be aligned (unsupported-table-type) for target table"))
         (expect (table-align-test-condition
                  (lambda () (table-align pipe-document orphan)))
                 :to-equal '(:edit :wrong-node-type "keyword"))
@@ -222,6 +248,9 @@
         (expect (table-align-test-condition
                  (lambda () (table-align pipe-document "table/path")))
                 :to-equal '(:edit :target-not-found "table/path"))
+        (expect (table-align-test-condition
+                 (lambda () (table-align pipe-document '())))
+                :to-equal '(:edit :target-not-found "target"))
         (expect (document-text pipe-document)
                 :to-equal (format nil "#+TBLFM: $1=$1~%~%| a |~%")))))
 
@@ -264,6 +293,39 @@
         (expect (document-text (edit-result-updated-document result))
                 :to-equal source)
         (expect (document-text document) :to-equal source))))
+
+  (it "checks max-output-octets and max-input-length immediately below, at, and above the output size"
+    (let ((source (format nil "|a|~%"))
+          (expected (format nil "| a |~%")))
+      (flet ((run-with-limit (name value)
+               (let* ((other-limit
+                        (case name
+                          (:max-output-octets :max-input-length)
+                          (:max-input-length :max-output-octets)))
+                      (limits
+                        (apply #'make-limits
+                               (list name value other-limit 100)))
+                      (document (parse-org source :limits limits))
+                      (table (table-align-test-find-node
+                              (document-root document) :table)))
+                 (handler-case
+                     (list :ok
+                           (document-text
+                            (edit-result-updated-document
+                             (table-align document table))))
+                   (org-resource-limit-error (condition)
+                     (list :limit
+                           (org-resource-limit-error-limit-name condition)
+                           (org-resource-limit-error-limit condition)
+                           (org-resource-limit-error-actual condition)))))))
+        (with-soft-assertions
+          (dolist (name '(:max-output-octets :max-input-length))
+            (expect (run-with-limit name 5)
+                    :to-equal (list :limit name 5 6))
+            (expect (run-with-limit name 6)
+                    :to-equal (list :ok expected))
+            (expect (run-with-limit name 7)
+                    :to-equal (list :ok expected)))))))
 
   (it "rejects enormous width cookies before allocating padded cells"
     (let* ((source

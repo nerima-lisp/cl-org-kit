@@ -1,0 +1,6 @@
+# T2 fixture metadata: Unicode 17.0.0 policy fixture; expected output is hand-fixed
+# Backend: none
+# Encoding: UTF-8
+# Policy: East Asian Width A is narrow and occupies one column.
+| · |
+| x |

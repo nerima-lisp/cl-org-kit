@@ -173,6 +173,15 @@ docs/src/reference/node-model.md.")
         (expect (list name (and (documented-p (find-symbol name "ORG-KIT")) t))
                 :to-equal (list name t)))))
 
+  (it "pins the T2 public API documentation"
+    (with-soft-assertions
+      (expect (documentation 'table-align 'function)
+              :to-equal "Align a pipe table and return its validated edit result.")
+      (expect (documentation 'org-table-error 'type)
+              :to-equal
+              "Signalled when a table edit is unsupported. TARGET describes the
+addressed table and REASON classifies the table-specific failure.")))
+
   (it "keeps the package name stable and nickname-free"
     (expect (package-name (find-package "ORG-KIT")) :to-equal "ORG-KIT")
     (expect (package-nicknames (find-package "ORG-KIT")) :to-equal '())))

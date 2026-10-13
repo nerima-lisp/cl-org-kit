@@ -1,0 +1,6 @@
+# T2 fixture metadata: table alignment regression fixture; expected output is hand-fixed
+# Backend: none
+# Encoding: UTF-8
+| x |
+|---+---|
+| y |
