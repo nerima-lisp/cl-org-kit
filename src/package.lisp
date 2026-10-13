@@ -29,6 +29,8 @@
    #:clocktable-result #:make-clocktable-result #:clocktable-result-p
    #:clocktable-result-total-minutes #:clocktable-result-rows
    #:clocktable-result-range #:clocktable-data
+   ;; Clock editing
+   #:clock-in #:clock-out
    ;; Edit results
    #:edit-span #:make-edit-span #:edit-span-p #:edit-span-start #:edit-span-end
    #:edit-result #:make-edit-result #:edit-result-p

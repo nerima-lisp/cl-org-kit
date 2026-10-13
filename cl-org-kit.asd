@@ -56,6 +56,7 @@
                (:file "query-path")
                (:file "query-match")
                (:file "clock")
+               (:file "edit-clock")
                (:file "clocktable")
                ;; F agenda
                (:file "agenda"))
@@ -114,6 +115,7 @@
                (:file "query-match-test")
                (:file "query-equivalence-test")
                (:file "clock-test")
+               (:file "edit-clock-test")
                (:file "agenda-test")
                (:file "clocktable-test"))
   :perform (test-op (operation component)
