@@ -64,7 +64,7 @@
                   (reader-heading-settings-error
                    context offset "Malformed TODO sequence ID in ~A" source-key))
                 (values kind (subseq source-key id-start id-end) t))
-              (values kind nil t))))))
+              (values kind nil t)))))))
 
 (defun reader-heading-todo-name-valid-p (name)
   (and (plusp (length name))
