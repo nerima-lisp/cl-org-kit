@@ -1,0 +1,17 @@
+--- corpus/formula-table.org
++++ source-after/column-insert-after-last.org
+@@ -4,9 +4,9 @@
+ # Encoding: UTF-8
+ # Reference time: 2000-01-01T00:00:00Z (fixed; unused)
+ # Zone/DST policy: UTC; DST not applicable
+-| Item  | A | B |
+-|-------+---+---|
+-| alpha | red   | gold   |
+-| beta  | blue  | silver |
+-| gamma | green | bronze |
++| Item  | A     | B      | new |
++|-------+-------+--------+-----|
++| alpha | red   | gold   | x   |
++| beta  | blue  | silver | y   |
++| gamma | green | bronze | z   |
+ #+TBLFM: @3$3=@2$1+@+1$-1::@2$2=@3$1+@+1$-1::$3=$1+$2+@4$1

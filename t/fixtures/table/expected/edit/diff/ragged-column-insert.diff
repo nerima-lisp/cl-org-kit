@@ -1,0 +1,18 @@
+--- corpus/ragged.org
++++ source-after/ragged-column-insert.org
+@@ -4,9 +4,9 @@
+ # Encoding: UTF-8
+ # Reference time: 2000-01-01T00:00:00Z (fixed; unused)
+ # Zone/DST policy: UTC; DST not applicable
+-| A | B | C |
+-|---+---+---|
+-| one | single |
+-| two |
+-| three | third | fourth |
+-#+TBLFM: $3=$1+@2$2
++| A     | inserted | B      | C      |
++|-------+----------+--------+--------|
++| one   | x        | single |        |
++| two   | y        |        |        |
++| three | z        | third  | fourth |
++#+TBLFM: $4=$1+@2$3

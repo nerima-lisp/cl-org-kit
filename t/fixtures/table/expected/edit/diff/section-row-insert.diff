@@ -1,0 +1,21 @@
+--- corpus/sections.org
++++ source-after/section-row-insert.org
+@@ -4,11 +4,12 @@
+ # Encoding: UTF-8
+ # Reference time: 2000-01-01T00:00:00Z (fixed; unused)
+ # Zone/DST policy: UTC; DST not applicable
+-| Group | Value |
+-|-------+-------|
+-| alpha | first |
++| Group | Value  |
++|-------+--------|
++| alpha | first  |
+ | beta  | second |
+-|-------+-------|
+-| gamma | third |
++|-------+--------|
++| new   | added  |
++| gamma | third  |
+ | delta | fourth |
+-#+TBLFM: @3$2=@2$1+@+1$-1::$2=@4$1
++#+TBLFM: @3$2=@2$1+@+1$-1::$2=@5$1

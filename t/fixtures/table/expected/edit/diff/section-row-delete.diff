@@ -1,0 +1,12 @@
+--- corpus/sections.org
++++ source-after/section-row-delete.org
+@@ -7,8 +7,7 @@
+ | Group | Value |
+ |-------+-------|
+ | alpha | first |
+-| beta  | second |
+ |-------+-------|
+ | gamma | third |
+ | delta | fourth |
+-#+TBLFM: @3$2=@2$1+@+1$-1::$2=@4$1
++#+TBLFM: $2=@3$1

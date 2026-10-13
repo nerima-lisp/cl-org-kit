@@ -2098,6 +2098,302 @@
 
 (advice-add 'org-fixture--main :around #'org-fixture--h2-clocktable-main-around)
 
+;;; T3 table editing fixtures
+
+(require 'cl-lib)
+(require 'diff)
+
+(defconst org-fixture--table-edit-required-metadata
+  '("GNU Emacs 31.1; Org 9.8.10"
+    "Generator mode: org-table-edit"
+    "Backend: none"
+    "Encoding: UTF-8"
+    "Reference time: 2000-01-01T00:00:00Z (fixed; unused)"
+    "Zone/DST policy: UTC; DST not applicable"))
+
+(defun org-fixture--table-edit-read-cases (file)
+  (with-temp-buffer
+    (let ((read-eval nil))
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (let ((cases (read (current-buffer))))
+        (condition-case nil
+            (progn
+              (read (current-buffer))
+              (error "Expected one T3 operations list in %s"
+                     (file-name-nondirectory file)))
+          (end-of-file nil))
+        cases))))
+
+(defun org-fixture--table-edit-validate-cases (cases)
+  (let ((ids (make-hash-table :test #'equal))
+        (actions '(:insert-row :delete-row :move-row
+                   :insert-column :delete-column :move-column))
+        (allowed-keys '(:id :source :action :index :values :from :to)))
+    (unless (and (listp cases) cases)
+      (error "T3 operations must be a non-empty list"))
+    (dolist (case cases)
+      (unless (and (listp case) (= (% (length case) 2) 0))
+        (error "Malformed T3 operation"))
+      (let ((tail case))
+        (while tail
+          (let ((key (pop tail)))
+            (pop tail)
+            (unless (memq key allowed-keys)
+              (error "Unknown T3 operation key %S" key)))))
+      (let ((id (plist-get case :id))
+            (source (plist-get case :source))
+            (action (plist-get case :action))
+            (values (plist-get case :values)))
+        (unless (and (stringp id)
+                     (string-match-p "\\`[a-z0-9][a-z0-9-]*\\'" id)
+                     (not (gethash id ids)))
+          (error "Invalid or duplicate T3 operation id"))
+        (puthash id t ids)
+        (unless (and (stringp source)
+                     (equal source (file-name-nondirectory source))
+                     (string-match-p "\\.org\\'" source))
+          (error "T3 source must be a corpus .org file name"))
+        (unless (memq action actions)
+          (error "Unsupported T3 operation action %S" action))
+        (when (plist-member case :values)
+          (unless (and (listp values) (cl-every #'stringp values))
+            (error "T3 inserted values must be a string list")))
+        (pcase action
+          ((or :insert-row :insert-column)
+           (unless (and (plist-member case :index)
+                        (integerp (plist-get case :index))
+                        (> (plist-get case :index) 0))
+             (error "T3 insert operation needs a positive index")))
+          ((or :delete-row :delete-column)
+           (unless (and (plist-member case :index)
+                        (integerp (plist-get case :index))
+                        (> (plist-get case :index) 0))
+             (error "T3 delete operation needs a positive index")))
+          ((or :move-row :move-column)
+           (unless (and (plist-member case :from)
+                        (plist-member case :to)
+                        (integerp (plist-get case :from))
+                        (integerp (plist-get case :to))
+                        (> (plist-get case :from) 0)
+                        (> (plist-get case :to) 0)
+                        (/= (plist-get case :from) (plist-get case :to)))
+             (error "T3 move operation needs distinct positive indices"))))
+        (when (and (memq action '(:delete-row :delete-column
+                                 :move-row :move-column))
+                   (plist-member case :values))
+          (error "T3 delete and move operations do not accept values"))))
+    cases))
+
+(defun org-fixture--table-edit-context (table)
+  (let ((row-count 0)
+        (width 0)
+        (section 0)
+        (sections nil))
+    (dolist (row table)
+      (if (eq row 'hline)
+          (setq section (1+ section))
+        (progn
+          (setq row-count (1+ row-count)
+                width (max width (length row)))
+          (push (cons row-count section) sections))))
+    (list :row-count row-count
+          :width width
+          :sections (nreverse sections))))
+
+(defun org-fixture--table-edit-row-section (context row)
+  (cdr (assq row (plist-get context :sections))))
+
+(defun org-fixture--table-edit-set-values (table-start first-row column values)
+  (let ((row first-row))
+    (dolist (value values)
+      (goto-char table-start)
+      (org-table-put row column value)
+      (setq row (1+ row)))
+    (org-table-align)))
+
+(defun org-fixture--table-edit-set-row-values (table-start row values)
+  (let ((column 1))
+    (dolist (value values)
+      (goto-char table-start)
+      (org-table-put row column value)
+      (setq column (1+ column)))
+    (org-table-align)))
+
+(defun org-fixture--table-edit-run (case)
+  (let* ((source (plist-get case :source))
+         (action (plist-get case :action))
+         (index (plist-get case :index))
+         (from (plist-get case :from))
+         (to (plist-get case :to))
+         (values (plist-get case :values)))
+    (with-temp-buffer
+      (org-fixture--read-buffer source)
+      (let ((before (buffer-string))
+            table-start table context)
+        (goto-char (point-min))
+        (unless (re-search-forward "^[ \t]*|" nil t)
+          (error "T3 source has no pipe table"))
+        (setq table-start (line-beginning-position))
+        (unless (= (length (org-element-map (org-element-parse-buffer)
+                                            'table #'identity))
+                   1)
+          (error "T3 source must contain exactly one table"))
+        (goto-char table-start)
+        (setq table (org-table-to-lisp)
+              context (org-fixture--table-edit-context table))
+        (dolist (metadata org-fixture--table-edit-required-metadata)
+          (unless (string-match-p (regexp-quote metadata) before)
+            (error "Missing T3 fixture metadata %S" metadata)))
+        (pcase action
+          (:insert-row
+           (unless (<= index (1+ (plist-get context :row-count)))
+             (error "T3 row insertion index is outside the table"))
+           (when (> (length values) (plist-get context :width))
+             (error "T3 row insertion values exceed the table width"))
+           (goto-char table-start)
+           (if (= index (1+ (plist-get context :row-count)))
+               (progn
+                 (org-table-goto-line (plist-get context :row-count))
+                 (org-table-insert-row t))
+             (org-table-goto-line index)
+             (org-table-insert-row))
+           (org-fixture--table-edit-set-row-values table-start index values))
+          (:delete-row
+           (unless (<= index (plist-get context :row-count))
+             (error "T3 row deletion index is outside the table"))
+           (goto-char table-start)
+           (org-table-goto-line index)
+           (org-table-kill-row))
+          (:move-row
+           (unless (and (<= from (plist-get context :row-count))
+                        (<= to (plist-get context :row-count)))
+             (error "T3 row move index is outside the table"))
+           (unless (equal (org-fixture--table-edit-row-section context from)
+                          (org-fixture--table-edit-row-section context to))
+             (error "T3 oracle row move crosses an hline boundary"))
+           (let ((row from))
+             (while (/= row to)
+               (goto-char table-start)
+               (org-table-goto-line row)
+               (org-table-move-row (> row to))
+               (setq row (+ row (if (< row to) 1 -1))))))
+          (:insert-column
+           (unless (<= index (1+ (plist-get context :width)))
+             (error "T3 column insertion index is outside the table"))
+           (when (> (length values) (plist-get context :row-count))
+             (error "T3 column insertion values exceed the row count"))
+           (goto-char table-start)
+           (org-table-goto-column index)
+           (org-table-insert-column)
+           (org-fixture--table-edit-set-values table-start 1 index values))
+          (:delete-column
+           (unless (<= index (plist-get context :width))
+             (error "T3 column deletion index is outside the table"))
+           (goto-char table-start)
+           (org-table-goto-column index)
+           (org-table-delete-column))
+          (:move-column
+           (unless (and (<= from (plist-get context :width))
+                        (<= to (plist-get context :width)))
+             (error "T3 column move index is outside the table"))
+           (let ((column from))
+             (while (/= column to)
+               (goto-char table-start)
+               (org-table-goto-column column)
+               (org-table-move-column (> column to))
+               (setq column (+ column (if (< column to) 1 -1)))))))
+        (list before (buffer-string))))))
+
+(defun org-fixture--table-edit-diff (before after source-label result-label)
+  (let ((old-buffer (generate-new-buffer "t3-source"))
+        (new-buffer (generate-new-buffer "t3-source-after"))
+        diff-buffer)
+    (unwind-protect
+        (progn
+          (with-current-buffer old-buffer (insert before))
+          (with-current-buffer new-buffer (insert after))
+          (setq diff-buffer (diff-no-select old-buffer new-buffer "-u" t))
+          (with-current-buffer diff-buffer
+            (let* ((raw (buffer-string))
+                   (start (string-match "^@@ " raw))
+                   (body (and start (substring raw start)))
+                   (end (and body (string-match "^Diff finished\\." body))))
+              (unless body
+                (error "T3 source-after has no diff"))
+              (replace-regexp-in-string
+               "\n+\\'" "\n"
+               (concat "--- " source-label "\n+++ " result-label "\n"
+                       (if end (substring body 0 end) body))))))
+      (when (buffer-live-p diff-buffer) (kill-buffer diff-buffer))
+      (kill-buffer old-buffer)
+      (kill-buffer new-buffer))))
+
+(defun org-fixture-generate-table-edit (corpus-directory operations-file
+                                                        expected-directory)
+  "Generate Org source-after and unified-diff oracles for T3 operations."
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "T3 oracle requires Emacs 31.1 and Org 9.8.10; found %s and %s"
+           emacs-version (org-version)))
+  (unless (file-directory-p corpus-directory)
+    (error "T3 corpus directory does not exist"))
+  (let ((cases (org-fixture--table-edit-validate-cases
+                (org-fixture--table-edit-read-cases operations-file))))
+    (dolist (case cases)
+      (let* ((id (plist-get case :id))
+             (source (plist-get case :source))
+             (input (expand-file-name source corpus-directory))
+             (source-after-directory
+              (expand-file-name "source-after" expected-directory))
+             (diff-directory (expand-file-name "diff" expected-directory))
+             (source-after (expand-file-name (concat id ".org")
+                                             source-after-directory))
+             (diff-file (expand-file-name (concat id ".diff") diff-directory))
+             before after diff-content)
+        (unless (file-exists-p input)
+          (error "T3 corpus source does not exist: %s" source))
+        (pcase-let ((`(,old ,new) (org-fixture--table-edit-run
+                                   (let ((case (copy-sequence case)))
+                                     (plist-put case :source input)
+                                     case))))
+          (setq before old
+                after new))
+        (setq diff-content
+              (org-fixture--table-edit-diff
+               before after (concat "corpus/" source)
+               (concat "source-after/" id ".org")))
+        (make-directory source-after-directory t)
+        (make-directory diff-directory t)
+        (let ((coding-system-for-write 'utf-8-unix))
+          (write-region (org-fixture--check-output after)
+                        nil source-after nil 'silent)
+          (write-region (org-fixture--check-output diff-content)
+                        nil diff-file nil 'silent))
+        (princ (format "Wrote T3 oracle %s\n" id))))
+    (princ (format "Generated %d T3 table-edit oracle cases.\n" (length cases)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
+(defun org-fixture--table-edit-dispatch-around (original)
+  (let ((arguments (if (equal (car command-line-args-left) "--")
+                       (cdr command-line-args-left)
+                     command-line-args-left)))
+    (if (equal (car arguments) "--table-edit")
+        (progn
+          (setq command-line-args-left nil)
+          (unless (= (length arguments) 4)
+            (error (concat
+                    "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+                    "--table-edit CORPUS-DIR OPERATIONS-FILE EXPECTED-DIR")))
+          (org-fixture-generate-table-edit
+           (expand-file-name (nth 1 arguments))
+           (expand-file-name (nth 2 arguments))
+           (expand-file-name (nth 3 arguments))))
+      (funcall original))))
+
+(advice-add 'org-fixture--dispatch-main :around
+            #'org-fixture--table-edit-dispatch-around)
+
 (org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here
