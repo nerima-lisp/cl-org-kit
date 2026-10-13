@@ -1067,6 +1067,14 @@
                (org-kit:query-list document '(:property-missing "OWNER")))
               :to-equal '("Entry"))))
 
+  (it "reads symbol property keys set on a parsed headline"
+    (let* ((document (parse-org "* Entry"))
+           (headline (first (org-kit:query-list document '(:type :headline)))))
+      (setf (org-kit:node-property headline :owner) "Ada")
+      (expect (query-eval-test-titles
+               (org-kit:query-list document '(:property "OWNER" := "Ada")))
+              :to-equal '("Entry"))))
+
   (it "continues drawer property lookup after a keyword child"
     (let ((document
             (parse-org
