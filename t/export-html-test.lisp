@@ -843,6 +843,17 @@
       (expect (search "<li>parent
 <ul class=\"org-ul\">" output) :not :to-be nil)))
 
+  (it "separates a hidden list comment from a nested list child"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "- #+BEGIN_COMMENT~%  ignored~%  #+END_COMMENT~%  - nested child~%")))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "<li>
+<ul class=\"org-ul\">" output) :not :to-be nil)
+        (expect (search "nested child" output) :not :to-be nil))))
+
   (it "does not mutate documents on successful or failed HTML export"
     (let* ((valid (parse-org
                    (format nil "#+ATTR_HTML: :alt safe~%[[file:image.png]]")))
