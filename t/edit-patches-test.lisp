@@ -859,14 +859,14 @@
   (it "refuses edited text that cannot be encoded using the original encoding"
     (let* ((document (parse-org (octets #x2A #x20 #x78 #x0A) :encoding :latin-1))
            (headline (edit-test-headline document)))
-      (handler-case
-          (progn
-            (replace-heading-title document headline "日")
-            (expect nil :to-be t))
-        (org-edit-error ()
-          (expect nil :to-be t))
-        (org-kit-error ()
-          (expect t :to-be t)))
+      (signals org-kit-error
+        (handler-bind
+            ((org-kit-error
+               (lambda (condition)
+                 (expect (org-kit-error-message condition)
+                         :to-equal
+                         "Edited text cannot be represented in LATIN-1"))))
+          (replace-heading-title document headline "日")))
       (expect (document-text document) :to-equal (format nil "* x~%"))))
 
   (it "bounds and escapes invalid target descriptions through the public edit API"
