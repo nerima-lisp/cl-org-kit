@@ -1,0 +1,8 @@
+* Parent
+:PROPERTIES:
+:COOKIE_DATA: todo recursive
+:END:
+** Child [0/0]
+*** DONE Direct
+*** TODO Direct
+**** DONE Nested

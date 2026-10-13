@@ -1,0 +1,5 @@
+* Parent [1/2]
+- [ ] Parent item [0/0]
+*************** TODO Inline
+- [X] Inline item [0/0]
+*************** END

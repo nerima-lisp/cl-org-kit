@@ -1,0 +1,12 @@
+* Parent
+:PROPERTIES:
+:COOKIE_DATA: checkbox recursive
+:END:
+** Child [1/2]
+:PROPERTIES:
+:COOKIE_DATA+: x
+:END:
+- [X] Direct complete
+- [ ] Direct open
+*** Grandchild
+- [X] Nested complete

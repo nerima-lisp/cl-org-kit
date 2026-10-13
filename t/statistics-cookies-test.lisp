@@ -5,7 +5,10 @@
   '("todo-direct" "todo-recursive" "checkbox-direct" "checkbox-recursive"
     "checkbox-recursive-only" "checkbox-noninherit" "todo-zero" "percent-floor"
     "multiple-cookies" "todo-plus-recursive"
-    "checkbox-plus-recursive-local-heading" "checkbox-continuation-cookie"))
+    "checkbox-plus-recursive-local-heading" "checkbox-continuation-cookie"
+    "default-checkbox" "todo-item-cookie" "checkbox-plus-inherited-recursion"
+    "inline-task-checkbox" "todo-inherited-recursion"
+    "no-cookie-item-checkbox"))
 
 (defun statistics-cookies-test-nodes-in-tree (document types)
   (let ((nodes nil))
@@ -227,6 +230,24 @@
           (expect (document-text document) :to-equal source))
         (expect (document-text recursive-document) :to-equal recursive-source))))
 
+  (it "updates checkbox item cookies when COOKIE_DATA is absent"
+    (let* ((source (statistics-cookies-test-fixture-text
+                    "source" "no-cookie-item-checkbox"))
+           (expected (statistics-cookies-test-fixture-text
+                      "expected" "no-cookie-item-checkbox"))
+           (document (parse-org source))
+           (heading (first (statistics-cookies-test-nodes document :headline)))
+           (result-and-updates (multiple-value-list
+                                (update-statistics-cookies document heading)))
+           (result (first result-and-updates)))
+      (with-soft-assertions
+        (expect (mapcar #'statistics-cookie-update-new-value
+                        (second result-and-updates))
+                :to-equal '("[1/1]"))
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
   (it "inherits TODO COOKIE_DATA for child headings but scopes checkbox recursion locally"
     (let* ((todo-source
              (format nil
@@ -357,11 +378,11 @@
                 :to-equal source)
         (expect (document-text document) :to-equal source))))
 
-  (it "keeps inline-task cookies outside the parent heading scope"
+  (it "counts inline-task checkboxes in the parent scope and updates inline item cookies"
     (let* ((source (format nil
                            "* Parent [0/0]~%- [ ] Parent item [0/0]~%*************** TODO Inline~%- [X] Inline item [9/9]~%*************** END~%"))
            (expected (format nil
-                             "* Parent [0/1]~%- [ ] Parent item [0/0]~%*************** TODO Inline~%- [X] Inline item [9/9]~%*************** END~%"))
+                             "* Parent [1/2]~%- [ ] Parent item [0/0]~%*************** TODO Inline~%- [X] Inline item [0/0]~%*************** END~%"))
            (document (parse-org source))
            (heading (first (statistics-cookies-test-nodes document :headline)))
            (result-and-updates (multiple-value-list
@@ -369,7 +390,7 @@
            (result (first result-and-updates)))
       (with-soft-assertions
         (expect (mapcar #'statistics-cookie-update-new-value (second result-and-updates))
-                :to-equal '("[0/1]"))
+                :to-equal '("[1/2]" "[0/0]"))
         (expect (document-text (edit-result-updated-document result))
                 :to-equal expected)
         (expect (document-text document) :to-equal source))))

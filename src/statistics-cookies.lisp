@@ -82,7 +82,9 @@
        (let* ((type (node-type node))
               (heading-p (member type '(:headline :inlinetask) :test #'eq))
               (parent-context (gethash (node-parent node) contexts))
-              (owner-heading (if heading-p
+              (owner-heading (if (and heading-p
+                                      (or (eq node heading)
+                                          (eq type :headline)))
                                  node
                                  (and parent-context
                                       (aref parent-context 0))))
@@ -154,19 +156,30 @@
             checkbox-direct checkbox-recursive
             item-descendant-counts item-direct-counts)))
 
-(defun statistics-cookie-settings (document heading)
+(defun statistics-cookie-local-data-tokens (heading)
+  (let ((values nil))
+    (multiple-value-bind (value found-p)
+        (effective-heading-property-value heading "COOKIE_DATA")
+      (when found-p (push value values)))
+    (dolist (entry (effective-heading-property-entries heading "COOKIE_DATA+"))
+      (push (node-property entry :value) values))
+    (loop for value in (nreverse values)
+          append (statistics-cookie-data-tokens value))))
+
+(defun statistics-cookie-settings (document heading default-mode)
   (multiple-value-bind (data source)
       (effective-property document heading "COOKIE_DATA" :inherit t)
     (let* ((tokens (statistics-cookie-data-tokens data))
-           (mode (or (statistics-cookie-data-mode tokens) :todo))
-           (local-p (or (eq source heading)
-                        (and (listp source)
-                             (member heading source :test #'eq))))
+           (local-tokens (statistics-cookie-local-data-tokens heading))
+           (configured-mode (statistics-cookie-data-mode tokens))
+           (mode (or configured-mode
+                     (if source :todo default-mode)))
            (checkbox-recursive-p
-             (and local-p (member "recursive" tokens :test #'string=)))
+             (member "recursive" local-tokens :test #'string=))
            (todo-recursive-p (member "recursive" tokens :test #'string=)))
       (values mode (not (null checkbox-recursive-p))
-              (not (null todo-recursive-p))))))
+              (not (null todo-recursive-p))
+              (eq configured-mode :todo)))))
 
 (defun statistics-cookie-replacement (cookie done total)
   (let* ((value (node-property cookie :value))
@@ -249,8 +262,10 @@ The second value lists only cookies whose source spelling changed, in source ord
            todo-direct todo-recursive checkbox-direct checkbox-recursive
            item-descendant-counts item-direct-counts)
         (statistics-cookie-analysis heading)
-      (multiple-value-bind (mode checkbox-recursive-p todo-recursive-p)
-          (statistics-cookie-settings document heading)
+      (multiple-value-bind (mode checkbox-recursive-p todo-recursive-p todo-mode-p)
+          (statistics-cookie-settings
+           document heading
+           (if (plusp (aref checkbox-direct 1)) :checkbox :todo))
         (dolist (cookie cookies)
           (let* ((owner-item (gethash cookie cookie-items))
                  (cookie-mode (if owner-item :checkbox mode))
@@ -264,18 +279,20 @@ The second value lists only cookies whose source spelling changed, in source ord
                            (if checkbox-recursive-p
                                checkbox-recursive
                                checkbox-direct))
-                       (if todo-recursive-p todo-recursive todo-direct)))
-                 (done (aref counts 0))
-                 (total (aref counts 1))
-                 (old-value (node-property cookie :value))
-                 (new-value (statistics-cookie-replacement cookie done total)))
-            (unless (string= old-value new-value)
-              (let ((start (node-begin cookie))
-                    (end (- (node-end cookie) (node-post-blank cookie))))
-                (push (edit-make-patch start end new-value heading) patches)
-                (push (make-statistics-cookie-update
-                       :node cookie :old-value old-value :new-value new-value)
-                      updates)))))
+                       (if todo-recursive-p todo-recursive todo-direct))))
+            (unless (and owner-item todo-mode-p)
+              (let* ((done (aref counts 0))
+                     (total (aref counts 1))
+                     (old-value (node-property cookie :value))
+                     (new-value
+                       (statistics-cookie-replacement cookie done total)))
+                (unless (string= old-value new-value)
+                  (let ((start (node-begin cookie))
+                        (end (- (node-end cookie) (node-post-blank cookie))))
+                    (push (edit-make-patch start end new-value heading) patches)
+                    (push (make-statistics-cookie-update
+                           :node cookie :old-value old-value :new-value new-value)
+                          updates)))))))
       (statistics-cookie-update-title-raw-value
        document expected heading title-cookie-set updates))
     (when updates

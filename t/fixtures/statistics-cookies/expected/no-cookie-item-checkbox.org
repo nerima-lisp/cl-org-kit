@@ -1,0 +1,4 @@
+* Parent [0/0]
+- plain parent
+  - [ ] Parent item [1/1]
+    - [X] Nested complete
