@@ -248,6 +248,7 @@
                        (reader-headings-test-lines
                         "#+TAGS: valid [unfinished group"
                         "#+FILETAGS: :good:bad/tag:"
+                       "#+FILETAGS: invalid"
                         "* Entry")))
                      (malformed-settings
                       (document-settings malformed-document))
