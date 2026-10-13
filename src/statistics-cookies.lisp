@@ -203,11 +203,7 @@
                original-child canonical-child index)))
     ((consp original)
      (statistics-cookie-index-canonical-nodes (car original) (car canonical) index)
-     (statistics-cookie-index-canonical-nodes (cdr original) (cdr canonical) index))
-    ((and (vectorp original) (not (stringp original)))
-     (loop for position below (length original)
-           do (statistics-cookie-index-canonical-nodes
-               (aref original position) (aref canonical position) index))))
+     (statistics-cookie-index-canonical-nodes (cdr original) (cdr canonical) index)))
   index)
 
 (defun statistics-cookie-update-canonical-values (document expected updates)
