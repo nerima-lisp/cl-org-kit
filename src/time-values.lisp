@@ -5,7 +5,8 @@
                            (:conc-name %org-time-value-)
                            (:copier nil)
                            (:predicate org-time-value-p))
-  "An ORG-KIT-owned date or date-time parsed from a strict ISO-8601 string."
+  "An ORG-KIT-owned date or date-time parsed from a strict ISO-8601 string.
+Dates have no clock fields or UTC offset."
   (kind nil :read-only t)
   (iso8601 nil :read-only t)
   (year nil :read-only t)
@@ -210,7 +211,10 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
                           (:conc-name org-time-zone-)
                           (:copier nil)
                           (:predicate org-time-zone-p))
-  "An explicit fixed-offset or named time zone owned by ORG-KIT."
+  "An explicit fixed-offset or named time zone owned by ORG-KIT.
+Fixed zone names are UTC at zero or UTC±hh:mm otherwise. Fixed offsets use
+minutes from UTC and range from -840 through 840; named zones have no fixed
+offset."
   (name nil :read-only t)
   (offset-minutes nil :read-only t)
   (backend nil :read-only t))
@@ -243,7 +247,11 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
                              (:conc-name org-time-context-)
                              (:copier nil)
                              (:predicate org-time-context-p))
-  "Explicit reference time, zone, and daylight-saving policy for time work."
+  "Explicit reference time, zone, and daylight-saving policy for time work.
+Date-only references resolve at the start of day with :COMPATIBLE, regardless
+of the policy used for local date-times. Local date-times use :COMPATIBLE,
+:EARLIER, :LATER, or :STRICT to resolve DST gaps and overlaps. The reference
+instant is the absolute instant resolved from REFERENCE-TIME in ZONE."
   (reference-time nil :read-only t)
   (zone nil :read-only t)
   (dst-policy :compatible :read-only t)
@@ -298,7 +306,8 @@ time to reject."
                            (:conc-name org-time-range-)
                            (:copier nil)
                            (:predicate org-time-range-p))
-  "An ordered interval of ORG-KIT time values with explicit endpoint inclusion."
+  "An ordered interval of ORG-KIT time values with explicit endpoint inclusion.
+Endpoints must both carry UTC offsets or both be local values."
   (start nil :read-only t)
   (end nil :read-only t)
   (include-start-p nil :read-only t)
@@ -385,7 +394,12 @@ matter."
                                (:conc-name org-timestamp-view-)
                                (:copier nil)
                                (:predicate org-timestamp-view-p))
-  "ORG-KIT's normalized view of a source timestamp node."
+  "ORG-KIT's normalized view of a source timestamp node.
+Diary timestamps have no endpoints; points have only a start, and ranges have
+both endpoints with boolean inclusion flags. Repeater and warning fields are
+complete triples or absent; amounts are positive integers, and units are
+:HOUR, :DAY, :WEEK, :MONTH, or :YEAR. Repeater modes are :CUMULATE, :CATCH-UP,
+or :RESTART; warning modes are :ALL or :FIRST."
   (kind nil :read-only t)
   (start nil :read-only t)
   (end nil :read-only t)
@@ -397,60 +411,6 @@ matter."
   (warning-amount nil :read-only t)
   (warning-unit nil :read-only t)
   (warning-mode nil :read-only t))
-
-(eval-when (:load-toplevel :execute)
-  (setf (documentation 'org-time-value-p 'function)
-        "Return true only for ORG-KIT-owned time values."
-        (documentation 'org-time-zone-p 'function)
-        "Return true for an ORG-KIT fixed-offset or named time zone."
-        (documentation 'org-time-zone-name 'function)
-        "Return the stable zone name or canonical UTC offset."
-        (documentation 'org-time-zone-offset-minutes 'function)
-        "Return the fixed UTC offset in minutes; named zones have none."
-        (documentation 'org-time-context-p 'function)
-        "Return true for an ORG-KIT time context."
-        (documentation 'org-time-context-reference-time 'function)
-        "Return the explicit calendar value used as CONTEXT's reference."
-        (documentation 'org-time-context-zone 'function)
-        "Return the explicit zone used to resolve CONTEXT's local times."
-        (documentation 'org-time-context-dst-policy 'function)
-        "Return the policy CONTEXT uses to resolve gaps and overlaps."
-        (documentation 'org-time-context-reference-instant 'function)
-        "Return the absolute instant selected for CONTEXT's reference time."
-        (documentation 'org-time-range-p 'function)
-        "Return true for an ORG-KIT time range."
-        (documentation 'org-time-range-start 'function)
-        "Return the first value in RANGE."
-        (documentation 'org-time-range-end 'function)
-        "Return the final value in RANGE."
-        (documentation 'org-time-range-include-start-p 'function)
-        "Return true when RANGE includes its first endpoint."
-        (documentation 'org-time-range-include-end-p 'function)
-        "Return true when RANGE includes its final endpoint."
-        (documentation 'org-timestamp-view-p 'function)
-        "Return true for a normalized ORG-KIT timestamp view."
-        (documentation 'org-timestamp-view-kind 'function)
-        "Return the source timestamp kind represented by VIEW."
-        (documentation 'org-timestamp-view-start 'function)
-        "Return VIEW's start value, or NIL when it has no concrete endpoint."
-        (documentation 'org-timestamp-view-end 'function)
-        "Return VIEW's end value, or NIL when it is not a range."
-        (documentation 'org-timestamp-view-start-inclusive-p 'function)
-        "Return whether VIEW includes its range start."
-        (documentation 'org-timestamp-view-end-inclusive-p 'function)
-        "Return whether VIEW includes its range end."
-        (documentation 'org-timestamp-view-repeater-amount 'function)
-        "Return the positive repeat amount, or NIL when VIEW has no repeater."
-        (documentation 'org-timestamp-view-repeater-unit 'function)
-        "Return the source unit for VIEW's repeater, or NIL when absent."
-        (documentation 'org-timestamp-view-repeater-mode 'function)
-        "Return VIEW's repeater mode, or NIL when it has no repeater."
-        (documentation 'org-timestamp-view-warning-amount 'function)
-        "Return the positive warning amount, or NIL when VIEW has no warning."
-        (documentation 'org-timestamp-view-warning-unit 'function)
-        "Return the source unit for VIEW's warning, or NIL when absent."
-        (documentation 'org-timestamp-view-warning-mode 'function)
-        "Return VIEW's warning mode, or NIL when it has no warning."))
 
 (defun %time-optional-triplet-valid-p (amount unit mode kind)
   (or (and (null amount) (null unit) (null mode))
