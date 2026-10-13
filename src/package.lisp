@@ -54,4 +54,26 @@
    #:query-list #:query-path #:query-match-at #:query-match-now
    #:node-heading-path
    ;; Timestamp values
-   #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay))
+   #:timestamp-start #:timestamp-end #:timestamp-repeater #:timestamp-warning-delay
+   ;; Unit V timestamp facade and time context
+   #:org-time-error #:org-time-error-reason #:org-time-error-context
+   #:org-time-value #:make-org-time-value #:org-time-value-p
+   #:org-time-value-kind #:org-time-value-iso8601 #:org-time-value-year
+   #:org-time-value-month #:org-time-value-day #:org-time-value-hour
+   #:org-time-value-minute #:org-time-value-second #:org-time-value-offset-minutes
+   #:org-time-zone #:make-fixed-time-zone #:resolve-time-zone #:org-time-zone-p
+   #:org-time-zone-name #:org-time-zone-offset-minutes
+   #:org-time-context #:make-time-context #:org-time-context-p
+   #:org-time-context-reference-time #:org-time-context-zone
+   #:org-time-context-dst-policy
+   #:org-time-range #:make-time-range #:org-time-range-p
+   #:org-time-range-start #:org-time-range-end
+   #:org-time-range-include-start-p #:org-time-range-include-end-p
+   #:org-timestamp-view #:make-org-timestamp-view #:org-timestamp-view-p
+   #:org-timestamp-view-kind #:org-timestamp-view-start #:org-timestamp-view-end
+   #:org-timestamp-view-start-inclusive-p #:org-timestamp-view-end-inclusive-p
+   #:org-timestamp-view-repeater-amount #:org-timestamp-view-repeater-unit
+   #:org-timestamp-view-repeater-mode #:org-timestamp-view-warning-amount
+   #:org-timestamp-view-warning-unit #:org-timestamp-view-warning-mode
+   #:timestamp-view
+   #:org-time-interval-kind #:org-time-interval-amount #:org-time-interval-unit))

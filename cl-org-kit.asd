@@ -29,6 +29,7 @@
                (:file "org-semantics")
                (:file "outline")
                (:file "timestamp")
+               (:file "time-values")
                (:file "objects")
                (:file "object-markup")
                (:file "object-timestamp")

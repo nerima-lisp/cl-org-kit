@@ -139,3 +139,22 @@ otherwise a character index into the document text. NIL when unknown."
 (defun org-resource-limit-error-actual (condition)
   "Return the measured amount that exceeded the limit."
   (slot-value condition 'actual))
+
+(define-condition org-time-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ near \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-time-error-reason condition)
+                     (org-time-error-context condition))))
+  (:documentation "Signalled when an Org date, time, zone, or range is invalid.
+REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
+
+(defun org-time-error-reason (condition)
+  "Return the keyword classifying the time failure CONDITION reports."
+  (slot-value condition 'reason))
+
+(defun org-time-error-context (condition)
+  "Return the bounded, escaped time or zone excerpt, or NIL."
+  (slot-value condition 'context))

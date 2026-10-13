@@ -80,3 +80,17 @@
                       (org-resource-limit-error-limit condition)
                       (org-resource-limit-error-actual condition))
                 :to-equal '(:max-node-count 10 11))))))
+
+(describe "time error reports"
+  (it "reports reason and context when present and omits absent slots"
+    (let ((full (make-condition 'org-time-error :message "Bad time"
+                                                 :reason :invalid-time :context "date"))
+          (bare (make-condition 'org-time-error :message "Bad time")))
+      (with-soft-assertions
+        (expect (subtypep 'org-time-error 'org-kit-error) :to-be t)
+        (expect (org-time-error-reason full) :to-be :invalid-time)
+        (expect (org-time-error-context full) :to-equal "date")
+        (expect (report full) :to-equal "Bad time (invalid-time) near \"date\"")
+        (expect (org-time-error-reason bare) :to-be nil)
+        (expect (org-time-error-context bare) :to-be nil)
+        (expect (report bare) :to-equal "Bad time")))))
