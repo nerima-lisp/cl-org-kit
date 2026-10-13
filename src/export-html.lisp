@@ -536,44 +536,28 @@
       (export-html-escape-verse-text-to-output state text)
       (export-html-escape-to-output state :text text)))
 
-(defun export-html-write-inline-views (state views &optional trim-boundaries
-                                                        trim-list-indent)
+(defun export-html-write-inline-views (state views &optional trim-list-indent)
   (loop with trim-list-indent-p = trim-list-indent
         for remaining on views
         for view = (car remaining)
-        for first-p = t then nil
-        for last-p = (null (cdr remaining))
         for node = (export-view-node view)
         for type = (node-type node)
         do (cond
              ((member type '(:section :paragraph) :test #'eq)
               (export-html-write-inline-views
-               state (export-view-children view) t trim-list-indent-p))
+               state (export-view-children view) trim-list-indent-p))
              ((eq type :macro)
               (export-html-write-inline-views
-               state (export-view-children view) trim-boundaries
-               trim-list-indent-p))
-             ((and (or trim-boundaries trim-list-indent-p)
+               state (export-view-children view) trim-list-indent-p))
+             ((and trim-list-indent-p
                    (member type '(:plain-text :text) :test #'eq))
               (let* ((text (or (node-text node) ""))
-                     (boundary-start
-                       (if (and trim-boundaries first-p (plusp (length text))
-                                (char= (char text 0) #\Newline))
-                           1 0))
                      (start
-                       (if trim-list-indent-p
-                           (loop for position from boundary-start below (length text)
-                                 while (member (char text position)
-                                               '(#\Space #\Tab) :test #'char=)
-                                 finally (return position))
-                           boundary-start))
-                     (end (if (and last-p (> (length text) start)
-                                   trim-boundaries
-                                   (char= (char text (1- (length text)))
-                                          #\Newline))
-                              (1- (length text))
-                              (length text))))
-                (export-html-write-text state (subseq text start end))
+                       (loop for position from 0 below (length text)
+                             while (member (char text position)
+                                           '(#\Space #\Tab) :test #'char=)
+                             finally (return position))))
+                (export-html-write-text state (subseq text start))
                 (when (< start (length text))
                   (setf trim-list-indent-p nil))))
              (t (export-html-render-view state view)))
@@ -1067,7 +1051,7 @@
           (export-html-write state "<p>
 ")
           (export-html-write-inline-views
-           state child-views nil trim-list-indent)
+           state child-views trim-list-indent)
           (unless (export-html-output-ends-with-newline-p state)
             (export-html-write state (string #\Newline)))
           (export-html-write state "</p>")
@@ -1243,7 +1227,7 @@
                   (export-html-render-paragraph
                    state child-node (export-view-children child) t)
                   (export-html-write-inline-views
-                   state (export-view-children child) nil t))
+                   state (export-view-children child) t))
               (setf paragraph-seen-p t))
             (progn
               (when (and (or paragraph-seen-p
