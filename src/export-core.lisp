@@ -137,6 +137,66 @@
   (let ((code (char-code character)))
     (or (<= code #x1f) (<= #x7f code #x9f))))
 
+(defun export-utf8-length (text backend)
+  (loop with total = 0
+        for character across text
+        for code = (char-code character)
+        for length = (cond ((<= code #x7f) 1)
+                           ((<= code #x7ff) 2)
+                           ((or (<= code #xd7ff)
+                                (<= #xe000 code #xffff))
+                            3)
+                           ((<= #x10000 code #x10ffff) 4))
+        do (unless length
+             (export-error backend :encoding text
+                           "Unable to measure UTF-8 export output"))
+           (incf total length)
+        finally (return total)))
+
+(defun export-write-output (text limits output-type &key stream backend)
+  "Apply output limits and return a string, UTF-8 octets, or the written stream."
+  (let ((octet-output-p
+          (case output-type
+            (:string
+             (when stream
+               (export-error backend :invalid-output nil
+                             "A stream is only valid with :STREAM output type"))
+             nil)
+            (:octets
+             (when stream
+               (export-error backend :invalid-output nil
+                             "A stream is only valid with :STREAM output type"))
+             t)
+            (:stream
+             (unless (and (streamp stream) (output-stream-p stream))
+               (export-error backend :invalid-output nil
+                             "Stream output requires an output stream"))
+             (multiple-value-bind (character-p character-known-p)
+                 (subtypep (stream-element-type stream) 'character)
+               (cond
+                 ((and character-known-p character-p) nil)
+                 ((equal (stream-element-type stream) '(unsigned-byte 8)) t)
+                 (t
+                  (export-error backend :invalid-output nil
+                                "Unsupported stream element type")))))
+            (otherwise
+             (export-error backend :invalid-output nil
+                           "Unsupported export output type")))))
+    (check-limit limits :max-output-length (length text))
+    (if octet-output-p
+        (let ((octet-count (export-utf8-length text backend)))
+          (check-limit limits :max-output-octets octet-count)
+          (let ((octets (cl-codec-kit:string-to-octets text :encoding :utf-8)))
+            (if (eq output-type :stream)
+                (progn (write-sequence octets stream) stream)
+                octets)))
+        (if (eq output-type :stream)
+            (progn
+              (export-utf8-length text backend)
+              (write-string text stream)
+              stream)
+            text))))
+
 (defun export-whitespace-p (character)
   (find character '(#\Space #\Tab #\Newline #\Return #\Page)))
 

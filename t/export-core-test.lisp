@@ -61,6 +61,20 @@
   (mapcar #'org-kit::export-view-node
           (export-core-test-view-nodes preparation type)))
 
+(defclass export-core-test-binary-output-stream
+    (sb-gray:fundamental-binary-output-stream)
+  ((element-type :initarg :element-type :reader export-core-test-element-type)
+   (octets :initform (make-array 0 :element-type '(unsigned-byte 8)
+                                 :adjustable t :fill-pointer 0)
+           :reader export-core-test-stream-octets)))
+
+(defmethod stream-element-type ((stream export-core-test-binary-output-stream))
+  (export-core-test-element-type stream))
+
+(defmethod sb-gray:stream-write-byte
+    ((stream export-core-test-binary-output-stream) byte)
+  (vector-push-extend byte (export-core-test-stream-octets stream)))
+
 (describe "E1 export context and core preparation"
   (it "runs the export policy fixtures through preparation"
     (let ((cases '("footnotes-after-pruning.org"
@@ -1338,3 +1352,173 @@
           (expect (org-resource-limit-error-actual below) :to-be actual))
         (expect at :to-be nil)
         (expect above :to-be nil)))))
+
+(describe "E1 export output validation"
+  (it "validates output types and writes to character and octet streams"
+    (let* ((string-stream (make-string-output-stream))
+           (string-stream-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits) :string :backend :html
+                 :stream string-stream))))
+           (octets-stream-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits) :octets :backend :html
+                 :stream string-stream))))
+           (missing-stream
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output "text" (make-limits) :stream
+                                              :backend :html))))
+           (non-stream-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output "text" (make-limits) :stream
+                                              :backend :html :stream :invalid))))
+           (input-stream
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits) :stream :backend :html
+                 :stream (make-string-input-stream "text")))))
+           (unsupported-stream
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits) :stream :backend :html
+                 :stream (make-instance 'export-core-test-binary-output-stream
+                                        :element-type '(unsigned-byte 16))))))
+           (unknown-output
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output "text" (make-limits) :unknown
+                                              :backend :html))))
+           (character-stream (make-string-output-stream))
+           (character-result
+             (org-kit::export-write-output "text" (make-limits) :stream
+                                           :backend :html :stream character-stream))
+           (octet-stream
+             (make-instance 'export-core-test-binary-output-stream
+                            :element-type '(unsigned-byte 8)))
+           (octet-result
+             (org-kit::export-write-output "é" (make-limits) :stream
+                                           :backend :html :stream octet-stream))
+           (mixed-utf8-text
+             (concatenate 'string "A" "é" (string (code-char #x20ac))
+                          (string (code-char #x1f600))))
+           (mixed-utf8-octets
+             (org-kit::export-write-output
+              mixed-utf8-text (make-limits :max-output-octets 10) :octets
+              :backend :html))
+           (surrogate (string (code-char #xd800)))
+           (encoding-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output surrogate (make-limits) :octets
+                                              :backend :html))))
+           (encoding-before-octet-limit
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 surrogate (make-limits :max-output-octets 0) :octets
+                 :backend :html))))
+           (failed-character-stream (make-string-output-stream))
+           (character-limit-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits :max-output-length 3) :stream
+                 :backend :html :stream failed-character-stream))))
+           (failed-character-encoding-stream (make-string-output-stream))
+           (character-stream-encoding-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 surrogate (make-limits) :stream :backend :html
+                 :stream failed-character-encoding-stream))))
+           (failed-octet-stream
+             (make-instance 'export-core-test-binary-output-stream
+                            :element-type '(unsigned-byte 8)))
+           (octet-stream-encoding-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 surrogate (make-limits) :stream :backend :html
+                 :stream failed-octet-stream)))))
+      (with-soft-assertions
+        (dolist (condition (list string-stream-error octets-stream-error
+                                 missing-stream non-stream-error input-stream
+                                 unsupported-stream unknown-output))
+          (expect (typep condition 'org-export-error) :to-be t)
+          (when (typep condition 'org-export-error)
+            (expect (org-export-error-reason condition) :to-be :invalid-output)))
+        (expect (get-output-stream-string string-stream) :to-equal "")
+        (expect (eq character-result character-stream) :to-be t)
+        (expect (get-output-stream-string character-stream) :to-equal "text")
+        (expect (eq octet-result octet-stream) :to-be t)
+        (expect (export-core-test-stream-octets octet-stream)
+                :to-equalp #(195 169))
+        (expect mixed-utf8-octets
+                :to-equalp #(65 195 169 226 130 172 240 159 152 128))
+        (dolist (condition (list encoding-error encoding-before-octet-limit
+                                 character-stream-encoding-error
+                                 octet-stream-encoding-error))
+          (expect (typep condition 'org-export-error) :to-be t)
+          (when (typep condition 'org-export-error)
+            (expect (org-export-error-reason condition) :to-be :encoding)))
+        (expect (typep character-limit-error 'org-resource-limit-error)
+                :to-be t)
+        (expect (get-output-stream-string failed-character-stream) :to-equal "")
+        (expect (get-output-stream-string failed-character-encoding-stream)
+                :to-equal "")
+        (expect (export-core-test-stream-octets failed-octet-stream)
+                :to-equalp #()))))
+
+  (it "checks output characters immediately below, at, and above the limit"
+    (let* ((text "abc")
+           (below (export-core-test-catch-error
+                   (lambda ()
+                     (org-kit::export-write-output
+                      text (make-limits :max-output-length 2) :string
+                      :backend :html))))
+           (at (org-kit::export-write-output
+                text (make-limits :max-output-length 3) :string
+                :backend :html))
+           (above (org-kit::export-write-output
+                   text (make-limits :max-output-length 4) :string
+                   :backend :html)))
+      (with-soft-assertions
+        (expect (typep below 'org-resource-limit-error) :to-be t)
+        (when (typep below 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit below) :to-be 2)
+          (expect (org-resource-limit-error-actual below) :to-be 3))
+        (expect at :to-equal text)
+        (expect above :to-equal text))))
+
+  (it "checks UTF-8 output octets immediately below, at, and above the limit"
+    (let* ((text "é")
+           (below (export-core-test-catch-error
+                   (lambda ()
+                     (org-kit::export-write-output
+                      text (make-limits :max-output-octets 1) :octets
+                      :backend :html))))
+           (at (org-kit::export-write-output
+                text (make-limits :max-output-octets 2) :octets
+                :backend :html))
+           (above (org-kit::export-write-output
+                   text (make-limits :max-output-octets 3) :octets
+                   :backend :html)))
+      (with-soft-assertions
+        (expect (typep below 'org-resource-limit-error) :to-be t)
+        (when (typep below 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below)
+                  :to-be :max-output-octets)
+          (expect (org-resource-limit-error-limit below) :to-be 1)
+          (expect (org-resource-limit-error-actual below) :to-be 2))
+        (expect at :to-equalp #(195 169))
+        (expect above :to-equalp #(195 169))))))
