@@ -356,15 +356,6 @@
         (subseq digits first-nonzero)
         "0")))
 
-(defun table-edit-decimal-compare-integer (digits integer)
-  (let* ((normalized (table-edit-normalize-decimal digits))
-         (integer-digits (write-to-string integer :base 10 :radix nil)))
-    (cond ((< (length normalized) (length integer-digits)) :less)
-          ((> (length normalized) (length integer-digits)) :greater)
-          ((string= normalized integer-digits) :equal)
-          ((string< normalized integer-digits) :less)
-          (t :greater))))
-
 (defun table-edit-decimal-increment (digits)
   (let ((result (copy-seq (table-edit-normalize-decimal digits))))
     (loop for index downfrom (1- (length result)) to 0
@@ -392,16 +383,9 @@
                      (table-edit-normalize-decimal result)))))))
 
 (defun table-edit-decimal-coordinate-map (digits operation)
-  (let ((kind (getf operation :kind))
-        (index (getf operation :index)))
-    (case kind
-      (:insert
-       (unless (eq (table-edit-decimal-compare-integer digits index) :less)
-         (table-edit-decimal-increment digits)))
-      (:delete
-       (case (table-edit-decimal-compare-integer digits index)
-         (:equal :invalid)
-         (:greater (table-edit-decimal-decrement digits)))))))
+  (case (getf operation :kind)
+    (:insert (table-edit-decimal-increment digits))
+    (:delete (table-edit-decimal-decrement digits))))
 
 (defun table-edit-reference-component-edit (reference axis operation formula)
   (let* ((kind (if (eq axis :row)
@@ -433,7 +417,7 @@
                  (table-edit-decimal-coordinate-map
                   (subseq formula start end) operation)))
            (when mapped
-             (list start end (if (eq mapped :invalid) "INVALID" mapped)))))))))
+             (list start end mapped))))))))
 
 (defun table-edit-expression-reference-edits (expression operation formula)
   (let ((edits nil))
@@ -558,9 +542,6 @@
                           (1- line-end)
                           line-end))
          (colon (position #\: source :start start :end content-end)))
-    (unless colon
-      (edit-signal-error "table" :uneditable-structure
-                         "Attached TBLFM line has no value separator"))
     (let ((value-start (1+ colon)))
       (loop while (and (< value-start content-end)
                        (find (char source value-start) '(#\Space #\Tab)))
@@ -585,8 +566,7 @@
            (loop for cell in (node-children row)
                  for index from 1
                  thereis (and (/= index deleted-index)
-                              (string= (node-property cell :value) name)))))))
-    nil))
+                              (string= (node-property cell :value) name)))))))))
 
 (defun table-edit-plan-formulas (source table operation)
   (let ((formulas (node-property table :tblfm))
@@ -599,9 +579,6 @@
     (when (> (length formulas) 1)
       (edit-signal-error table :uneditable-structure
                          "Multiple TBLFM directives cannot be remapped safely"))
-    (unless (= (length formulas) (length ranges))
-      (edit-signal-error table :uneditable-structure
-                         "TBLFM source ranges do not match formulas"))
     (loop for formula in formulas
           for range in ranges
           for value-range = (table-edit-formula-value-range source range)
@@ -1432,8 +1409,7 @@
          (preserve-raw-p
            (and (eq (getf operation :axis) :row)
                 (member (getf operation :kind) '(:delete :move))
-                (not original-ragged-p)
-                (not (table-edit-ragged-rows-p models width))))
+                (not original-ragged-p)))
          (normalized-models
            (progn
              (unless preserve-raw-p
