@@ -175,7 +175,18 @@
            (condition
              (table-calc-eval-test-condition
               "@1$1=@1$2;E" :base-row 1 :base-column 1 :cells cells)))
-      (table-calc-eval-test-expect-table-error condition :non-finite-result)))
+      (table-calc-eval-test-expect-table-error condition :non-finite-result))
+    (let* ((cells (table-calc-eval-test-cell-map '(1 2 "")))
+           (condition
+             (table-calc-eval-test-condition
+              "@1$1=@1$2+1;E" :base-row 1 :base-column 1 :cells cells)))
+      (table-calc-eval-test-expect-table-error condition :non-finite-result))
+    (let ((cells (table-calc-eval-test-cell-map '(1 2 ""))))
+      (dolist (formula '("@1$1=-@1$2;E" "@1$1=+@1$2;E"))
+        (table-calc-eval-test-expect-table-error
+         (table-calc-eval-test-condition
+          formula :base-row 1 :base-column 1 :cells cells)
+         :non-finite-result))))
 
   (it "handles a filtered empty vector and propagates E-mode NaN"
     (let* ((blank (table-calc-eval-test-cell-map '(1 1 "")))
@@ -213,8 +224,83 @@
               (expect actual :to-equal (cdr row))))))
     (expect (table-calc-eval-test-evaluate "@1$1=1.15;%.1f")
             :to-equal "1.2")
+    (expect (table-calc-eval-test-evaluate "@1$1=-0;%.2f")
+            :to-equal "-0.00")
     (expect (table-calc-eval-test-evaluate "@1$1=1e-3")
             :to-equal "0.001")))
+
+  (it "evaluates current-column targets and assignment defaults through parsed input"
+    (let* ((assignment (table-calc-eval-test-assignment "$2=7"))
+           (result
+             (org-kit::table-calc-evaluate-assignment
+              assignment
+              (table-calc-eval-test-position-function 1 2 1 nil)
+              (table-calc-eval-test-cell-value-function
+               (table-calc-eval-test-cell-map)))))
+      (expect result :to-equal "7")))
+
+  (it "preserves signed zero through unary, addition, and multiplication"
+    (dolist (case '(("@1$1=--0" . "0")
+                    ("@1$1=-0+-0" . "-0")
+                    ("@1$1=0*-9" . "-0")))
+      (expect (table-calc-eval-test-evaluate (car case))
+              :to-equal (cdr case))))
+
+  (it "rounds large-order addition without expanding distant decimal places"
+    (let ((limits (make-limits :max-formula-precision 2)))
+      (dolist (formula '("@1$1=1e3+1" "@1$1=1+1e3"))
+        (expect (table-calc-eval-test-evaluate formula :limits limits)
+                :to-equal "1000"))))
+
+  (it "checks division ratio ordering and exponent bounds"
+    (dolist (case '(("@1$1=1/22" . "0.045454545")
+                    ("@1$1=12/2" . "6")
+                    ("@1$1=9/11" . "0.81818182")
+                    ("@1$1=10/99" . "0.1010101")
+                    ("@1$1=9/99" . "0.090909091")
+                    ("@1$1=99/9" . "11")
+                    ("@1$1=1/10" . "0.1")
+                    ("@1$1=0/1" . "0")
+                    ("@1$1=-0/1" . "-0")))
+      (expect (table-calc-eval-test-evaluate (car case))
+              :to-equal (cdr case)))
+    (let* ((limits (make-limits :max-formula-precision 2
+                                :max-formula-exponent 2))
+           (overflow
+             (table-calc-eval-test-condition "@1$1=1e2/1e-2" :limits limits))
+           (underflow
+             (table-calc-eval-test-condition "@1$1=1e-2/1e2" :limits limits)))
+      (table-calc-eval-test-expect-limit
+       overflow :max-formula-exponent 2 3)
+      (table-calc-eval-test-expect-limit
+       underflow :max-formula-exponent 2 4)))
+
+  (it "checks rounding carry against the exponent limit and rounds negative products"
+    (let* ((limits (make-limits :max-formula-precision 1
+                                :max-formula-exponent 0))
+           (condition (table-calc-eval-test-condition "@1$1=9*9" :limits limits))
+           (negative-limits (make-limits :max-formula-precision 1
+                                         :max-formula-exponent 1)))
+      (table-calc-eval-test-expect-limit
+       condition :max-formula-exponent 0 1)
+      (expect (table-calc-eval-test-evaluate "@1$1=-9*9"
+                                             :limits negative-limits)
+              :to-equal "-80")))
+
+  (it "rejects non-string callback cells and zero precision through formula inputs"
+    (let* ((condition
+             (table-calc-eval-test-condition
+              "@1$1=@1$2" :base-row 1 :base-column 1
+              :cells (table-calc-eval-test-cell-map '(1 2 7))))
+           (zero-precision-limits (make-limits :max-formula-precision 0))
+           (zero-precision
+             (table-calc-eval-test-condition
+              "@1$2=vcount(@1$1..@1$1)" :base-row 1 :base-column 2
+              :cells (table-calc-eval-test-cell-map '(1 1 ""))
+              :limits zero-precision-limits)))
+      (expect (typep condition 'type-error) :to-be t)
+      (table-calc-eval-test-expect-limit
+       zero-precision :max-formula-precision 0 1)))
 
   (it "signals table conditions for zero division and external non-finite numbers"
     (table-calc-eval-test-expect-table-error

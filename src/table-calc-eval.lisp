@@ -42,8 +42,7 @@
   (length (write-to-string (abs integer) :base 10 :radix nil)))
 
 (defun table-calc-strip-decimal-zeroes (coefficient exponent)
-  (loop while (and (not (zerop coefficient))
-                   (zerop (mod coefficient 10)))
+  (loop while (zerop (mod coefficient 10))
         do (setf coefficient (truncate coefficient 10))
            (incf exponent))
   (values coefficient exponent))
@@ -79,11 +78,6 @@
                  (rounded (table-calc-round-integer (abs coefficient) divisor)))
             (setf coefficient (if negative-p (- rounded) rounded)
                   exponent rounded-exponent)))))
-    (when (zerop coefficient)
-      (check-limit limits :max-formula-precision 1)
-      (return-from table-calc-round-decimal
-        (%make-safe-decimal :coefficient 0 :exponent 0
-                            :negative-zero-p negative-p)))
     (multiple-value-setq (coefficient exponent)
       (table-calc-strip-decimal-zeroes coefficient exponent))
     (check-limit limits :max-formula-precision
@@ -169,23 +163,18 @@
       (table-calc-round-decimal (* left-coefficient right-coefficient)
                                 exponent nil precision limits))))
 
-(defun table-calc-compare-scaled-integers (left right left-zeroes right-zeroes)
+(defun table-calc-compare-scaled-integers (left right left-zeroes)
   (let* ((left-digits (write-to-string (abs left) :base 10 :radix nil))
          (right-digits (write-to-string (abs right) :base 10 :radix nil))
-         (left-length (+ (length left-digits) left-zeroes))
-         (right-length (+ (length right-digits) right-zeroes)))
-    (cond
-      ((> left-length right-length) 1)
-      ((< left-length right-length) -1)
-      (t
-       (loop for index below left-length
-             for left-digit = (if (< index (length left-digits))
-                                  (char left-digits index) #\0)
-             for right-digit = (if (< index (length right-digits))
-                                   (char right-digits index) #\0)
-             when (char> left-digit right-digit) do (return 1)
-             when (char< left-digit right-digit) do (return -1)
-             finally (return 0))))))
+         (left-length (+ (length left-digits) left-zeroes)))
+    (loop for index below left-length
+          for left-digit = (if (< index (length left-digits))
+                               (char left-digits index) #\0)
+          for right-digit = (if (< index (length right-digits))
+                                (char right-digits index) #\0)
+          when (char> left-digit right-digit) do (return 1)
+          when (char< left-digit right-digit) do (return -1)
+          finally (return 0))))
 
 (defun table-calc-decimal-ratio-order (numerator denominator)
   (let* ((numerator-coefficient (abs (safe-decimal-coefficient numerator)))
@@ -196,12 +185,12 @@
     (if (minusp difference)
         (if (>= (table-calc-compare-scaled-integers
                  numerator-coefficient denominator-coefficient
-                 (- difference) 0)
+                 (- difference))
                 0)
             difference
             (1- difference))
         (if (>= (table-calc-compare-scaled-integers
-                 numerator-coefficient denominator-coefficient 0 difference)
+                 numerator-coefficient denominator-coefficient 0)
                 0)
             difference
             (1- difference)))))
@@ -219,8 +208,6 @@
          0 0 (not (eq (table-calc-decimal-negative-p numerator)
                       (table-calc-decimal-negative-p denominator)))
          precision limits)))
-    (when (zerop precision)
-      (check-limit limits :max-formula-precision 1))
     (let* ((ratio-order (table-calc-decimal-ratio-order numerator denominator))
            (result-order (+ ratio-order
                             (safe-decimal-exponent numerator)
@@ -240,7 +227,7 @@
              (coefficient (if negative-p (- rounded) rounded))
              (exponent result-exponent))
         (table-calc-round-decimal coefficient exponent
-                                  (and (zerop coefficient) negative-p)
+                                  nil
                                   precision limits)))))
 
 (defun table-calc-decimal-binary (operator left right limits target)
@@ -449,7 +436,7 @@
          (scale (+ exponent places))
          (rounded
            (cond
-             ((zerop coefficient) 0)
+             ((zerop coefficient) "0")
              ((>= scale 0)
               (concatenate 'string
                            (write-to-string (abs coefficient) :base 10 :radix nil)
@@ -502,9 +489,6 @@ WORK-BUDGET across assignments in one table recalculation."
                  (table-calc-assignment-expression assignment)
                  reference-position-function cell-value-function
                  (table-calc-assignment-mode assignment) limits budget target)))
-    (unless (or (eq value +table-calc-nan+)
-                (safe-decimal-p value))
-      (table-calc-evaluation-error :invalid-number target))
     (table-calc-format-result value
                               (table-calc-assignment-format-precision assignment)
                               limits target)))
