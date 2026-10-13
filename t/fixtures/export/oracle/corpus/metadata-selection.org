@@ -1,0 +1,19 @@
+#+TITLE: Export metadata and selection
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+#+LANGUAGE: en
+#+OPTIONS: toc:2 num:nil
+#+SELECT_TAGS: keep
+#+EXCLUDE_TAGS: drop
+
+* Selected heading :keep:
+Visible selected body.
+
+** Retained descendant
+An untagged descendant remains with its selected parent.
+
+* Excluded before selection :keep:drop:
+This heading is excluded even though it has a selected tag.
+
+* Unselected sibling
+This untagged sibling is pruned by selection.

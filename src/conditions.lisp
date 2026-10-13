@@ -240,3 +240,60 @@ REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
 (defun org-agenda-error-context (condition)
   "Return the bounded, escaped agenda option or entry excerpt, or NIL."
   (slot-value condition 'context))
+
+(define-condition org-export-error (org-kit-error)
+  ((backend :initarg :backend :initform nil)
+   (reason :initarg :reason :initform nil)
+   (source :initarg :source :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ for ~A~]~@[ near \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-export-error-reason condition)
+                     (org-export-error-backend condition)
+                     (org-export-error-source condition))))
+  (:documentation "Signalled when an Org export cannot be prepared or written.
+BACKEND identifies the requested serializer, REASON classifies the failure, and
+SOURCE is a bounded, escaped excerpt when one is available."))
+
+(defun org-export-error-backend (condition)
+  "Return the backend associated with the export failure, or NIL."
+  (slot-value condition 'backend))
+
+(defun org-export-error-reason (condition)
+  "Return the keyword classifying the export failure, or NIL."
+  (slot-value condition 'reason))
+
+(defun org-export-error-source (condition)
+  "Return the bounded, escaped source excerpt associated with the export failure."
+  (slot-value condition 'source))
+
+(define-condition org-export-unsupported-syntax (org-kit-error)
+  ((backend :initarg :backend :initform nil)
+   (source :initarg :source :initform nil)
+   (position :initarg :position :initform 0)
+   (feature :initarg :feature :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ at position ~D~]~@[ near \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-export-unsupported-syntax-feature condition)
+                     (org-export-unsupported-syntax-position condition)
+                     (org-export-unsupported-syntax-source condition))))
+  (:documentation "Signalled when an export construct or option is unsupported.
+SOURCE is a bounded, escaped excerpt, POSITION is its 0-based character index,
+and FEATURE identifies the unsupported syntax."))
+
+(defun org-export-unsupported-syntax-backend (condition)
+  "Return the backend associated with the unsupported syntax, or NIL."
+  (slot-value condition 'backend))
+
+(defun org-export-unsupported-syntax-source (condition)
+  "Return the bounded, escaped source excerpt that contains unsupported syntax."
+  (slot-value condition 'source))
+
+(defun org-export-unsupported-syntax-position (condition)
+  "Return the 0-based character position of the unsupported syntax."
+  (slot-value condition 'position))
+
+(defun org-export-unsupported-syntax-feature (condition)
+  "Return the feature name classifying unsupported export syntax."
+  (slot-value condition 'feature))

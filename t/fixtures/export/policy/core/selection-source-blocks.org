@@ -1,0 +1,14 @@
+#+SELECT_TAGS: keep
+#+BEGIN_SRC text
+root-secret
+#+END_SRC
+* Hidden :drop:
+#+BEGIN_SRC text
+hidden-secret
+#+END_SRC
+#+RESULTS:
+: hidden-result
+* Kept :keep:
+#+BEGIN_SRC text
+kept-code
+#+END_SRC

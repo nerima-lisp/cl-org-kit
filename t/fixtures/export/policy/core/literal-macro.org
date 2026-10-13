@@ -1,0 +1,2 @@
+#+MACRO: greeting Hello, $1! $2 / $1
+{{{greeting(World,again)}}}

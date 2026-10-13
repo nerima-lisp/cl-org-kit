@@ -59,6 +59,9 @@
                (:file "edit-clock")
                (:file "clocktable")
                ;; F agenda
+               ;; Unit E1 export core
+               (:file "export-types")
+               (:file "export-core")
                (:file "agenda"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
@@ -117,7 +120,9 @@
                (:file "clock-test")
                (:file "edit-clock-test")
                (:file "agenda-test")
-               (:file "clocktable-test"))
+               ;; Unit E1 export core
+               (:file "clocktable-test")
+               (:file "export-core-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)

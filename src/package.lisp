@@ -119,4 +119,15 @@
    #:agenda-match-entry-end-line
    #:agenda #:agenda-todo-list #:agenda-match
    ;; Effective Org semantics
-   #:effective-heading-tags #:effective-property))
+   #:effective-heading-tags #:effective-property
+   ;; Unit E1 export context and conditions
+   #:export-context #:make-export-context #:export-context-p
+   #:export-context-title #:export-context-author #:export-context-date
+   #:export-context-language #:export-context-time-context
+   #:org-export-error #:org-export-error-backend #:org-export-error-reason
+   #:org-export-error-source
+   #:org-export-unsupported-syntax
+   #:org-export-unsupported-syntax-backend
+   #:org-export-unsupported-syntax-source
+   #:org-export-unsupported-syntax-position
+   #:org-export-unsupported-syntax-feature))

@@ -1,0 +1,7 @@
+#+SELECT_TAGS: keep
+* Kept :keep:
+References [fn:shared] and [fn:shared].
+[fn:shared] This selected definition is numbered once.
+[fn:unused] This unreferenced definition is omitted.
+* Pruned :drop:
+[fn:missing] A definition here cannot resolve a kept reference.

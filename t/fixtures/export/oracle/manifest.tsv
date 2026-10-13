@@ -1,0 +1,7 @@
+# Export oracle cases are literal tab-separated data, never read as Lisp.
+case	source	include
+metadata-selection	metadata-selection.org	-
+exclude-tags-override	exclude-tags-override.org	-
+footnotes-macros-links	footnotes-macros-links.org	-
+include	include.org	included/fragment.org
+source-blocks	source-blocks.org	-

@@ -58,6 +58,17 @@
 
 (defvar org-fixture--include-effective-tags nil)
 
+(defconst org-fixture--export-backends
+  '((html . ("html" . html))
+    (gfm . ("gfm" . gfm))
+    (ascii . ("txt" . ascii))))
+
+(defconst org-fixture--ox-gfm-version "20231215.1901")
+(defconst org-fixture--ox-gfm-repository "https://github.com/larstvei/ox-gfm")
+(defconst org-fixture--ox-gfm-commit "4f774f13d34b3db9ea4ddb0b1edc070b1526ccbb")
+(defconst org-fixture--ox-gfm-source-sha256
+  "84c841f4204447eec317453ebab514741d22d4b65459a652eb87e04b29483771")
+
 (defun org-fixture--element-p (value)
   (and (consp value)
        (memq (car value)
@@ -1042,6 +1053,230 @@
 
 ;;; End T2 table alignment fixtures
 
+(defun org-fixture--export-relative-path-p (path)
+  (and (stringp path)
+       (string-match-p "\\`[[:alnum:]_.-]+\\(?:/[[:alnum:]_.-]+\\)*\\'" path)
+       (let ((components (split-string path "/" nil)))
+         (and components
+              (not (member "." components))
+              (not (member ".." components))))))
+
+(defun org-fixture--read-export-manifest (manifest corpus-directory)
+  (unless (file-exists-p manifest)
+    (error "Export manifest does not exist"))
+  (let ((coding-system-for-read 'utf-8-unix)
+        (auto-coding-functions nil)
+        (enable-local-variables nil)
+        (inhibit-local-variables t)
+        (seen-header nil)
+        (seen-cases (make-hash-table :test #'equal))
+        (rows nil))
+    (with-temp-buffer
+      (insert-file-contents manifest)
+      (dolist (line (split-string (buffer-string) "\n" t))
+        (cond
+         ((string-prefix-p "#" line) nil)
+         ((not seen-header)
+          (unless (equal line "case\tsource\tinclude")
+            (error "Export manifest must begin with case/source/include columns"))
+          (setq seen-header t))
+         (t
+          (let* ((fields (split-string line "\t" nil))
+                 (case-name (nth 0 fields))
+                 (source (nth 1 fields))
+                 (include (nth 2 fields)))
+            (unless (and (= (length fields) 3)
+                         (string-match-p "\\`[a-z0-9][a-z0-9-]*\\'" case-name)
+                         (org-fixture--export-relative-path-p source)
+                         (or (equal include "-")
+                             (org-fixture--export-relative-path-p include)))
+              (error "Invalid export manifest row"))
+            (when (gethash case-name seen-cases)
+              (error "Duplicate export case in manifest: %s" case-name))
+            (puthash case-name t seen-cases)
+            (dolist (relative (delq nil (list source (unless (equal include "-") include))))
+              (let* ((root (file-name-as-directory (file-truename corpus-directory)))
+                     (path (expand-file-name relative root)))
+                (unless (and (file-exists-p path)
+                             (string-prefix-p root (file-truename path)))
+                  (error "Export fixture input is missing or escapes the corpus"))))
+            (push (list case-name source (unless (equal include "-") include)) rows))))))
+    (unless seen-header
+      (error "Export manifest has no header"))
+    (unless rows
+      (error "Export manifest contains no cases"))
+    (nreverse rows)))
+
+(defun org-fixture--read-export-source (file)
+  (let ((coding-system-for-read 'utf-8-unix)
+        (auto-coding-functions nil)
+        (enable-local-variables nil)
+        (inhibit-local-variables t))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (buffer-string))))
+
+(defun org-fixture--export-include-directives (source)
+  (let ((lines (split-string source "\n" nil))
+        directives)
+    (dolist (line lines)
+      (when (string-match-p "\\`[ \t]*#\\+INCLUDE:" line)
+        (unless (string-match "\\`[ \t]*#\\+INCLUDE:[ \t]+\"\\([[:alnum:]_.-]+\\(?:/[[:alnum:]_.-]+\\)*\\)\"[ \t]*\\'" line)
+          (error "Export oracle only supports a quoted literal include path"))
+        (push (match-string 1 line) directives)))
+    (nreverse directives)))
+
+(defun org-fixture--copy-export-input (relative corpus-directory temporary-directory)
+  (let* ((source (expand-file-name relative corpus-directory))
+         (target (expand-file-name relative temporary-directory))
+         (root (file-name-as-directory (file-truename corpus-directory))))
+    (unless (and (file-exists-p source)
+                 (string-prefix-p root (file-truename source)))
+      (error "Export oracle input is missing or escapes the corpus"))
+    (make-directory (file-name-directory target) t)
+    (copy-file source target t)
+    target))
+
+(defun org-fixture--export-buffer (source-file backend)
+  (let ((default-directory (file-name-directory source-file)))
+    (with-temp-buffer
+      (let ((coding-system-for-read 'utf-8-unix)
+            (auto-coding-functions nil)
+            (enable-local-variables nil)
+            (inhibit-local-variables t)
+            (org-export-use-babel nil)
+            (org-export-time-stamp-file nil))
+        (insert-file-contents source-file)
+        (setq buffer-file-name source-file)
+        (org-mode)
+        (substring-no-properties (org-export-as backend nil nil nil nil))))))
+
+(defun org-fixture--export-output-extension (backend)
+  (or (car (cdr (assq backend org-fixture--export-backends)))
+      (error "Unknown export fixture backend")))
+
+(defun org-fixture--export-output-backend (backend)
+  (or (cdr (cdr (assq backend org-fixture--export-backends)))
+      (error "Unknown export fixture backend")))
+
+(defun org-fixture--file-sha256 (file)
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (insert-file-contents-literally file)
+    (secure-hash 'sha256 (current-buffer))))
+
+(defun org-fixture--export-metadata (backend source include source-sha include-sha)
+  (let ((metadata
+         (format (concat
+                  "emacs=%s\norg=%s\ngenerator-mode=export-oracle-v1\n"
+                  "backend=%s\nencoding=UTF-8\n"
+                  "reference-time=2000-01-01T00:00:00Z\ntime-zone=UTC\n"
+                  "dst-policy=compatible\nunicode-width-data=Unicode-17.0.0\n"
+                  "source=%s\nsource-sha256=%s\n"
+                  "include-source=%s\ninclude-source-sha256=%s\n")
+                 emacs-version (org-version) backend
+                 source source-sha (or include "none") (or include-sha "none"))))
+    (if (eq backend 'gfm)
+        (concat metadata
+                (format (concat
+                         "ox-gfm-version=%s\nox-gfm-repository=%s\n"
+                         "ox-gfm-commit=%s\nox-gfm-source-sha256=%s\n")
+                        org-fixture--ox-gfm-version
+                        org-fixture--ox-gfm-repository
+                        org-fixture--ox-gfm-commit
+                        org-fixture--ox-gfm-source-sha256))
+      metadata)))
+
+(defun org-fixture--verify-ox-gfm-pin ()
+  (require 'ox-gfm)
+  (let ((file (locate-library "ox-gfm.el")))
+    (unless file
+      (error "Unable to locate ox-gfm source"))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (unless (and (re-search-forward "^;; Package-Version: \\(.*\\)$" nil t)
+                   (equal (match-string 1) org-fixture--ox-gfm-version))
+        (error "Export oracle requires the pinned ox-gfm version"))
+      (unless (equal (org-fixture--file-sha256 file)
+                     org-fixture--ox-gfm-source-sha256)
+        (error "Export oracle ox-gfm source does not match the pinned commit")))))
+
+(defun org-fixture--check-export-output (text temporary-directory)
+  (when (or (string-match-p (regexp-quote temporary-directory) text)
+            (and (not (equal (expand-file-name "~") "/"))
+                 (string-match-p (regexp-quote (expand-file-name "~")) text)))
+    (error "Generated export unexpectedly contains a local filesystem path"))
+  text)
+
+(defun org-fixture--write-export-file (file text)
+  (make-directory (file-name-directory file) t)
+  (let ((coding-system-for-write 'utf-8-unix))
+    (write-region text nil file nil 'silent)))
+
+(defun org-fixture--generate-export-case (case corpus-directory expected-directory)
+  (let* ((case-name (nth 0 case))
+         (source-relative (nth 1 case))
+         (include-relative (nth 2 case))
+         (source (expand-file-name source-relative corpus-directory))
+         (source-text (org-fixture--read-export-source source))
+         (include-directives (org-fixture--export-include-directives source-text)))
+    (unless (equal include-directives (if include-relative (list include-relative) nil))
+      (error "Export manifest does not match the source include directive"))
+    (let* ((temporary-directory (file-name-as-directory
+                                 (make-temp-file "org-fixture-export-" t)))
+           (temporary-source (org-fixture--copy-export-input
+                              source-relative corpus-directory temporary-directory))
+           (source-sha (org-fixture--file-sha256 source))
+           (include-sha (when include-relative
+                          (org-fixture--file-sha256
+                           (expand-file-name include-relative corpus-directory)))))
+      (unwind-protect
+          (progn
+            (when include-relative
+              (org-fixture--copy-export-input
+               include-relative corpus-directory temporary-directory))
+            (dolist (backend '(html gfm ascii))
+              (let* ((backend-name (symbol-name backend))
+                     (backend-directory (expand-file-name backend-name expected-directory))
+                     (output-file (expand-file-name
+                                   (format "%s.%s" case-name
+                                           (org-fixture--export-output-extension backend))
+                                   backend-directory))
+                     (metadata-file (expand-file-name
+                                     (format "%s.meta" case-name) backend-directory))
+                     (text (org-fixture--check-export-output
+                            (org-fixture--export-buffer
+                             temporary-source
+                             (org-fixture--export-output-backend backend))
+                            temporary-directory)))
+                (org-fixture--write-export-file output-file text)
+                (org-fixture--write-export-file
+                 metadata-file
+                 (org-fixture--export-metadata backend source-relative include-relative
+                                               source-sha include-sha))
+                (princ (format "Wrote %s/%s.%s and %s/%s.meta\n"
+                               backend-name case-name
+                               (org-fixture--export-output-extension backend)
+                               backend-name case-name)))))
+        (delete-directory temporary-directory t)))))
+
+(defun org-fixture-generate-export-oracle (corpus-directory manifest expected-directory)
+  "Generate full Org export outputs for the literal export oracle manifest."
+  (unless (file-directory-p corpus-directory)
+    (error "Export oracle corpus directory does not exist"))
+  (require 'ox-html)
+  (require 'ox-ascii)
+  (org-fixture--verify-ox-gfm-pin)
+  (let ((cases (org-fixture--read-export-manifest manifest corpus-directory))
+        (org-export-use-babel nil))
+    (dolist (case cases)
+      (org-fixture--generate-export-case case corpus-directory expected-directory))
+    (princ (format "Generated %d export oracle cases for html/gfm/ascii.\n"
+                   (length cases)))
+    (princ (format "Emacs %s; Org %s; ox-gfm %s\n"
+                   emacs-version (org-version) org-fixture--ox-gfm-version))))
+
 (defun org-fixture--main ()
   (let ((arguments (if (equal (car command-line-args-left) "--")
                        (cdr command-line-args-left)
@@ -1074,6 +1309,11 @@
      ((and (= (length arguments) 3) (equal (car arguments) "--table-calc"))
       (org-fixture-generate-table-calc (expand-file-name (nth 1 arguments))
                                        (expand-file-name (nth 2 arguments))))
+     ((and (= (length arguments) 4) (equal (car arguments) "--export-oracle"))
+      (org-fixture-generate-export-oracle
+       (expand-file-name (nth 1 arguments))
+       (expand-file-name (nth 2 arguments))
+       (expand-file-name (nth 3 arguments))))
      ((= (length arguments) 2)
       (org-fixture-generate (expand-file-name (nth 0 arguments))
                             (expand-file-name (nth 1 arguments))))
@@ -1085,6 +1325,7 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --h1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --export-oracle CORPUS-DIR MANIFEST EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
 ;;; Behavior agenda oracle action

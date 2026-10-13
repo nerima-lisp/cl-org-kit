@@ -1,0 +1,26 @@
+                            ________________
+
+                             INCLUDE ORACLE
+
+                             Fixture Author
+                            ________________
+
+
+                               2024-02-03
+
+
+Table of Contents
+_________________
+
+1. Included section
+
+
+Before included content.
+
+
+1 Included section
+==================
+
+  The include source is copied into the generator's temporary directory.
+
+  After included content.

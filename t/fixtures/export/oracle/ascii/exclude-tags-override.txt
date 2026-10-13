@@ -1,0 +1,21 @@
+                        _______________________
+
+                         EXPLICIT EXCLUDE TAGS
+
+                             Fixture Author
+                        _______________________
+
+
+                               2024-02-03
+
+
+Table of Contents
+_________________
+
+1. Visible after replacing the default exclusion              :noexport:
+
+
+1 Visible after replacing the default exclusion               :noexport:
+===============================================
+
+  An explicit exclusion list replaces the default noexport tag.

@@ -1,0 +1,29 @@
+#+BEGIN_SRC text :exports both
+both-code
+#+END_SRC
+#+RESULTS:
+: both-result
+#+BEGIN_SRC text :exports code
+code-code
+#+END_SRC
+#+RESULTS:
+: code-result
+#+BEGIN_SRC text :exports results
+results-code
+#+END_SRC
+#+RESULTS:
+: results-result
+#+BEGIN_SRC text :exports none
+none-code
+#+END_SRC
+#+RESULTS:
+: none-result
+#+BEGIN_SRC text
+default-code
+#+END_SRC
+#+BEGIN_SRC text :exports results
+separated-code
+#+END_SRC
+
+#+RESULTS:
+: separated-result

@@ -26,6 +26,27 @@ Files under `corpus/` and `expected/` are byte-sensitive test data; do not refor
 normalize their whitespace or line endings. Git text conversion is disabled for both trees because
 CRLF, BOM, missing final newlines, and intentional trailing spaces are part of these parser inputs.
 
+## Export oracle fixtures
+
+`export/oracle/corpus/` contains Org documents for export cases, and `export/oracle/manifest.tsv`
+lists each case and its optional include source. `export/oracle/html/`, `gfm/`, and `ascii/` contain
+the corresponding full backend outputs and metadata sidecars. The generator accepts only literal
+relative paths from the manifest, copies include inputs to a temporary directory, and removes that
+directory after export. Kit tests use in-memory include resolvers and do not invoke Emacs.
+
+Regenerate the export oracle from the repository root with:
+
+```sh
+emacs --batch -Q --script scripts/generate-org-fixtures.el \
+  --export-oracle t/fixtures/export/oracle/corpus \
+  t/fixtures/export/oracle/manifest.tsv t/fixtures/export/oracle
+```
+
+The oracle pins Emacs 31.1, Org 9.8.10, and ox-gfm 20231215.1901. The generator sets
+`org-export-use-babel` to nil; under this Org version that also disables source-block header
+arguments, including `:exports`. The source-block oracle therefore records Org's nil-mode output;
+the kit's explicit source export modes are covered separately by policy tests.
+
 The coverage check reads the generated trees and reports every `org-element` element and object
 type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
 type.

@@ -1,0 +1,12 @@
+- [Included section](#org40e7e62)
+
+Before included content.
+
+
+<a id="org40e7e62"></a>
+
+# Included section
+
+The include source is copied into the generator's temporary directory.
+
+After included content.

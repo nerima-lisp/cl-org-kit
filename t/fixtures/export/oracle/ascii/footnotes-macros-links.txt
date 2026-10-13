@@ -1,0 +1,53 @@
+                     ______________________________
+
+                      FOOTNOTES, MACROS, AND LINKS
+
+                             Fixture Author
+                     ______________________________
+
+
+                               2024-02-03
+
+
+Table of Contents
+_________________
+
+Overview
+Detail
+
+
+Overview
+========
+
+  Greetings, reader with a named footnote[1] and another reference[1].
+  Macro arguments: one|; extra arguments: [one].
+
+  Safe links: [A label with ]( and `backtick` | pipe] and [section
+  link].
+
+  Raw HTML-like text in a literal block:
+
+  ,----
+  | <em>literal HTML</em>
+  `----
+
+  This line has a tab between these words: before and after.
+
+
+[A label with ]( and `backtick` | pipe]
+<https://example.test/path?q=a&b=c>
+
+[section link] See section Detail
+
+
+Detail
+======
+
+  The local fragment destination is safe.
+
+
+
+Footnotes
+_________
+
+[1] One definition serves both references.

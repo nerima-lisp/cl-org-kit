@@ -1,0 +1,16 @@
+- [Selected heading](#org555fcc0)
+  - [Retained descendant](#org6126e29)
+
+
+<a id="org555fcc0"></a>
+
+# Selected heading     :keep:
+
+Visible selected body.
+
+
+<a id="org6126e29"></a>
+
+## Retained descendant
+
+An untagged descendant remains with its selected parent.

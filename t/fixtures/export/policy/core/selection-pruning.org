@@ -1,0 +1,9 @@
+#+SELECT_TAGS: ship noexport
+#+EXCLUDE_TAGS: discard
+#+OPTIONS: toc:3 h:3
+* Container
+** Selected :ship:
+*** Nested
+** ExcludedAfterSelection :ship:discard:
+** ReplacedDefaultSelectTag :export:
+** ExplicitlySelectedNoexport :noexport:
