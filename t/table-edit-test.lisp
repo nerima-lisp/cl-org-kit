@@ -1103,4 +1103,77 @@
                     :to-equal crlf-expected)
             (expect (document-text document) :to-equal crlf-source))
           (expect (document-text empty-document) :to-equal empty-source)))))
+
+  (it "remaps absolute references across decimal insertion and deletion boundaries"
+    (let* ((increment-source
+             (format nil "| A |~%| x |~%#+TBLFM: @2$1=@2$1~%"))
+           (increment-document (parse-org increment-source))
+           (increment-table
+             (table-edit-test-find-node
+              (document-root increment-document) :table))
+           (increment-result
+             (table-insert-row increment-document increment-table 2))
+           (index-ten-source
+             (with-output-to-string (stream)
+               (loop for index from 1 to 10
+                     do (format stream "| x~D |~%" index))
+               (format stream "#+TBLFM: @9$1=@9$1~%")))
+           (index-ten-expected
+             (with-output-to-string (stream)
+               (loop for index from 1 to 9
+                     do (format stream "| x~D  |~%" index))
+               (format stream "|     |~%| x10 |~%#+TBLFM: @9$1=@9$1~%")))
+           (index-ten-document (parse-org index-ten-source))
+           (index-ten-table
+             (table-edit-test-find-node
+              (document-root index-ten-document) :table))
+           (index-ten-result
+             (table-insert-row index-ten-document index-ten-table 10))
+           (delete-source
+             (with-output-to-string (stream)
+               (format stream "| ~{~A~^ | ~} |~%"
+                       (loop for index from 1 to 10
+                             collect (format nil "c~2,'0D" index)))
+               (format stream "| ~{~A~^ | ~} |~%"
+                       (loop for index from 1 to 10
+                             collect (format nil "v~2,'0D" index)))
+               (format stream "#+TBLFM: $10=$10~%")))
+           (delete-expected
+             (with-output-to-string (stream)
+               (format stream "| ~{~A~^ | ~} |~%"
+                       (loop for index from 2 to 10
+                             collect (format nil "c~2,'0D" index)))
+               (format stream "| ~{~A~^ | ~} |~%"
+                       (loop for index from 2 to 10
+                             collect (format nil "v~2,'0D" index)))
+               (format stream "#+TBLFM: $9=$9~%")))
+           (delete-document (parse-org delete-source))
+           (delete-table
+             (table-edit-test-find-node
+              (document-root delete-document) :table))
+           (delete-result (table-delete-column delete-document delete-table 1))
+           (zero-source
+             (format nil "| x |~%| y |~%#+TBLFM: @000$1=@000$1~%"))
+           (zero-document (parse-org zero-source))
+           (zero-table
+             (table-edit-test-find-node (document-root zero-document) :table))
+           (zero-result (table-delete-row zero-document zero-table 1)))
+      (with-soft-assertions
+        (expect (document-text
+                 (edit-result-updated-document increment-result))
+                :to-equal
+                (format nil "| A |~%|   |~%| x |~%#+TBLFM: @3$1=@3$1~%"))
+        (expect (document-text
+                 (edit-result-updated-document index-ten-result))
+                :to-equal index-ten-expected)
+        (expect (document-text
+                 (edit-result-updated-document delete-result))
+                :to-equal delete-expected)
+        (expect (document-text
+                 (edit-result-updated-document zero-result))
+                :to-equal
+                (format nil "| y |~%#+TBLFM: @000$1=@000$1~%"))
+        (expect (document-text index-ten-document) :to-equal index-ten-source)
+        (expect (document-text delete-document) :to-equal delete-source)
+        (expect (document-text zero-document) :to-equal zero-source))))
 )
