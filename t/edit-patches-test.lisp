@@ -756,6 +756,8 @@
   (it "matches generic UTF-16 and UTF-32 edit boundaries to encoded output"
     (loop for encoding in '(:utf-16 :utf-32)
           for source = (format nil "* x~%")
+          for input-octets = (cl-codec-kit:string-to-octets
+                              source :encoding encoding)
           for output = (format nil "* y~%")
           for patches = (list (org-kit::edit-make-patch 2 3 "y"))
           for expected = (org-kit::edit-canonical-document (parse-org output))
@@ -764,7 +766,7 @@
           for output-octets = (length encoded-output)
           do (progn
                (let* ((document
-                        (parse-org source :encoding encoding
+                        (parse-org input-octets :encoding encoding
                                    :limits (make-limits
                                             :max-output-octets output-octets)))
                        (prospective-octets
@@ -772,15 +774,19 @@
                           document source patches))
                        (result (org-kit::edit-apply-patches-result
                                 document patches :expected expected))
-                       (updated (edit-result-updated-document result)))
+                       (updated (edit-result-updated-document result))
+                       (actual-output (write-org updated :output-type :octets)))
                  (with-soft-assertions
-                   (expect (document-bom-p document) :to-be nil)
+                   (expect (document-encoding document) :to-be encoding)
+                   (expect (document-bom-p document) :to-be t)
+                   (expect (document-encoding updated) :to-be encoding)
+                   (expect (document-bom-p updated) :to-be t)
                    (expect prospective-octets :to-be output-octets)
-                   (expect (write-org updated :output-type :octets)
-                           :to-equalp encoded-output)
+                   (expect (length actual-output) :to-be output-octets)
+                   (expect actual-output :to-equalp encoded-output)
                    (expect (document-text updated) :to-equal output)))
                (let ((limited-document
-                       (parse-org source :encoding encoding
+                       (parse-org input-octets :encoding encoding
                                   :limits (make-limits
                                            :max-output-octets
                                            (1- output-octets)))))
