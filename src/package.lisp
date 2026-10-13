@@ -18,6 +18,12 @@
    #:clock-summary-scoped-minutes #:clock-summary-unscoped-minutes
    #:clock-summary-total-minutes #:clock-summary-clipped-interval-count
    #:sum-clocks
+   #:clocktable-row #:make-clocktable-row #:clocktable-row-p
+   #:clocktable-row-level #:clocktable-row-title #:clocktable-row-tags
+   #:clocktable-row-range #:clocktable-row-minutes
+   #:clocktable-result #:make-clocktable-result #:clocktable-result-p
+   #:clocktable-result-total-minutes #:clocktable-result-rows
+   #:clocktable-result-range #:clocktable-data
    ;; Edit results
    #:edit-span #:make-edit-span #:edit-span-p #:edit-span-start #:edit-span-end
    #:edit-result #:make-edit-result #:edit-result-p

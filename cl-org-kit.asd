@@ -52,7 +52,8 @@
                (:file "query-list")
                (:file "query-path")
                (:file "query-match")
-               (:file "clock"))
+               (:file "clock")
+               (:file "clocktable"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -105,7 +106,8 @@
                (:file "query-path-test")
                (:file "query-match-test")
                (:file "query-equivalence-test")
-               (:file "clock-test"))
+               (:file "clock-test")
+               (:file "clocktable-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)

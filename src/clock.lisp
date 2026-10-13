@@ -199,6 +199,71 @@
                (document-root document))
     count))
 
+(defun clock-collect-range (heading from to time-context
+                            include-running-p include-unscoped-p
+                            &optional included-headings provided-as-of-seconds)
+  (let* ((as-of-seconds
+           (or provided-as-of-seconds
+               (cl-date-kit:instant-epoch-second
+                (org-time-context-reference-instant time-context))))
+         (from-seconds (clock-context-instant-seconds from time-context))
+         (to-seconds (clock-context-instant-seconds to time-context))
+         (scoped-minutes 0)
+         (unscoped-minutes 0)
+         (clipped-interval-count 0)
+         (heading-minutes (when included-headings
+                            (make-hash-table :test #'eq))))
+    (when (> from-seconds to-seconds)
+      (%org-clock-error :invalid-range "FROM follows TO"))
+    (labels ((add-heading-minutes (owner minutes)
+               (when heading-minutes
+                 (incf (gethash owner heading-minutes 0) minutes)))
+             (add-interval (owner start-seconds end-seconds)
+               (when (> start-seconds end-seconds)
+                 (%org-clock-error :malformed-clock
+                                   "interval end precedes start"))
+               (let ((clipped-start (max from-seconds start-seconds))
+                     (clipped-end (min to-seconds end-seconds)))
+                 (when (< clipped-start clipped-end)
+                   (let ((minutes (floor (- clipped-end clipped-start) 60)))
+                     (incf clipped-interval-count)
+                     (incf scoped-minutes minutes)
+                     (add-heading-minutes owner minutes))))))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :clock)
+           (let ((owner (and included-headings
+                             (query-nearest-headline node))))
+             (when (or (null included-headings)
+                       (gethash owner included-headings))
+               (multiple-value-bind (kind start end duration)
+                   (clock-row-values node)
+                 (case kind
+                   (:unscoped
+                    (when (< from-seconds to-seconds)
+                      (incf unscoped-minutes duration)
+                      (add-heading-minutes owner duration)))
+                   (:closed
+                    (add-interval owner
+                                  (clock-context-instant-seconds start time-context)
+                                  (clock-context-instant-seconds end time-context)))
+                   (:running
+                    (when include-running-p
+                      (let ((start-seconds
+                              (clock-context-instant-seconds start time-context)))
+                        (when (> start-seconds as-of-seconds)
+                          (%org-clock-error :invalid-range
+                                            (clock-row-source-line node)))
+                        (add-interval owner start-seconds as-of-seconds))))))))))
+       heading))
+    (values (make-clock-summary
+             :scoped-minutes scoped-minutes
+             :unscoped-minutes unscoped-minutes
+             :total-minutes (+ scoped-minutes
+                               (if include-unscoped-p unscoped-minutes 0))
+             :clipped-interval-count clipped-interval-count)
+            heading-minutes)))
+
 (defun sum-clocks (document heading from to &rest options)
   "Return clock minutes in HEADING's subtree, clipped to [FROM, TO).
 TIME-CONTEXT is required and supplies the explicit zone and DST policy.
@@ -230,45 +295,9 @@ instant. Duration-only entries are included by default regardless of range."
         (unless (= (clock-context-instant-seconds as-of time-context)
                    as-of-seconds)
           (%org-clock-error :invalid-range "as-of differs from time-context")))
-      (let* ((from-seconds (clock-context-instant-seconds from time-context))
-             (to-seconds (clock-context-instant-seconds to time-context))
-             (scoped-minutes 0)
-             (unscoped-minutes 0)
-             (clipped-interval-count 0))
-        (when (> from-seconds to-seconds)
-          (%org-clock-error :invalid-range "FROM follows TO"))
-        (labels ((add-interval (start-seconds end-seconds)
-                   (when (> start-seconds end-seconds)
-                     (%org-clock-error :malformed-clock "interval end precedes start"))
-                   (let ((clipped-start (max from-seconds start-seconds))
-                         (clipped-end (min to-seconds end-seconds)))
-                     (when (< clipped-start clipped-end)
-                       (incf clipped-interval-count)
-                       (incf scoped-minutes (floor (- clipped-end clipped-start) 60))))))
-          (map-nodes
-           (lambda (node)
-             (when (eq (node-type node) :clock)
-               (multiple-value-bind (kind start end duration)
-                   (clock-row-values node)
-                 (case kind
-                   (:unscoped
-                    (when (< from-seconds to-seconds)
-                      (incf unscoped-minutes duration)))
-                   (:closed
-                    (add-interval (clock-context-instant-seconds start time-context)
-                                  (clock-context-instant-seconds end time-context)))
-                   (:running
-                    (when include-running-p
-                      (let ((start-seconds
-                              (clock-context-instant-seconds start time-context)))
-                        (when (> start-seconds as-of-seconds)
-                          (%org-clock-error :invalid-range
-                                            (clock-row-source-line node)))
-                        (add-interval start-seconds as-of-seconds))))))))
-           heading))
-        (make-clock-summary
-         :scoped-minutes scoped-minutes
-         :unscoped-minutes unscoped-minutes
-         :total-minutes (+ scoped-minutes
-                           (if include-unscoped-p unscoped-minutes 0))
-         :clipped-interval-count clipped-interval-count)))))
+      (multiple-value-bind (summary heading-minutes)
+          (clock-collect-range heading from to time-context
+                               include-running-p include-unscoped-p nil
+                               as-of-seconds)
+        (declare (ignore heading-minutes))
+        summary))))
