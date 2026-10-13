@@ -119,9 +119,8 @@
   (timestamp-view (node-property clock :value)))
 
 (defun clock-reversed-range-error-p (condition)
-  (and (stringp (org-time-error-context condition))
-       (string= (org-time-error-context condition)
-                "range start is after range end")))
+  (string= (org-time-error-context condition)
+           "range start is after range end"))
 
 (defun clock-row-unscoped-duration (line duration)
   (unless duration
