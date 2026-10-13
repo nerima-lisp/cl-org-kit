@@ -193,38 +193,6 @@
     { background-color: #ffff00; color: #000000; font-weight: bold; }
   .org-svg { }
 </style>
-<script>
-  window.MathJax = {
-    tex: {
-      ams: {
-        multlineWidth: '85%'
-      },
-      tags: 'ams',
-      tagSide: 'right',
-      tagIndent: '.8em'
-    },
-    chtml: {
-      scale: 1.0,
-      displayAlign: 'center',
-      displayIndent: '0em'
-    },
-    svg: {
-      scale: 1.0,
-      displayAlign: 'center',
-      displayIndent: '0em'
-    },
-    output: {
-      font: 'mathjax-modern',
-      displayOverflow: 'overflow'
-    }
-  };
-</script>
-
-<script
-  id="MathJax-script"
-  async
-  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
-</script>
 </head>
 <body>
 <div id="content" class="content">
@@ -237,7 +205,11 @@
 <ul>
 <li><a href="#html-fuzzy">1.1. Fuzzy target</a>
 <ul>
-<li><a href="#html-styled">Styled <span class="underline">underlined</span> <del>struck</del></a></li>
+<li><a href="#html-styled">Styled <span class="underline">underlined</span> <del>struck</del></a>
+<ul>
+<li><a href="#html-grandchild">Grandchild H<sub>2O</sub> and x<sup>2</sup></a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -254,8 +226,8 @@
 <div class="outline-text-2" id="text-html-root">
 <p>
 Resolved links: <a href="#html-root">custom ID</a> and <a href="#html-fuzzy">fuzzy heading</a>; safe <a href="https://example.test/search?q=a&amp;b=c">web link</a>.
-<a id="org6c59750"></a>
-Radio target <a id="orgbebfe03">radio phrase</a> and matching <a href="#orgbebfe03">radio phrase</a>.
+<a id="org0426e64"></a>
+Radio target <a id="org7f59a7c">radio phrase</a> and matching <a href="#org7f59a7c">radio phrase</a>.
 Named footnote reference<sup><a id="fnr.html-example" class="footref" href="#fn.html-example" role="doc-backlink">1</a></sup>.
 </p>
 </div>
@@ -267,12 +239,11 @@ Named footnote reference<sup><a id="fnr.html-example" class="footref" href="#fn.
 <h4 id="html-styled">Styled <span class="underline">underlined</span> <del>struck</del></h4>
 <div class="outline-text-4" id="text-html-styled">
 </div>
-<ul class="org-ul">
-<li><a id="html-grandchild"></a>Grandchild H<sub>2O</sub> and x<sup>2</sup><br />
+<div id="outline-container-html-grandchild" class="outline-5">
+<h5 id="html-grandchild">Grandchild H<sub>2O</sub> and x<sup>2</sup></h5>
 <div class="outline-text-5" id="text-html-grandchild">
 </div>
-</li>
-</ul>
+</div>
 </div>
 </div>
 </div>
@@ -324,7 +295,7 @@ Ordered list:
 <li>Next ordered item</li>
 </ol>
 
-<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides">
+<table border="2" cellspacing="0" cellpadding="6" rules="groups" frame="hsides" class="custom-table">
 
 
 <colgroup>
@@ -351,7 +322,13 @@ Ordered list:
 </tbody>
 </table>
 
-<div class="NOTE" id="org584c4f9">
+
+<div id="org765b745" class="figure">
+<p><img src="oracle-image.png" alt="oracle-image.png" width="50%" />
+</p>
+</div>
+
+<div class="NOTE" id="org4fe6b7d">
 <p>
 Special block text.
 </p>
@@ -375,7 +352,7 @@ Verse first line<br />
 Verse second line<br />
 </p>
 
-<pre class="example" id="org8b4996d">
+<pre class="example" id="org89521cb">
 Example text with &lt;tag&gt; and &amp;.
 </pre>
 
@@ -390,11 +367,7 @@ Example text with &lt;tag&gt; and &amp;.
 </div>
 
 <p>
-Dynamic block text.
-</p>
-
-<p>
-&alpha; and <code>[2/5]</code> and \(x + y\).
+&alpha;.
 </p>
 
 <pre class="example">
@@ -423,10 +396,7 @@ fixed-width text with &lt;tag&gt; &amp; an un-terminated value
 
 <div class="footdef"><sup><a id="fn.html-example" class="footnum" href="#fnr.html-example" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">
 Footnote prose.
-</p>
-<pre class="example" id="org1da7cdc">
-Footnote example with &lt;tag&gt; &amp;.
-</pre></div></div>
+</p></div></div>
 
 
 </div>

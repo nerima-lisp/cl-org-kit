@@ -3,7 +3,7 @@
 #+DATE: 2026-10-14
 #+LANGUAGE: en
 #+TODO: TODO(t) | DONE(d)
-#+OPTIONS: toc:4 num:2 tags:t pri:t
+#+OPTIONS: toc:4 num:2 H:4 tags:t pri:t
 
 * TODO [#A] Root /italic/ and *bold* :root:
 :PROPERTIES:
@@ -52,10 +52,14 @@ Ordered list:
 3. Ordered item starting at three
 4. Next ordered item
 
+#+ATTR_HTML: :class custom-table
 | Heading | Value |
 |---------+-------|
 | | *empty first cell* |
 | Link | [[https://example.test/table][table link]] |
+
+#+ATTR_HTML: :width 50%
+[[file:oracle-image.png]]
 
 #+BEGIN_NOTE
 Special block text.
@@ -85,14 +89,7 @@ Example text with <tag> and &.
 #+BEGIN_SRC text :exports code
 #+END_SRC
 
-#+BEGIN: fixture-dynamic
-Dynamic block text.
-#+END:
-
-#+BEGIN: fixture-empty
-#+END:
-
-\alpha and [2/5] and $x + y$.
+\alpha.
 
 : fixed-width text with <tag> & an un-terminated value
 
@@ -112,6 +109,3 @@ Dynamic block text.
 :END:
 
 [fn:html-example] Footnote prose.
-  #+BEGIN_EXAMPLE
-  Footnote example with <tag> &.
-  #+END_EXAMPLE

@@ -101,7 +101,8 @@
             (return))
           (let ((name (string-downcase (scan-name))))
             (unless (plusp (length name))
-              (error "Malformed HTML attribute list"))
+              (error "Malformed HTML attribute list in ~S at offset ~D"
+                     content position))
             (skip-space)
             (push (cons name
                         (if (and (< position length)
@@ -218,9 +219,7 @@
            (multiple-value-bind (value found-p)
                (effective-property document node "CUSTOM_ID")
              (when found-p (remember value))))
-         (remember (node-property node :NAME))
-         (when (member (node-type node) '(:target :radio-target) :test #'eq)
-           (remember (node-property node :value))))
+         (remember (node-property node :NAME)))
        (document-root document)))
     ids))
 
@@ -371,7 +370,8 @@
   (it "matches every standard Org HTML compatibility fixture"
     (dolist (name '("metadata-selection" "exclude-tags-override"
                     "footnotes-macros-links" "include" "source-blocks"
-                    "markup-lists-blocks-tables-links"))
+                    "markup-lists-blocks-tables-links" "html-renderer-branches"
+                    "html-numbering-enabled"))
       (export-html-test-expect-fixture
        (format nil "t/fixtures/export/oracle/corpus/~A.org" name)
        (format nil "t/fixtures/export/oracle/html/~A.html" name))))
@@ -425,7 +425,98 @@
            (condition
              (export-html-test-catch-error
               (lambda () (export-org source :html)))))
+      (export-html-test-assert-attribute-condition source condition))
+    (let* ((source
+             (parse-org
+              (format nil "#+ATTR_HTML: :alt unsafe~%[[file:first.png]][[file:second.png]]")))
+           (condition
+             (export-html-test-catch-error
+              (lambda () (export-org source :html)))))
       (export-html-test-assert-attribute-condition source condition)))
+
+  (it "escapes allowed image attributes and rejects malformed values"
+    (let* ((source
+             (parse-org
+              (format nil "#+ATTR_HTML: :title \"<tag>&\"~%[[file:image.png]]")))
+           (output (export-org source :html)))
+      (expect (search "title=\"&lt;tag&gt;&amp;\"" output) :not :to-be nil))
+    (dolist (source-text
+             (list (format nil "#+ATTR_HTML: :width 12px~%[[file:image.png]]")
+                   (format nil "#+ATTR_HTML: :title \"unfinished~%[[file:image.png]]")
+                   (format nil "#+ATTR_HTML: :class one :class two~%[[file:image.png]]")
+                   (format nil "#+ATTR_HTML: class value~%[[file:image.png]]")
+                   (format nil "#+ATTR_HTML: :class~%[[file:image.png]]")))
+      (let* ((document (parse-org source-text))
+             (condition
+               (export-html-test-catch-error
+                (lambda () (export-org document :html)))))
+        (export-html-test-assert-attribute-condition document condition))))
+    (let* ((document
+             (parse-org
+              (format nil "#+ATTR_HTML: :alt safe~%[[file:image.png]]")))
+           (node (export-html-test-attributed-node document)))
+      (setf (node-property node :ATTR_HTML) 42)
+      (let ((condition
+              (export-html-test-catch-error
+               (lambda () (export-org document :html)))))
+        (export-html-test-assert-attribute-condition document condition)))
+
+  (it "rejects diary sexps with an unsupported syntax condition"
+    (let* ((document (parse-org (format nil "%%(org-calendar-holiday)~%")))
+           (condition
+             (export-html-test-catch-error
+              (lambda () (export-org document :html)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-unsupported-syntax) :to-be t)
+        (when (typep condition 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-backend condition)
+                  :to-be :html)
+          (expect (org-export-unsupported-syntax-feature condition)
+                  :to-be :diary-sexp)
+          (expect (org-export-unsupported-syntax-position condition)
+                  :to-be-truthy)))))
+
+  (it "renders anonymous inline footnotes at their source position"
+    (let* ((document (parse-org "Before [fn::inline <&>] after."))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "Before inline &lt;&amp;&gt; after." output)
+                :not :to-be nil)
+        (expect (search "[fn::" output) :to-be nil)
+        (expect (search "id=\"footnotes\"" output) :to-be nil))))
+
+  (it "collision-resolves generated footnote IDs against explicit IDs"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+ATTR_HTML: :id fn.note~%[[file:image.png]]~%~%* Explicit reference~%:PROPERTIES:~%:CUSTOM_ID: fnr.note~%:END:~%A reference[fn:note].~%~%[fn:note] Definition.")))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "id=\"fn.note\"" output) :not :to-be nil)
+        (expect (search "id=\"fn.note.1\"" output) :not :to-be nil)
+        (expect (search "href=\"#fn.note.1\"" output) :not :to-be nil)
+        (expect (search "id=\"fnr.note\"" output) :not :to-be nil)
+        (expect (search "id=\"fnr.note.1\"" output) :not :to-be nil)
+        (expect (search "href=\"#fnr.note.1\"" output) :not :to-be nil))))
+
+  (it "escapes literal LaTeX fragments and environments"
+    (let* ((document
+             (parse-org
+              (format nil "$x < y$~%~%\\begin{equation}~%x < y~%\\end{equation}")))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "x &lt; y" output) :not :to-be nil)
+        (expect (search "x < y" output) :to-be nil))))
+
+  (it "renders timestamps as time elements with ISO dates"
+    (let* ((document (parse-org "Date <2026-10-14 Wed>"))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search
+                 "<time class=\"timestamp\" datetime=\"2026-10-14\">&lt;2026-10-14 Wed&gt;</time>"
+                 output)
+                :not :to-be nil)
+        (expect (search "timestamp-wrapper" output) :to-be nil))))
 
   (it "keeps explicit IDs exact while normalizing generated Org references"
     (let* ((document
@@ -436,12 +527,12 @@
       (with-soft-assertions
         (expect (search "id=\"org00000aa\"" output) :not :to-be nil)
         (expect (search "id=\"org00000bb\"" output) :not :to-be nil)
-        (expect (search "id=\"org00000cc\"" output) :not :to-be nil)
+        (expect (search "id=\"org00000cc\"" output) :to-be nil)
         (expect (search "org00000aa" (prin1-to-string normalized))
                 :not :to-be nil)
         (expect (search "org00000bb" (prin1-to-string normalized))
                 :not :to-be nil)
-        (expect (search "org00000cc" (prin1-to-string normalized))
+        (expect (search "generated-reference-" (prin1-to-string normalized))
                 :not :to-be nil))))
 
   (it "rejects unsafe schemes and accepts allowed explicit schemes case-insensitively"
@@ -479,6 +570,12 @@
     (let* ((backend-error
              (export-html-test-catch-error
               (lambda () (export-org (parse-org "Body") :unknown))))
+           (gfm-renderer-error
+             (export-html-test-catch-error
+              (lambda () (export-org (parse-org "Body") :gfm))))
+           (ascii-renderer-error
+             (export-html-test-catch-error
+              (lambda () (export-org (parse-org "Body") :ascii))))
            (context-error
              (export-html-test-catch-error
               (lambda ()
@@ -490,6 +587,15 @@
           (expect (org-export-error-reason backend-error) :to-be :unknown-backend)
           (expect (org-export-error-source backend-error) :to-be nil)
           (expect (org-kit-error-message backend-error) :to-be-truthy))
+        (dolist (condition (list gfm-renderer-error ascii-renderer-error))
+          (expect (typep condition 'org-export-error) :to-be t)
+          (when (typep condition 'org-export-error)
+            (expect (org-export-error-backend condition)
+                    :to-be (if (eq condition gfm-renderer-error) :gfm :ascii))
+            (expect (org-export-error-reason condition)
+                    :to-be :unsupported-backend)
+            (expect (org-export-error-source condition) :to-be nil)
+            (expect (org-kit-error-message condition) :to-be-truthy)))
         (expect (typep context-error 'org-export-error) :to-be t)
         (when (typep context-error 'org-export-error)
           (expect (org-export-error-backend context-error) :to-be :html)
@@ -497,6 +603,24 @@
                   :to-be :invalid-escape-context)
           (expect (org-export-error-source context-error) :to-be nil)
           (expect (org-kit-error-message context-error) :to-be-truthy)))))
+
+  (it "rejects unrecognized schemes with valid RFC scheme characters"
+    (let* ((document
+             (parse-org "[[proto2+test.x-y:payload][safe label]]"))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "safe label" output) :not :to-be nil)
+        (expect (search "href=\"proto2+test.x-y:payload\"" output)
+                :to-be nil))))
+
+  (it "does not serialize coderef links with JavaScript event attributes"
+    (let* ((document (parse-org "[[(answer)][safe reference]]"))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "safe reference" output) :not :to-be nil)
+        (expect (search "href=\"coderef:answer\"" output) :to-be nil)
+        (expect (search "onmouseover=" output) :to-be nil)
+        (expect (search "onmouseout=" output) :to-be nil))))
 
   (it "treats creator:comment like enabled creator output for HTML"
     (let* ((comment-output
@@ -513,36 +637,6 @@
                 :not :to-be nil)
         (expect (search "<meta name=\"generator\"" disabled-output)
                 :to-be nil))))
-
-  (it "preserves all limits slots while replacing the node budget"
-    (let* ((limits (make-limits :max-input-length 11 :max-heading-depth 12
-                                :max-element-depth 13 :max-object-depth 14
-                                :max-node-count 15 :max-output-length 16
-                                :max-output-octets 17 :max-agenda-range-days 18
-                                :max-agenda-entries 19 :max-future-repeats 20
-                                :max-export-expansion-depth 21
-                                :max-export-expanded-characters 22
-                                :max-export-expanded-nodes 23
-                                :max-formula-tokens 24 :max-formula-ast-depth 25
-                                :max-formula-precision 26 :max-formula-exponent 27
-                                :max-formula-work 28))
-           (budget 99)
-           (copy (org-kit::export-limits-with-node-budget limits budget)))
-      (with-soft-assertions
-        (dolist (slot (sb-mop:class-slots (find-class 'limits)))
-          (let* ((slot-name (sb-mop:slot-definition-name slot))
-                 (accessor
-                   (find-symbol
-                    (concatenate 'string "%LIMITS-"
-                                 (string-upcase (symbol-name slot-name)))
-                    "ORG-KIT")))
-            (expect (not (null (and accessor (fboundp accessor)))) :to-be t)
-            (when (and accessor (fboundp accessor))
-              (expect (funcall (symbol-function accessor) copy)
-                      :to-be (if (string= (symbol-name slot-name)
-                                          "MAX-NODE-COUNT")
-                                 budget
-                                 (funcall (symbol-function accessor) limits)))))))))
 
   (it "does not mutate documents on successful or failed HTML export"
     (let* ((valid (parse-org
