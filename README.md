@@ -24,3 +24,4 @@ See [`docs/src/project/development.md`](docs/src/project/development.md).
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+Unicode 17.0.0 width data notices: [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES).
