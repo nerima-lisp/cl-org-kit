@@ -1,0 +1,117 @@
+#+TITLE: HTML renderer branches
+#+AUTHOR: Fixture Author
+#+DATE: 2026-10-14
+#+LANGUAGE: en
+#+TODO: TODO(t) | DONE(d)
+#+OPTIONS: toc:4 num:2 tags:t pri:t
+
+* TODO [#A] Root /italic/ and *bold* :root:
+:PROPERTIES:
+:CUSTOM_ID: html-root
+:END:
+Resolved links: [[#html-root][custom ID]] and [[Fuzzy target][fuzzy heading]]; safe [[https://example.test/search?q=a&b=c][web link]].
+<<named-anchor>>
+Radio target <<<radio phrase>>> and matching radio phrase.
+Named footnote reference[fn:html-example].
+
+** Fuzzy target
+:PROPERTIES:
+:CUSTOM_ID: html-fuzzy
+:END:
+*** Styled _underlined_ +struck+
+:PROPERTIES:
+:CUSTOM_ID: html-styled
+:END:
+**** Grandchild H_2O and x^2
+:PROPERTIES:
+:CUSTOM_ID: html-grandchild
+:END:
+
+* DONE Final :done:
+:PROPERTIES:
+:CUSTOM_ID: html-final
+:END:
+Inline =literal <&= and ~code <&~; a hard line break follows this text\\
+and continues in the same paragraph.
+
+Checkbox list:
+- [ ] unchecked checkbox
+- [X] checked checkbox
+- [-] transitional checkbox
+
+Descriptive list:
+- Term :: descriptive definition
+
+Nested unordered list:
+- First paragraph.
+
+  Second paragraph.
+  - Nested item
+
+Ordered list:
+3. Ordered item starting at three
+4. Next ordered item
+
+| Heading | Value |
+|---------+-------|
+| | *empty first cell* |
+| Link | [[https://example.test/table][table link]] |
+
+#+BEGIN_NOTE
+Special block text.
+#+END_NOTE
+
+#+BEGIN_CENTER
+Centered block text.
+#+END_CENTER
+
+#+BEGIN_QUOTE
+Quoted block text.
+#+END_QUOTE
+
+#+BEGIN_VERSE
+Verse first line
+Verse second line
+#+END_VERSE
+
+#+BEGIN_EXAMPLE
+Example text with <tag> and &.
+#+END_EXAMPLE
+
+#+BEGIN_SRC emacs-lisp :exports code
+(+ 1 2)
+#+END_SRC
+
+#+BEGIN_SRC text :exports code
+#+END_SRC
+
+#+BEGIN: fixture-dynamic
+Dynamic block text.
+#+END:
+
+#+BEGIN: fixture-empty
+#+END:
+
+\alpha and [2/5] and $x + y$.
+
+: fixed-width text with <tag> & an un-terminated value
+
+* Duplicate first
+:PROPERTIES:
+:CUSTOM_ID: collision
+:END:
+
+* Duplicate second
+:PROPERTIES:
+:CUSTOM_ID: collision-1
+:END:
+
+* Duplicate third
+:PROPERTIES:
+:CUSTOM_ID: collision
+:END:
+
+[fn:html-example] Footnote prose.
+  #+BEGIN_EXAMPLE
+  Footnote example with <tag> &.
+  #+END_EXAMPLE

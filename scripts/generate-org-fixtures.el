@@ -2978,11 +2978,63 @@
   (let ((metadata (funcall original backend source include source-sha include-sha)))
     (if (eq backend 'html)
         (concat metadata "html-source-fontification=disabled\n"
+                "html-htmlize-output-type=disabled\n"
                 "html-babel-evaluation=disabled\n")
       metadata)))
 
 (advice-add 'org-fixture--export-metadata
             :around #'org-fixture--html-export-metadata)
+
+(defun org-fixture-generate-html-oracle
+    (corpus-directory manifest expected-directory)
+  "Generate HTML export outputs for the literal HTML-only oracle manifest."
+  (unless (file-directory-p corpus-directory)
+    (error "HTML export oracle corpus directory does not exist"))
+  (require 'ox-html)
+  (require 'ox-ascii)
+  (org-fixture--verify-ox-gfm-pin)
+  (let* ((cases (org-fixture--read-export-manifest manifest corpus-directory))
+         (temporary-expected (make-temp-file "org-fixture-html-oracle-" t))
+         (org-export-use-babel nil))
+    (unwind-protect
+        (progn
+          (dolist (case cases)
+            (let* ((case-name (nth 0 case))
+                   (temporary-html (expand-file-name
+                                    "html" temporary-expected))
+                   (expected-html (expand-file-name "html"
+                                                     expected-directory)))
+              (org-fixture--generate-export-case
+               case corpus-directory temporary-expected)
+              (make-directory expected-html t)
+              (dolist (extension '("html" "meta"))
+                (copy-file
+                 (expand-file-name (format "%s.%s" case-name extension)
+                                   temporary-html)
+                 (expand-file-name (format "%s.%s" case-name extension)
+                                   expected-html)
+                 t))))
+          (princ (format "Generated %d HTML export oracle cases.\n"
+                         (length cases)))
+          (princ (format "Emacs %s; Org %s\n" emacs-version (org-version))))
+      (delete-directory temporary-expected t))))
+
+(defun org-fixture--html-oracle-dispatch (original)
+  (if (equal (car command-line-args-left) "--html-oracle")
+      (let ((arguments command-line-args-left))
+        (setq command-line-args-left nil)
+        (unless (= (length arguments) 4)
+          (error (concat
+                  "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+                  "--html-oracle CORPUS-DIR MANIFEST EXPECTED-DIR")))
+        (org-fixture-generate-html-oracle
+         (expand-file-name (nth 1 arguments))
+         (expand-file-name (nth 2 arguments))
+         (expand-file-name (nth 3 arguments))))
+    (funcall original)))
+
+(advice-add 'org-fixture--dispatch-main :around
+            #'org-fixture--html-oracle-dispatch)
 
 (org-fixture--dispatch-main)
 

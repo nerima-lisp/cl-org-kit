@@ -1,0 +1,13 @@
+#+TITLE: Explicit HTML numbering
+#+AUTHOR: Fixture Author
+#+DATE: 2026-10-14
+#+OPTIONS: toc:2 num:t
+
+* Numbered parent
+:PROPERTIES:
+:CUSTOM_ID: numbered-parent
+:END:
+** Numbered child
+:PROPERTIES:
+:CUSTOM_ID: numbered-child
+:END:
