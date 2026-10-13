@@ -469,8 +469,7 @@
                        (progn
                          (incf position)
                          (setf start position)
-                         (loop while (and (< position (length inner))
-                                          (not (char= (char inner position) #\")))
+                         (loop while (not (char= (char inner position) #\"))
                                do (incf position))
                          (push (subseq inner start position) items)
                          (incf position)
@@ -553,7 +552,7 @@
            (char= (char token 1) #\:))
       (values ":" (subseq token 2))
       (let ((colon (position #\: token)))
-        (unless (and colon (plusp colon) (< colon (1- (length token))))
+        (unless (and colon (plusp colon))
           (export-invalid-option source backend "Malformed export option"))
         (values (string-downcase (subseq token 0 colon))
                 (subseq token (1+ colon))))))

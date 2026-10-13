@@ -343,9 +343,9 @@
                (export-core-test-preparation
                 (format nil "#+OPTIONS: ~A~%~A" options source))))
            (visible (funcall preparation-for
-                             "c:t p:t stat:t inline:t tex:t f:t d:t prop:t"))
+                             "arch:t c:t p:t stat:t inline:t tex:t f:t d:t prop:t"))
            (pruned (funcall preparation-for
-                            "c:nil p:nil stat:nil inline:nil tex:nil f:nil d:(LOGBOOK) prop:nil"))
+                            "arch:nil c:nil p:nil stat:nil inline:nil tex:nil f:nil d:(LOGBOOK) prop:nil"))
            (visible-drawers
              (mapcar (lambda (view)
                        (node-property (org-kit::export-view-node view) :drawer-name))
@@ -362,7 +362,12 @@
           (expect (export-core-test-view-nodes pruned type) :to-be nil))
         (expect (member "LOGBOOK" visible-drawers :test #'string=) :to-be-truthy)
         (expect (member "NOTES" visible-drawers :test #'string=) :to-be-truthy)
-        (expect pruned-drawers :to-equal '("LOGBOOK")))))
+        (expect pruned-drawers :to-equal '("LOGBOOK"))
+        (expect (mapcar (lambda (view)
+                          (node-property (org-kit::export-view-node view)
+                                         :raw-value))
+                        (export-core-test-view-nodes pruned :headline))
+                :to-equal '("Task [0/1]" "Completed" "Normal")))))
 
   (it "applies included and excluded TODO list modes to parsed headings"
     (let* ((headings-for
@@ -381,10 +386,12 @@
       (with-soft-assertions
         (expect todo-included
                 :to-equal '(("Task [0/1]" "TODO" :todo)
-                            ("Normal" nil nil)))
+                            ("Normal" nil nil)
+                            ("Archived" nil nil)))
         (expect todo-excluded
                 :to-equal '(("Completed" "DONE" :done)
-                            ("Normal" nil nil))))))
+                            ("Normal" nil nil)
+                            ("Archived" nil nil))))))
 
   (it "accepts an explicit time context and rejects an invalid one"
     (let* ((time-context
@@ -1095,7 +1102,7 @@
     (let* ((with-ignored-arguments
              (export-core-test-preparation
               (export-core-test-lines
-               "#+BEGIN_SRC text :results output :tangle file :var x=1 :other :exports both"
+               "#+BEGIN_SRC text x plain :results output :tangle file :var x=1 :other :empty x :exports both"
                "body" "#+END_SRC" "#+RESULTS:" ": result")))
            (with-ignored-view
              (first (export-core-test-view-nodes with-ignored-arguments :src-block)))

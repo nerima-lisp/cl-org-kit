@@ -16,6 +16,7 @@ Drawer text.
 :END:
 Task text with a footnote [fn:detail].
 Progress [1/2].
+[fn:detail] Footnote definition.
 
 *************** TODO Inline task
 Inline task text.
@@ -27,7 +28,8 @@ Completed text.
 * Normal
 Normal text.
 
-[fn:detail] Footnote definition.
+* Archived :ARCHIVE:
+Archived body.
 
 : Fixed-width text.
 
