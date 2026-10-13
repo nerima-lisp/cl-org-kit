@@ -45,6 +45,12 @@
       (progn (org-kit::query-list document form) nil)
     (org-query-error (condition) condition)))
 
+(defclass query-list-unprintable-test-value () ())
+
+(defmethod print-object ((value query-list-unprintable-test-value) stream)
+  (declare (ignore value stream))
+  (error "This test value cannot be printed"))
+
 (describe "structured list queries"
   (it "evaluates logic, type, path, and node scope forms"
     (let ((document (query-list-test-document)))
@@ -216,25 +222,75 @@
                (org-kit::query-list document form))
               :to-equal '("Build" "Build"))))
 
+  (it "accepts a supplied query context and validates public options"
+    (let ((document (query-list-test-document)))
+      (expect (query-list-test-titles
+               (org-kit::query-list
+                document '(:type :headline)
+                :context (org-kit::make-query-context)))
+              :to-equal '("Alpha" "Build" "Build" "Beta" "Plain"))
+      (signals type-error
+        (org-kit::query-list document '(:todo-present) :scope :everything))
+      (signals type-error
+        (org-kit::query-list document '(:todo-present) :context :invalid))))
+
+  (it "uses a fallback query label when printing user input fails"
+    (let* ((document (query-list-test-document))
+           (form (list :unknown (make-instance 'query-list-unprintable-test-value)))
+           (condition (query-list-test-query-error document form)))
+      (expect (org-query-error-query condition) :to-equal "<list query>")))
+
   (it "rejects malformed forms with org-query-error and no source position"
     (let* ((document (query-list-test-document))
            (bad-forms
-             '((:and)
+             '(()
+               (not-a-keyword)
+               (:and)
                (:or (:tag := "work"))
                (:not (:tag := "work") (:todo-present))
+               (:not (:tag := "work" . :tail))
                (:unknown)
                (:type "headline")
                (:path ())
+               (:path "Alpha")
+               (:path ("Alpha") "extra")
+               (:path ("Alpha" :unknown))
+               (:path ("Alpha" (:name "Build")))
+               (:path ("Alpha" (:other "Build" 2)))
                (:path ("Alpha" (:name "Build" 0)))
+               (:path ("Alpha" (:name "Build" 2 . :tail)))
+               (:todo-present :unexpected)
+               (:todo-missing :unexpected)
+               (:todo)
+               (:tag :=)
                (:todo :matches "TO")
+               (:tag :matches (:regex "work" :extra))
+               (:tag := 42)
                (:tag :unknown "work")
+               (:property "EFFORT")
+               (:property 42 := "value")
+               (:property "EFFORT" :unknown "value")
+               (:property "EFFORT" := nil)
                (:property "EFFORT" :< 2 :wrong :zero)
+               (:property "EFFORT" := 1 :missing-as :unknown)
                (:property "EFFORT" :< "2" :missing-as :zero)
+               (:property "EFFORT" :matches (:regex "b.*") :missing-as :zero)
                (:property "EFFORT" :matches "b.*")
                (:planning :unknown := (:date "2024-07-02"))
+               (:planning :scheduled :unknown (:date "2024-07-02"))
+               (:planning :scheduled :=)
                (:planning :scheduled :>= "<today>")
+               (:planning :scheduled :>= (:date "<today>" :extra))
                (:property-exists 42)
+               (:property-exists "LABEL" :extra)
+               (:property-missing)
+               (:planning-exists :unknown)
+               (:planning-exists :scheduled :extra)
                (:planning-missing :unknown)
+               (:planning-missing :deadline :extra)
+               (:level :contains 1)
+               (:type :headline :extra)
+               (:level := "1")
                (:property "EFFORT" := (:date "not-a-date"))
                (:tag :matches (:regex "\\("))
                (:planning :scheduled :>= (:date "<today>")))))

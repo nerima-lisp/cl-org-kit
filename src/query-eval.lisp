@@ -8,33 +8,18 @@
   limits
   regex-cache
   tag-groups
-  (depth 0)
-  (tag-groups-validated-p nil))
+  depth)
 
 (defun query-signal-error (query position message)
   (error 'org-query-error :message message
          :query (bounded-text (or query ""))
          :position position))
 
-(defun query-proper-list-length (value limits)
-  "Return VALUE's proper-list length, rejecting cycles, dotted tails and excess.
-The walk is bounded by LIMITS even when VALUE is circular."
-  (let ((cursor value)
-        (slow value)
-        (fast value)
-        (count 0))
-    (loop while (consp cursor)
-          do (incf count)
-             (check-limit limits :max-node-count count)
-             (setf cursor (cdr cursor)
-                   slow (and (consp slow) (cdr slow))
-                   fast (and (consp fast) (cdr fast))
-                   fast (and (consp fast) (cdr fast)))
-             (when (and (consp slow) (eq slow fast))
-               (query-signal-error nil nil "Circular list in canonical query")))
-    (unless (null cursor)
-      (query-signal-error nil nil "Dotted list in canonical query"))
-    count))
+(defun query-canonical-list-length (value limits)
+  "Count a proper list already normalized by a public query parser."
+  (let ((length (length value)))
+    (check-limit limits :max-node-count length)
+    length))
 
 (defun query-translate-emacs-regex (pattern max-depth query source-offset)
   (let ((output (make-array 0 :element-type 'character :fill-pointer 0
@@ -129,6 +114,10 @@ The walk is bounded by LIMITS even when VALUE is circular."
                        (emit-pair #\\ escaped position)
                        (incf position 2)))
                     ((and (char= character #\])
+                          (= position (1+ class-start)))
+                     (emit-pair #\\ #\] position)
+                     (incf position))
+                    ((and (char= character #\])
                           (> position (1+ class-start)))
                      (emit-character character position)
                      (setf class-start nil)
@@ -220,8 +209,7 @@ The walk is bounded by LIMITS even when VALUE is circular."
 PATTERN length and group nesting are bounded by LIMITS. QUERY and SOURCE-OFFSET
 locate translation or compilation errors in the original selector."
   (check-type pattern string)
-  (let* ((limits (or limits (make-limits)))
-         (max-pattern-length (limit-value limits :max-input-length))
+  (let* ((max-pattern-length (limit-value limits :max-input-length))
          (max-depth (limit-value limits :max-element-depth)))
     (check-limit limits :max-input-length (length pattern))
     (multiple-value-bind (translated source-map)
@@ -253,21 +241,13 @@ locate translation or compilation errors in the original selector."
 (defun query-compiled-regex (value state)
   (cond
     ((query-regex-p value) (query-regex-compiled value))
-    ((stringp value)
+    (t
      (or (gethash value (query-evaluation-state-regex-cache state))
          (setf (gethash value (query-evaluation-state-regex-cache state))
-               (query-compile-emacs-regex
-                value (query-evaluation-state-context state)
-                (query-evaluation-state-limits state) nil))))
-    ((and (consp value) (eq (car value) :regex))
-     (unless (and (= (query-proper-list-length
-                      value (query-evaluation-state-limits state))
-                     2)
-                  (stringp (second value)))
-       (query-signal-error nil nil "Invalid regular expression in query"))
-     (query-compiled-regex (second value) state))
-    (t
-     (query-signal-error nil nil "Invalid compiled regular expression in query"))))
+               (query-regex-compiled
+                (query-compile-emacs-regex
+                 value (query-evaluation-state-context state)
+                 (query-evaluation-state-limits state) nil)))))))
 
 (defun query-date-value-p (value)
   (or (cl-date-kit:local-date-p value)
@@ -283,10 +263,9 @@ locate translation or compilation errors in the original selector."
     ((and (cl-date-kit:local-date-p left)
           (cl-date-kit:local-date-p right))
      (cl-date-kit:local-date-compare left right))
-    ((and (query-date-value-p left) (query-date-value-p right))
+    (t
      (cl-date-kit:local-date-time-compare (query-date-time-value left)
-                                          (query-date-time-value right)))
-    (t nil)))
+                                          (query-date-time-value right)))))
 
 (defun query-reference-date (reference-time)
   (cond
@@ -421,42 +400,43 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                                "Invalid Org date literal"))))))
 
 (defun query-number-from-string (string)
-  (when (stringp string)
-    (let* ((length (length string))
-           (position 0)
-           (negative-p nil)
-           (integer-start nil)
-           (integer-end nil)
-           (fraction-start nil)
-           (fraction-end nil))
-      (when (and (< position length)
-                 (find (char string position) '(#\+ #\-)))
-        (setf negative-p (char= (char string position) #\-))
-        (incf position))
-      (setf integer-start position)
+  (let* ((length (length string))
+         (position 0)
+         (negative-p nil)
+         (integer-start nil)
+         (integer-end nil)
+         (fraction-start nil)
+         (fraction-end nil))
+    (when (and (< position length)
+               (find (char string position) '(#\+ #\-)))
+      (setf negative-p (char= (char string position) #\-))
+      (incf position))
+    (setf integer-start position)
+    (loop while (and (< position length) (digit-char-p (char string position)))
+          do (incf position))
+    (setf integer-end position)
+    (when (and (< position length) (char= (char string position) #\.))
+      (incf position)
+      (setf fraction-start position)
       (loop while (and (< position length) (digit-char-p (char string position)))
             do (incf position))
-      (setf integer-end position)
-      (when (and (< position length) (char= (char string position) #\.))
-        (incf position)
-        (setf fraction-start position)
-        (loop while (and (< position length) (digit-char-p (char string position)))
-              do (incf position))
-        (setf fraction-end position))
-      (when (and (= position length)
-                 (or (> integer-end integer-start)
-                     (and fraction-start (> fraction-end fraction-start))))
-        (let* ((whole (if (> integer-end integer-start)
-                          (parse-integer string :start integer-start :end integer-end)
-                          0))
-               (fraction (if fraction-start
-                             (parse-integer string :start fraction-start :end fraction-end)
-                             0))
-               (scale (if fraction-start
-                          (expt 10 (- fraction-end fraction-start))
-                          1))
-               (number (+ whole (/ fraction scale))))
-          (if negative-p (- number) number))))))
+      (setf fraction-end position))
+    (when (and (= position length)
+               (or (> integer-end integer-start)
+                   (and fraction-start (> fraction-end fraction-start)))
+               (or (null fraction-start)
+                   (> fraction-end fraction-start)))
+      (let* ((whole (if (> integer-end integer-start)
+                        (parse-integer string :start integer-start :end integer-end)
+                        0))
+             (fraction (if fraction-start
+                           (parse-integer string :start fraction-start :end fraction-end)
+                           0))
+             (scale (if fraction-start
+                        (expt 10 (- fraction-end fraction-start))
+                        1))
+             (number (+ whole (/ fraction scale))))
+        (if negative-p (- number) number)))))
 
 (defun query-coerce-actual-value (actual expected reference-time)
   (cond
@@ -511,57 +491,32 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
         ((:<) (minusp comparison))
         ((:<=) (not (plusp comparison)))
         ((:>) (plusp comparison))
-        ((:>=) (not (minusp comparison)))
-        (otherwise nil)))))
-
-(defun query-valid-predicate-p (predicate)
-  (and (consp predicate) (keywordp (car predicate))))
+        ((:>=) (not (minusp comparison)))))))
 
 (defun query-predicate-children (predicate)
   (case (car predicate)
     ((:and :or)
-     (unless (>= (length predicate) 3)
-       (query-signal-error nil nil "Empty or unary boolean predicate"))
      (cdr predicate))
     (:not
-     (unless (= (length predicate) 2)
-       (query-signal-error nil nil "Malformed NOT predicate"))
      (list (second predicate)))
     (otherwise nil)))
 
 (defun query-validate-predicate-tree (predicate limits)
   "Validate nested boolean predicates iteratively before candidate traversal."
-  (let ((pending (list (list predicate 1 nil)))
-        (active (make-hash-table :test #'eq))
-        (complete (make-hash-table :test #'eq))
+  (let ((pending (list (list predicate 1)))
         (total 0))
     (loop while pending
           for entry = (pop pending)
           for node = (first entry)
           for depth = (second entry)
-          for leaving-p = (third entry)
-          do (cond
-               (leaving-p
-                (remhash node active)
-                (setf (gethash node complete) t))
-               ((gethash node complete) nil)
-               ((gethash node active)
-                (query-signal-error nil nil "Circular predicate tree"))
-               (t
-                (unless (query-valid-predicate-p node)
-                  (query-signal-error nil nil "Invalid predicate in canonical query"))
-                (check-limit limits :max-element-depth depth)
-                (incf total (query-proper-list-length node limits))
-                (check-limit limits :max-node-count total)
-                (setf (gethash node active) t)
-                (push (list node depth t) pending)
-                (dolist (child (reverse (query-predicate-children node)))
-                  (push (list child (1+ depth) nil) pending)))))
+          do (check-limit limits :max-element-depth depth)
+             (incf total (query-canonical-list-length node limits))
+             (check-limit limits :max-node-count total)
+             (dolist (child (reverse (query-predicate-children node)))
+               (push (list child (1+ depth)) pending)))
   t))
 
-(defun query-check-predicate (predicate state)
-  (unless (and (consp predicate) (keywordp (car predicate)))
-    (query-signal-error nil nil "Invalid predicate in canonical query"))
+(defun query-check-predicate (state)
   (let ((depth (1+ (query-evaluation-state-depth state))))
     (check-limit (query-evaluation-state-limits state) :max-element-depth depth)
     depth))
@@ -571,34 +526,15 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
     ((stringp selector)
      (string= selector (getf segment :title)))
     ((eq selector :*) t)
-    ((and (consp selector) (eq (car selector) :name))
+    (t
      (and (string= (second selector) (getf segment :title))
-          (= (third selector) (getf segment :index))))
-    ((consp selector) (query-signal-error nil nil "Invalid path segment"))
-    (t (query-signal-error nil nil "Invalid path segment"))))
-
-(defun query-validate-path-selector (selector limits)
-  (dolist (part selector)
-    (cond
-      ((stringp part) nil)
-      ((member part '(:* :**)) nil)
-      ((and (consp part) (eq (car part) :name))
-       (unless (and (= (query-proper-list-length part limits) 3)
-                    (stringp (second part))
-                    (typep (third part) '(integer 1 *)))
-         (query-signal-error nil nil "Invalid named path segment")))
-      ((consp part)
-       (query-proper-list-length part limits)
-       (query-signal-error nil nil "Invalid path segment"))
-      (t (query-signal-error nil nil "Invalid path segment"))))
-  t)
+          (= (third selector) (getf segment :index))))))
 
 (defun query-path-matches-p (selector path limits)
-  (let* ((selector-count (query-proper-list-length selector limits))
-         (path-count (query-proper-list-length path limits))
+  (let* ((selector-count (query-canonical-list-length selector limits))
+         (path-count (query-canonical-list-length path limits))
          (previous (make-array (1+ path-count) :initial-element nil)))
     (check-limit limits :max-element-depth selector-count)
-    (query-validate-path-selector selector limits)
     (setf (aref previous 0) t)
     (dolist (part selector)
       (let ((next (make-array (1+ path-count) :initial-element nil)))
@@ -613,7 +549,7 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                   do (setf (aref next index)
                            (and (aref previous (1- index))
                                 (query-path-segment-match-p
-                                part (nth (1- index) path) )))))
+                                 part (nth (1- index) path))))))
         (setf previous next)))
     (aref previous path-count)))
 
@@ -625,8 +561,7 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
 
 (defun query-drawer-property (headline name)
   (labels ((search-node (node)
-             (unless (and (not (eq node headline))
-                          (eq (node-type node) :headline))
+             (unless (eq (node-type node) :headline)
                (when (eq (node-type node) :property-drawer)
                  (dolist (property (node-children node))
                    (when (and (eq (node-type property) :node-property)
@@ -682,8 +617,7 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
 (defun query-todo-state (headline document)
   (let ((keyword (query-todo-keyword headline))
         (type (node-property headline :todo-type)))
-    (cond ((null keyword) nil)
-          ((member type '(:todo :done)) type)
+    (cond ((member type '(:todo :done)) type)
           ((query-done-keyword-p keyword document) :done)
           (t :todo))))
 
@@ -692,8 +626,7 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
        (not (eq (query-todo-state headline document) :done))))
 
 (defun query-tag-group-name (entry)
-  (when (and (%query-proper-list-p entry) (getf entry :group))
-    (getf entry :group)))
+  (getf entry :group))
 
 (defun query-tag-group-by-name (name groups)
   (find name groups :key #'query-tag-group-name :test #'string=))
@@ -737,38 +670,31 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
           (t (query-signal-error nil nil "Invalid tag group member")))))))
 
 (defun query-validate-tag-groups (state)
-  (unless (query-evaluation-state-tag-groups-validated-p state)
-    (let ((groups (query-merged-tag-groups state)))
-      (dolist (entry groups)
-        (let ((name (query-tag-group-name entry)))
-          (when name
-            (query-validate-tag-group-chain name groups '() 1 state))))
-      (setf (query-evaluation-state-tag-groups-validated-p state) t))))
+  (let ((groups (query-merged-tag-groups state)))
+    (dolist (entry groups)
+      (let ((name (query-tag-group-name entry)))
+        (when name
+          (query-validate-tag-group-chain name groups '() 1 state))))))
 
-(defun query-tag-in-group-p (tag group groups stack depth state)
-  (let ((name (query-tag-group-name group)))
-    (when (member name stack :test #'string=)
-      (query-signal-error nil nil "Cyclic tag group definition"))
-    (check-limit (query-evaluation-state-limits state) :max-element-depth depth)
-    (some
-     (lambda (member)
-       (cond
-         ((stringp member)
-          (if (string= member tag)
-              t
-              (let ((nested (query-tag-group-by-name member groups)))
-                (and nested
-                     (query-tag-in-group-p tag nested groups (cons name stack)
-                                           (1+ depth) state)))))
-         ((and (consp member) (eq (first member) :regex))
-          (query-regex-match-p (second member) tag state))
-         (t nil)))
-     (getf group :members))))
+;; QUERY-EVALUATE-TAG validates the complete group graph before matching.
+(defun query-tag-in-group-p (tag group groups state)
+  (some
+   (lambda (member)
+     (cond
+       ((stringp member)
+        (if (string= member tag)
+            t
+            (let ((nested (query-tag-group-by-name member groups)))
+              (and nested
+                     (query-tag-in-group-p tag nested groups state)))))
+       (t
+        (query-regex-match-p (second member) tag state))))
+   (getf group :members)))
 
 (defun query-tag-name-matches-p (tag requested groups state)
   (or (string= tag requested)
       (let ((group (query-tag-group-by-name requested groups)))
-        (and group (query-tag-in-group-p tag group groups '() 1 state)))))
+        (and group (query-tag-in-group-p tag group groups state)))))
 
 (defun query-append-unique-tags (tags result)
   (dolist (tag tags result)
@@ -825,10 +751,10 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                    (when (if (eq timestamp-type :active)
                              (member type '(:active :active-range))
                              (member type '(:inactive :inactive-range)))
-                     (return-from search-node node)))
+                     (return-from search-node node))))
                (dolist (child (node-children node))
                  (let ((found (search-node child)))
-                   (when found (return-from search-node found))))))))
+                   (when found (return-from search-node found)))))))
     (search-node headline)))
 
 (defun query-logical-heading-level (document headline)
@@ -938,36 +864,13 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
 (defun query-planning-present-p (headline kind)
   (nth-value 1 (query-planning-value headline kind)))
 
-(defun query-predicate-arguments (predicate operator arity state)
-  (unless (and (query-valid-predicate-p predicate)
-               (eq (car predicate) operator)
-               (= (query-proper-list-length
-                   predicate (query-evaluation-state-limits state))
-                  arity))
-    (query-signal-error nil nil "Malformed predicate in canonical query"))
-  (cdr predicate))
-
 (defun query-evaluate-property (predicate headline state)
   (let* ((arguments (cdr predicate))
-         (argument-count
-           (query-proper-list-length arguments
-                                     (query-evaluation-state-limits state)))
-         (canonical-p (eq (first arguments) :name))
-         (name (if canonical-p (getf arguments :name) (first arguments)))
-         (operator (if canonical-p (getf arguments :operator) (second arguments)))
-         (expected (if canonical-p (getf arguments :value) (third arguments)))
-         (missing-as
-           (if canonical-p
-               (getf arguments :missing-as)
-               (or (getf (cdddr arguments) :missing-as)
-                   (if (numberp expected) :zero :nonmatch))))
-         (require-present-p (and canonical-p (getf arguments :require-present-p))))
-    (unless (and (stringp name)
-                 (or (and canonical-p (evenp argument-count))
-                     (not canonical-p))
-                 (member missing-as '(:zero :nonmatch))
-                 (member operator '(:= :!= :< :<= :> :>= :matches :not-matches)))
-      (query-signal-error nil nil "Malformed property predicate in canonical query"))
+         (name (getf arguments :name))
+         (operator (getf arguments :operator))
+         (expected (getf arguments :value))
+         (missing-as (getf arguments :missing-as))
+         (require-present-p (getf arguments :require-present-p)))
     (multiple-value-bind (actual present)
         (query-resolve-property (query-evaluation-state-document state)
                                 headline name state)
@@ -976,8 +879,6 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
          (cond
            (require-present-p nil)
            ((eq missing-as :zero)
-            (unless (numberp expected)
-              (query-signal-error nil nil ":missing-as :zero requires a numeric value"))
             (query-compare-values operator expected 0
                                   (query-evaluation-state-reference-time state)))
            (t nil)))
@@ -989,19 +890,17 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                                (query-evaluation-state-reference-time state)))))))
 
 (defun query-evaluate-planning (predicate headline state)
-  (let* ((arguments (query-predicate-arguments predicate :planning 4 state))
+  (let* ((arguments (cdr predicate))
          (kind (first arguments))
          (operator (second arguments))
          (expected (third arguments)))
-    (unless (member kind '(:scheduled :deadline :closed))
-      (query-signal-error nil nil "Unknown planning field in canonical query"))
     (multiple-value-bind (actual present) (query-planning-value headline kind)
       (and present actual
            (query-compare-values operator expected actual
                                  (query-evaluation-state-reference-time state))))))
 
 (defun query-evaluate-existence (predicate headline state)
-  (let ((arguments (query-predicate-arguments predicate (first predicate) 3 state)))
+  (let ((arguments (cdr predicate)))
     (let* ((kind (first arguments))
            (name (second arguments))
            (present
@@ -1010,53 +909,45 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                 (nth-value 1 (query-resolve-property
                              (query-evaluation-state-document state)
                              headline name state)))
-               ((and (eq kind :planning)
-                     (member name '(:scheduled :deadline :closed)))
-                (query-planning-present-p headline name))
-               (t (query-signal-error nil nil "Unknown existence target in query")))))
+               (t
+                (query-planning-present-p headline name)))))
       (if (eq (car predicate) :exists) present (not present)))))
 
 (defun query-evaluate-tag (predicate headline state)
-  (let* ((arguments (query-predicate-arguments predicate :tag 3 state))
+  (let* ((arguments (cdr predicate))
          (operator (first arguments))
          (expected (second arguments))
          (tags (query-effective-tags headline state)))
     (query-validate-tag-groups state)
     (case operator
       ((:=)
-       (and (stringp expected)
-            (some (lambda (tag)
+       (some (lambda (tag)
+               (query-tag-name-matches-p
+                tag expected (query-merged-tag-groups state) state))
+             tags))
+      ((:!=)
+       (not (some (lambda (tag)
                     (query-tag-name-matches-p
                      tag expected (query-merged-tag-groups state) state))
                   tags)))
-      ((:!=)
-       (and (stringp expected)
-            (not (some (lambda (tag)
-                         (query-tag-name-matches-p
-                          tag expected (query-merged-tag-groups state) state))
-                       tags))))
       ((:matches)
        (some (lambda (tag) (query-regex-match-p expected tag state)) tags))
       ((:not-matches)
-       (not (some (lambda (tag) (query-regex-match-p expected tag state)) tags)))
-      (otherwise
-       (query-signal-error nil nil "Unknown tag operator in canonical query")))))
+       (not (some (lambda (tag) (query-regex-match-p expected tag state)) tags))))))
 
 (defun query-evaluate-todo (predicate headline state)
-  (let* ((arguments (query-predicate-arguments predicate :todo 3 state))
+  (let* ((arguments (cdr predicate))
          (operator (first arguments))
          (expected (second arguments))
          (keyword (or (query-todo-keyword headline) "")))
     (case operator
-      ((:=) (and (stringp expected) (string= keyword expected)))
-      ((:!=) (and (stringp expected) (not (string= keyword expected))))
+      ((:=) (string= keyword expected))
+      ((:!=) (not (string= keyword expected)))
       ((:matches) (query-regex-match-p expected keyword state))
-      ((:not-matches) (not (query-regex-match-p expected keyword state)))
-      (otherwise
-       (query-signal-error nil nil "Unknown TODO operator in canonical query")))))
+      ((:not-matches) (not (query-regex-match-p expected keyword state))))))
 
 (defun query-evaluate-level (predicate headline state)
-  (let* ((arguments (query-predicate-arguments predicate :level 3 state))
+  (let* ((arguments (cdr predicate))
          (operator (first arguments))
          (expected (second arguments))
          (actual (query-logical-heading-level
@@ -1070,45 +961,31 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                                (query-evaluation-state-reference-time state)))))
 
 (defun query-evaluate-predicate (predicate candidate state)
-  (let* ((depth (query-check-predicate predicate state))
+  (let* ((depth (query-check-predicate state))
          (operator (car predicate))
          (headline (query-nearest-headline candidate)))
     (let ((state (copy-query-evaluation-state state)))
       (setf (query-evaluation-state-depth state) depth)
       (cond
         ((eq operator :and)
-         (unless (>= (length predicate) 3)
-           (query-signal-error nil nil "Empty or unary AND predicate"))
          (every (lambda (child) (query-evaluate-predicate child candidate state))
                 (cdr predicate)))
         ((eq operator :or)
-         (unless (>= (length predicate) 3)
-           (query-signal-error nil nil "Empty or unary OR predicate"))
          (some (lambda (child) (query-evaluate-predicate child candidate state))
                (cdr predicate)))
         ((eq operator :not)
-         (let ((arguments (query-predicate-arguments predicate :not 2 state)))
-           (not (query-evaluate-predicate (first arguments) candidate state))))
+         (not (query-evaluate-predicate (second predicate) candidate state)))
         ((eq operator :type)
-         (let ((arguments (query-predicate-arguments predicate :type 2 state)))
-           (and (node-type-p (first arguments))
-                (eq (node-type candidate) (first arguments)))))
+         (eq (node-type candidate) (second predicate)))
         ((eq operator :path)
-         (let ((arguments (query-predicate-arguments predicate :path 2 state)))
-           (query-path-matches-p (first arguments) (node-heading-path candidate)
-                                 (query-evaluation-state-limits state))))
+         (query-path-matches-p (second predicate) (node-heading-path candidate)
+                               (query-evaluation-state-limits state)))
         ((eq operator :todo-present)
-         (and (= (query-proper-list-length
-                  predicate (query-evaluation-state-limits state))
-                 1)
-              headline
+         (and headline
               (query-todo-present-p headline
                                     (query-evaluation-state-document state))))
         ((eq operator :todo-missing)
-         (and (= (query-proper-list-length
-                  predicate (query-evaluation-state-limits state))
-                 1)
-              headline
+         (and headline
               (null (query-todo-keyword headline))))
         ((eq operator :level)
          (and headline (query-evaluate-level predicate headline state)))
@@ -1120,10 +997,8 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
          (and headline (query-evaluate-property predicate headline state)))
         ((eq operator :planning)
          (and headline (query-evaluate-planning predicate headline state)))
-        ((member operator '(:exists :missing))
-         (and headline (query-evaluate-existence predicate headline state)))
         (t
-         (query-signal-error nil nil "Unknown predicate in canonical query"))))))
+         (and headline (query-evaluate-existence predicate headline state)))))))
 
 (defun query-evaluate-ir (document query-ir &key reference-time)
   "Evaluate a parser-produced QUERY-IR against DOCUMENT and return matching
@@ -1139,22 +1014,18 @@ this function never reads the current time."
                  :context context
                  :reference-time reference-time
                  :limits limits
-                 :regex-cache (make-hash-table :test #'equal)))
+                 :regex-cache (make-hash-table :test #'equal)
+                 :depth 0))
          (scope (query-ir-scope query-ir))
          (predicate (query-ir-predicate query-ir))
          (results '()))
-    (unless (query-context-p context)
-      (error 'type-error :datum context :expected-type 'query-context))
-    (unless (member scope '(:headlines :nodes))
-      (query-signal-error nil nil "Unknown query candidate scope"))
     (query-validate-predicate-tree predicate limits)
     (when root
       (map-nodes
        (lambda (candidate)
          (when (and (not (eq (node-type candidate) :org-data))
                     (or (eq scope :nodes)
-                        (and (eq scope :headlines)
-                             (eq (node-type candidate) :headline)))
+                        (eq (node-type candidate) :headline))
                     (query-evaluate-predicate predicate candidate state))
            (push candidate results)))
        root))
