@@ -92,8 +92,8 @@ and FEATURE the syntax class that was refused."))
                      (org-kit-error-message condition)
                      (org-table-error-reason condition)
                      (org-table-error-target condition))))
-  (:documentation "Signalled when a table edit is unsupported. TARGET describes the
-addressed table and REASON classifies the table-specific failure."))
+  (:documentation "Signalled when a table edit fails or a table formula cannot be evaluated.
+TARGET describes the addressed table and REASON classifies the table-specific failure."))
 
 (define-condition org-resource-limit-error (org-kit-error)
   ((limit-name :initarg :limit-name)

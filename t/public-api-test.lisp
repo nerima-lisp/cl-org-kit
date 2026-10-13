@@ -210,14 +210,14 @@ docs/src/reference/node-model.md.")
         (expect (list name (and (documented-p (find-symbol name "ORG-KIT")) t))
                 :to-equal (list name t)))))
 
-  (it "pins the T2 public API documentation"
+  (it "pins the table edit and formula API documentation"
     (with-soft-assertions
       (expect (documentation 'table-align 'function)
               :to-equal "Align a pipe table and return its validated edit result.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
-              "Signalled when a table edit is unsupported. TARGET describes the
-addressed table and REASON classifies the table-specific failure.")))
+              "Signalled when a table edit fails or a table formula cannot be evaluated.
+TARGET describes the addressed table and REASON classifies the table-specific failure.")))
 
   (it "pins the T5b public API documentation"
     (with-soft-assertions
