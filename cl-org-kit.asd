@@ -60,6 +60,7 @@
                (:file "clock")
                (:file "edit-clock")
                (:file "clocktable")
+               (:file "edit-clocktable")
                ;; F agenda
                ;; Unit E1 export core
                (:file "export-types")
@@ -123,6 +124,7 @@
                (:file "query-equivalence-test")
                (:file "clock-test")
                (:file "edit-clock-test")
+               (:file "edit-clocktable-test")
                (:file "agenda-test")
                ;; Unit E1 export core
                (:file "clocktable-test")

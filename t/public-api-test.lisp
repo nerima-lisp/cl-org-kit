@@ -35,6 +35,7 @@
     "CLOCKTABLE-RESULT-RANGE" "CLOCKTABLE-DATA"
     ;; Clock editing
     "CLOCK-IN" "CLOCK-OUT"
+    "WRITE-CLOCKTABLE"
     ;; Edit results
     "EDIT-SPAN" "MAKE-EDIT-SPAN" "EDIT-SPAN-P" "EDIT-SPAN-START" "EDIT-SPAN-END"
     "EDIT-RESULT" "MAKE-EDIT-RESULT" "EDIT-RESULT-P"
@@ -223,6 +224,14 @@ addressed table and REASON classifies the table-specific failure.")))
       (expect (documentation 'table-sort-rows 'function)
               :to-equal
               "Stable-sort rows in an Org pipe table and return its validated edit result.")))
+
+  (it "pins the H2 clocktable writer documentation"
+    (expect (documentation 'write-clocktable 'function)
+            :to-equal
+            "Replace a clocktable dynamic block body with RESULT's fixed table data.")
+    (expect (fboundp 'clocktable-result-rows) :to-be-truthy)
+    (expect (fboundp 'clocktable-result-total-minutes) :to-be-truthy)
+    (expect (fboundp 'clocktable-result-range) :to-be-truthy))
 
   (it "keeps the package name stable and nickname-free"
     (expect (package-name (find-package "ORG-KIT")) :to-equal "ORG-KIT")

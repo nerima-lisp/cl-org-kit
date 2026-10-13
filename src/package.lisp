@@ -31,6 +31,7 @@
    #:clocktable-result-range #:clocktable-data
    ;; Clock editing
    #:clock-in #:clock-out
+   #:write-clocktable
    ;; Edit results
    #:edit-span #:make-edit-span #:edit-span-p #:edit-span-start #:edit-span-end
    #:edit-result #:make-edit-result #:edit-result-p
