@@ -1104,6 +1104,34 @@
             (expect (document-text document) :to-equal crlf-source))
           (expect (document-text empty-document) :to-equal empty-source)))))
 
+  (it "preserves TBLFM assignment whitespace when deleting a column"
+    (let* ((source
+             (format nil
+                     "| A | B |~%| x | y |~%#+TBLFM:   $1=1   ::   $2=2   ~%"))
+           (last-expected
+             (format nil
+                     "| A |~%| x |~%#+TBLFM:   $1=1   ::   ~%"))
+           (last-document (parse-org source))
+           (last-table
+             (table-edit-test-find-node (document-root last-document) :table))
+           (last-result (table-delete-column last-document last-table 2))
+           (first-expected
+             (format nil
+                     "| B |~%| y |~%#+TBLFM:      $1=2   ~%"))
+           (first-document (parse-org source))
+           (first-table
+             (table-edit-test-find-node (document-root first-document) :table))
+           (first-result (table-delete-column first-document first-table 1)))
+      (with-soft-assertions
+        (expect (edit-result-p last-result) :to-be t)
+        (expect (document-text (edit-result-updated-document last-result))
+                :to-equal last-expected)
+        (expect (edit-result-p first-result) :to-be t)
+        (expect (document-text (edit-result-updated-document first-result))
+                :to-equal first-expected)
+        (expect (document-text last-document) :to-equal source)
+        (expect (document-text first-document) :to-equal source))))
+
   (it "remaps absolute references across decimal insertion and deletion boundaries"
     (let* ((increment-source
              (format nil "| A |~%| x |~%#+TBLFM: @2$1=@2$1~%"))

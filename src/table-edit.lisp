@@ -498,6 +498,19 @@
          (char= (char formula tail-end) #\:)
          (char= (char formula (1- tail-end)) #\:))))
 
+(defun table-edit-formula-assignment-output-bounds (formula assignment)
+  (let ((start (table-calc-assignment-start assignment))
+        (end (table-calc-assignment-end assignment)))
+    (loop while (and (plusp start)
+                     (find (char formula (1- start))
+                           '(#\Space #\Tab #\Return #\Newline)))
+          do (decf start))
+    (loop while (and (< end (length formula))
+                     (find (char formula end)
+                           '(#\Space #\Tab #\Return #\Newline)))
+          do (incf end))
+    (values start end)))
+
 (defun table-edit-formula-output-length (formula kept-pairs removed-p terminal-p)
   (if (not removed-p)
       (+ (length formula)
@@ -506,26 +519,29 @@
       (if (null kept-pairs)
           0
           (+ (loop for (assignment edits) in kept-pairs
-                   sum (+ (- (table-calc-assignment-end assignment)
-                             (table-calc-assignment-start assignment))
-                          (table-edit-edits-delta edits)))
+                   sum (multiple-value-bind (start end)
+                           (table-edit-formula-assignment-output-bounds
+                            formula assignment)
+                         (+ (- end start)
+                            (table-edit-edits-delta edits))))
              (* 2 (1- (length kept-pairs)))
              (if terminal-p 2 0)))))
 
 (defun table-edit-render-assignment (formula assignment edits)
-  (let* ((start (table-calc-assignment-start assignment))
-         (end (table-calc-assignment-end assignment))
-         (local-edits (remove-if-not
-                       (lambda (edit)
-                         (and (<= start (first edit))
-                              (<= (second edit) end)))
-                       edits)))
-    (table-edit-apply-component-edits (subseq formula start end)
-                                      (mapcar (lambda (edit)
-                                                (list (- (first edit) start)
-                                                      (- (second edit) start)
-                                                      (third edit)))
-                                              local-edits))))
+  (multiple-value-bind (start end)
+      (table-edit-formula-assignment-output-bounds formula assignment)
+    (let ((local-edits (remove-if-not
+                        (lambda (edit)
+                          (and (<= start (first edit))
+                               (<= (second edit) end)))
+                        edits)))
+      (table-edit-apply-component-edits
+       (subseq formula start end)
+       (mapcar (lambda (edit)
+                 (list (- (first edit) start)
+                       (- (second edit) start)
+                       (third edit)))
+               local-edits)))))
 
 (defun table-edit-formula-output (formula kept-pairs edits removed-p terminal-p)
   (if (not removed-p)
@@ -782,22 +798,23 @@
         (if (null kept)
             0
             (+ (loop for (assignment assignment-edits) in kept
-                     sum (let* ((start (table-calc-assignment-start assignment))
-                                (end (table-calc-assignment-end assignment))
-                                (old-bytes
-                                  (- (edit-encoded-range-octets formula start end
-                                                                encoding)
-                                     preamble)))
-                           (+ old-bytes
-                              (loop for (edit-start edit-end replacement)
-                                    in assignment-edits
-                                    sum (- (- (edit-encoded-range-octets
-                                               replacement 0 (length replacement)
-                                               encoding)
-                                              preamble)
-                                           (- (edit-encoded-range-octets
-                                               formula edit-start edit-end encoding)
-                                              preamble))))))
+                     sum (multiple-value-bind (start end)
+                             (table-edit-formula-assignment-output-bounds
+                              formula assignment)
+                           (let ((old-bytes
+                                   (- (edit-encoded-range-octets formula start end
+                                                                 encoding)
+                                      preamble)))
+                             (+ old-bytes
+                                (loop for (edit-start edit-end replacement)
+                                      in assignment-edits
+                                      sum (- (- (edit-encoded-range-octets
+                                                 replacement 0 (length replacement)
+                                                 encoding)
+                                                preamble)
+                                             (- (edit-encoded-range-octets
+                                                 formula edit-start edit-end encoding)
+                                                preamble)))))))
                (* 2 (1- (length kept))
                   (table-edit-one-character-octets #\: encoding preamble))
                (if (%table-edit-formula-terminal-p plan)
@@ -966,13 +983,17 @@
          (cell-rows (table-edit-canonical-cell-rows document models width)))
     (setf (getf canonical-table :children)
           (mapcar #'table-edit-canonical-row models cell-rows)
-          (getf properties :tblfm) formulas
+          (getf properties :tblfm)
+          (mapcar (lambda (formula) (string-trim '(#\Space #\Tab) formula))
+                  formulas)
           (getf canonical-table :properties) properties)
     expected))
 
 (defun table-edit-keyword-canonical (formula)
   (list :type :keyword :post-blank 0
-        :properties (list :key "TBLFM" :value formula :options nil)
+        :properties (list :key "TBLFM"
+                          :value (string-trim '(#\Space #\Tab) formula)
+                          :options nil)
         :children nil))
 
 (defun table-edit-canonical-without-empty-table (document table formulas)
