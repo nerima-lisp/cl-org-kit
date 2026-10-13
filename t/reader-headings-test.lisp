@@ -262,7 +262,6 @@
                        (reader-headings-test-lines
                         "#+TAGS: \\n valid bad/tag stray} [ : ignored ] [] { : ignored } { member } [ Named : } later ] {unfinished\\"
                         "#+FILETAGS: :good:bad/tag:"
-                        "#+FILETAGS: invalid"
                         "* Entry")))
                      (malformed-settings
                       (document-settings malformed-document))
@@ -288,8 +287,15 @@
                        (reader-headings-test-lines
                         "#+FILETAGS:"
                         "* Entry")))
+                     (bare-file-tags-document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "#+FILETAGS: FILE"
+                        "* Entry")))
                      (empty-settings
-                      (document-settings empty-file-tags-document)))
+                      (document-settings empty-file-tags-document))
+                     (bare-file-tags-settings
+                      (document-settings bare-file-tags-document)))
                 (with-soft-assertions
                  (expect escaped-tags
                          :to-equal
@@ -316,8 +322,9 @@
                          :to-be
                          :missing)
                  (expect (getf empty-settings :file-tags)
-                         :to-equal
-                         nil))))
+                         :to-equal nil)
+                 (expect (getf bare-file-tags-settings :file-tags)
+                         :to-equal '("FILE")))))
 
           (it "lets explicit category settings override buffer category"
               (let ((document

@@ -2575,6 +2575,506 @@
 
 (advice-add 'org-fixture--dispatch-main :around #'org-fixture--t5b-main-around)
 
+(defun org-fixture--e-pretty-data (data)
+  (require 'pp)
+  (let ((form (car (read-from-string (org-fixture--cl-value data))))
+        (replacements nil)
+        (next 0))
+    (cl-labels
+        ((prepare (value)
+           (cond
+            ((stringp value)
+             (let* ((name (format "org-fixture--e-string-%d-end" next))
+                    (marker (make-symbol name)))
+               (setq next (1+ next))
+               (push (cons marker (substring-no-properties value))
+                     replacements)
+               marker))
+            ((consp value) (cons (prepare (car value)) (prepare (cdr value))))
+            ((and (vectorp value) (not (stringp value)))
+             (mapcar #'prepare (append value nil)))
+            (t value))))
+      (let ((printed (pp-to-string (prepare form))))
+        (dolist (entry (nreverse replacements) printed)
+          (setq printed
+                (replace-regexp-in-string
+                 (regexp-quote (symbol-name (car entry)))
+                 (org-fixture--cl-string (cdr entry))
+                 printed t t)))))))
+
+(defun org-fixture--e-write-case (root relative data)
+  (let* ((output (expand-file-name relative root))
+         (content
+          (concat
+           (format "; Generated from Org APIs with Emacs %s and Org %s.\n"
+                   emacs-version (org-version))
+           "; Org oracle output is kept separate from contract policy output.\n"
+           (org-fixture--e-pretty-data data))))
+    (org-fixture--check-output content)
+    (when (string-match-p "\\(?:^\\|[[:space:]]\\)~/" content)
+      (error "Generated E fixture unexpectedly contains a home-relative path"))
+    (make-directory (file-name-directory output) t)
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region content nil output nil 'silent))
+    relative))
+
+(defun org-fixture--e-direct-child-headlines ()
+  (let (headlines)
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "^\\*\\* \\(.*\\)$" nil t)
+        (push (match-string-no-properties 1) headlines)))
+    (nreverse headlines)))
+
+(defun org-fixture--e-sort-key-value (key property-name)
+  (pcase key
+    ((or :alpha :numeric) (org-get-heading t t t t))
+    (:time (save-excursion
+             (when (re-search-forward org-ts-regexp nil t)
+               (match-string-no-properties 0))))
+    (:created (org-entry-get nil property-name))
+    (:scheduled (org-entry-get nil "SCHEDULED"))
+    (:deadline (org-entry-get nil "DEADLINE"))
+    (:priority (org-get-priority (org-get-heading)))
+    (:todo (org-get-todo-state))
+    (:property (org-entry-get nil property-name))))
+
+(defun org-fixture--e-sort-key-values (key property-name)
+  (let (values)
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "^\\*\\* " nil t)
+        (let ((heading-start (match-beginning 0)))
+          (goto-char heading-start)
+          (push (org-fixture--e-sort-key-value key property-name) values)
+          (forward-line 1))))
+    (nreverse values)))
+
+(defun org-fixture--e-sort-case (spec)
+  (let* ((input (plist-get spec :input))
+         (key (plist-get spec :key))
+         (property-name (plist-get spec :property-name))
+         (sort-character (plist-get spec :sort-character))
+         (org-priority-highest ?A)
+         (org-priority-lowest ?C)
+         (org-priority-default ?B))
+    (with-temp-buffer
+      (insert input)
+      (org-mode)
+      (goto-char (point-min))
+      (unless (re-search-forward "^\\* Parent$" nil t)
+        (error "E sort fixture has no parent headline: %s"
+               (plist-get spec :name)))
+      (beginning-of-line)
+      (org-sort-entries nil sort-character nil nil property-name)
+      (append
+       (list :name (plist-get spec :name)
+             :emacs-version emacs-version
+             :org-version (org-version)
+             :operation :sort
+             :key key
+             :org-type :headline
+             :sort-character sort-character)
+       (when property-name (list :property-name property-name))
+       (when (eq key :priority)
+         (list :priority-highest (char-to-string org-priority-highest)
+               :priority-default (char-to-string org-priority-default)
+               :priority-lowest (char-to-string org-priority-lowest)))
+       (list :input input
+             :expected (buffer-string)
+             :expected-order (org-fixture--e-direct-child-headlines)
+             :expected-key-values
+             (org-fixture--e-sort-key-values key property-name))))))
+
+(defun org-fixture--e-sort-specs ()
+  (list
+   (list :name "alpha" :key :alpha :sort-character ?a
+         :input (concat "* Parent\n"
+                        "** beta\n** Alpha\n** alpha\n** alpha\n** Gamma\n"))
+   (list :name "numeric" :key :numeric :sort-character ?n
+         :input (concat "* Parent\n"
+                        "** 10\n** 2\n** 2.0\n** 1\n"))
+   (list :name "time" :key :time :sort-character ?t
+         :input (concat "* Parent\n"
+                        "** Later <2024-03-01 Fri>\n"
+                        "** Early <2024-02-01 Thu>\n"
+                        "** Tie first <2024-02-01 Thu>\n"
+                        "** No timestamp\n"))
+   (list :name "created" :key :created :sort-character ?r
+         :property-name "CREATED"
+         :input (concat "* Parent\n"
+                        "** Later\n:PROPERTIES:\n:CREATED: [2024-03-01 Fri]\n:END:\n"
+                        "** Early\n:PROPERTIES:\n:CREATED: [2024-02-01 Thu]\n:END:\n"
+                        "** Tie first\n:PROPERTIES:\n:CREATED: [2024-02-01 Thu]\n:END:\n"))
+   (list :name "scheduled" :key :scheduled :sort-character ?s
+         :input (concat "* Parent\n"
+                        "** Later\nSCHEDULED: <2024-03-01 Fri>\n"
+                        "** Early\nSCHEDULED: <2024-02-01 Thu>\n"
+                        "** Tie first\nSCHEDULED: <2024-02-01 Thu>\n"
+                        "** Unscheduled\n"))
+   (list :name "deadline" :key :deadline :sort-character ?d
+         :input (concat "* Parent\n"
+                        "** Later\nDEADLINE: <2024-03-01 Fri>\n"
+                        "** Early\nDEADLINE: <2024-02-01 Thu>\n"
+                        "** Tie first\nDEADLINE: <2024-02-01 Thu>\n"
+                        "** No deadline\n"))
+   (list :name "priority" :key :priority :sort-character ?p
+         :input (concat "* Parent\n"
+                        "** [#B] Explicit B\n** Default priority\n"
+                        "** [#A] High\n** [#C] Low\n** [#B] Second B\n"))
+   (list :name "todo" :key :todo :sort-character ?o
+         :input (concat "#+TODO: TODO WAIT | DONE\n"
+                        "* Parent\n** WAIT Waiting\n** DONE Finished\n"
+                        "** TODO Active\n"))
+   (list :name "property" :key :property :sort-character ?r
+         :property-name "RANK"
+         :input (concat "* Parent\n"
+                        "** Zulu\n:PROPERTIES:\n:RANK: z\n:END:\n"
+                        "** Alpha first\n:PROPERTIES:\n:RANK: a\n:END:\n"
+                        "** Alpha second\n:PROPERTIES:\n:RANK: a\n:END:\n"
+                        ))
+   (list :name "priority-directive" :key :priority :sort-character ?p
+         :input (concat "#+PRIORITIES: B D C\n"
+                        "* Parent\n** [#C] Explicit default\n"
+                        "** [#D] Lowest\n** Default priority\n"
+                        "** [#B] Highest\n"))))
+
+(defun org-fixture--e-refile-case (name source-input target-input target-heading)
+  (let* ((source-buffer (generate-new-buffer " *e-refile-source*"))
+         (target-buffer (generate-new-buffer " *e-refile-target*"))
+         (root (file-name-directory
+                (directory-file-name (file-name-directory load-file-name))))
+         (source-file (expand-file-name "e-refile-source.org" root))
+         (target-file (expand-file-name "e-refile-target.org" root))
+         (target-marker nil)
+         (target-label (or target-heading "Root")))
+    (unwind-protect
+        (progn
+          (with-current-buffer target-buffer
+            (insert target-input)
+            (org-mode)
+            (setq buffer-file-name target-file)
+            (if target-heading
+                (progn
+                  (goto-char (point-min))
+                  (unless (re-search-forward
+                           (concat "^\\*+ " (regexp-quote target-heading) "$"))
+                    (error "Missing E refile target heading: %s" target-heading))
+                  (beginning-of-line))
+              (goto-char (point-min)))
+            (setq target-marker (copy-marker (point) t)))
+          (with-current-buffer source-buffer
+            (insert source-input)
+            (org-mode)
+            (setq buffer-file-name source-file)
+            (let ((org-refile-keep nil)
+                  (org-refile-use-outline-path nil)
+                  (org-reverse-note-order nil)
+                  (org-refile-allow-creating-parent-nodes t)
+                  (inhibit-message t))
+              (org-refile nil nil
+                          (list target-label target-file nil target-marker)))
+            (let ((source-expected (buffer-string))
+                  target-expected)
+              (with-current-buffer target-buffer
+                (setq target-expected (buffer-string)))
+              (list :name name
+                    :emacs-version emacs-version
+                    :org-version (org-version)
+                    :operation :refile
+                    :mode :move
+                    :target-heading target-heading
+                    :source-input source-input
+                    :target-input target-input
+                    :source-expected source-expected
+                    :target-expected target-expected))))
+      (when (buffer-live-p source-buffer) (kill-buffer source-buffer))
+      (when (buffer-live-p target-buffer) (kill-buffer target-buffer)))))
+
+(defun org-fixture--e-archive-case (name source-name source-input location)
+  (require 'org-archive)
+  (let* ((root (file-name-directory
+                (directory-file-name (file-name-directory load-file-name))))
+         (source-file (expand-file-name source-name root))
+         (source-buffer (generate-new-buffer " *e-archive-source*"))
+         (archive-buffer nil)
+         (fixed-time (encode-time 0 34 12 19 2 2024 "UTC"))
+         (fixed-format (org-time-stamp-format 'with-time 'no-brackets))
+         (fixed-time-string nil)
+         (original-format-time-string (symbol-function 'format-time-string)))
+    (unwind-protect
+        (with-current-buffer source-buffer
+          (insert source-input)
+          (org-mode)
+          (setq buffer-file-name source-file)
+          (setq fixed-time-string
+                (funcall original-format-time-string fixed-format fixed-time "UTC"))
+          (let* ((org-archive-location location)
+                 (org-archive-subtree-save-file-p nil)
+                 (org-archive-save-context-info '(time file olpath category todo itags))
+                 (org-archive-subtree-add-inherited-tags 'infile)
+                 (org-archive-mark-done nil)
+                 (location-pair (org-archive--compute-location location))
+                 (archive-file (car location-pair)))
+            (cl-letf (((symbol-function 'format-time-string)
+                       (lambda (format-string &optional time zone)
+                         (if (and (null time) (equal format-string fixed-format))
+                             (funcall original-format-time-string
+                                      format-string fixed-time "UTC")
+                           (funcall original-format-time-string
+                                    format-string time zone)))))
+              (goto-char (point-min))
+              (unless (re-search-forward "^\\*+ \\(?:TODO \\)?Work\\b" nil t)
+                (error "Missing E archive source heading: %s" name))
+              (beginning-of-line)
+              (let ((inhibit-message t)) (org-archive-subtree)))
+            (setq archive-buffer
+                  (or (get-file-buffer archive-file)
+                      (error "Org archive buffer missing for %s" name)))
+            (with-current-buffer archive-buffer
+              (list :name name
+                    :emacs-version emacs-version
+                    :org-version (org-version)
+                    :operation :archive
+                    :archive-location location
+                    :archive-time fixed-time-string
+                    :source-file source-name
+                    :source-input source-input
+                    :target-input ""
+                    :source-expected
+                    (with-current-buffer source-buffer (buffer-string))
+                    :target-expected (buffer-string)))))
+      (when (buffer-live-p source-buffer) (kill-buffer source-buffer))
+      (when (and (buffer-live-p archive-buffer)
+                 (not (eq archive-buffer source-buffer)))
+        (kill-buffer archive-buffer)))))
+
+(defun org-fixture--e-normalize-archive-data (data source-name)
+  (let* ((root (file-name-directory
+                (directory-file-name (file-name-directory load-file-name))))
+         (source-file (expand-file-name source-name root))
+         (source-abbreviated (abbreviate-file-name source-file))
+         (archive-file (concat source-file "_archive"))
+         (archive-abbreviated (abbreviate-file-name archive-file)))
+    (mapcar (lambda (value)
+              (if (stringp value)
+                  (let* ((normalized
+                         (replace-regexp-in-string
+                          (regexp-quote source-file) source-name value t t))
+                         (normalized
+                          (replace-regexp-in-string
+                           (regexp-quote source-abbreviated) source-name
+                           normalized t t)))
+                    (let ((normalized
+                           (replace-regexp-in-string
+                            (regexp-quote archive-file)
+                            (concat source-name "_archive") normalized t t)))
+                      (replace-regexp-in-string
+                       (regexp-quote archive-abbreviated)
+                       (concat source-name "_archive") normalized t t)))
+                value))
+            data)))
+
+(defun org-fixture--e-without-archive-time (text)
+  (with-temp-buffer
+    (insert text)
+    (goto-char (point-min))
+    (while (re-search-forward "^:ARCHIVE_TIME:.*$" nil t)
+      (beginning-of-line)
+      (delete-region (point) (line-end-position))
+      (when (eq (char-after) ?\n) (delete-char 1)))
+    (buffer-string)))
+
+(defun org-fixture--e-policy-archive (oracle-data)
+  (let* ((source-name (plist-get oracle-data :source-file))
+         (source-file (plist-get oracle-data :source-expected))
+         (org-target (plist-get oracle-data :target-expected))
+         (headline-start (or (string-match "^\\*+ \\(?:TODO \\)?Work\\b" org-target)
+                             (error "Missing root archive headline")))
+         (target (substring org-target headline-start))
+         (without-time (org-fixture--e-without-archive-time target)))
+    (list :name "archive-time-omitted"
+          :emacs-version emacs-version
+          :org-version (org-version)
+          :operation :archive
+          :source-file source-name
+          :divergence :archive-time-omitted-no-time-context
+          :additional-divergence
+          :org-archive-file-header-omitted-for-caller-target
+          :oracle-archive-time (plist-get oracle-data :archive-time)
+          :source-input (plist-get oracle-data :source-input)
+          :target-input ""
+          :source-expected source-file
+          :target-expected without-time
+          :oracle-target-expected org-target)))
+
+(defun org-fixture--e-generate (output-directory)
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "E oracle requires Emacs 31.1 and Org 9.8.10; found %s / %s"
+           emacs-version (org-version)))
+  (let* ((root (file-name-directory
+                (directory-file-name (file-name-directory load-file-name))))
+         (expected-oracle (expand-file-name "t/fixtures/e/oracle" root))
+         (expected-policy (expand-file-name "t/fixtures/e/policy" root))
+         (output-directory (expand-file-name output-directory))
+         (policy-directory (expand-file-name "../policy" output-directory))
+         (written nil)
+         (manifest nil))
+    (unless (equal output-directory expected-oracle)
+      (error "E oracle output must be t/fixtures/e/oracle"))
+    (unless (equal policy-directory expected-policy)
+      (error "E policy output must be t/fixtures/e/policy"))
+    (dolist (spec (org-fixture--e-sort-specs))
+      (let* ((data (org-fixture--e-sort-case spec))
+             (relative (concat "sort/" (plist-get spec :name) ".sexp")))
+        (push (org-fixture--e-write-case output-directory relative data) written)
+        (push (list :name (plist-get spec :name) :path relative
+                    :key (plist-get spec :key)) manifest)))
+    (dolist (spec
+             (list
+              (list "refile-root"
+                    "* Source\nsource body\n" "" nil)
+              (list "refile-heading"
+                    "* Parent\n** Source\nsource body\n"
+                    "* Target\ntarget body\n" "Target")
+              (list "refile-incompatible-todo"
+                    "#+TODO: WAIT | CLOSED\n* WAIT Source\nsource body\n"
+                    "#+TODO: TODO | DONE\n* Target\ntarget body\n" "Target")))
+      (let* ((name (nth 0 spec))
+             (data (org-fixture--e-refile-case
+                    name (nth 1 spec) (nth 2 spec) (nth 3 spec)))
+             (relative (concat "relocate/" name ".sexp")))
+        (push (org-fixture--e-write-case output-directory relative data) written)
+        (push (list :name name :path relative :key :refile) manifest)))
+    (let ((archive-specs
+           (progn
+             (require 'org-archive)
+             (list
+              (list "archive-root" "e-oracle-root-source.org"
+                    "* Keep\nkeep body\n* Work\nwork body\n"
+                    (default-value 'org-archive-location) :default)
+              (list "archive-heading" "e-oracle-heading-source.org"
+                    "* Keep\nkeep body\n* Work\nwork body\n"
+                    "%s_archive::* Archive")
+              (list "archive-context" "e-oracle-context-source.org"
+                    "#+FILETAGS: FILE\n* Parent :PARENT:\n** Child :CHILD:\n*** TODO Work :LOCAL:\nBody\n"
+                    "%s_archive::")))))
+      (dolist (spec archive-specs)
+        (let* ((name (nth 0 spec))
+               (source-name (nth 1 spec))
+               (raw (org-fixture--e-archive-case
+                     name source-name (nth 2 spec) (nth 3 spec)))
+               (data (org-fixture--e-normalize-archive-data raw source-name))
+               (relative (concat "archive/" name ".sexp")))
+          (when (eq (nth 4 spec) :default)
+            (setq data (plist-put data :archive-location-source :default)))
+          (push (org-fixture--e-write-case output-directory relative data) written)
+          (push (list :name name :path relative :key :archive) manifest)
+          (when (equal name "archive-context")
+            (let ((policy (org-fixture--e-policy-archive data)))
+              (org-fixture--e-write-case
+               policy-directory "archive/archive-time-omitted.sexp" policy)
+              (push "../policy/archive/archive-time-omitted.sexp" written)
+              (push (list :name "archive-time-omitted"
+                          :path "../policy/archive/archive-time-omitted.sexp"
+                          :key :archive :policy t)
+                    manifest))))))
+    (dolist (spec
+             (list
+              (list :name "property-missing-last" :key :property
+                    :sort-character ?r :property-name "RANK"
+                    :divergence :org-property-missing-sorts-first
+                    :input (concat "* Parent\n** Zulu\n:PROPERTIES:\n:RANK: z\n:END:\n"
+                                   "** Missing property\n** Alpha\n:PROPERTIES:\n:RANK: a\n:END:\n"))
+              (list :name "created-missing-last" :key :created
+                    :sort-character ?r :property-name "CREATED"
+                    :divergence :org-created-missing-sorts-first
+                    :input (concat "* Parent\n"
+                                   "** Later\n:PROPERTIES:\n:CREATED: [2024-03-01 Fri]\n:END:\n"
+                                   "** Missing\n"
+                                   "** Early\n:PROPERTIES:\n:CREATED: [2024-02-01 Thu]\n:END:\n"
+                                   "** Tie first\n:PROPERTIES:\n:CREATED: [2024-02-01 Thu]\n:END:\n"))
+              (list :name "todo-missing-last" :key :todo :sort-character ?o
+                    :divergence :org-todo-missing-is-not-last
+                    :input (concat "#+TODO: TODO WAIT | DONE\n* Parent\n"
+                                   "** DONE Finished\n** No TODO state\n"
+                                   "** WAIT Waiting\n** TODO Active\n"))
+              (list :name "alpha-code-point-case-sensitive" :key :alpha
+                    :sort-character ?a
+                    :divergence :org-alpha-is-case-insensitive
+                    :input "* Parent\n** a\n** A\n")))
+      (let* ((key (plist-get spec :key))
+             (property-name (plist-get spec :property-name))
+             (oracle-data (org-fixture--e-sort-case spec))
+             (expected-order
+              (pcase key
+                (:property '("Alpha" "Zulu" "Missing property"))
+                (:created '("Early" "Tie first" "Later" "Missing"))
+                (:todo '("TODO Active" "WAIT Waiting" "DONE Finished"
+                         "No TODO state"))
+                (:alpha '("A" "a"))))
+             (expected-key-values
+              (pcase key
+                (:property '("a" "z" nil))
+                (:created '("[2024-02-01 Thu]" "[2024-02-01 Thu]"
+                            "[2024-03-01 Fri]" nil))
+                (:todo '("TODO" "WAIT" "DONE" nil))
+                (:alpha '("A" "a"))))
+             (data (list :name (plist-get spec :name)
+                         :emacs-version emacs-version
+                         :org-version (org-version)
+                         :operation :sort
+                         :key key
+                         :property-name property-name
+                         :divergence (plist-get spec :divergence)
+                         :input (plist-get spec :input)
+                         :expected-order expected-order
+                         :expected-key-values expected-key-values
+                         :oracle-expected-order
+                         (plist-get oracle-data :expected-order)
+                         :oracle-key-values
+                         (plist-get oracle-data :expected-key-values))))
+        (org-fixture--e-write-case
+         policy-directory (concat "sort/" (plist-get spec :name) ".sexp") data)
+        (push (concat "../policy/sort/" (plist-get spec :name) ".sexp")
+              written)
+        (push (list :name (plist-get spec :name)
+                    :path (concat "../policy/sort/"
+                                  (plist-get spec :name) ".sexp")
+                    :key key :policy t)
+              manifest)))
+    (let ((manifest-data
+           (list :name "e-oracle-manifest"
+                 :emacs-version emacs-version
+                 :org-version (org-version)
+                 :cases (nreverse manifest))))
+      (push (org-fixture--e-write-case output-directory "manifest.sexp"
+                                      manifest-data)
+            written))
+    (let ((generated-count (length written)))
+      (dolist (relative (nreverse written))
+        (princ (format "Wrote %s\n" relative)))
+      (princ (format "Generated %d E oracle and policy fixtures.\n"
+                     generated-count)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
+(defun org-fixture--e-main-around (original)
+  (let ((arguments (if (equal (car command-line-args-left) "--")
+                       (cdr command-line-args-left)
+                     command-line-args-left)))
+    (if (equal (car arguments) "--e-oracle")
+        (progn
+          (setq command-line-args-left nil)
+          (unless (= (length arguments) 2)
+            (error (concat
+                    "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+                    "--e-oracle t/fixtures/e/oracle")))
+          (org-fixture--e-generate (nth 1 arguments)))
+      (funcall original))))
+
+(advice-add 'org-fixture--dispatch-main :around #'org-fixture--e-main-around)
+
 (org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here

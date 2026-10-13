@@ -83,6 +83,13 @@
     ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
+    ;; Unit E subtree relocation and sort
+    "RELOCATION-RESULT" "MAKE-RELOCATION-RESULT" "RELOCATION-RESULT-P"
+    "RELOCATION-RESULT-SOURCE-EDIT" "RELOCATION-RESULT-TARGET-EDIT"
+    "RELOCATION-RESULT-MODE" "RELOCATION-RESULT-SOURCE-PATH"
+    "RELOCATION-RESULT-TARGET-PATH"
+    "MOVE-SUBTREE" "REFILE-SUBTREE" "SET-HEADING-ARCHIVE-TAG"
+    "ARCHIVE-SUBTREE-TO" "SORT-SUBTREE-CHILDREN"
     ;; Queries
     "QUERY-CONTEXT" "MAKE-QUERY-CONTEXT" "QUERY-CONTEXT-P"
     "QUERY-CONTEXT-TAG-GROUPS" "QUERY-CONTEXT-PROPERTY-INHERITANCE-P"
@@ -245,6 +252,32 @@ TARGET describes the addressed table and REASON classifies the table-specific fa
     (expect (fboundp 'clocktable-result-rows) :to-be-truthy)
     (expect (fboundp 'clocktable-result-total-minutes) :to-be-truthy)
     (expect (fboundp 'clocktable-result-range) :to-be-truthy))
+
+  (it "pins the E public API documentation"
+    (with-soft-assertions
+      (expect (documentation 'relocation-result 'type)
+              :to-equal
+              "The validated edit results and heading paths for a relocation.")
+      (expect (documentation 'make-relocation-result 'function)
+              :to-equal
+              "Return a relocation result containing the validated edits and paths.")
+      (expect (documentation 'relocation-result-p 'function)
+              :to-equal "Return true when OBJECT is a relocation result.")
+      (expect (documentation 'move-subtree 'function)
+              :to-equal
+              "Move HEADING one sibling position UP or DOWN and return its edit result.")
+      (expect (documentation 'refile-subtree 'function)
+              :to-equal
+              "Move or copy HEADING to the last-child position in TARGET-DOCUMENT.")
+      (expect (documentation 'set-heading-archive-tag 'function)
+              :to-equal "Add or remove the local ARCHIVE tag on HEADING.")
+      (expect (documentation 'archive-subtree-to 'function)
+              :to-equal
+              "Move HEADING to the archive root or TARGET-HEADING's last-child position.")
+      (expect (documentation 'sort-subtree-children 'function)
+              :to-equal
+              "Sort HEADING's direct headline children by a built-in Org key.
+Missing values stay last in both directions, and ties retain source order.")))
 
   (it "keeps the package name stable and nickname-free"
     (expect (package-name (find-package "ORG-KIT")) :to-equal "ORG-KIT")

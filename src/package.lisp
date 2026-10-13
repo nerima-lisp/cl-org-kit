@@ -78,6 +78,13 @@
    ;; Format-preserving subtree edits
    #:insert-subtree #:delete-subtree #:replace-subtree
    #:promote-subtree #:demote-subtree
+   ;; Unit E subtree relocation and sort
+   #:relocation-result #:make-relocation-result #:relocation-result-p
+   #:relocation-result-source-edit #:relocation-result-target-edit
+   #:relocation-result-mode #:relocation-result-source-path
+   #:relocation-result-target-path
+   #:move-subtree #:refile-subtree #:set-heading-archive-tag
+   #:archive-subtree-to #:sort-subtree-children
    ;; Queries
    #:query-context #:make-query-context #:query-context-p
    #:query-context-tag-groups #:query-context-property-inheritance-p

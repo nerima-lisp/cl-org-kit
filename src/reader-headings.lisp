@@ -566,9 +566,11 @@
           do (when (or (= position limit)
                        (char= (char text position) #\:))
                (let ((tag (subseq text start position)))
-                 (unless (reader-heading-valid-tag-name-p tag)
+                 (unless (or (zerop (length tag))
+                             (reader-heading-valid-tag-name-p tag))
                    (return-from reader-heading-file-tag-list (values nil nil)))
-                 (push tag tags)
+                 (unless (zerop (length tag))
+                   (push tag tags))
                  (setf start (1+ position)))))
     (values (nreverse tags) t)))
 
@@ -577,12 +579,8 @@
     (cond
       ((zerop length)
        (values nil t))
-      ((and (>= length 2)
-            (char= (char value 0) #\:)
-            (char= (char value (1- length)) #\:))
-       (reader-heading-file-tag-list (subseq value 1 (1- length))))
       (t
-       (values nil nil)))))
+       (reader-heading-file-tag-list value)))))
 
 (defun reader-heading-property-setting (value context offset)
   (let* ((start (reader-heading-skip-horizontal-space value 0 (length value)))

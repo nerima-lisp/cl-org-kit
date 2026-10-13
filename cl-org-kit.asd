@@ -52,6 +52,9 @@
                (:file "edit-elements")
                (:file "edit-subtree")
                (:file "statistics-cookies")
+               ;; Unit E subtree relocation and sort
+               (:file "edit-relocate")
+               (:file "edit-sort")
                (:file "emitter-objects")
                (:file "emitter")
                (:file "query-types")
@@ -117,6 +120,9 @@
                (:file "edit-elements-test")
                (:file "edit-subtree-test")
                (:file "statistics-cookies-test")
+               ;; Unit E subtree relocation and sort
+               (:file "edit-relocate-test")
+               (:file "edit-sort-test")
                (:file "emitter-test")
                (:file "emitter-objects-test")
                (:file "emitter-property-test")
