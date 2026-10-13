@@ -73,14 +73,17 @@
                  (when width-hint
                    (setf (aref width-hints column)
                          (max (aref width-hints column) width-hint))))))
-    (values (loop for width across widths
-                  for hint across width-hints
-                  collect (max width hint))
-            (loop for alignment across alignments
-                  collect (or alignment :left)))))
+    (loop for column below column-count
+          do (setf (aref widths column)
+                   (max (aref widths column) (aref width-hints column))))
+    (values widths
+            (map 'vector (lambda (alignment) (or alignment :left)) alignments))))
+
+(defun table-cell-extra-padding (value width)
+  (max 0 (- width (table-string-width value))))
 
 (defun table-format-cell (value width alignment)
-  (let* ((extra (max 0 (- width (table-string-width value))))
+  (let* ((extra (table-cell-extra-padding value width))
          (left-padding (case alignment
                          (:right extra)
                          (:center (floor extra 2))
@@ -95,7 +98,7 @@
 
 (defun table-formatted-cell-length (value width)
   (+ 2 (length value)
-     (max 0 (- width (table-string-width value)))))
+     (table-cell-extra-padding value width)))
 
 (defun table-hline-segment-ranges (source start end)
   (let ((ranges nil)
@@ -104,7 +107,7 @@
           when (char= (char source index) #\+)
             do (push (cons segment-start index) ranges)
                (setf segment-start (1+ index)))
-    (nreverse (cons (cons segment-start end) ranges))))
+    (coerce (nreverse (cons (cons segment-start end) ranges)) 'vector)))
 
 (defun table-hline-formatted-segment-length (width)
   (max 3 (+ width 2)))
@@ -112,9 +115,6 @@
 (defun table-hline-segment (width)
   (make-string (table-hline-formatted-segment-length width)
                :initial-element #\-))
-
-(defun table-hline-segment-replacement (width)
-  (table-hline-segment width))
 
 (defun table-row-indent-patch (source row line-end expected-prefix target)
   (let* ((first-bar (table-row-first-bar source row line-end))
@@ -135,8 +135,8 @@
                         line-end)
           for value = (node-property cell :value)
           for replacement = (table-format-cell value
-                                               (nth column widths)
-                                               (nth column alignments))
+                                               (aref widths column)
+                                               (aref alignments column))
           do (when (= column (1- cell-count))
                (setf replacement
                      (concatenate
@@ -147,8 +147,8 @@
                                  (write-string
                                   (table-format-cell
                                    ""
-                                   (nth missing-column widths)
-                                   (nth missing-column alignments))
+                                   (aref widths missing-column)
+                                   (aref alignments missing-column))
                                   stream))
                         (unless terminal-bar-p
                           (write-char #\| stream))))))
@@ -167,10 +167,10 @@
          (new-count (length widths))
          (patches nil))
     (if (= old-count new-count)
-        (loop for range in ranges
+        (loop for range across ranges
               for index from 0
-              for width in widths
-              for segment = (table-hline-segment-replacement width)
+              for width across widths
+              for segment = (table-hline-segment width)
               for replacement = (if (and (= index (1- new-count))
                                          (not terminal-bar-p))
                                     (concatenate 'string segment "|")
@@ -182,23 +182,21 @@
                          patches))
         (let ((tail-index (1- (min old-count new-count))))
           (loop for index below tail-index
-                for range = (nth index ranges)
-                for replacement = (table-hline-segment-replacement
-                                   (nth index widths))
+                for range = (aref ranges index)
+                for replacement = (table-hline-segment (aref widths index))
                 unless (string= replacement
                                (subseq source (car range) (cdr range)))
                   do (push (edit-make-patch (car range) (cdr range)
                                             replacement target)
                            patches))
-          (let* ((tail-range (nth tail-index ranges))
+          (let* ((tail-range (aref ranges tail-index))
                  (replacement
                    (with-output-to-string (stream)
                      (loop for index from tail-index below new-count
                            do (when (> index tail-index)
                                 (write-char #\+ stream))
                               (write-string
-                               (table-hline-segment-replacement
-                                (nth index widths))
+                               (table-hline-segment (aref widths index))
                                stream))
                      (unless terminal-bar-p
                        (write-char #\| stream)))))
@@ -209,6 +207,7 @@
 (defun table-standard-row-output-delta (source row line-end widths)
   (let* ((terminal-bar-p (table-row-terminal-bar-p source row line-end))
          (cells (node-children row))
+         (cell-count (length cells))
          (delta 0))
     (loop for cell in cells
           for column from 0
@@ -217,14 +216,14 @@
                         line-end)
           for value = (node-property cell :value)
           do (incf delta
-                   (- (table-formatted-cell-length value (nth column widths))
+                   (- (table-formatted-cell-length value (aref widths column))
                       (- end start)))
-             (when (= column (1- (length cells)))
-               (loop for missing-column from (length cells) below (length widths)
+             (when (= column (1- cell-count))
+               (loop for missing-column from cell-count below (length widths)
                      do (incf delta)
                         (incf delta
                               (table-formatted-cell-length
-                               "" (nth missing-column widths))))))
+                               "" (aref widths missing-column))))))
     (unless terminal-bar-p
       (incf delta))
     delta))
@@ -239,7 +238,7 @@
            (+ (if terminal-bar-p
                   (1- (length widths))
                   (length widths))
-              (loop for width in widths
+              (loop for width across widths
                     sum (table-hline-formatted-segment-length width)))))
     (- new-length (- end start))))
 
@@ -262,13 +261,14 @@
          (output-length
            (table-alignment-output-length document rows widths expected-prefix)))
     (check-limit limits :max-output-length output-length)
-    (unless (document-encoding document)
-      (check-limit limits :max-input-length output-length))
     ;; Every emitted character occupies at least one octet. This catches
     ;; oversized padding before constructing the replacement strings.
-    (check-limit limits :max-output-octets output-length)
-    (when (document-encoding document)
-      (check-limit limits :max-input-length output-length))))
+    ;; Preserve the established first-failure order for each encoding path.
+    (dolist (limit-name
+              (if (document-encoding document)
+                  '(:max-output-octets :max-input-length)
+                  '(:max-input-length :max-output-octets)))
+      (check-limit limits limit-name output-length))))
 
 (defun table-align-patches (document table rows widths alignments expected-prefix)
   (let ((source (document-text document))
@@ -276,16 +276,15 @@
     (dolist (row rows)
       (let* ((line-end (table-row-content-end source row))
              (prefix-patch
-               (table-row-indent-patch source row line-end expected-prefix table)))
-        (when prefix-patch
-          (setf patches (nconc patches prefix-patch)))
-        (setf patches
-              (nconc patches
-                     (if (eq (node-property row :type) :rule)
-                         (table-rule-row-patches source row line-end widths table)
-                         (table-standard-row-patches
-                          source row line-end widths alignments table))))))
-    patches))
+               (table-row-indent-patch source row line-end expected-prefix table))
+             (row-patches
+               (if (eq (node-property row :type) :rule)
+                   (table-rule-row-patches source row line-end widths table)
+                   (table-standard-row-patches
+                    source row line-end widths alignments table))))
+        (dolist (patch (append prefix-patch row-patches))
+          (push patch patches))))
+    (nreverse patches)))
 
 (defun table-expected-canonical-document (document table column-count)
   (let* ((expected (edit-canonical-copy (edit-canonical-document document)))
