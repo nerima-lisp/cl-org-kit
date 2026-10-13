@@ -49,6 +49,7 @@
 
   (it "matches the checked-in Org align fixtures where the policies agree"
     (dolist (fixture '("corpus/align/ascii.org"
+                       "corpus/align/alignment-cookie.org"
                        "corpus/align/ambiguous.org"
                        "corpus/align/cookies.org"
                        "corpus/align/single-emoji.org"
@@ -223,6 +224,16 @@
                 :to-equal '(:edit :target-not-found "table/path"))
         (expect (document-text pipe-document)
                 :to-equal (format nil "#+TBLFM: $1=$1~%~%| a |~%")))))
+
+  (it "rejects tables without standard rows"
+    (let* ((source (format nil "|---|~%"))
+           (document (parse-org source))
+           (table (table-align-test-find-node (document-root document) :table)))
+      (with-soft-assertions
+        (expect (table-align-test-condition
+                 (lambda () (table-align document table)))
+                :to-equal '(:edit :uneditable-structure "table"))
+        (expect (document-text document) :to-equal source))))
 
   (it "reports an output limit failure without changing the input document"
     (let* ((source (format nil "| a | long |~%|---+----|~%| x | y |~%"))

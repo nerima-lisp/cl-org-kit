@@ -12,14 +12,12 @@
          (limit (node-end row))
          (newline (position #\Newline source :start start :end limit))
          (end (or newline limit)))
-    (if (and (> end start) (char= (char source (1- end)) #\Return))
+    (if (char= (char source (1- end)) #\Return)
         (1- end)
         end)))
 
 (defun table-row-first-bar (source row line-end)
-  (or (reader-next-table-delimiter source (node-begin row) line-end)
-      (edit-signal-error row :uneditable-structure
-                         "Table row has no source pipe")))
+  (reader-next-table-delimiter source (node-begin row) line-end))
 
 (defun table-row-last-bar (source first-bar line-end)
   (loop with position = first-bar
@@ -29,6 +27,13 @@
         do (setf last-bar next-bar
                  position next-bar)
         finally (return last-bar)))
+
+(defun table-row-terminal-bar-p (source row line-end)
+  (let* ((first-bar (table-row-first-bar source row line-end))
+         (last-bar (table-row-last-bar source first-bar line-end)))
+    (and (> last-bar first-bar)
+         (loop for index from (1+ last-bar) below line-end
+               always (find (char source index) '(#\Space #\Tab))))))
 
 (defun table-line-prefix (source row first-bar)
   (subseq source (node-begin row) first-bar))
@@ -101,33 +106,15 @@
                (setf segment-start (1+ index)))
     (nreverse (cons (cons segment-start end) ranges))))
 
-(defun table-hline-segment-colon-count (source range)
-  (loop for index from (car range) below (cdr range)
-        count (char= (char source index) #\:)))
+(defun table-hline-formatted-segment-length (width)
+  (max 3 (+ width 2)))
 
-(defun table-hline-formatted-segment-length (source range width)
-  (let ((colon-count (table-hline-segment-colon-count source range)))
-    (+ colon-count (max 3 (- (+ width 2) colon-count)))))
+(defun table-hline-segment (width)
+  (make-string (table-hline-formatted-segment-length width)
+               :initial-element #\-))
 
-(defun table-hline-segment (old-segment width)
-  (let* ((colon-count (count #\: old-segment))
-         (leading-colons (loop for index from 0 below (length old-segment)
-                               while (char= (char old-segment index) #\:)
-                               count t))
-         (trailing-colons
-           (loop for index downfrom (1- (length old-segment)) to leading-colons
-                 while (char= (char old-segment index) #\:)
-                 count t))
-         (internal-colons (- colon-count leading-colons trailing-colons))
-         (dash-count (max 3 (- (+ width 2) colon-count))))
-    (concatenate 'string
-                 (make-string leading-colons :initial-element #\:)
-                 (make-string dash-count :initial-element #\-)
-                 (make-string internal-colons :initial-element #\:)
-                 (make-string trailing-colons :initial-element #\:))))
-
-(defun table-hline-segment-replacement (source range width)
-  (table-hline-segment (subseq source (car range) (cdr range)) width))
+(defun table-hline-segment-replacement (width)
+  (table-hline-segment width))
 
 (defun table-row-indent-patch (source row line-end expected-prefix target)
   (let* ((first-bar (table-row-first-bar source row line-end))
@@ -136,7 +123,8 @@
       (list (edit-make-patch (node-begin row) first-bar expected-prefix target)))))
 
 (defun table-standard-row-patches (source row line-end widths alignments target)
-  (let* ((cells (node-children row))
+  (let* ((terminal-bar-p (table-row-terminal-bar-p source row line-end))
+         (cells (node-children row))
          (cell-count (length cells))
          (column-count (length widths))
          (patches nil))
@@ -161,7 +149,9 @@
                                    ""
                                    (nth missing-column widths)
                                    (nth missing-column alignments))
-                                  stream))))))
+                                  stream))
+                        (unless terminal-bar-p
+                          (write-char #\| stream))))))
           unless (string= replacement (subseq source start end))
             do (push (edit-make-patch start end replacement target) patches))
     (nreverse patches)))
@@ -169,6 +159,7 @@
 (defun table-rule-row-patches (source row line-end widths target)
   (let* ((first-bar (table-row-first-bar source row line-end))
          (last-bar (table-row-last-bar source first-bar line-end))
+         (terminal-bar-p (table-row-terminal-bar-p source row line-end))
          (start (1+ first-bar))
          (end (if (> last-bar first-bar) last-bar line-end))
          (ranges (table-hline-segment-ranges source start end))
@@ -177,9 +168,13 @@
          (patches nil))
     (if (= old-count new-count)
         (loop for range in ranges
+              for index from 0
               for width in widths
-              for replacement = (table-hline-segment-replacement
-                                 source range width)
+              for segment = (table-hline-segment-replacement width)
+              for replacement = (if (and (= index (1- new-count))
+                                         (not terminal-bar-p))
+                                    (concatenate 'string segment "|")
+                                    segment)
               unless (string= replacement
                              (subseq source (car range) (cdr range)))
                 do (push (edit-make-patch (car range) (cdr range)
@@ -189,7 +184,7 @@
           (loop for index below tail-index
                 for range = (nth index ranges)
                 for replacement = (table-hline-segment-replacement
-                                   source range (nth index widths))
+                                   (nth index widths))
                 unless (string= replacement
                                (subseq source (car range) (cdr range)))
                   do (push (edit-make-patch (car range) (cdr range)
@@ -203,21 +198,18 @@
                                 (write-char #\+ stream))
                               (write-string
                                (table-hline-segment-replacement
-                                source
-                                (if (< index old-count)
-                                    (nth index ranges)
-                                    (cons end end))
                                 (nth index widths))
-                               stream)))))
-            (unless (string= replacement
-                             (subseq source (car tail-range) end))
-              (push (edit-make-patch (car tail-range) end replacement target)
-                    patches)))))
+                               stream))
+                     (unless terminal-bar-p
+                       (write-char #\| stream)))))
+            (push (edit-make-patch (car tail-range) end replacement target)
+                  patches))))
     (nreverse patches)))
 
 (defun table-standard-row-output-delta (source row line-end widths)
-  (let ((cells (node-children row))
-        (delta 0))
+  (let* ((terminal-bar-p (table-row-terminal-bar-p source row line-end))
+         (cells (node-children row))
+         (delta 0))
     (loop for cell in cells
           for column from 0
           for start = (node-begin cell)
@@ -233,23 +225,22 @@
                         (incf delta
                               (table-formatted-cell-length
                                "" (nth missing-column widths))))))
+    (unless terminal-bar-p
+      (incf delta))
     delta))
 
 (defun table-rule-row-output-delta (source row line-end widths)
   (let* ((first-bar (table-row-first-bar source row line-end))
          (last-bar (table-row-last-bar source first-bar line-end))
+         (terminal-bar-p (table-row-terminal-bar-p source row line-end))
          (start (1+ first-bar))
          (end (if (> last-bar first-bar) last-bar line-end))
-         (ranges (table-hline-segment-ranges source start end))
          (new-length
-           (+ (1- (length widths))
+           (+ (if terminal-bar-p
+                  (1- (length widths))
+                  (length widths))
               (loop for width in widths
-                    for index from 0
-                    for range = (if (< index (length ranges))
-                                    (nth index ranges)
-                                    (cons end end))
-                    sum (table-hline-formatted-segment-length
-                         source range width)))))
+                    sum (table-hline-formatted-segment-length width)))))
     (- new-length (- end start))))
 
 (defun table-alignment-output-length (document rows widths expected-prefix)

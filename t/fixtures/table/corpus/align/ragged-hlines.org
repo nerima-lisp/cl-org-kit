@@ -5,10 +5,10 @@
 # Reference time: 2000-01-01T00:00:00Z (fixed; unused)
 # Zone/DST policy: UTC; DST not applicable
 # Unicode width data: Unicode 17.0.0
-  | key | value |
-  |-----+-------|
-  | a | 1 |
-  |-----+-------|
-  | bb |
-  |---+--+--|
-  | ccc | 22 | z |
+  | key | value
+|--+-------
+| a | 1
+  |-----+-------
+  | bb
+ |---+--+--
+| ccc | 22 | z
