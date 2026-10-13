@@ -1,0 +1,3 @@
+#+FILETAGS: :file_before:shared:file_after:
+* Parent :parent_before:shared:parent_after:
+** Child :child_before:shared:child_after:

@@ -372,7 +372,7 @@
                          :to-equal
                          "//tracker.example/42"))))
           (it
-           "attaches planning timestamps to both the planning node and headline"
+           "keeps planning timestamps on the Org headline and planning node"
            (let* ((document
                    (parse-org
                     (reader-headings-test-lines "* Scheduled task"
@@ -392,6 +392,10 @@
                       (planning-timestamp (node-property planning property)))
                   (expect (node-type headline-timestamp) :to-be :timestamp)
                   (expect (node-type planning-timestamp) :to-be :timestamp)
+                  (expect (node-begin headline-timestamp)
+                          :to-equal (node-begin planning-timestamp))
+                  (expect (node-end headline-timestamp)
+                          :to-equal (node-end planning-timestamp))
                   (expect (node-parent headline-timestamp) :to-be headline)
                   (expect (node-parent planning-timestamp) :to-be planning))))))
           (it "does not treat prose or an invalid timestamp as planning"

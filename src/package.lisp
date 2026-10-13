@@ -76,4 +76,6 @@
    #:org-timestamp-view-repeater-mode #:org-timestamp-view-warning-amount
    #:org-timestamp-view-warning-unit #:org-timestamp-view-warning-mode
    #:timestamp-view
-   #:org-time-interval-kind #:org-time-interval-amount #:org-time-interval-unit))
+   #:org-time-interval-kind #:org-time-interval-amount #:org-time-interval-unit
+   ;; Effective Org semantics
+   #:effective-heading-tags #:effective-property))

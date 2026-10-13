@@ -412,8 +412,14 @@
                                           planning-line-start (1+ line-end) "")
         (with-soft-assertions
           (expect (node-property planning kind) :to-be-truthy)
+          (expect (node-property
+                   (edit-properties-test-headline edited) kind)
+                  :to-be-truthy)
           (expect (edit-properties-test-planning
                    (edit-properties-test-headline removed))
+                  :to-be nil)
+          (expect (node-property
+                   (edit-properties-test-headline removed) kind)
                   :to-be nil)
           (expect (edit-properties-test-canonical-headline removed "Other")
                   :to-equalp (edit-properties-test-canonical-headline

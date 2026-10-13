@@ -55,6 +55,8 @@
     (subscript :use-brackets-p)
     (superscript :use-brackets-p)))
 
+(defvar org-fixture--include-effective-tags nil)
+
 (defun org-fixture--element-p (value)
   (and (consp value)
        (memq (car value)
@@ -125,6 +127,13 @@
     (dolist (property selected)
       (setq properties
             (append properties (list property (org-element-property property element)))))
+    (when (and org-fixture--include-effective-tags (eq type 'headline))
+      (setq properties
+            (append properties
+                    (list :effective-tags
+                          (save-excursion
+                            (goto-char (org-element-property :begin element))
+                            (org-get-tags))))))
     properties))
 
 (defun org-fixture--node (element depth)
@@ -150,18 +159,22 @@
             (if children (concat "\n" indent ")") ")"))))
 
 (defun org-fixture--header ()
-  (format (concat
-           "; Generated from org-element-parse-buffer with Emacs %s and Org %s.\n"
-           "; Offsets are zero-based decoded character positions; :end is exclusive.\n"
-           "; A leading U+FEFF is removed before parsing and excluded from offsets.\n"
-           "; CR and LF each count as one character, so a CRLF pair counts as two.\n"
-           "; org-inlinetask is loaded explicitly with its default minimum level 15.\n"
-           "; Plain text is an unpropertized string.\n"
-           "; Excluded: :parent (cycles/buffer references), :standard-properties (internal markers/buffer),\n"
-           "; :pre-blank and :post-blank (layout counts), :path except on links (file context),\n"
-           "; :CATEGORY and unselected properties such as :raw-link/:raw-value (source spellings);\n"
-           "; text properties are stripped.\n")
-          emacs-version (org-version)))
+  (let ((header
+          (format (concat
+                   "; Generated from org-element-parse-buffer with Emacs %s and Org %s.\n"
+                   "; Offsets are zero-based decoded character positions; :end is exclusive.\n"
+                   "; A leading U+FEFF is removed before parsing and excluded from offsets.\n"
+                   "; CR and LF each count as one character, so a CRLF pair counts as two.\n"
+                   "; org-inlinetask is loaded explicitly with its default minimum level 15.\n"
+                   "; Plain text is an unpropertized string.\n"
+                   "; Excluded: :parent (cycles/buffer references), :standard-properties (internal markers/buffer),\n"
+                   "; :pre-blank and :post-blank (layout counts), :path except on links (file context),\n"
+                   "; :CATEGORY and unselected properties such as :raw-link/:raw-value (source spellings);\n"
+                   "; text properties are stripped.\n")
+                 emacs-version (org-version))))
+    (if org-fixture--include-effective-tags
+        (concat header "; :effective-tags is captured from org-get-tags at each headline.\n")
+        header)))
 
 (defun org-fixture--read-buffer (file)
   (let ((coding-system-for-read 'utf-8-unix)
@@ -320,12 +333,18 @@
      ((and (= (length arguments) 3) (equal (car arguments) "--check-types"))
       (org-fixture-check-types (expand-file-name (nth 1 arguments))
                                (expand-file-name (nth 2 arguments))))
+     ((and (= (length arguments) 3)
+           (equal (car arguments) "--include-effective-tags"))
+      (let ((org-fixture--include-effective-tags t))
+        (org-fixture-generate (expand-file-name (nth 1 arguments))
+                              (expand-file-name (nth 2 arguments)))))
      ((= (length arguments) 2)
       (org-fixture-generate (expand-file-name (nth 0 arguments))
                             (expand-file-name (nth 1 arguments))))
      (t
       (error (concat
               "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el CORPUS-DIR EXPECTED-DIR\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
 (org-fixture--main)
