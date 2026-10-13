@@ -437,6 +437,68 @@
         (expect (third nonstring-values) :to-be :invalid-value)
         (expect (document-text document) :to-equal source))))
 
+  (it "rejects improper and multiline inserted values and table.el targets"
+    (let* ((source (format nil "| A |~%| x |~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (improper-values
+             (table-edit-test-condition
+              (lambda ()
+                (table-insert-row document table 1 :values (cons "a" "b")))))
+           (carriage-return-value
+             (table-edit-test-condition
+              (lambda ()
+                (table-insert-row
+                 document table 1
+                 :values (list (concatenate 'string "a" (string #\Return) "b"))))))
+           (newline-value
+             (table-edit-test-condition
+              (lambda ()
+                (table-insert-row document table 1
+                                  :values (list (format nil "a~%b"))))))
+           (table-el-document
+             (parse-org (format nil "+---+---+~%| one | two |~%+---+---+~%")))
+           (table-el
+             (table-edit-test-find-node (document-root table-el-document) :table))
+           (table-el-condition
+             (table-edit-test-condition
+              (lambda () (table-insert-row table-el-document table-el 1)))))
+      (with-soft-assertions
+        (expect improper-values :to-equal
+                '(:table "Table values must be a proper list" :invalid-value "table"))
+        (expect carriage-return-value :to-equal
+                '(:table "Table values must be single-line strings"
+                  :invalid-value "table"))
+        (expect newline-value :to-equal
+                '(:table "Table values must be single-line strings"
+                  :invalid-value "table"))
+        (expect table-el-condition :to-equal
+                '(:table "Only Org pipe tables can be edited"
+                  :unsupported-table-type "table"))
+        (expect (document-text document) :to-equal source))))
+
+  (it "leaves row and column moves unchanged when their endpoints match"
+    (let* ((source (format nil
+                           "| A | B |~%| x | y |~%#+TBLFM: @2$1=1::$1=@2$2~%"))
+           (row-document (parse-org source))
+           (row-table
+             (table-edit-test-find-node (document-root row-document) :table))
+           (row-result (table-move-row row-document row-table 2 2))
+           (row-updated (edit-result-updated-document row-result))
+           (column-document (parse-org source))
+           (column-table
+             (table-edit-test-find-node (document-root column-document) :table))
+           (column-result
+             (table-move-column column-document column-table 1 1))
+           (column-updated (edit-result-updated-document column-result)))
+      (with-soft-assertions
+        (expect (document-text row-updated) :to-equal source)
+        (expect (document-text column-updated) :to-equal source)
+        (expect (edit-result-spans row-result) :to-be nil)
+        (expect (edit-result-spans column-result) :to-be nil)
+        (expect (document-text row-document) :to-equal source)
+        (expect (document-text column-document) :to-equal source))))
+
   (it "maps unsupported formula syntax to an edit error"
     (let* ((source (format nil
                            "| A |~%| x |~%#+TBLFM: $1=#.(progn 1)~%"))
