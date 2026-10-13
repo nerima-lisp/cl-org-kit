@@ -260,31 +260,30 @@
 (defun reader-heading-tag-alist (value)
   (let ((entries '())
         (position 0)
-        (limit (length value)))
+        (limit (reader-heading-trim-right value 0 (length value))))
     (loop while (< position limit)
           do (setf position
                    (reader-heading-skip-horizontal-space value position limit))
-             (when (< position limit)
-               (let ((character (char value position)))
-                 (if (find character '(#\[ #\{))
-                     (let ((end (reader-heading-tag-group-end value position)))
-                       (unless end
-                         (return))
-                       (let ((entry
-                               (reader-heading-tag-group-definition
-                                value position end)))
-                         (when entry
-                           (push entry entries)))
-                       (setf position (1+ end)))
-                     (let* ((end (reader-heading-tag-token-end value
-                                                               position
-                                                               limit))
-                            (entry
-                             (reader-heading-tag-definition
-                              (subseq value position end))))
+             (let ((character (char value position)))
+               (if (find character '(#\[ #\{))
+                   (let ((end (reader-heading-tag-group-end value position)))
+                     (unless end
+                       (return))
+                     (let ((entry
+                             (reader-heading-tag-group-definition
+                              value position end)))
                        (when entry
-                         (push entry entries))
-                       (setf position end))))))
+                         (push entry entries)))
+                     (setf position (1+ end)))
+                   (let* ((end (reader-heading-tag-token-end value
+                                                             position
+                                                             limit))
+                          (entry
+                           (reader-heading-tag-definition
+                            (subseq value position end))))
+                     (when entry
+                       (push entry entries))
+                     (setf position end)))))
     (nreverse entries)))
 
 (defun reader-heading-file-tag-list (text)

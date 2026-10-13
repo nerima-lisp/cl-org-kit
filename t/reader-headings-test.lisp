@@ -246,12 +246,29 @@
                      (malformed-document
                       (parse-org
                        (reader-headings-test-lines
-                        "#+TAGS: valid [unfinished group"
+                        "#+TAGS: \\n valid bad/tag stray} [ : ignored ] [] { : ignored } { member } [ Named : } later ] {unfinished\\"
                         "#+FILETAGS: :good:bad/tag:"
-                       "#+FILETAGS: invalid"
+                        "#+FILETAGS: invalid"
                         "* Entry")))
                      (malformed-settings
                       (document-settings malformed-document))
+                     (terminal-escape-document
+                      (parse-org
+                       (reader-headings-test-lines
+                        "#+TAGS: kept dangling\\"
+                        "* Entry")))
+                     (empty-tags-settings
+                      (document-settings
+                       (parse-org
+                        (reader-headings-test-lines
+                         "#+TAGS:"
+                         "* Entry"))))
+                     (whitespace-tags-settings
+                      (document-settings
+                       (parse-org
+                        (reader-headings-test-lines
+                         (format nil "#+TAGS:  kept~C  " #\Tab)
+                         "* Entry"))))
                      (empty-file-tags-document
                       (parse-org
                        (reader-headings-test-lines
@@ -267,7 +284,20 @@
                             :exclusive-p nil)))
                  (expect (getf malformed-settings :tag-alist)
                          :to-equal
-                         '((:tag "valid" :fast-key nil)))
+                         '((:tag "valid" :fast-key nil)
+                           (:group "" :members ("member") :exclusive-p t)
+                           (:group "Named" :members ("later")
+                            :exclusive-p nil)))
+                 (expect (getf (document-settings terminal-escape-document)
+                               :tag-alist)
+                         :to-equal
+                         '((:tag "kept" :fast-key nil)))
+                 (expect (getf empty-tags-settings :tag-alist :missing)
+                         :to-equal
+                         nil)
+                 (expect (getf whitespace-tags-settings :tag-alist)
+                         :to-equal
+                         '((:tag "kept" :fast-key nil)))
                  (expect (getf malformed-settings :file-tags :missing)
                          :to-be
                          :missing)
