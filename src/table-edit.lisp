@@ -123,6 +123,7 @@
   (let ((models nil)
         (section 0)
         (standard-count 0)
+        (rule-width 0)
         (width 0))
     (dolist (row (node-children table))
       (let* ((kind (node-property row :type))
@@ -130,6 +131,10 @@
              (terminal-p (table-row-terminal-bar-p source row line-end)))
         (if (eq kind :rule)
             (progn
+              (setf rule-width
+                    (max rule-width
+                         (length (table-hline-segment-ranges
+                                  source (node-begin row) line-end))))
               (push (%make-table-edit-row :kind :rule :values nil
                                           :cells nil
                                           :section section
@@ -151,6 +156,8 @@
                                           :raw-content
                                           (subseq source (node-begin row) line-end))
                     models)))))
+    (when (zerop standard-count)
+      (setf width rule-width))
     (values (nreverse models) standard-count width)))
 
 (defun table-edit-insertion-section (models row-count index)
@@ -201,26 +208,21 @@
   (table-edit-check-index table to maximum))
 
 (defun table-edit-insert-row-model (models index row standard-count)
-  (let ((result nil)
-        (seen 0)
-        (inserted-p nil))
-    (dolist (current models)
-      (when (and (eq (%table-edit-row-kind current) :standard)
-                 (= (1+ seen) index)
-                 (not inserted-p))
-        (push row result)
-        (setf inserted-p t))
-      (push current result)
-      (when (eq (%table-edit-row-kind current) :standard)
-        (incf seen)
-        (when (and (= seen standard-count)
-                   (= index (1+ standard-count))
-                   (not inserted-p))
-          (push row result)
-          (setf inserted-p t))))
-    (unless inserted-p
-      (push row result))
-    (nreverse result)))
+  (if (zerop standard-count)
+      (cons row models)
+      (let ((result nil)
+            (seen 0))
+        (dolist (current models)
+          (when (and (eq (%table-edit-row-kind current) :standard)
+                     (= (1+ seen) index))
+            (push row result))
+          (push current result)
+          (when (eq (%table-edit-row-kind current) :standard)
+            (incf seen)
+            (when (and (= seen standard-count)
+                       (= index (1+ standard-count)))
+              (push row result))))
+        (nreverse result))))
 
 (defun table-edit-delete-row-model (models index)
   (let ((result nil)

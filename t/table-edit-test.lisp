@@ -505,6 +505,17 @@
                 :to-be nil)
         (expect (document-text document) :to-equal source))))
 
+  (it "inserts before an hline-only table as Org does"
+    (let* ((source (format nil "|---|~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (result (table-insert-row document table 1))
+           (updated (document-text (edit-result-updated-document result))))
+      (with-soft-assertions
+        (expect (edit-result-p result) :to-be t)
+        (expect updated :to-equal (format nil "|   |~%|---|~%"))
+        (expect (document-text document) :to-equal source))))
+
   (it "normalizes ragged rows when deleting and moving rows"
     (let* ((source (format nil
                            "| A | B | C |~%| short |~%| one | two | three |~%"))
