@@ -92,9 +92,8 @@ and FEATURE the syntax class that was refused."))
                      (org-kit-error-message condition)
                      (org-table-error-reason condition)
                      (org-table-error-target condition))))
-  (:documentation "Signalled when a table operation or calculation is invalid.
-TARGET is a bounded description of the affected table cell or formula target;
-REASON is the keyword classifying the failure."))
+  (:documentation "Signalled when a table edit is unsupported. TARGET describes the
+addressed table and REASON classifies the table-specific failure."))
 
 (define-condition org-resource-limit-error (org-kit-error)
   ((limit-name :initarg :limit-name)
@@ -166,11 +165,11 @@ otherwise a character index into the document text. NIL when unknown."
   (slot-value condition 'feature))
 
 (defun org-table-error-target (condition)
-  "Return the bounded description of the affected table cell or formula target."
+  "Return the bounded description of the table addressed by this error, or NIL."
   (slot-value condition 'target))
 
 (defun org-table-error-reason (condition)
-  "Return the keyword classifying why the table operation or calculation failed."
+  "Return the keyword classifying why the table operation was refused, or NIL."
   (slot-value condition 'reason))
 
 (defun org-resource-limit-error-limit-name (condition)
