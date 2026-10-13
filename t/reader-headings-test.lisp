@@ -123,14 +123,44 @@
               (expect (document-settings document)
                       :to-equal
                       '(:todo-keywords
-                        (("TODO" . :todo) ("WAIT" . :todo)
-                         ("DONE" . :done)
-                         ("CANCELLED" . :done)
-                         ("NEXT" . :todo)
-                         ("HOLD" . :todo)
-                         ("FINISHED" . :done)
-                         ("IDEA" . :todo)
-                         ("REJECTED" . :done))
+                        (("IDEA" . :todo) ("REJECTED" . :done))
+                        :todo-sequences
+                        ((:kind :sequence
+                          :declaration-kind :todo
+                          :sequence-id "todo-1"
+                          :declaration-index 1
+                          :todo-keywords
+                          ((:keyword "TODO" :logging-mode :none
+                            :exit-logging-p nil :fast-key #\t)
+                           (:keyword "WAIT" :logging-mode :note
+                            :exit-logging-p t :fast-key #\w))
+                          :done-keywords
+                          ((:keyword "DONE" :logging-mode :timestamp
+                            :exit-logging-p nil :fast-key #\d)
+                           (:keyword "CANCELLED" :logging-mode :note
+                            :exit-logging-p nil :fast-key #\c)))
+                         (:kind :sequence
+                          :declaration-kind :seq-todo
+                          :sequence-id "seq-todo-2"
+                          :declaration-index 2
+                          :todo-keywords
+                          ((:keyword "NEXT" :logging-mode :none
+                            :exit-logging-p nil :fast-key #\n)
+                           (:keyword "HOLD" :logging-mode :none
+                            :exit-logging-p nil :fast-key #\h))
+                          :done-keywords
+                          ((:keyword "FINISHED" :logging-mode :timestamp
+                            :exit-logging-p nil :fast-key #\f)))
+                         (:kind :type
+                          :declaration-kind :typ-todo
+                          :sequence-id "typ-todo-3"
+                          :declaration-index 3
+                          :todo-keywords
+                          ((:keyword "IDEA" :logging-mode :none
+                            :exit-logging-p nil :fast-key #\i))
+                          :done-keywords
+                          ((:keyword "REJECTED" :logging-mode :timestamp
+                            :exit-logging-p nil :fast-key #\r))))
                         :startup
                         nil
                         :inlinetask-min-level
@@ -159,34 +189,18 @@
                 override-headlines)
                :to-equal
                '(("REVIEW" :todo) ("CLOSED" :done))))))
-          (it "leaves an empty TODO keyword name unrecognized"
-              (let* ((document
-                      (parse-org
-                       (reader-headings-test-lines
-                        "#+TODO: (TODO) DONE"
-                        "* TODO Item")))
-                     (headline
-                      (first
-                       (reader-headings-test-elements document :headline))))
-                (with-soft-assertions
-                 (expect (node-property headline :todo-keyword) :to-be nil)
-                 (expect (node-property headline :raw-value)
-                         :to-equal
-                         "TODO Item"))))
-          (it "ignores an unterminated bracketed TODO setting key"
-              (let* ((document
-                      (parse-org
-                       (reader-headings-test-lines
-                        "#+SEQ_TODO[flow: NEXT | DONE"
-                        "* NEXT Item")))
-                     (headline
-                      (first
-                       (reader-headings-test-elements document :headline))))
-                (with-soft-assertions
-                 (expect (node-property headline :todo-keyword) :to-be nil)
-                 (expect (node-property headline :raw-value)
-                         :to-equal
-                         "NEXT Item"))))
+          (it "rejects an empty TODO keyword name"
+              (signals org-parse-error
+                       (parse-org
+                        (reader-headings-test-lines
+                         "#+TODO: (TODO) DONE"
+                         "* TODO Item"))))
+          (it "rejects an unterminated bracketed TODO setting key"
+              (signals org-parse-error
+                       (parse-org
+                        (reader-headings-test-lines
+                         "#+SEQ_TODO[flow: NEXT | DONE"
+                         "* NEXT Item"))))
           (it "does not treat an unnamed BEGIN_ keyword as a block"
               (let* ((document
                       (parse-org

@@ -493,6 +493,29 @@
                          (lambda () (emit-org closing-marker))))
                 :to-be-truthy))))
 
+  (it "emits TODO states from active TYP_TODO declarations in either order"
+    (dolist (source
+             (list (format nil
+                           "#+TODO: SHARED | OLD-DONE~%#+TYP_TODO: OLD-DONE | SHARED~%* SHARED State~%")
+                   (format nil
+                           "#+TYP_TODO: OLD-DONE | SHARED~%#+TODO: SHARED | OLD-DONE~%* SHARED State~%")))
+      (let* ((document (parse-org source))
+             (root (document-root document))
+             (headline (second (node-children root)))
+             (output (emit-org root))
+             (emitted-headline
+               (second
+                (node-children
+                 (document-root (parse-org output))))))
+        (with-soft-assertions
+          (expect (node-property headline :todo-keyword) :to-equal "SHARED")
+          (expect (node-property headline :todo-type) :to-equal :done)
+          (expect output :to-equal source)
+          (expect (node-property emitted-headline :todo-keyword)
+                  :to-equal "SHARED")
+          (expect (node-property emitted-headline :todo-type)
+                  :to-equal :done)))))
+
   (it "preserves structured headline titles and document heading settings"
     (let* ((tree
              (make-node

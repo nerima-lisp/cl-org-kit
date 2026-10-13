@@ -17,6 +17,7 @@
 (defun reader-default-settings ()
   "Return the settings used when a document has no settings directive."
   (list :todo-keywords '(("TODO" . :todo) ("DONE" . :done))
+        :todo-sequences nil
         :startup nil
         :inlinetask-min-level 15
         :link-abbrevs nil))
@@ -81,17 +82,19 @@
                     :post-blank post-blank :properties properties :children children)))
 
 (defun reader-keyword-fields (context offset)
-  "Return a keyword's uppercase key and trimmed value, or two NIL values."
+  "Return an uppercase key, trimmed value, and source spelling, or NIL values."
   (let ((line (reader-line-text context offset)))
     (when (and (>= (length line) 3)
                (char= (char line 0) #\#)
                (char= (char line 1) #\+))
       (let ((colon (position #\: line :start 2)))
         (when colon
-          (values (string-upcase (string-trim '(#\Space #\Tab)
-                                              (subseq line 2 colon)))
+          (let ((source-key (string-trim '(#\Space #\Tab)
+                                          (subseq line 2 colon))))
+            (values (string-upcase source-key)
                   (string-trim '(#\Space #\Tab)
-                               (subseq line (1+ colon)))))))))
+                               (subseq line (1+ colon)))
+                    source-key)))))))
 
 (defun reader-affiliated-keyword-p (key)
   "Return true when KEY can attach to the following element."

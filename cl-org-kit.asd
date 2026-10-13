@@ -86,6 +86,7 @@
                (:file "object-other-test")
                (:file "reader-core-test")
                (:file "reader-headings-test")
+               (:file "todo-settings-test")
                (:file "reader-blocks-test")
                (:file "reader-collections-test")
                (:file "conformance-test")

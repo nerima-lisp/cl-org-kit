@@ -30,37 +30,276 @@
                    (setf word-start position))))
     (nreverse words)))
 
-(defun reader-heading-todo-name (token)
-  (let ((marker (position #\( token)))
-    (if marker
-        (and (> marker 0) (subseq token 0 marker))
-        token)))
+(defun reader-heading-settings-error (context offset control &rest arguments)
+  (let ((message (apply #'format nil control arguments))
+        (offset (or offset 0)))
+    (if context
+        (let ((document (reader-context-document context)))
+          (multiple-value-bind (line column) (offset-line-column document offset)
+            (error 'org-parse-error
+                   :message message
+                   :offset offset
+                   :line line
+                   :column column
+                   :context (bounded-text (reader-line-text context offset))
+                   :source-name (document-source-name document))))
+        (error 'org-parse-error :message message :offset offset))))
+
+(defun reader-heading-todo-declaration-info (source-key context offset)
+  (when source-key
+    (let ((normalized (string-upcase source-key)))
+      (dolist (entry '(("TODO" . :todo)
+                       ("SEQ_TODO" . :seq-todo)
+                       ("TYP_TODO" . :typ-todo)))
+        (let* ((base (car entry))
+               (base-length (length base)))
+          (cond
+            ((string= normalized base)
+             (return-from reader-heading-todo-declaration-info
+               (values (cdr entry) nil t)))
+            ((and (> (length normalized) base-length)
+                  (string= normalized base :end1 base-length :end2 base-length)
+                  (char= (char normalized base-length) #\[))
+             (let* ((source-length (length source-key))
+                    (id-start (1+ base-length))
+                    (id-end (1- source-length)))
+               (unless (and (> id-end id-start)
+                            (char= (char source-key id-end) #\])
+                            (loop for index from id-start below id-end
+                                  for character = (char source-key index)
+                                  always (not (find character
+                                                   '(#\[ #\] #\Space #\Tab)))))
+                 (reader-heading-settings-error
+                  context offset "Malformed TODO sequence ID in ~A" source-key))
+               (return-from reader-heading-todo-declaration-info
+                 (values (cdr entry)
+                         (subseq source-key id-start id-end)
+                         t))))))))))
+
+(defun reader-heading-todo-name-valid-p (name)
+  (and (plusp (length name))
+       (not (find-if (lambda (character)
+                       (or (find character '(#\Space #\Tab #\( #\) #\|))))
+                     name))))
+
+(defun reader-heading-todo-keyword (token context offset)
+  (let* ((open (position #\( token))
+         (close (position #\) token :from-end t))
+         (name (if open (subseq token 0 open) token))
+         (fast-key nil)
+         (timestamp-p nil)
+         (note-p nil)
+         (exit-logging-p nil))
+    (unless (reader-heading-todo-name-valid-p name)
+      (reader-heading-settings-error context offset
+                                     "Invalid or empty TODO keyword in ~A" token))
+    (when (and (null open) close)
+      (reader-heading-settings-error context offset
+                                     "Unmatched TODO marker in ~A" token))
+    (when open
+      (unless (and close
+                   (= close (1- (length token)))
+                   (null (position #\( token :start (1+ open)))
+                   (null (position #\) token :start (1+ open) :end close)))
+        (reader-heading-settings-error context offset
+                                       "Malformed TODO marker in ~A" token))
+      (loop for marker across (subseq token (1+ open) close)
+            do (case marker
+                 (#\@
+                  (when note-p
+                    (reader-heading-settings-error context offset
+                                                   "Duplicate @ marker in ~A" token))
+                  (setf note-p t))
+                 (#\!
+                  (when timestamp-p
+                    (reader-heading-settings-error context offset
+                                                   "Duplicate ! marker in ~A" token))
+                  (setf timestamp-p t))
+                 (#\/
+                  (when exit-logging-p
+                    (reader-heading-settings-error context offset
+                                                   "Duplicate / marker in ~A" token))
+                  (setf exit-logging-p t))
+                 (otherwise
+                  (if fast-key
+                      (reader-heading-settings-error
+                       context offset "Malformed fast key in TODO keyword ~A" token)
+                      (setf fast-key marker)))))
+      (when (and (null fast-key)
+                 (not note-p)
+                 (not timestamp-p)
+                 (not exit-logging-p))
+        (reader-heading-settings-error context offset
+                                       "Empty TODO marker in ~A" token)))
+    (list :keyword name
+          :logging-mode (cond (note-p :note)
+                              (timestamp-p :timestamp)
+                              (t :none))
+          :exit-logging-p exit-logging-p
+          :fast-key fast-key)))
+
+(defun reader-heading-generated-sequence-id (declaration-kind declaration-index)
+  (format nil "~(~A~)-~D" declaration-kind declaration-index))
+
+(defun reader-heading-todo-sequence-entry (value declaration-kind sequence-id
+                                           declaration-index context offset)
+  (let* ((tokens (reader-heading-words value))
+         (separators (loop for token in tokens
+                           for index from 0
+                           when (string= token "|")
+                             collect index)))
+    (when (null tokens)
+      (reader-heading-settings-error context offset
+                                     "TODO sequence has no keywords"))
+    (when (> (length separators) 1)
+      (reader-heading-settings-error context offset
+                                     "TODO sequence has more than one DONE boundary"))
+    (let* ((separator (first separators))
+           (todo-tokens (if separator (subseq tokens 0 separator)
+                            (butlast tokens)))
+           (done-tokens (if separator (nthcdr (1+ separator) tokens)
+                            (last tokens)))
+           (todo-keywords (mapcar (lambda (token)
+                                    (reader-heading-todo-keyword token context offset))
+                                  todo-tokens))
+           (done-keywords (mapcar (lambda (token)
+                                    (reader-heading-todo-keyword token context offset))
+                                  done-tokens)))
+      (list :kind (if (eq declaration-kind :typ-todo) :type :sequence)
+            :declaration-kind declaration-kind
+            :sequence-id (or sequence-id
+                             (reader-heading-generated-sequence-id
+                              declaration-kind declaration-index))
+            :declaration-index declaration-index
+            :todo-keywords todo-keywords
+            :done-keywords done-keywords
+            :reader-offset offset))))
+
+(defun reader-heading-active-todo-sequences (sequences)
+  (let ((typed (remove-if-not
+                (lambda (sequence)
+                  (eq (getf sequence :declaration-kind) :typ-todo))
+                sequences)))
+    (if typed
+        typed
+        (remove-if-not
+         (lambda (sequence)
+           (member (getf sequence :declaration-kind) '(:todo :seq-todo)))
+         sequences))))
+
+(defun reader-heading-sequence-keyword-names (sequence)
+  (append (mapcar (lambda (keyword) (getf keyword :keyword))
+                  (getf sequence :todo-keywords))
+          (mapcar (lambda (keyword) (getf keyword :keyword))
+                  (getf sequence :done-keywords))))
+
+(defun reader-heading-public-todo-sequences (sequences)
+  (mapcar (lambda (sequence)
+            (loop for (key value) on sequence by #'cddr
+                  unless (eq key :reader-offset)
+                    append (list key value)))
+          sequences))
+
+(defun reader-heading-keywords-for-sequence (sequence)
+  (append (mapcar (lambda (keyword)
+                    (cons (getf keyword :keyword) :todo))
+                  (getf sequence :todo-keywords))
+          (mapcar (lambda (keyword)
+                    (cons (getf keyword :keyword) :done))
+                  (getf sequence :done-keywords))))
+
+(defun reader-heading-flatten-todo-sequences (sequences)
+  (mapcan #'reader-heading-keywords-for-sequence
+          (reader-heading-active-todo-sequences sequences)))
 
 (defun reader-heading-todo-sequence (value)
-  (let* ((tokens (reader-heading-words value))
-         (separator (position "|" tokens :test #'string=))
-         (todo-tokens
-          (if separator
-              (subseq tokens 0 separator)
-              tokens))
-         (done-tokens (and separator (nthcdr (1+ separator) tokens)))
-         (todo-names
-          (remove nil (mapcar #'reader-heading-todo-name todo-tokens)))
-         (done-names
-          (and separator
-               (remove nil (mapcar #'reader-heading-todo-name done-tokens)))))
-    (unless separator
-      (setf done-names (last todo-names)
-            todo-names (butlast todo-names)))
-    (append
-     (mapcar
-      (lambda (name)
-        (cons name :todo))
-      todo-names)
-     (mapcar
-      (lambda (name)
-        (cons name :done))
-      done-names))))
+  (reader-heading-keywords-for-sequence
+   (reader-heading-todo-sequence-entry value :todo nil 1 nil nil)))
+
+(defun reader-heading-recognized-todo-keywords (settings)
+  (let* ((sequences (getf settings :todo-sequences))
+         (active (reader-heading-active-todo-sequences sequences)))
+    (if sequences
+        (append (mapcan #'reader-heading-keywords-for-sequence active)
+                (mapcan #'reader-heading-keywords-for-sequence
+                        (remove-if (lambda (sequence)
+                                     (member sequence active :test #'eq))
+                                   sequences)))
+        (getf settings :todo-keywords))))
+
+(defun reader-heading-validate-todo-sequences (sequences context)
+  (let ((ids (make-hash-table :test #'equal))
+        (active-keywords (make-hash-table :test #'equal))
+        (inactive-keywords (make-hash-table :test #'equal))
+        (active (reader-heading-active-todo-sequences sequences)))
+    (dolist (sequence sequences)
+      (let ((id (getf sequence :sequence-id)))
+        (when (gethash id ids)
+          (reader-heading-settings-error
+           context (getf sequence :reader-offset)
+           "Ambiguous TODO sequence ID ~A" id))
+        (setf (gethash id ids) t)))
+    (dolist (sequence active)
+      (dolist (keyword (reader-heading-sequence-keyword-names sequence))
+        (when (gethash keyword active-keywords)
+          (reader-heading-settings-error
+           context (getf sequence :reader-offset)
+           "Ambiguous TODO keyword ~A in active sequences" keyword))
+        (setf (gethash keyword active-keywords) t)))
+    (dolist (sequence sequences)
+      (unless (member sequence active :test #'eq)
+        (dolist (keyword (reader-heading-sequence-keyword-names sequence))
+          (unless (gethash keyword active-keywords)
+            (when (gethash keyword inactive-keywords)
+              (reader-heading-settings-error
+               context (getf sequence :reader-offset)
+               "Ambiguous TODO keyword ~A in inactive sequences" keyword))
+            (setf (gethash keyword inactive-keywords) t)))))
+    sequences))
+
+(defun reader-heading-default-todo-sequence ()
+  (list :kind :sequence
+        :declaration-kind :todo
+        :sequence-id "todo-1"
+        :declaration-index 1
+        :todo-keywords
+        (list (list :keyword "TODO" :logging-mode :none
+                    :exit-logging-p nil :fast-key nil))
+        :done-keywords
+        (list (list :keyword "DONE" :logging-mode :none
+                    :exit-logging-p nil :fast-key nil))))
+
+(defun reader-heading-setting-present-p (settings key)
+  (loop for tail on settings by #'cddr
+        thereis (eq (first tail) key)))
+
+(defun reader-heading-explicit-todo-sequences (keywords context)
+  (let ((todo-keywords nil)
+        (done-keywords nil))
+    (dolist (entry keywords)
+      (unless (and (consp entry)
+                   (stringp (car entry))
+                   (member (cdr entry) '(:todo :done)))
+        (error 'type-error :datum entry
+                           :expected-type '(cons string (member :todo :done))))
+      (let ((keyword (list :keyword (car entry)
+                           :logging-mode :none
+                           :exit-logging-p nil
+                           :fast-key nil)))
+        (ecase (cdr entry)
+          (:todo (push keyword todo-keywords))
+          (:done (push keyword done-keywords)))))
+    (if (null keywords)
+        nil
+        (let ((sequence
+                (list :kind :sequence
+                      :declaration-kind :todo
+                      :sequence-id "todo-1"
+                      :declaration-index 1
+                      :todo-keywords (nreverse todo-keywords)
+                      :done-keywords (nreverse done-keywords))))
+          (reader-heading-validate-todo-sequences (list sequence) context)
+          (list sequence)))))
 
 (defun reader-heading-setting-kind (key)
   (when (stringp key)
@@ -77,7 +316,8 @@
       ((string= key "LINK") :link)
       ((string= key "CATEGORY") :category)
       ((string= key "FILETAGS") :file-tags)
-      ((string= key "TAGS") :tag-alist))))
+      ((string= key "TAGS") :tag-alist)
+      ((string= key "PROPERTY") :property-settings))))
 
 (defun reader-heading-block-end-key (context offset)
   (let* ((line (reader-line-text context offset))
@@ -312,10 +552,22 @@
       (t
        (values nil nil)))))
 
+(defun reader-heading-property-setting (value context offset)
+  (let* ((start (reader-heading-skip-horizontal-space value 0 (length value)))
+         (end (or (position-if #'reader-heading-horizontal-space-p value
+                               :start start)
+                  (length value))))
+    (when (= start end)
+      (reader-heading-settings-error context offset
+                                     "PROPERTY directive has no name"))
+    (cons (string-upcase (subseq value start end))
+          (subseq value
+                  (reader-heading-skip-horizontal-space value end (length value))))))
+
 (defmethod reader-buffer-settings ((context reader-context) explicit-settings)
   (let ((settings (reader-default-settings))
-        (todo-keywords nil)
-        (todo-seen nil)
+        (todo-sequences nil)
+        (todo-declaration-index 0)
         (startup nil)
         (link-abbrevs nil)
         (category nil)
@@ -324,6 +576,8 @@
         (file-tags-seen nil)
         (tag-alist nil)
         (tag-alist-seen nil)
+        (property-settings nil)
+        (property-settings-seen-p nil)
         (position 0)
         (limit (length (reader-context-text context)))
         (block-end-key nil))
@@ -342,57 +596,89 @@
                      (if open-key
                          (setf block-end-key open-key
                                position next)
-                         (multiple-value-bind (key value)
+                         (multiple-value-bind (key value source-key)
                              (reader-keyword-fields context position)
-                           (case (reader-heading-setting-kind key)
-                             (:todo
-                              (setf todo-seen t
-                                    todo-keywords (append todo-keywords
-                                                          (reader-heading-todo-sequence
-                                                           value))))
-                             (:startup
-                              (setf startup (append startup
-                                                    (mapcar
-                                                     (function string-downcase)
-                                                     (reader-heading-words
-                                                      value)))))
-                             (:link
-                              (let ((abbreviation
-                                     (reader-heading-link-abbreviation value)))
-                                (when abbreviation
-                                  (setf link-abbrevs (append link-abbrevs
-                                                             (list abbreviation))))))
-                             (:category
-                              (when (plusp (length value))
-                                (setf category value
-                                      category-seen t)))
-                             (:file-tags
-                              (multiple-value-bind (tags valid-p)
-                                  (reader-heading-file-tags value)
-                                (when valid-p
-                                  (setf file-tags-seen t
-                                        file-tags (append file-tags tags)))))
-                             (:tag-alist
-                              (setf tag-alist-seen t
-                                    tag-alist
-                                    (append tag-alist
-                                            (reader-heading-tag-alist value))))
-                             (otherwise nil))
+                           (multiple-value-bind (declaration-kind sequence-id
+                                                todo-declaration-p)
+                               (reader-heading-todo-declaration-info
+                                source-key context position)
+                             (if todo-declaration-p
+                                 (progn
+                                   (incf todo-declaration-index)
+                                   (push (reader-heading-todo-sequence-entry
+                                          value declaration-kind sequence-id
+                                          todo-declaration-index context position)
+                                         todo-sequences))
+                                 (case (reader-heading-setting-kind key)
+                                   (:startup
+                                    (setf startup (append startup
+                                                          (mapcar
+                                                           (function string-downcase)
+                                                           (reader-heading-words
+                                                            value)))))
+                                   (:link
+                                    (let ((abbreviation
+                                           (reader-heading-link-abbreviation value)))
+                                      (when abbreviation
+                                        (setf link-abbrevs
+                                              (append link-abbrevs
+                                                      (list abbreviation))))))
+                                   (:category
+                                    (when (plusp (length value))
+                                      (setf category value
+                                            category-seen t)))
+                                   (:file-tags
+                                    (multiple-value-bind (tags valid-p)
+                                        (reader-heading-file-tags value)
+                                      (when valid-p
+                                        (setf file-tags-seen t
+                                              file-tags (append file-tags tags)))))
+                                   (:tag-alist
+                                    (setf tag-alist-seen t
+                                          tag-alist
+                                          (append tag-alist
+                                                  (reader-heading-tag-alist value))))
+                                   (:property-settings
+                                    (setf property-settings-seen-p t
+                                          property-settings
+                                          (append property-settings
+                                                  (list
+                                                   (reader-heading-property-setting
+                                                    value context position)))))
+                                   (otherwise nil))))
                            (setf position next)))))))
-    (when todo-seen
-      (setf (getf settings :todo-keywords) todo-keywords))
-    (when startup
-      (setf (getf settings :startup) startup))
-    (when link-abbrevs
-      (setf (getf settings :link-abbrevs) link-abbrevs))
+    (setf todo-sequences (nreverse todo-sequences))
+    (unless todo-sequences
+      (setf todo-sequences (list (reader-heading-default-todo-sequence))))
+    (reader-heading-validate-todo-sequences todo-sequences context)
+    (setf (getf settings :todo-sequences)
+          (reader-heading-public-todo-sequences todo-sequences)
+          (getf settings :todo-keywords)
+          (reader-heading-flatten-todo-sequences todo-sequences))
     (when category-seen
       (setf (getf settings :category) category))
     (when file-tags-seen
       (setf (getf settings :file-tags) file-tags))
     (when tag-alist-seen
       (setf (getf settings :tag-alist) tag-alist))
+    (when property-settings-seen-p
+      (setf (getf settings :property-settings) property-settings))
+    (when startup
+      (setf (getf settings :startup) startup))
+    (when link-abbrevs
+      (setf (getf settings :link-abbrevs) link-abbrevs))
     (loop for tail on explicit-settings by (function cddr)
           do (setf (getf settings (first tail)) (second tail)))
+    (cond
+      ((reader-heading-setting-present-p explicit-settings :todo-keywords)
+       (setf (getf settings :todo-sequences)
+             (reader-heading-public-todo-sequences
+              (reader-heading-explicit-todo-sequences
+               (getf settings :todo-keywords) context))))
+      ((reader-heading-setting-present-p explicit-settings :todo-sequences)
+       (setf (getf settings :todo-keywords)
+             (reader-heading-flatten-todo-sequences
+              (getf settings :todo-sequences)))))
     settings))
 
 (defun reader-heading-inline-minimum-stars (context)
@@ -480,7 +766,8 @@
                                                   (+ start star-count)
                                                   line-end))
            (todo-keywords
-            (getf (reader-context-settings context) :todo-keywords))
+            (reader-heading-recognized-todo-keywords
+             (reader-context-settings context)))
            (todo-keyword nil)
            (todo-type nil)
            (priority nil)

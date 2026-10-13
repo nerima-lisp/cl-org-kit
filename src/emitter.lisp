@@ -10,6 +10,8 @@
 (defvar *emitter-current-limits* nil)
 (defvar *emitter-todo-keywords* nil)
 (defvar *emitter-todo-setting-seen* nil)
+(defvar *emitter-ordinary-todo-keywords* nil)
+(defvar *emitter-typed-todo-keywords* nil)
 (defvar *emitter-odd-levels* nil)
 
 (defun emitter-fail (node message &rest arguments)
@@ -132,13 +134,35 @@
                               (emitter-format-affiliations node)
                               (emitter-render node)))))
 
-(defun emitter-add-todo-setting (value)
+(defun emitter-add-todo-setting (key value)
   (unless *emitter-todo-setting-seen*
-    (setf *emitter-todo-setting-seen* t
-          *emitter-todo-keywords* nil))
-  (setf *emitter-todo-keywords*
-        (append *emitter-todo-keywords*
-                (reader-heading-todo-sequence value))))
+    (setf *emitter-todo-setting-seen* t))
+  (multiple-value-bind (declaration-kind)
+      (reader-heading-todo-declaration-info key nil nil)
+    (let ((keywords (reader-heading-todo-sequence value)))
+      (if (eq declaration-kind :typ-todo)
+          (setf *emitter-typed-todo-keywords*
+                (append *emitter-typed-todo-keywords* keywords))
+          (setf *emitter-ordinary-todo-keywords*
+                (append *emitter-ordinary-todo-keywords* keywords))))))
+
+(defun emitter-merge-todo-keywords (ordinary typed)
+  (let ((keywords nil))
+    (dolist (entry ordinary)
+      (unless (assoc (car entry) keywords :test #'string=)
+        (setf keywords (append keywords (list entry)))))
+    (dolist (entry typed)
+      (let ((existing (assoc (car entry) keywords :test #'string=)))
+        (if existing
+            (setf (cdr existing) (cdr entry))
+            (setf keywords (append keywords (list entry))))))
+    keywords))
+
+(defun emitter-finalize-todo-settings ()
+  (when *emitter-todo-setting-seen*
+    (setf *emitter-todo-keywords*
+          (emitter-merge-todo-keywords *emitter-ordinary-todo-keywords*
+                                       *emitter-typed-todo-keywords*))))
 
 (defun emitter-track-settings (node)
   (when (eq (node-type node) :keyword)
@@ -146,7 +170,7 @@
           (value (node-property node :value)))
       (when (and (stringp key) (stringp value))
         (case (reader-heading-setting-kind key)
-          (:todo (emitter-add-todo-setting value))
+          (:todo (emitter-add-todo-setting key value))
           (:startup
            (loop for option in (reader-heading-words value)
                  do (cond
@@ -1028,6 +1052,8 @@ TABLE.EL nodes are opaque and emit their retained source; their :VALUE and
          (*emitter-object-depth* 0)
          (*emitter-todo-keywords* '(("TODO" . :todo) ("DONE" . :done)))
          (*emitter-todo-setting-seen* nil)
+         (*emitter-ordinary-todo-keywords* nil)
+         (*emitter-typed-todo-keywords* nil)
          (*emitter-odd-levels* nil)
          (*emitter-current-limits* limits)
          (root node))
@@ -1060,6 +1086,7 @@ TABLE.EL nodes are opaque and emit their retained source; their :VALUE and
                             (scan child (cons current active)
                                   child-settings-suppressed))))))))))
       (scan root nil nil))
+    (emitter-finalize-todo-settings)
     (let* ((document (node-document node))
            (rendered-text (emitter-render node))
            (text (if (and document
