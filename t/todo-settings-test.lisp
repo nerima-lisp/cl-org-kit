@@ -104,7 +104,7 @@
                                  headlines)
                          :to-equal '(("OPEN" . :todo)
                                      ("CLOSED" . :done)
-                                     ("OPEN" . :todo)))))
+                                     ("OPEN" . :todo))))))
         (setf (symbol-function
                'org-kit::reader-heading-recognized-todo-keywords)
               original))))
