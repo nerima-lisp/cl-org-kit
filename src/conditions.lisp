@@ -71,6 +71,19 @@ of the query text and POSITION the 0-based character index of the fault."))
 validation. TARGET is a bounded description of the addressed node and REASON a
 keyword classifying the failure. The input is never modified."))
 
+(define-condition org-table-unsupported-syntax (org-kit-error)
+  ((formula :initarg :formula :initform nil)
+   (position :initarg :position :initform nil)
+   (feature :initarg :feature :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ at position ~D~]~@[ in formula \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-table-unsupported-syntax-position condition)
+                     (org-table-unsupported-syntax-formula condition))))
+  (:documentation "Signalled when a table formula uses unsupported syntax.
+FORMULA is a bounded, escaped excerpt, POSITION the 0-based character offset,
+and FEATURE the syntax class that was refused."))
+
 (define-condition org-resource-limit-error (org-kit-error)
   ((limit-name :initarg :limit-name)
    (limit :initarg :limit)
@@ -127,6 +140,18 @@ otherwise a character index into the document text. NIL when unknown."
 (defun org-edit-error-reason (condition)
   "Return the keyword classifying why the edit was refused, or NIL."
   (slot-value condition 'reason))
+
+(defun org-table-unsupported-syntax-formula (condition)
+  "Return the bounded, escaped formula excerpt that was refused, or NIL."
+  (slot-value condition 'formula))
+
+(defun org-table-unsupported-syntax-position (condition)
+  "Return the 0-based character offset of the unsupported formula syntax, or NIL."
+  (slot-value condition 'position))
+
+(defun org-table-unsupported-syntax-feature (condition)
+  "Return the keyword identifying the unsupported formula syntax, or NIL."
+  (slot-value condition 'feature))
 
 (defun org-resource-limit-error-limit-name (condition)
   "Return the MAKE-LIMITS keyword of the exceeded limit."

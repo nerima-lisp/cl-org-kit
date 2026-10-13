@@ -10,6 +10,10 @@
    #:org-parse-error-column #:org-parse-error-context #:org-parse-error-source-name
    #:org-query-error #:org-query-error-query #:org-query-error-position
    #:org-edit-error #:org-edit-error-target #:org-edit-error-reason
+   #:org-table-unsupported-syntax
+   #:org-table-unsupported-syntax-formula
+   #:org-table-unsupported-syntax-position
+   #:org-table-unsupported-syntax-feature
    #:org-resource-limit-error #:org-resource-limit-error-limit-name
    #:org-resource-limit-error-limit #:org-resource-limit-error-actual
    ;; Clock aggregation
