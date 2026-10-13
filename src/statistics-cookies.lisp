@@ -22,18 +22,6 @@
         (documentation 'statistics-cookie-update-new-value 'function)
         "Return the cookie's replacement spelling."))
 
-(defun statistics-cookie-ancestor (node types)
-  (loop for parent = (node-parent node) then (node-parent parent)
-        while parent
-        when (member (node-type parent) types :test #'eq)
-          return parent))
-
-(defun statistics-cookie-owner-heading (node)
-  (statistics-cookie-ancestor node '(:headline :inlinetask)))
-
-(defun statistics-cookie-owner-item (node)
-  (statistics-cookie-ancestor node '(:item)))
-
 (defun statistics-cookie-data-tokens (value)
   (when (stringp value)
     (loop with start = nil
@@ -62,91 +50,123 @@
         (map-nodes (lambda (node) (push node nodes)) segment)))
     (nreverse nodes)))
 
-(defun statistics-cookie-title-node-p (heading cookie)
-  (member cookie (statistics-cookie-title-nodes heading) :test #'eq))
+(defun statistics-cookie-count-vector ()
+  (vector 0 0))
 
-(defun statistics-cookie-context (document heading cookie)
-  (let ((item (statistics-cookie-owner-item cookie)))
-    (multiple-value-bind (data source)
-        (effective-property document heading "COOKIE_DATA" :inherit t)
-      (let* ((tokens (statistics-cookie-data-tokens data))
-             (mode (if item :checkbox
-                       (or (statistics-cookie-data-mode tokens) :todo)))
-             (local-p (or (eq source heading)
-                          (and (listp source)
-                               (member heading source :test #'eq))))
-             (recursive-p
-               (if (eq mode :checkbox)
-                   (and local-p
-                        (member "recursive" tokens :test #'string=))
-                   (member "recursive" tokens :test #'string=))))
-        (values mode item (not (null recursive-p)))))))
+(defun statistics-cookie-count-vector-add (counts done total)
+  (incf (aref counts 0) done)
+  (incf (aref counts 1) total)
+  counts)
 
-(defun statistics-cookie-in-scope-p (heading cookie title-nodes)
-  (and (eq (statistics-cookie-owner-heading cookie) heading)
-       (or (statistics-cookie-owner-item cookie)
-           (member cookie title-nodes :test #'eq))))
-
-(defun statistics-cookie-nodes (heading)
-  (let ((title-nodes (statistics-cookie-title-nodes heading))
-        (cookies nil))
-    (dolist (node title-nodes)
+(defun statistics-cookie-analysis (heading)
+  (let ((title-cookies nil)
+        (body-cookies nil)
+        (title-cookie-set (make-hash-table :test #'eq))
+        (cookie-items (make-hash-table :test #'eq))
+        (contexts (make-hash-table :test #'eq))
+        (item-subtree-counts (make-hash-table :test #'eq))
+        (item-descendant-counts (make-hash-table :test #'eq))
+        (item-direct-counts (make-hash-table :test #'eq))
+        (visited-reverse nil)
+        (todo-direct (statistics-cookie-count-vector))
+        (todo-recursive (statistics-cookie-count-vector))
+        (checkbox-direct (statistics-cookie-count-vector))
+        (checkbox-recursive (statistics-cookie-count-vector)))
+    (dolist (node (statistics-cookie-title-nodes heading))
       (when (eq (node-type node) :statistics-cookie)
-        (push node cookies)))
-    (map-nodes (lambda (node)
-                 (when (and (eq (node-type node) :statistics-cookie)
-                            (statistics-cookie-in-scope-p heading node title-nodes))
-                   (push node cookies)))
-               heading)
-    (stable-sort (remove-duplicates cookies :test #'eq) #'< :key #'node-begin)))
-
-(defun statistics-cookie-node-below-p (node ancestor)
-  (loop for parent = (node-parent node) then (node-parent parent)
-        while parent
-        thereis (eq parent ancestor)))
-
-(defun statistics-cookie-todo-count (heading recursive-p)
-  (let ((done 0)
-        (total 0))
+        (push node title-cookies)
+        (setf (gethash node title-cookie-set) t)))
     (map-nodes
      (lambda (node)
-       (when (and (not (eq node heading))
-                  (member (node-type node) '(:headline :inlinetask) :test #'eq)
-                  (if recursive-p
-                      (statistics-cookie-node-below-p node heading)
-                      (eq (statistics-cookie-owner-heading node) heading)))
-         (case (node-property node :todo-type)
-           (:todo (incf total))
-           (:done (incf total) (incf done)))))
+       (push node visited-reverse)
+       (let* ((type (node-type node))
+              (heading-p (member type '(:headline :inlinetask) :test #'eq))
+              (parent-context (gethash (node-parent node) contexts))
+              (owner-heading (if heading-p
+                                 node
+                                 (and parent-context
+                                      (aref parent-context 0))))
+              (parent-item (and (eq owner-heading heading)
+                                parent-context
+                                (aref parent-context 1)))
+              (item-p (eq type :item))
+              (item-parent (and item-p parent-item))
+              (active-item (and (eq owner-heading heading)
+                                (if item-p node parent-item))))
+         (setf (gethash node contexts)
+               (vector owner-heading active-item item-parent))
+         (when (and heading-p (not (eq node heading)))
+           (let ((state (node-property node :todo-type)))
+             (case state
+               (:todo
+                (incf (aref todo-recursive 1))
+                (when (eq (and parent-context (aref parent-context 0)) heading)
+                  (incf (aref todo-direct 1))))
+               (:done
+                (incf (aref todo-recursive 0))
+                (incf (aref todo-recursive 1))
+                (when (eq (and parent-context (aref parent-context 0)) heading)
+                  (incf (aref todo-direct 0))
+                  (incf (aref todo-direct 1)))))))
+         (when (and item-p (eq owner-heading heading))
+           (let* ((checkbox (node-property node :checkbox))
+                  (checked-p (member checkbox '(:on :off :trans) :test #'eq))
+                  (done (if (eq checkbox :on) 1 0))
+                  (total (if checked-p 1 0)))
+             (setf (gethash node item-subtree-counts)
+                   (vector done total)
+                   (gethash node item-direct-counts)
+                   (statistics-cookie-count-vector))
+             (when checked-p
+               (statistics-cookie-count-vector-add checkbox-recursive done total)
+               (if item-parent
+                   (statistics-cookie-count-vector-add
+                    (gethash item-parent item-direct-counts) done total)
+                   (statistics-cookie-count-vector-add checkbox-direct done total)))))
+         (when (and (eq type :statistics-cookie)
+                    (eq owner-heading heading)
+                    active-item)
+           (push node body-cookies)
+           (setf (gethash node cookie-items) active-item))))
      heading)
-    (values done total)))
+    (dolist (node visited-reverse)
+      (when (and (eq (node-type node) :item)
+                 (eq (aref (gethash node contexts) 0) heading))
+        (let* ((counts (gethash node item-subtree-counts))
+               (checkbox (node-property node :checkbox))
+               (own-total (if (member checkbox '(:on :off :trans) :test #'eq)
+                              1 0))
+               (own-done (if (eq checkbox :on) 1 0))
+               (parent-item (aref (gethash node contexts) 2)))
+          (setf (gethash node item-descendant-counts)
+                (vector (- (aref counts 0) own-done)
+                        (- (aref counts 1) own-total)))
+          (when parent-item
+            (statistics-cookie-count-vector-add
+             (gethash parent-item item-subtree-counts)
+             (aref counts 0) (aref counts 1))))))
+    (setf title-cookies (nreverse title-cookies)
+          body-cookies (nreverse body-cookies))
+    (values (append title-cookies body-cookies)
+            title-cookie-set
+            cookie-items
+            todo-direct todo-recursive
+            checkbox-direct checkbox-recursive
+            item-descendant-counts item-direct-counts)))
 
-(defun statistics-cookie-nearest-item-ancestor (node heading)
-  (loop for parent = (node-parent node) then (node-parent parent)
-        while (and parent (not (eq parent heading)))
-        when (eq (node-type parent) :item)
-          return parent))
-
-(defun statistics-cookie-checkbox-count (heading owner-item recursive-p)
-  (let ((done 0)
-        (total 0))
-    (map-nodes
-     (lambda (node)
-       (when (and (eq (node-type node) :item)
-                  (not (eq node owner-item))
-                  (eq (statistics-cookie-owner-heading node) heading)
-                  (or (null owner-item)
-                      (statistics-cookie-node-below-p node owner-item))
-                  (or recursive-p
-                      (eq (statistics-cookie-nearest-item-ancestor node heading)
-                          owner-item)))
-         (let ((checkbox (node-property node :checkbox)))
-           (when (member checkbox '(:on :off :trans) :test #'eq)
-             (incf total)
-             (when (eq checkbox :on)
-               (incf done))))))
-     heading)
-    (values done total)))
+(defun statistics-cookie-settings (document heading)
+  (multiple-value-bind (data source)
+      (effective-property document heading "COOKIE_DATA" :inherit t)
+    (let* ((tokens (statistics-cookie-data-tokens data))
+           (mode (or (statistics-cookie-data-mode tokens) :todo))
+           (local-p (or (eq source heading)
+                        (and (listp source)
+                             (member heading source :test #'eq))))
+           (checkbox-recursive-p
+             (and local-p (member "recursive" tokens :test #'string=)))
+           (todo-recursive-p (member "recursive" tokens :test #'string=)))
+      (values mode (not (null checkbox-recursive-p))
+              (not (null todo-recursive-p))))))
 
 (defun statistics-cookie-replacement (cookie done total)
   (let* ((value (node-property cookie :value))
@@ -155,60 +175,46 @@
         (format nil "[~D%]" (if (zerop total) 0 (floor (* done 100) total)))
         (format nil "[~D/~D]" done total))))
 
-(defun statistics-cookie-update-canonical-value (original canonical target value)
+(defun statistics-cookie-index-canonical-nodes (original canonical index)
   (cond
-    ((eq original target)
-     (let ((properties (getf canonical :properties)))
-       (setf (getf properties :value) value
-             (getf canonical :properties) properties)
-       (values canonical t)))
     ((node-p original)
-     (let ((properties (getf canonical :properties)))
-       (loop for (key original-value) on (node-properties original) by #'cddr
+     (setf (gethash original index) canonical)
+     (let ((canonical-properties (getf canonical :properties)))
+       (loop for (key value) on (node-properties original) by #'cddr
              unless (edit-source-property-p key)
-               do (multiple-value-bind (updated found-p)
-                      (statistics-cookie-update-canonical-value
-                       original-value (getf properties key) target value)
-                    (when found-p
-                      (setf (getf properties key) updated
-                            (getf canonical :properties) properties)
-                      (return-from statistics-cookie-update-canonical-value
-                        (values canonical t)))))
-       (loop for original-child in (node-children original)
-             for index from 0
-             for canonical-child in (getf canonical :children)
-             do (multiple-value-bind (updated found-p)
-                    (statistics-cookie-update-canonical-value
-                     original-child canonical-child target value)
-                  (when found-p
-                    (setf (nth index (getf canonical :children)) updated)
-                    (return-from statistics-cookie-update-canonical-value
-                      (values canonical t)))))
-       (values canonical nil)))
+               do (statistics-cookie-index-canonical-nodes
+                   value (getf canonical-properties key) index)))
+     (loop for original-child in (node-children original)
+           for canonical-child in (getf canonical :children)
+           do (statistics-cookie-index-canonical-nodes
+               original-child canonical-child index)))
     ((consp original)
-     (multiple-value-bind (updated found-p)
-         (statistics-cookie-update-canonical-value
-          (car original) (car canonical) target value)
-       (when found-p
-         (setf (car canonical) updated)
-         (return-from statistics-cookie-update-canonical-value
-           (values canonical t))))
-     (multiple-value-bind (updated found-p)
-         (statistics-cookie-update-canonical-value
-          (cdr original) (cdr canonical) target value)
-       (when found-p
-         (setf (cdr canonical) updated)
-         (return-from statistics-cookie-update-canonical-value
-           (values canonical t))))
-     (values canonical nil))
-    (t (values canonical nil))))
+     (statistics-cookie-index-canonical-nodes (car original) (car canonical) index)
+     (statistics-cookie-index-canonical-nodes (cdr original) (cdr canonical) index))
+    ((and (vectorp original) (not (stringp original)))
+     (loop for position below (length original)
+           do (statistics-cookie-index-canonical-nodes
+               (aref original position) (aref canonical position) index))))
+  index)
 
-(defun statistics-cookie-update-title-raw-value (document expected heading updates)
+(defun statistics-cookie-update-canonical-values (document expected updates)
+  (let ((index (make-hash-table :test #'eq)))
+    (statistics-cookie-index-canonical-nodes
+     (document-root document) expected index)
+    (dolist (update updates)
+      (let* ((canonical (gethash (statistics-cookie-update-node update) index))
+             (properties (getf canonical :properties)))
+        (setf (getf properties :value)
+              (statistics-cookie-update-new-value update)
+              (getf canonical :properties) properties)))
+    expected))
+
+(defun statistics-cookie-update-title-raw-value
+    (document expected heading title-cookie-set updates)
   (let ((title-updates
           (remove-if-not
            (lambda (update)
-             (statistics-cookie-title-node-p
-              heading (statistics-cookie-update-node update)))
+             (gethash (statistics-cookie-update-node update) title-cookie-set))
            (reverse updates))))
     (when title-updates
       (multiple-value-bind (title-start title-end)
@@ -238,26 +244,42 @@ The second value lists only cookies whose source spelling changed, in source ord
          (expected (edit-canonical-copy (edit-canonical-document document)))
          (patches nil)
          (updates nil))
-    (dolist (cookie (statistics-cookie-nodes heading))
-      (multiple-value-bind (mode owner-item recursive-p)
-          (statistics-cookie-context document heading cookie)
-        (multiple-value-bind (done total)
-            (if (eq mode :checkbox)
-                (statistics-cookie-checkbox-count heading owner-item recursive-p)
-                (statistics-cookie-todo-count heading recursive-p))
-          (let* ((old-value (node-property cookie :value))
+    (multiple-value-bind
+          (cookies title-cookie-set cookie-items
+           todo-direct todo-recursive checkbox-direct checkbox-recursive
+           item-descendant-counts item-direct-counts)
+        (statistics-cookie-analysis heading)
+      (multiple-value-bind (mode checkbox-recursive-p todo-recursive-p)
+          (statistics-cookie-settings document heading)
+        (dolist (cookie cookies)
+          (let* ((owner-item (gethash cookie cookie-items))
+                 (cookie-mode (if owner-item :checkbox mode))
+                 (counts
+                   (if (eq cookie-mode :checkbox)
+                       (if owner-item
+                           (gethash owner-item
+                                    (if checkbox-recursive-p
+                                        item-descendant-counts
+                                        item-direct-counts))
+                           (if checkbox-recursive-p
+                               checkbox-recursive
+                               checkbox-direct))
+                       (if todo-recursive-p todo-recursive todo-direct)))
+                 (done (aref counts 0))
+                 (total (aref counts 1))
+                 (old-value (node-property cookie :value))
                  (new-value (statistics-cookie-replacement cookie done total)))
             (unless (string= old-value new-value)
-              (let* ((start (node-begin cookie))
-                     (end (- (node-end cookie) (node-post-blank cookie))))
+              (let ((start (node-begin cookie))
+                    (end (- (node-end cookie) (node-post-blank cookie))))
                 (push (edit-make-patch start end new-value heading) patches)
                 (push (make-statistics-cookie-update
                        :node cookie :old-value old-value :new-value new-value)
-                      updates)
-                (setf expected
-                      (statistics-cookie-update-canonical-value
-                       (document-root document) expected cookie new-value))))))))
-    (statistics-cookie-update-title-raw-value document expected heading updates)
+                      updates)))))
+      (statistics-cookie-update-title-raw-value
+       document expected heading title-cookie-set updates))
+    (when updates
+      (statistics-cookie-update-canonical-values document expected updates))
     (values (edit-apply-patches-result document (nreverse patches)
                                        :target heading :expected expected)
-            (nreverse updates))))
+            (nreverse updates)))))
