@@ -169,6 +169,25 @@
                 :to-equal '("A" "Same" "Same" "Z"))
         (expect (document-text document) :to-equal source))))
 
+  (it "keeps parent section content while sorting its headline children"
+    (let* ((source
+             (format nil
+                     "* Parent~%parent body~%** Z~%z body~%** A~%a body~%"))
+           (expected
+             (format nil
+                     "* Parent~%parent body~%** A~%a body~%** Z~%z body~%"))
+           (document (parse-org source))
+           (result
+             (sort-subtree-children document
+                                    (edit-sort-test-parent document) :alpha))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-text updated) :to-equal expected)
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent updated))
+                :to-equal '("A" "Z"))
+        (expect (document-text document) :to-equal source))))
+
   (it "reports the exact source span and leaves text outside sorted children unchanged"
     (let* ((source (format nil "* Before~%outside prefix~%* Parent~%** Z~%z body~%** A~%a body~%* After~%outside suffix~%"))
            (expected (format nil "* Before~%outside prefix~%* Parent~%** A~%a body~%** Z~%z body~%* After~%outside suffix~%"))
@@ -326,16 +345,173 @@
                            (lambda () (sort-subtree-children document parent :alpha
                                                              :property-name nil))
                            (lambda () (sort-subtree-children document parent :property
-                                                             :property-name nil)))
+                                                             :property-name nil))
+                           (lambda () (sort-subtree-children document parent :property
+                                                             :property-name ""))
+                           (lambda () (sort-subtree-children document parent :property
+                                                             :property-name 1)))
                    collect (handler-case (funcall thunk)
                              (org-edit-error (condition) condition)))))
       (with-soft-assertions
         (expect (mapcar #'org-edit-error-reason errors)
                 :to-equal '(:invalid-value :invalid-value :invalid-value
-                            :invalid-value :invalid-value))
+                            :invalid-value :invalid-value :invalid-value
+                            :invalid-value))
         (expect (every (lambda (condition)
                          (and (stringp (org-edit-error-target condition))
                               (stringp (org-kit-error-message condition))))
                        errors)
                 :to-be t)
-        (expect (document-text document) :to-equal source)))))
+        (expect (document-text document) :to-equal source))))
+
+  (it "orders prefix values by their code-point length"
+    (let* ((short-first-source (format nil "* Parent~%** A~%** AA~%"))
+           (long-first-source (format nil "* Parent~%** AA~%** A~%"))
+           (short-first (parse-org short-first-source))
+           (long-first (parse-org long-first-source))
+           (short-result
+             (sort-subtree-children short-first
+                                    (edit-sort-test-parent short-first) :alpha))
+           (long-result
+             (sort-subtree-children long-first
+                                    (edit-sort-test-parent long-first) :alpha)))
+      (with-soft-assertions
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent (edit-result-updated-document short-result)))
+                :to-equal '("A" "AA"))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent (edit-result-updated-document long-result)))
+                :to-equal '("A" "AA")))))
+
+  (it "resolves priority defaults from settings and a short priorities directive"
+    (let ((source (format nil "* Parent~%** [#C] Explicit~%** Implicit~%")))
+      (dolist (case '((66 ("Implicit" "Explicit"))
+                      (#\B ("Implicit" "Explicit"))
+                      ("66" ("Implicit" "Explicit"))
+                      ("B" ("Implicit" "Explicit"))
+                      ("" ("Explicit" "Implicit"))
+                      ("9X" ("Explicit" "Implicit"))
+                      (:unsupported ("Explicit" "Implicit"))))
+        (let* ((document (parse-org source
+                                    :settings (list :priority-default (first case))))
+               (result (sort-subtree-children
+                        document (edit-sort-test-parent document) :priority)))
+          (expect (edit-sort-test-direct-child-values
+                   (edit-sort-test-parent (edit-result-updated-document result)))
+                  :to-equal (second case))))
+      (let* ((directive-source
+               (format nil "#+PRIORITIES: A B~%~A" source))
+             (document (parse-org directive-source))
+             (result (sort-subtree-children
+                      document (edit-sort-test-parent document) :priority)))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent (edit-result-updated-document result)))
+                :to-equal '("Implicit" "Explicit")))
+      (let* ((scanned-source
+               (format nil
+                       "Preamble text~%#+PRIORITIES: A C D~%* Parent~%** [#D] Explicit~%** Implicit~%** [#C] Medium~%"))
+             (document (parse-org scanned-source))
+             (result (sort-subtree-children
+                      document (edit-sort-test-parent document) :priority)))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent (edit-result-updated-document result)))
+                :to-equal '("Medium" "Explicit" "Implicit")))))
+
+  (it "keeps two missing sort keys in source order and accepts a symbol property name"
+    (let* ((missing-source (format nil "* Parent~%** Z~%** A~%"))
+           (missing-document (parse-org missing-source))
+           (missing-result
+             (sort-subtree-children missing-document
+                                    (edit-sort-test-parent missing-document) :todo))
+           (property-source
+             (format nil "* Parent~%** Z~%:PROPERTIES:~%:RANK: Z~%:END:~%** A~%:PROPERTIES:~%:RANK: A~%:END:~%"))
+           (property-document (parse-org property-source))
+           (property-result
+             (sort-subtree-children property-document
+                                    (edit-sort-test-parent property-document)
+                                    :property :property-name 'rank)))
+      (with-soft-assertions
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent
+                  (edit-result-updated-document missing-result)))
+                :to-equal '("Z" "A"))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent
+                  (edit-result-updated-document property-result)))
+                :to-equal '("A" "Z")))))
+
+  (it "rejects duplicate CREATED values and non-timestamp CREATED text"
+    (let* ((duplicate-source
+             (format nil "* Parent~%** First~%:PROPERTIES:~%:CREATED: [2024-01-01 Mon]~%:CREATED: [2024-01-02 Tue]~%:END:~%** Second~%"))
+           (duplicate-document (parse-org duplicate-source))
+           (duplicate-error
+             (handler-case
+                 (sort-subtree-children duplicate-document
+                                        (edit-sort-test-parent duplicate-document)
+                                        :created)
+               (org-edit-error (condition) condition)))
+           (text-source
+             (format nil "* Parent~%** First~%:PROPERTIES:~%:CREATED: not a timestamp~%:END:~%** Second~%"))
+           (text-document (parse-org text-source))
+           (text-error
+             (handler-case
+                 (sort-subtree-children text-document
+                                        (edit-sort-test-parent text-document)
+                                        :created)
+               (org-edit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (org-edit-error-reason duplicate-error) :to-be :ambiguous-target)
+        (expect (org-edit-error-reason text-error) :to-be :invalid-value)
+        (expect (org-kit-error-message text-error)
+                :to-equal "CREATED property is not a valid timestamp")
+        (expect (document-text duplicate-document) :to-equal duplicate-source)
+        (expect (document-text text-document) :to-equal text-source))))
+
+  (it "rejects a non-string CREATED value from a parsed public node"
+    (let* ((source
+             (format nil
+                     "* Parent~%** First~%:PROPERTIES:~%:CREATED: [2024-01-01 Mon]~%:END:~%** Second~%"))
+           (document (parse-org source))
+           (property nil))
+      (map-nodes
+       (lambda (node)
+         (when (and (eq (node-type node) :node-property)
+                    (string= (node-property node :key) "CREATED"))
+           (setf property node)))
+       (document-root document))
+      (setf (node-property property :value) 1)
+      (let ((condition
+              (handler-case
+                  (sort-subtree-children document
+                                         (edit-sort-test-parent document)
+                                         :created)
+                (org-edit-error (error) error))))
+        (with-soft-assertions
+          (expect (org-edit-error-reason condition) :to-be :invalid-value)
+          (expect (org-kit-error-message condition)
+                  :to-equal "CREATED property is not a valid timestamp")
+          (expect (document-text document) :to-equal source)))))
+
+  (it "rejects a non-string property value from a parsed public node"
+    (let* ((source
+             (format nil "* Parent~%** A~%:PROPERTIES:~%:RANK: one~%:END:~%** B~%:PROPERTIES:~%:RANK: two~%:END:~%"))
+           (document (parse-org source))
+           (property nil))
+      (map-nodes
+       (lambda (node)
+         (when (and (eq (node-type node) :node-property)
+                    (string= (node-property node :key) "RANK"))
+           (setf property node)))
+       (document-root document))
+      (setf (node-property property :value) 1)
+      (let ((condition
+              (handler-case
+                  (sort-subtree-children document
+                                         (edit-sort-test-parent document)
+                                         :property :property-name "RANK")
+                (org-edit-error (error) error))))
+        (with-soft-assertions
+          (expect (org-edit-error-reason condition) :to-be :invalid-value)
+          (expect (org-kit-error-message condition)
+                  :to-equal "Requested property value is not a string")
+          (expect (document-text document) :to-equal source))))))

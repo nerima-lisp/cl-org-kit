@@ -66,8 +66,10 @@
 (defun edit-subtree-trailing-comment-p (source start end)
   "Return true when the last nonblank line in [START, END) is a comment."
   (loop with line-end = end
+        while (plusp line-end)
         do (decf line-end)
-           (when (char= (char source (1- line-end)) #\Return)
+           (when (and (plusp line-end)
+                      (char= (char source (1- line-end)) #\Return))
              (decf line-end))
            (let* ((newline (position #\Newline source :start start :end line-end
                                      :from-end t))

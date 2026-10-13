@@ -26,15 +26,14 @@
                               (t 0)))))
 
 (defun edit-sort-priority-token-value (token)
-  (when (stringp token)
-    (cond
-      ((and (= (length token) 1)
-            (<= (char-code #\A) (char-code (char token 0))
-                (char-code #\Z)))
-       (char-code (char token 0)))
-      ((and (plusp (length token))
-            (every #'table-calc-digit-p token))
-       (parse-integer token)))))
+  (cond
+    ((and (= (length token) 1)
+          (<= (char-code #\A) (char-code (char token 0))
+              (char-code #\Z)))
+     (char-code (char token 0)))
+    ((and (plusp (length token))
+          (every #'table-calc-digit-p token))
+     (parse-integer token))))
 
 (defun edit-sort-priority-directive-value (document)
   (let* ((section (find :section (node-children (document-root document))

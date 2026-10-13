@@ -118,10 +118,6 @@
       (unless neighbor
         (edit-signal-error heading :invalid-value
                            "No adjacent heading exists in that direction"))
-      (unless (eql (node-property headline :level)
-                   (node-property neighbor :level))
-        (edit-signal-error heading :uneditable-structure
-                           "Adjacent headings do not have the same logical level"))
       (multiple-value-bind (headline-start headline-end)
           (edit-subtree-safe-span document headline heading)
         (multiple-value-bind (neighbor-start neighbor-end)
@@ -247,19 +243,13 @@
 
 (defun edit-relocate-root-property-drawers (heading)
   (loop for child in (node-children heading)
-        append (case (node-type child)
-                 (:property-drawer (list child))
-                 (:section
-                  (remove-if-not
-                   (lambda (node) (eq (node-type node) :property-drawer))
-                   (node-children child)))
-                 (otherwise nil))))
+        when (eq (node-type child) :section)
+          append (remove-if-not
+                  (lambda (node) (eq (node-type node) :property-drawer))
+                  (node-children child))))
 
 (defun edit-relocate-property-line-value-start (source start end)
   (let ((separator (position #\: source :start (1+ start) :end end)))
-    (unless separator
-      (edit-signal-error source :uneditable-structure
-                         "Property line has no value separator"))
     (loop for position from (1+ separator) below end
           while (reader-heading-horizontal-space-p (char source position))
           finally (return position))))
@@ -344,10 +334,9 @@
                                          newline)))
                              target)
                             patches)))
-                  (let ((prefix (if (and (plusp insertion-offset)
-                                         (not (char= (char raw
-                                                           (1- insertion-offset))
-                                                     #\Newline)))
+                  (let ((prefix (if (not (char= (char raw
+                                                  (1- insertion-offset))
+                                                #\Newline))
                                     newline
                                     "")))
                     (push (edit-make-patch

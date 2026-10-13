@@ -146,6 +146,22 @@
                  (relocation-result-target-edit result))
                 :to-equal '((0 0))))))
 
+  (it "preserves a blank-only destination prefix when refileing at its root"
+    (let* ((source-text (format nil "* Source~%"))
+           (source (parse-org source-text))
+           (blank (format nil "~%"))
+           (target (parse-org blank))
+           (result
+             (refile-subtree source
+                             (edit-relocate-test-headline source "Source")
+                             target nil))
+           (updated-target (edit-result-updated-document
+                            (relocation-result-target-edit result))))
+      (with-soft-assertions
+        (expect (document-text updated-target)
+                :to-equal (format nil "~%* Source~%"))
+        (expect (document-text target) :to-equal blank))))
+
   (it "copies a subtree without a source edit and keeps the source document intact"
     (let* ((source-text (format nil "* Source~%source body~%"))
            (target-text (format nil "* Target~%target body~%"))
@@ -238,6 +254,31 @@
         (expect (relocation-result-target-path result)
                 :to-equal '((:title "Target" :index 1)
                             (:title "Move" :index 1))))))
+
+  (it "adjusts a nested target path after removing an earlier sibling"
+    (let* ((source-text
+             (format nil
+                     "* Root~%** Parent~%*** Moving~%moving body~%*** Other~%**** Target~%target body~%"))
+           (document (parse-org source-text))
+           (result
+             (refile-subtree document
+                             (edit-relocate-test-headline document "Moving")
+                             document
+                             (edit-relocate-test-headline document "Target")))
+           (updated (edit-result-updated-document
+                     (relocation-result-target-edit result))))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal
+                (format nil
+                        "* Root~%** Parent~%*** Other~%**** Target~%target body~%***** Moving~%moving body~%"))
+        (expect (relocation-result-target-path result)
+                :to-equal '((:title "Root" :index 1)
+                            (:title "Parent" :index 1)
+                            (:title "Other" :index 1)
+                            (:title "Target" :index 1)
+                            (:title "Moving" :index 1)))
+        (expect (document-text document) :to-equal source-text))))
 
   (it "rejects self and descendant relocation targets"
     (dolist (target-title '("Move" "Descendant"))
@@ -561,9 +602,255 @@
               (lambda ()
                 (move-subtree document
                               (edit-relocate-test-headline document "Only")
-                              :direction :down)))))
+                              :direction :down))))
+           (invalid-direction
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (move-subtree document
+                              (edit-relocate-test-headline document "Only")
+                              :direction :sideways)))))
       (with-soft-assertions
         (expect (typep condition 'org-edit-error) :to-be t)
         (when condition
           (expect (org-edit-error-reason condition) :to-be :invalid-value))
+        (expect (org-edit-error-reason invalid-direction)
+                :to-be :invalid-value)
+        (expect (document-text document) :to-equal source-text))))
+
+  (it "moves a child upward without changing the other sibling order"
+    (let* ((source-text (format nil "* Parent~%** A~%** B~%** C~%"))
+           (document (parse-org source-text))
+           (result (move-subtree document
+                                 (edit-relocate-test-headline document "B")
+                                 :direction :up))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* Parent~%** B~%** A~%** C~%"))
+        (expect (document-text document) :to-equal source-text))))
+
+  (it "rejects invalid relocation inputs at the public entry points"
+    (let* ((source-text (format nil "* Source~%"))
+           (source (parse-org source-text))
+           (target (parse-org ""))
+           (heading (edit-relocate-test-headline source "Source"))
+           (mode-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (refile-subtree source heading target nil :mode :link))))
+           (document-error
+             (handler-case
+                 (move-subtree :not-a-document nil :direction :down)
+               (type-error () :type-error))))
+      (with-soft-assertions
+        (expect (org-edit-error-reason mode-error) :to-be :invalid-value)
+        (expect document-error :to-be :type-error)
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal ""))))
+
+  (it "refiles from a later parent to an earlier nested target"
+    (let* ((source-text
+             (format nil "* Earlier~%** Target~%* Later~%** Source~%"))
+           (document (parse-org source-text))
+           (result
+             (refile-subtree document
+                             (edit-relocate-test-headline document "Source")
+                             document
+                             (edit-relocate-test-headline document "Target")))
+           (updated (edit-result-updated-document
+                     (relocation-result-target-edit result))))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil
+                                  "* Earlier~%** Target~%*** Source~%* Later~%"))
+        (expect (relocation-result-target-path result) :to-be-truthy)
+        (expect (document-text document) :to-equal source-text))))
+
+  (it "rejects trailing comments and affiliated keywords at destination boundaries"
+    (let* ((source-text (format nil "* Source~%"))
+           (source (parse-org source-text))
+           (source-heading (edit-relocate-test-headline source "Source"))
+           (comment-text (format nil "* Target~%# trailing comment"))
+           (comment-document (parse-org comment-text))
+           (comment-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (refile-subtree source source-heading comment-document
+                                (edit-relocate-test-headline comment-document
+                                                             "Target")))))
+           (heading-affiliation-text
+             (format nil "* Target~%~%#+CAPTION: trailing~%"))
+           (heading-affiliation-document (parse-org heading-affiliation-text))
+           (heading-affiliation-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (refile-subtree
+                 source source-heading heading-affiliation-document
+                 (edit-relocate-test-headline heading-affiliation-document
+                                              "Target")))))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (affiliation-text
+             (concatenate 'string "#+CAPTION: trailing" crlf crlf))
+           (affiliation-document (parse-org affiliation-text))
+           (affiliation-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (refile-subtree source source-heading affiliation-document nil)))))
+      (with-soft-assertions
+        (expect (org-edit-error-reason comment-error)
+                :to-be :uneditable-structure)
+        (expect (org-edit-error-reason heading-affiliation-error)
+                :to-be :uneditable-structure)
+        (expect (org-edit-error-reason affiliation-error)
+                :to-be :uneditable-structure)
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text comment-document) :to-equal comment-text)
+        (expect (document-text heading-affiliation-document)
+                :to-equal heading-affiliation-text)
+        (expect (document-text affiliation-document) :to-equal affiliation-text))))
+
+  (it "inserts archive context after planning and keeps nested headings"
+    (let* ((source-text
+             (format nil "* Task~%SCHEDULED: <2025-01-01 Wed>~%~%body~%** Nested~%"))
+           (source (parse-org source-text :source-name "tasks.org"))
+           (target (parse-org ""))
+           (result
+             (archive-subtree-to source
+                                 (edit-relocate-test-headline source "Task")
+                                 target))
+           (updated-target
+             (edit-result-updated-document
+              (relocation-result-target-edit result)))
+           (updated-text (document-text updated-target)))
+      (with-soft-assertions
+        (expect (search "SCHEDULED: <2025-01-01 Wed>" updated-text) :to-be-truthy)
+        (expect (search ":ARCHIVE_FILE: tasks.org" updated-text) :to-be-truthy)
+        (expect (search "** Nested" updated-text) :to-be-truthy)
+        (expect (document-text source) :to-equal source-text))))
+
+  (it "inserts archive metadata into a no-newline subtree"
+    (let* ((source-text "* Task")
+           (source (parse-org source-text :source-name "tasks.org"))
+           (target-text (format nil "* Archive~%"))
+           (target (parse-org target-text))
+           (result
+             (archive-subtree-to
+              source (edit-relocate-test-headline source "Task") target
+              :target-heading (edit-relocate-test-headline target "Archive")))
+           (updated-target
+             (edit-result-updated-document
+              (relocation-result-target-edit result)))
+           (updated-text (document-text updated-target)))
+      (with-soft-assertions
+        (expect (search ":ARCHIVE_FILE: tasks.org" updated-text) :to-be-truthy)
+        (expect (search (format nil "~%:PROPERTIES:~%") updated-text)
+                :to-be-truthy)
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text))))
+
+  (it "archives a plain subtree without inventing archive metadata"
+    (let* ((source-text (format nil "* Plain~%"))
+           (source (parse-org source-text))
+           (target (parse-org ""))
+           (result
+             (archive-subtree-to source
+                                 (edit-relocate-test-headline source "Plain")
+                                 target))
+           (updated-source
+             (edit-result-updated-document
+              (relocation-result-source-edit result)))
+           (updated-target
+             (edit-result-updated-document
+              (relocation-result-target-edit result))))
+      (with-soft-assertions
+        (expect (document-text updated-source) :to-equal "")
+        (expect (document-text updated-target) :to-equal source-text)
+        (expect (search ":PROPERTIES:" (document-text updated-target)) :to-be nil)
+        (expect (document-text source) :to-equal source-text))))
+
+  (it "updates archive metadata already present in a property drawer"
+    (let* ((source-text
+             (format nil "* Task~%:PROPERTIES:~%:ARCHIVE_FILE: old.org~%:ARCHIVE_CATEGORY: old~%:END:~%"))
+           (source (parse-org source-text :source-name "tasks.org"))
+           (target (parse-org ""))
+           (result
+             (archive-subtree-to source
+                                 (edit-relocate-test-headline source "Task")
+                                 target))
+           (updated-target
+             (edit-result-updated-document
+              (relocation-result-target-edit result)))
+           (updated-text (document-text updated-target)))
+      (with-soft-assertions
+        (expect (search ":ARCHIVE_FILE: tasks.org" updated-text) :to-be-truthy)
+        (expect (search ":ARCHIVE_CATEGORY: tasks" updated-text) :to-be-truthy)
+        (expect (search "old.org" updated-text) :to-be nil)
+        (expect (document-text source) :to-equal source-text))))
+
+  (it "rejects duplicated archive metadata and ambiguous drawers"
+    (let* ((duplicate-text
+             (format nil "* Task~%:PROPERTIES:~%:ARCHIVE_FILE: old~%:ARCHIVE_FILE: older~%:END:~%"))
+           (duplicate-source
+             (parse-org duplicate-text :source-name "tasks.org"))
+           (duplicate-target (parse-org ""))
+           (duplicate-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (archive-subtree-to
+                 duplicate-source
+                 (edit-relocate-test-headline duplicate-source "Task")
+                 duplicate-target))))
+           (multiple-text
+             (format nil "* Task~%:PROPERTIES:~%:CUSTOM: one~%:END:~%DEADLINE: <2025-01-01 Wed>~%:PROPERTIES:~%:CUSTOM: two~%:END:~%"))
+           (multiple-source
+             (parse-org multiple-text :source-name "tasks.org"))
+           (multiple-target (parse-org ""))
+           (multiple-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (archive-subtree-to
+                 multiple-source
+                 (edit-relocate-test-headline multiple-source "Task")
+                 multiple-target))))
+           (unclosed-text
+             (format nil "* Task~%:PROPERTIES:~%:CUSTOM: keep~%"))
+           (unclosed-source
+             (parse-org unclosed-text :source-name "tasks.org"))
+           (unclosed-target (parse-org ""))
+           (unclosed-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (archive-subtree-to
+                 unclosed-source
+                 (edit-relocate-test-headline unclosed-source "Task")
+                 unclosed-target)))))
+      (with-soft-assertions
+        (expect (org-edit-error-reason duplicate-error)
+                :to-be :uneditable-structure)
+        (expect (org-kit-error-message duplicate-error)
+                :to-equal "Archive metadata property is duplicated")
+        (expect (org-edit-error-reason multiple-error)
+                :to-be :uneditable-structure)
+        (expect (org-kit-error-message multiple-error)
+                :to-equal "Headline has multiple property drawers")
+        (expect (org-edit-error-reason unclosed-error)
+                :to-be :uneditable-structure)
+        (expect (org-kit-error-message unclosed-error)
+                :to-equal "Property drawer has no closing marker")
+        (expect (document-text duplicate-source) :to-equal duplicate-text)
+        (expect (document-text duplicate-target) :to-equal "")
+        (expect (document-text multiple-source) :to-equal multiple-text)
+        (expect (document-text multiple-target) :to-equal "")
+        (expect (document-text unclosed-source) :to-equal unclosed-text)
+        (expect (document-text unclosed-target) :to-equal ""))))
+
+  (it "preserves an existing archive tag when setting it again"
+    (let* ((source-text (format nil "* Task :ARCHIVE:~%"))
+           (document (parse-org source-text))
+           (result
+             (set-heading-archive-tag
+              document (edit-relocate-test-headline document "Task") t)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal source-text)
         (expect (document-text document) :to-equal source-text)))))
