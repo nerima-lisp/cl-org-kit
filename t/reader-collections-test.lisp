@@ -155,6 +155,20 @@
         (expect (node-property table :type) :to-be :org)
         (expect (node-property table :tblfm) :to-be nil))))
 
+  (it "keeps a table.el-looking border as paragraph after a pipe table without TBLFM"
+    (let* ((source (format nil "| a |~%+---+~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (elements (node-children section))
+           (table (first elements))
+           (border (second elements)))
+      (with-soft-assertions
+        (expect (mapcar #'node-type elements) :to-equal '(:table :paragraph))
+        (expect (node-property table :type) :to-be :org)
+        (expect (node-property table :tblfm) :to-be nil)
+        (expect (node-text table) :to-equal (format nil "| a |~%"))
+        (expect (node-text border) :to-equal (format nil "+---+~%")))))
+
   (it "matches Org's classification when a table.el border follows an attached formula"
     (let* ((source (format nil "+--+~%|a |~%#+TBLFM: x~%+--+~%"))
            (document (parse-org source))

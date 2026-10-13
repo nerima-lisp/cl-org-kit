@@ -10,6 +10,11 @@
     "05-objects-inline-table-time.org"
     "06-element-boundaries.org"
     "07-object-boundaries.org"
+    "tblfm-boundaries/pipe-one.org"
+    "tblfm-boundaries/pipe-multiple.org"
+    "tblfm-boundaries/table-el.org"
+    "tblfm-boundaries/table-el-mid-tblfm.org"
+    "tblfm-boundaries/pipe-followed-by-table-el.org"
     "settings/inlinetask-levels.org"
     "settings/link-abbrev-defined.org"
     "settings/link-abbrev-undefined.org"
@@ -102,16 +107,23 @@
           :to-equal (list fixture (first expected)))
   (loop for (key value) on (second expected) by #'cddr
         do (let ((actual (conformance-node-property node key)))
-             (if (and (eq (node-type node) :table-cell)
-                      (eq key :value)
-                      (null value))
-                 (expect (list fixture actual)
-                         :to-equal
-                         (list fixture
-                               (subseq (document-text (node-document node))
-                                       (node-contents-begin node)
-                                       (node-contents-end node))))
-                 (assert-conformance-value actual value fixture))))
+             (cond
+               ((and (eq (node-type node) :table)
+                     (eq key :tblfm))
+                ;; Org reverses :tblfm; this API intentionally keeps source order.
+                (assert-conformance-value actual (reverse value) fixture))
+               ((and (eq (node-type node) :table-cell)
+                     (eq key :value)
+                     (null value))
+                ;; Org reports nil :value; this API exposes the source cell text.
+                (expect (list fixture actual)
+                        :to-equal
+                        (list fixture
+                              (subseq (document-text (node-document node))
+                                      (node-contents-begin node)
+                                      (node-contents-end node)))))
+               (t
+                (assert-conformance-value actual value fixture)))))
   (let ((children (node-children node))
         (expected-children (cddr expected)))
     (expect (list fixture (length children))
@@ -121,7 +133,7 @@
           do (assert-conformance-child child expected-child fixture))))
 
 (describe "Org element conformance"
-  (it "matches all 18 expected trees and preserves their source bytes"
+  (it "matches all 23 expected trees and preserves their source bytes"
     (let ((read-count 0)
           (comparison-count 0)
           (round-trip-count 0))
@@ -143,14 +155,14 @@
             (expect (equalp source (write-org document :output-type :octets))
                     :to-be t)
             (incf round-trip-count)))
-        (expect (length +conformance-fixtures+) :to-be 18)
-        (expect read-count :to-be 18)
-        (expect comparison-count :to-be 18)
-        (expect round-trip-count :to-be 18))
+        (expect (length +conformance-fixtures+) :to-be 23)
+        (expect read-count :to-be 23)
+        (expect comparison-count :to-be 23)
+        (expect round-trip-count :to-be 23))
       (format t "conformance fixtures: read=~D compared=~D octet-round-trips=~D~%"
               read-count comparison-count round-trip-count)))
 
-  (it "keeps table formula properties and emitted directives in source order"
+  (it "keeps API formula properties and emitted directives in source order"
     (let* ((source (format nil "| x |~%#+TBLFM: $1=$1+1~%#+TBLFM: $1=$1-1~%"))
            (document (parse-org source))
            (section (first (node-children (document-root document))))

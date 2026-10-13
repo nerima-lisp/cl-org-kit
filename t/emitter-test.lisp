@@ -103,8 +103,9 @@
                  (pushnew (node-type node) types)
                  (dolist (child (node-children node))
                    (visit-node child))
-                 (loop for tail on (node-properties node) by #'cddr
-                       do (visit-value (second tail))))))
+                 (loop for (key value) on (node-properties node) by #'cddr
+                       unless (emitter-test-reader-property-p key)
+                         do (visit-value value)))))
       (visit-node root))
     types))
 
