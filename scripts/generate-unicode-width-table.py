@@ -2,19 +2,20 @@
 """Generate the pinned Unicode 17.0.0 table-width Lisp source."""
 
 import argparse
+import hashlib
 import re
 import sys
 from pathlib import Path
 
 
 VERSION = "17.0.0"
-# Pinned Unicode 17.0.0 UCD inputs and their SHA-256 digests:
+# Pinned Unicode 17.0.0 UCD input URLs:
 # https://www.unicode.org/Public/17.0.0/ucd/EastAsianWidth.txt
-#   ea7ce50f3444a050333448dffef1cadd9325af55cbb764b4a2280faf52170a33
 # https://www.unicode.org/Public/17.0.0/ucd/extracted/DerivedGeneralCategory.txt
-#   d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e
 EAST_ASIAN_WIDTH_FILE = "EastAsianWidth.txt"
+EAST_ASIAN_WIDTH_SHA256 = "ea7ce50f3444a050333448dffef1cadd9325af55cbb764b4a2280faf52170a33"
 GENERAL_CATEGORY_FILE = "DerivedGeneralCategory.txt"
+GENERAL_CATEGORY_SHA256 = "d62e5bab70ca74f099343f71224fa051cb1fdd61a1ab45c0488c44cfc0b6102e"
 WIDE_DEFAULTS = (
     (0x3400, 0x4DBF),
     (0x4E00, 0x9FFF),
@@ -65,6 +66,19 @@ def parse_property_file(path, expected_stem):
     return text.splitlines()
 
 
+def verify_source_digest(path, expected_digest):
+    actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if actual_digest != expected_digest:
+        raise ValueError(
+            path.name
+            + " has unexpected SHA-256 digest (expected "
+            + expected_digest
+            + ", got "
+            + actual_digest
+            + ")"
+        )
+
+
 def merge_intervals(intervals):
     merged = []
     for start, end in sorted(intervals):
@@ -107,6 +121,8 @@ def render_source(ucd_root):
             "expected " + EAST_ASIAN_WIDTH_FILE + " and extracted/" + GENERAL_CATEGORY_FILE
         )
 
+    verify_source_digest(east_asian_width, EAST_ASIAN_WIDTH_SHA256)
+    verify_source_digest(general_category, GENERAL_CATEGORY_SHA256)
     east_lines = parse_property_file(east_asian_width, "EastAsianWidth")
     category_lines = parse_property_file(general_category, "DerivedGeneralCategory")
     wide = merge_intervals(
