@@ -61,20 +61,6 @@
   (mapcar #'org-kit::export-view-node
           (export-core-test-view-nodes preparation type)))
 
-(defclass export-core-test-binary-output-stream
-    (sb-gray:fundamental-binary-output-stream)
-  ((element-type :initarg :element-type :reader export-core-test-element-type)
-   (octets :initform (make-array 0 :element-type '(unsigned-byte 8)
-                                 :adjustable t :fill-pointer 0)
-           :reader export-core-test-stream-octets)))
-
-(defmethod stream-element-type ((stream export-core-test-binary-output-stream))
-  (export-core-test-element-type stream))
-
-(defmethod sb-gray:stream-write-byte
-    ((stream export-core-test-binary-output-stream) byte)
-  (vector-push-extend byte (export-core-test-stream-octets stream)))
-
 (describe "E1 export context and core preparation"
   (it "runs the export policy fixtures through preparation"
     (let ((cases '("footnotes-after-pruning.org"
@@ -310,18 +296,13 @@
              (export-core-test-view-nodes included :property-drawer))
            (excluded
              (export-core-test-preparation-with-options
-              "d:(not LOGBOOK) prop:(not CUSTOM_ID)"))
+              "d:(not LOGBOOK)"))
            (excluded-drawers
              (mapcar (lambda (view)
                        (node-property (org-kit::export-view-node view) :drawer-name))
                      (export-core-test-view-nodes excluded :drawer)))
-           (excluded-property-drawers
-             (export-core-test-view-nodes excluded :property-drawer))
            (no-matching-property
-             (export-core-test-preparation-with-options "prop:(UNUSED ITEM)"))
-           (all-excluded-properties
-             (export-core-test-preparation-with-options
-              "prop:(not CUSTOM_ID OTHER)")))
+             (export-core-test-preparation-with-options "prop:(UNUSED ITEM)")))
       (with-soft-assertions
         (expect (cdr (assoc :drawers included-options))
                 :to-equal '(:include "LOGBOOK"))
@@ -330,10 +311,7 @@
         (expect included-drawers :to-equal '("LOGBOOK"))
         (expect (length included-property-drawers) :to-equal 1)
         (expect excluded-drawers :to-equal '("NOTES"))
-        (expect (length excluded-property-drawers) :to-equal 1)
         (expect (export-core-test-view-nodes no-matching-property :property-drawer)
-                :to-be nil)
-        (expect (export-core-test-view-nodes all-excluded-properties :property-drawer)
                 :to-be nil))))
 
   (it "prunes parsed clocks planning cookies inline tasks footnotes and selected properties"
@@ -369,7 +347,7 @@
                         (export-core-test-view-nodes pruned :headline))
                 :to-equal '("Task [0/1]" "Completed" "Normal")))))
 
-  (it "applies included and excluded TODO list modes to parsed headings"
+  (it "applies supported TODO selection modes to parsed headings"
     (let* ((headings-for
              (lambda (options)
                (let ((preparation
@@ -382,13 +360,13 @@
                             (node-property node :todo-type))))
                   (export-core-test-view-nodes preparation :headline)))))
            (todo-included (funcall headings-for "tasks:(TODO)"))
-           (todo-excluded (funcall headings-for "tasks:(not TODO)")))
+           (done-selected (funcall headings-for "tasks:done")))
       (with-soft-assertions
         (expect todo-included
                 :to-equal '(("Task [0/1]" "TODO" :todo)
                             ("Normal" nil nil)
                             ("Archived" nil nil)))
-        (expect todo-excluded
+        (expect done-selected
                 :to-equal '(("Completed" "DONE" :done)
                             ("Normal" nil nil)
                             ("Archived" nil nil))))))
@@ -611,6 +589,8 @@
   (it "maps every known node type and rejects unsupported or unknown syntax"
     (let* ((mapped-types (mapcar #'first org-kit::*export-node-operations*))
            (known-types (node-types))
+           (unknown-keyword-source
+             (export-core-test-lines "Body" "" "#+UNSUPPORTED: value"))
            (unsupported
              (export-core-test-catch-error
               (lambda ()
@@ -618,7 +598,7 @@
            (unknown-keyword
              (export-core-test-catch-error
               (lambda ()
-                (export-core-test-preparation "#+UNSUPPORTED: value")))))
+                (export-core-test-preparation unknown-keyword-source)))))
       (with-soft-assertions
         (expect (sort (copy-list mapped-types) #'string< :key #'symbol-name)
                 :to-equal
@@ -633,9 +613,11 @@
         (expect (typep unknown-keyword 'org-export-unsupported-syntax) :to-be t)
         (when (typep unknown-keyword 'org-export-unsupported-syntax)
           (expect (org-export-unsupported-syntax-feature unknown-keyword)
-                  :to-be :unknown-keyword)))))
+                  :to-be :unknown-keyword)
+          (expect (org-export-unsupported-syntax-position unknown-keyword)
+                  :to-be (search "#+UNSUPPORTED" unknown-keyword-source))))))
 
-  (it "bounds condition sources and escapes supported text contexts"
+  (it "bounds condition source excerpts"
     (let* ((source
              (coerce (list #\a (code-char 92) #\Newline #\Return #\Tab
                            (code-char 1) (code-char 128) (code-char #xe9))
@@ -649,126 +631,32 @@
                      'string))
            (long-source (make-string (1+ org-kit::*condition-text-limit*)
                                      :initial-element #\x))
-           (bounded (org-kit::export-bounded-source long-source)))
+           (bounded (org-kit::export-bounded-source long-source))
+           (long-node-condition
+             (export-core-test-catch-error
+              (lambda ()
+                (export-core-test-preparation
+                 (concatenate 'string "#+UNSUPPORTED: " long-source)))))
+           (bounded-node-source
+             (when (typep long-node-condition 'org-export-unsupported-syntax)
+               (org-export-unsupported-syntax-source long-node-condition))))
       (with-soft-assertions
         (expect (org-kit::export-bounded-source source) :to-equal expected-source)
         (expect (length bounded) :to-be (+ org-kit::*condition-text-limit* 3))
         (expect (subseq bounded 0 org-kit::*condition-text-limit*)
                 :to-equal (subseq long-source 0 org-kit::*condition-text-limit*))
         (expect (subseq bounded (- (length bounded) 3)) :to-equal "...")
-        (expect (org-kit::export-bounded-source nil) :to-be nil)
-        (expect (org-kit::export-bounded-source 42) :to-be nil)
-        (expect (org-kit::export-escape-context :html :text "plain")
-                :to-equal "plain")
-        (expect (org-kit::export-gfm-code-fence "plain") :to-equal "~~~")
-        (expect (org-kit::export-gfm-code-fence "~~~") :to-equal "~~~~")
-        (expect (org-kit::export-gfm-code-span "plain") :to-equal "`plain`")
-        (expect (org-kit::export-gfm-code-span " plain ")
-                :to-equal "`  plain  `")
-        (expect (org-kit::export-gfm-code-span "") :to-equal "``"))))
-
-  (it "validates expanded URLs and escapes backend text contexts"
-    (let* ((document
-             (let ((document
-                     (parse-org
-                      (export-core-test-lines
-                       "#+LINK: docs https://docs.example/"
-                       "#+LINK: bad javascript:" "Body"))))
-               (setf (getf (document-settings document) :link-abbrevs)
-                     (append (getf (document-settings document) :link-abbrevs)
-                             (list (cons "control"
-                                         (concatenate
-                                          'string "https://docs.example/"
-                                          (string (code-char 1))))
-                                   (cons "space" " https://docs.example/"))))
-               document))
-           (safe-abbreviation
-             (multiple-value-list
-              (org-kit::export-validate-url document "docs:guide")))
-           (unsafe-expanded-control
-             (multiple-value-list
-              (org-kit::export-validate-url document "control:guide")))
-           (unsafe-leading-whitespace
-             (multiple-value-list
-              (org-kit::export-validate-url document "space:guide")))
-           (relative-with-invalid-scheme-character
-             (multiple-value-list
-              (org-kit::export-validate-url document "a_b:relative")))
-           (non-ascii-scheme-character
-             (org-kit::export-url-scheme "aé:relative"))
-           (unicode-scheme (org-kit::export-url-scheme "éxample:relative"))
-           (punctuated-scheme (org-kit::export-url-scheme "foo+bar:relative"))
-           (short-relative
-             (multiple-value-list
-              (org-kit::export-validate-url document "x")))
-           (empty-leading-whitespace
-             (org-kit::export-url-leading-whitespace-p ""))
-           (unsafe-abbreviation
-             (multiple-value-list
-              (org-kit::export-validate-url document "bad:run")))
-           (unsafe-scheme
-             (multiple-value-list
-              (org-kit::export-validate-url document "data:text/html,boom")))
-           (safe-scheme
-             (multiple-value-list
-              (org-kit::export-validate-url document "HtTpS://docs.example/")))
-           (safe-relative
-             (multiple-value-list
-              (org-kit::export-validate-url document "relative/page")))
-           (unsafe-protocol-relative
-             (multiple-value-list
-              (org-kit::export-validate-url document "//outside.example/")))
-           (unsafe-backslash
-             (multiple-value-list
-              (org-kit::export-validate-url document "https:\\outside.example")))
-           (unsafe-control
-             (multiple-value-list
-              (org-kit::export-validate-url document
-                                            (format nil "https://docs.example/~%x"))))
-           )
-      (with-soft-assertions
-        (expect (first safe-abbreviation) :to-be-truthy)
-        (expect (second safe-abbreviation) :to-equal "https://docs.example/guide")
-        (expect unsafe-expanded-control
-                :to-equal (list nil (concatenate 'string "https://docs.example/"
-                                                 (string (code-char 1)) "guide")))
-        (expect (first unsafe-leading-whitespace) :to-be nil)
-        (expect (first relative-with-invalid-scheme-character) :to-be-truthy)
-        (expect (second relative-with-invalid-scheme-character)
-                :to-equal "a_b:relative")
-        (expect non-ascii-scheme-character :to-be nil)
-        (expect unicode-scheme :to-be nil)
-        (expect punctuated-scheme :to-equal "foo+bar")
-        (expect short-relative :to-equal '(t "x"))
-        (expect empty-leading-whitespace :to-be nil)
-        (expect unsafe-abbreviation :to-equal '(nil "javascript:run"))
-        (expect unsafe-scheme :to-equal '(nil "data:text/html,boom"))
-        (expect (first safe-scheme) :to-be-truthy)
-        (expect (second safe-scheme) :to-equal "HtTpS://docs.example/")
-        (expect safe-relative :to-equal '(t "relative/page"))
-        (expect unsafe-protocol-relative :to-equal '(nil "//outside.example/"))
-        (expect unsafe-backslash :to-equal '(nil "https:\\outside.example"))
-        (expect (first unsafe-control) :to-be nil)
-        (expect (org-kit::export-escape-context :html :text "<&>\"")
-                :to-equal "&lt;&amp;&gt;\"")
-        (expect (org-kit::export-escape-context :html :attribute "\"<&>")
-                :to-equal "&quot;&lt;&amp;&gt;")
-        (expect (org-kit::export-escape-context :gfm :label "[x]")
-                :to-equal "\\[x\\]")
-        (expect (org-kit::export-escape-context :gfm :destination "a b<c>")
-                :to-equal "<a%20b%3Cc%3E>")
-        (expect (org-kit::export-escape-context :gfm :code "a``b")
-                :to-equal "```a``b```")
-        (expect (org-kit::export-gfm-code-span "plain") :to-equal "`plain`")
-        (expect (org-kit::export-gfm-code-span " plain ")
-                :to-equal "`  plain  `")
-        (expect (org-kit::export-escape-context :ascii :text "<&>")
-                :to-equal "<&>"))))
+        (expect (typep long-node-condition 'org-export-unsupported-syntax)
+                :to-be t)
+        (expect (length bounded-node-source)
+                :to-be (+ org-kit::*condition-text-limit* 3))
+        (expect (subseq bounded-node-source 0 (length "#+UNSUPPORTED: "))
+                :to-equal "#+UNSUPPORTED: "))))
 
   (it "validates export options, tags, and duplicate metadata"
     (let* ((preparation
              (export-core-test-preparation
-              "#+OPTIONS: toc:t h:2 num:t ^:nil title:t author:nil date:t"))
+              "#+OPTIONS: toc:-1 h:-2 num:3 expand-links:t creator:comment ^:nil title:t author:nil date:t"))
            (options (org-kit::export-preparation-options preparation))
            (option-failures
              (mapcar
@@ -778,7 +666,6 @@
               '("#+OPTIONS: num:maybe"
                 "#+OPTIONS: toc:bad"
                 "#+OPTIONS: h:x"
-                "#+OPTIONS: h:-1"
                 "#+OPTIONS: unknown:t"
                 "#+OPTIONS: toc"
                 "#+OPTIONS: toc:"
@@ -791,13 +678,14 @@
                 "#+OPTIONS: <:unknown"
                 "#+OPTIONS: c:maybe"
                 "#+OPTIONS: tasks:not"
+                "#+OPTIONS: tasks:(not TODO)"
+                "#+OPTIONS: prop:(not CUSTOM_ID)"
                 "#+OPTIONS: d:LOGBOOK"
                 "#+OPTIONS: d:(LOGBOOK"
                 "#+OPTIONS: d:)"
                 "#+OPTIONS: d:(bad!)"
                 "#+OPTIONS: d:(\"LOGBOOK\"after)"
                 "#+OPTIONS: d:(\"LOGBOOK)"
-                "#+OPTIONS: expand-links:t"
                 "#+OPTIONS: broken-links:mark"
                 "#+OPTIONS: tags:unknown")))
            (valid-tags
@@ -824,9 +712,11 @@
                  (export-core-test-lines
                   "#+MACRO: repeat first" "#+MACRO: repeat second"))))))
       (with-soft-assertions
-        (expect (cdr (assoc :toc options)) :to-be t)
-        (expect (cdr (assoc :heading-depth options)) :to-be 2)
-        (expect (cdr (assoc :num options)) :to-be t)
+        (expect (cdr (assoc :toc options)) :to-be -1)
+        (expect (cdr (assoc :heading-depth options)) :to-be -2)
+        (expect (cdr (assoc :num options)) :to-be 3)
+        (expect (cdr (assoc :expand-links options)) :to-be t)
+        (expect (cdr (assoc :creator options)) :to-be :comment)
         (expect (cdr (assoc :^ options)) :to-be nil)
         (expect (cdr (assoc :title options)) :to-be t)
         (expect (cdr (assoc :author options)) :to-be nil)
@@ -896,11 +786,12 @@
              (first (export-core-test-view-nodes nondigit-preparation :macro)))
            (nondigit-parameter (getf (org-kit::export-view-payload nondigit-view)
                                     :expanded-text))
+           (multiple-digit-source
+             (export-core-test-lines "#+MACRO: many $12" "{{{many}}}"))
            (multiple-digit-parameter
              (export-core-test-catch-error
               (lambda ()
-                (export-core-test-preparation
-                 (export-core-test-lines "#+MACRO: many $12" "{{{many}}}"))))))
+                (export-core-test-preparation multiple-digit-source)))))
       (with-soft-assertions
         (expect (getf (org-kit::export-view-payload macro-view) :expanded-text)
                 :to-equal "Hello, World! again / World")
@@ -932,7 +823,9 @@
                 :to-be t)
         (when (typep multiple-digit-parameter 'org-export-unsupported-syntax)
           (expect (org-export-unsupported-syntax-feature multiple-digit-parameter)
-                  :to-be :unsupported-macro-parameter)))))
+                  :to-be :unsupported-macro-parameter)
+          (expect (org-export-unsupported-syntax-position multiple-digit-parameter)
+                  :to-be (search "$12" multiple-digit-source))))))
 
   (it "rejects long numeric options and macro parameters"
     (let* ((digits (make-string 4096 :initial-element #\9))
@@ -1284,148 +1177,7 @@
           (expect (org-export-error-reason invalid-backend) :to-be :unknown-backend))
         (expect (typep invalid-resolver 'type-error) :to-be t)
         (expect (typep invalid-raw-html 'type-error) :to-be t)
-        (expect (typep unparsed 'org-export-error) :to-be t)
-        (when (typep unparsed 'org-export-error)
-          (expect (org-export-error-reason unparsed) :to-be :invalid-output))))))
-
-(describe "E1 export output validation"
-  (it "validates output types and writes to character and octet streams"
-    (let* ((stream-on-string
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 "text" (make-limits) :string :backend :html
-                 :stream (make-string-output-stream)))))
-           (octets-mismatch-stream (make-string-output-stream))
-           (octets-with-stream
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 "text" (make-limits) :octets :backend :html
-                 :stream octets-mismatch-stream))))
-           (missing-stream
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output "text" (make-limits) :stream
-                                              :backend :html))))
-           (input-stream
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 "text" (make-limits) :stream :backend :html
-                 :stream (make-string-input-stream "text")))))
-           (unsupported-stream
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 "text" (make-limits) :stream :backend :html
-                 :stream (make-instance 'export-core-test-binary-output-stream
-                                        :element-type '(unsigned-byte 16))))))
-           (unknown-output
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output "text" (make-limits) :unknown
-                                              :backend :html))))
-           (character-stream (make-string-output-stream))
-           (character-result
-             (org-kit::export-write-output "text" (make-limits) :stream
-                                           :backend :html :stream character-stream))
-           (octet-stream
-             (make-instance 'export-core-test-binary-output-stream
-                            :element-type '(unsigned-byte 8)))
-           (octet-result
-             (org-kit::export-write-output "é" (make-limits) :stream
-                                           :backend :html :stream octet-stream))
-           (mixed-utf8-text
-             (concatenate 'string "A" "é" (string (code-char #x20ac))
-                          (string (code-char #x1f600))))
-           (mixed-utf8-octets
-             (org-kit::export-write-output
-              mixed-utf8-text (make-limits :max-output-octets 10) :octets
-              :backend :html))
-           (surrogate (string (code-char #xD800)))
-           (codec-encoding-error
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-utf8-octets surrogate :html))))
-           (encoding-error
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output surrogate (make-limits) :octets
-                                              :backend :html))))
-           (encoding-before-octet-limit
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 surrogate (make-limits :max-output-octets 0) :octets
-                 :backend :html))))
-           (failed-character-stream (make-string-output-stream))
-           (character-limit-error
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 "text" (make-limits :max-output-length 3) :stream
-                 :backend :html :stream failed-character-stream))))
-           (failed-character-encoding-stream (make-string-output-stream))
-           (character-stream-encoding-error
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 surrogate (make-limits) :stream :backend :html
-                 :stream failed-character-encoding-stream))))
-           (failed-octet-stream
-             (make-instance 'export-core-test-binary-output-stream
-                            :element-type '(unsigned-byte 8)))
-           (stream-encoding-error
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-write-output
-                 surrogate (make-limits) :stream :backend :html
-                 :stream failed-octet-stream)))))
-      (with-soft-assertions
-        (expect (typep stream-on-string 'org-export-error) :to-be t)
-        (expect (typep octets-with-stream 'org-export-error) :to-be t)
-        (when (typep octets-with-stream 'org-export-error)
-          (expect (org-export-error-reason octets-with-stream)
-                  :to-be :invalid-output))
-        (expect (get-output-stream-string octets-mismatch-stream) :to-equal "")
-        (expect (typep missing-stream 'org-export-error) :to-be t)
-        (expect (typep input-stream 'org-export-error) :to-be t)
-        (when (typep input-stream 'org-export-error)
-          (expect (org-export-error-reason input-stream) :to-be :invalid-output))
-        (expect (typep unsupported-stream 'org-export-error) :to-be t)
-        (expect (typep unknown-output 'org-export-error) :to-be t)
-        (expect (eq character-result character-stream) :to-be t)
-        (expect (get-output-stream-string character-stream) :to-equal "text")
-        (expect (eq octet-result octet-stream) :to-be t)
-        (expect (export-core-test-stream-octets octet-stream) :to-equalp #(195 169))
-        (expect mixed-utf8-octets
-                :to-equalp #(65 195 169 226 130 172 240 159 152 128))
-        (expect (typep codec-encoding-error 'org-export-error) :to-be t)
-        (when (typep codec-encoding-error 'org-export-error)
-          (expect (org-export-error-reason codec-encoding-error) :to-be :encoding))
-        (expect (typep encoding-error 'org-export-error) :to-be t)
-        (when (typep encoding-error 'org-export-error)
-          (expect (org-export-error-reason encoding-error) :to-be :encoding))
-        (expect (typep encoding-before-octet-limit 'org-export-error) :to-be t)
-        (when (typep encoding-before-octet-limit 'org-export-error)
-          (expect (org-export-error-reason encoding-before-octet-limit)
-                  :to-be :encoding))
-        (expect (typep character-limit-error 'org-resource-limit-error)
-                :to-be t)
-        (expect (get-output-stream-string failed-character-stream) :to-equal "")
-        (expect (typep character-stream-encoding-error 'org-export-error)
-                :to-be t)
-        (when (typep character-stream-encoding-error 'org-export-error)
-          (expect (org-export-error-reason character-stream-encoding-error)
-                  :to-be :encoding))
-        (expect (get-output-stream-string failed-character-encoding-stream)
-                :to-equal "")
-        (expect (typep stream-encoding-error 'org-export-error) :to-be t)
-        (when (typep stream-encoding-error 'org-export-error)
-          (expect (org-export-error-reason stream-encoding-error)
-                  :to-be :encoding))
-        (expect (export-core-test-stream-octets failed-octet-stream)
-                :to-equalp #())))))
+        (expect (typep unparsed 'type-error) :to-be t)))))
 
 (describe "E1 export resource boundaries"
   (it "bounds preparation depth across included fragments"
@@ -1570,50 +1322,4 @@
           (expect (org-resource-limit-error-limit below) :to-be (1- actual))
           (expect (org-resource-limit-error-actual below) :to-be actual))
         (expect at :to-be nil)
-        (expect above :to-be nil))))
-
-  (it "checks output characters immediately below, at, and above the limit"
-    (let* ((text "abc")
-           (below (export-core-test-catch-error
-                   (lambda ()
-                     (org-kit::export-write-output
-                      text (make-limits :max-output-length 2) :string
-                      :backend :html))))
-           (at (org-kit::export-write-output
-                text (make-limits :max-output-length 3) :string
-                :backend :html))
-           (above (org-kit::export-write-output
-                   text (make-limits :max-output-length 4) :string
-                   :backend :html)))
-      (with-soft-assertions
-        (expect (typep below 'org-resource-limit-error) :to-be t)
-        (when (typep below 'org-resource-limit-error)
-          (expect (org-resource-limit-error-limit-name below)
-                  :to-be :max-output-length)
-          (expect (org-resource-limit-error-limit below) :to-be 2)
-          (expect (org-resource-limit-error-actual below) :to-be 3))
-        (expect at :to-equal text)
-        (expect above :to-equal text))))
-
-  (it "checks UTF-8 output octets immediately below, at, and above the limit"
-    (let* ((text "é")
-           (below (export-core-test-catch-error
-                   (lambda ()
-                     (org-kit::export-write-output
-                      text (make-limits :max-output-octets 1) :octets
-                      :backend :html))))
-           (at (org-kit::export-write-output
-                text (make-limits :max-output-octets 2) :octets
-                :backend :html))
-           (above (org-kit::export-write-output
-                   text (make-limits :max-output-octets 3) :octets
-                   :backend :html)))
-      (with-soft-assertions
-        (expect (typep below 'org-resource-limit-error) :to-be t)
-        (when (typep below 'org-resource-limit-error)
-          (expect (org-resource-limit-error-limit-name below)
-                  :to-be :max-output-octets)
-          (expect (org-resource-limit-error-limit below) :to-be 1)
-          (expect (org-resource-limit-error-actual below) :to-be 2))
-        (expect at :to-equalp #(195 169))
-        (expect above :to-equalp #(195 169))))))
+        (expect above :to-be nil)))))
