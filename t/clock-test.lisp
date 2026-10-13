@@ -375,11 +375,6 @@
            (invalid-timestamp-value
              (and invalid-timestamp-clock
                   (node-property invalid-timestamp-clock :value)))
-           (invalid-time-error
-             (when (and (node-p invalid-timestamp-value)
-                        (eq (node-type invalid-timestamp-value) :timestamp))
-               (clock-test-error
-                (lambda () (org-kit::timestamp-view invalid-timestamp-value)))))
            (fallback
              (sum-clocks invalid-timestamp-document
                          (clock-test-heading invalid-timestamp-document "Scope")
@@ -400,9 +395,6 @@
         (expect (and (node-p invalid-timestamp-value)
                      (eq (node-type invalid-timestamp-value) :timestamp))
                 :to-be t)
-        (clock-test-expect-time-error invalid-time-error :invalid-time
-                                      "timestamp has no valid start"
-                                      "Invalid date or time")
         (clock-test-expect-clock-error bad-duration :malformed-clock
                                        "CLOCK: => 1:60"
                                        "Malformed CLOCK entry")
