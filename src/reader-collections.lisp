@@ -222,7 +222,7 @@
                    (char= (char line indent) #\|))
           (+ offset indent)))))
 
-  (defun reader-table-el-border-line-p (context offset limit)
+  (defun reader-table-el-border-line-p (context offset limit &key start-p)
     (multiple-value-bind (content-end after-line)
         (reader-line-bounds context offset)
       (declare (ignore after-line))
@@ -235,6 +235,7 @@
              (some (lambda (character)
                      (find character '(#\- #\=)))
                    body)
+             (or (not start-p) (find #\- body))
              (every (lambda (character)
                       (find character
                             '(#\+ #\- #\= #\: #\Space #\Tab)))
@@ -472,7 +473,7 @@
     (let ((table-row (reader-table-row-start context start limit))
           (marker (reader-list-marker-at context start limit)))
       (cond
-        ((reader-table-el-border-line-p context start limit)
+        ((reader-table-el-border-line-p context start limit :start-p t)
          (reader-parse-table-el context start limit depth))
         (table-row (reader-parse-org-table context start limit depth))
         (marker (reader-parse-plain-list context start limit depth marker))

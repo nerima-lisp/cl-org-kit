@@ -183,6 +183,51 @@
                 :to-equal (format nil "+--+~%|a |~%+--+~%"))
         (expect (node-property table :tblfm) :to-equal '("x")))))
 
+  (it "splits a table.el candidate when a TBLFM falls between its rows"
+    (let* ((source (format nil "~{~A~%~}"
+                           '("+---+---+" "| a | b |" "#+TBLFM: $1=$2"
+                             "| c | d |" "+---+---+")))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (elements (node-children section))
+           (first-table (second elements))
+           (second-table (third elements)))
+      (with-soft-assertions
+        (expect (mapcar #'node-type elements)
+                :to-equal '(:paragraph :table :table :paragraph))
+        (expect (node-text (first elements)) :to-equal (format nil "+---+---+~%"))
+        (expect (node-property first-table :type) :to-be :org)
+        (expect (node-text first-table)
+                :to-equal (format nil "| a | b |~%#+TBLFM: $1=$2~%"))
+        (expect (node-property first-table :tblfm) :to-equal '("$1=$2"))
+        (expect (node-property second-table :type) :to-be :org)
+        (expect (node-text second-table) :to-equal (format nil "| c | d |~%"))
+        (expect (node-property second-table :tblfm) :to-be nil)
+        (expect (node-text (fourth elements)) :to-equal (format nil "+---+---+~%")))))
+
+  (it "keeps a table.el separator as a paragraph after a mid-table TBLFM"
+    (let* ((source (format nil "~{~A~%~}"
+                           '("+---+---+" "| a | b |" "#+TBLFM: $1=$2"
+                             "+===+===+" "| c | d |" "+---+---+")))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (elements (node-children section))
+           (first-table (second elements))
+           (separator (third elements))
+           (second-table (fourth elements)))
+      (with-soft-assertions
+        (expect (mapcar #'node-type elements)
+                :to-equal '(:paragraph :table :paragraph :table :paragraph))
+        (expect (node-property first-table :type) :to-be :org)
+        (expect (node-text first-table)
+                :to-equal (format nil "| a | b |~%#+TBLFM: $1=$2~%"))
+        (expect (node-property first-table :tblfm) :to-equal '("$1=$2"))
+        (expect (node-text separator) :to-equal (format nil "+===+===+~%"))
+        (expect (node-property second-table :type) :to-be :org)
+        (expect (node-text second-table) :to-equal (format nil "| c | d |~%"))
+        (expect (node-property second-table :tblfm) :to-be nil)
+        (expect (node-text (fifth elements)) :to-equal (format nil "+---+---+~%")))))
+
   (it "keeps table.el tables opaque"
     (let* ((source (format nil "+---+---+~%| one | two |~%+---+---+~%"))
            (document (parse-org source))
@@ -195,6 +240,33 @@
         (expect (node-contents-begin table) :to-be nil)
         (expect (node-contents-end table) :to-be nil)
         (expect (node-children table) :to-equal '()))))
+
+  (it "parses a table.el child after an inline list marker"
+    (let* ((source (format nil "- +---+~%  | a |~%  +---+~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (list (first (node-children section)))
+           (item (first (node-children list)))
+           (table (first (node-children item))))
+      (with-soft-assertions
+        (expect (node-type list) :to-be :plain-list)
+        (expect (node-type item) :to-be :item)
+        (expect (node-type table) :to-be :table)
+        (expect (node-property table :type) :to-be :table.el)
+        (expect (node-property table :value)
+                :to-equal (format nil "+---+~%  | a |~%  +---+~%")))))
+
+  (it "parses an empty table.el border after an inline list marker"
+    (let* ((source (format nil "- +-+~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (list (first (node-children section)))
+           (item (first (node-children list)))
+           (table (first (node-children item))))
+      (with-soft-assertions
+        (expect (node-type table) :to-be :table)
+        (expect (node-property table :type) :to-be :table.el)
+        (expect (node-property table :value) :to-equal (format nil "+-+~%")))))
 
   (it "keeps table.el separators and formulas opaque and source-positioned"
     (let* ((source (format nil "+---+---+~%| one | two |~%+===+===+~%| three | four |~%+---+---+~%#+TBLFM: $1=$2~%#+TBLFM: $2=$1~%"))
