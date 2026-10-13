@@ -75,6 +75,31 @@
       (expect (stringp (org-table-error-target condition)) :to-be t)
       (expect (org-kit-error-message condition) :to-be-truthy))))
 
+(defun table-calc-eval-test-expect-unsupported-syntax (condition feature)
+  (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+  (when (typep condition 'org-table-unsupported-syntax)
+    (expect (org-table-unsupported-syntax-feature condition)
+            :to-be feature)))
+
+(defun table-calc-eval-test-expect-range-policy (formula)
+  (let* ((corpus (table-calc-test-corpus-formulas
+                  "range-vector-algebra.org" "policy"))
+         (oracle-row
+           (assoc formula
+                  (table-calc-test-oracle-rows
+                   "range-vector-algebra.tsv" "policy")
+                  :test #'string=)))
+    (expect (member formula corpus :test #'string=) :to-be-truthy)
+    (expect oracle-row :to-be-truthy)
+    (when oracle-row
+      (expect (stringp (cdr oracle-row)) :to-be t)
+      (expect (plusp (length (cdr oracle-row))) :to-be t))
+    (table-calc-eval-test-expect-unsupported-syntax
+     (table-calc-eval-test-condition
+      formula :base-row 1 :base-column 2 :last-row 2
+      :cells (table-calc-eval-test-cell-map '(1 1 "1") '(2 1 "2")))
+     :range-outside-vector-function)))
+
 (defun table-calc-eval-test-expect-limit (condition name limit actual)
   (with-soft-assertions
     (expect (typep condition 'org-resource-limit-error) :to-be t)
@@ -309,20 +334,34 @@
                                              :limits negative-limits)
               :to-equal "-80")))
 
-  (it "rejects non-string callback cells and zero precision through formula inputs"
-    (let* ((condition
-             (table-calc-eval-test-condition
-              "@1$1=@1$2" :base-row 1 :base-column 1
-              :cells (table-calc-eval-test-cell-map '(1 2 7))))
-           (zero-precision-limits (make-limits :max-formula-precision 0))
+  (it "signals a table error for non-string callback cell values"
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition
+      "@1$1=@1$2" :base-row 1 :base-column 1
+      :cells (table-calc-eval-test-cell-map '(1 2 7)))
+     :invalid-value))
+
+  (it "checks zero precision through formula inputs"
+    (let* ((zero-precision-limits (make-limits :max-formula-precision 0))
            (zero-precision
              (table-calc-eval-test-condition
               "@1$2=vcount(@1$1..@1$1)" :base-row 1 :base-column 2
               :cells (table-calc-eval-test-cell-map '(1 1 ""))
               :limits zero-precision-limits)))
-      (expect (typep condition 'type-error) :to-be t)
       (table-calc-eval-test-expect-limit
        zero-precision :max-formula-precision 0 1)))
+
+  (it "rejects a range as an assignment value per Org policy"
+    (table-calc-eval-test-expect-range-policy
+     "@1$2=@1$1..@2$1"))
+
+  (it "rejects arithmetic on a range per Org policy"
+    (table-calc-eval-test-expect-range-policy
+     "@1$2=(@1$1..@2$1)+1"))
+
+  (it "rejects unary arithmetic on a range per Org policy"
+    (table-calc-eval-test-expect-range-policy
+     "@1$2=-@1$1..@2$1"))
 
   (it "signals table conditions for zero division and external non-finite numbers"
     (table-calc-eval-test-expect-table-error

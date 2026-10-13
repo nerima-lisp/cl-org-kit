@@ -927,7 +927,10 @@
     ("@5$4=vmean(@2$1..@4$3)" ((5 . 4)))
     ("@5$4=vmin(@2$1..@4$3)" ((5 . 4)))
     ("@5$4=vmax(@2$1..@4$3)" ((5 . 4)))
-    ("@5$4=vcount(@2$1..@4$3)" ((5 . 4))))
+    ("@5$4=vcount(@2$1..@4$3)" ((5 . 4)))
+    ("@1$2=@1$1..@2$1" ((1 . 2)))
+    ("@1$2=(@1$1..@2$1)+1" ((1 . 2)))
+    ("@1$2=-@1$1..@2$1" ((1 . 2))))
   "Exact formula inputs permitted in the table-calc oracle corpus.")
 
 (defun org-fixture--table-calc-directive-count (file)

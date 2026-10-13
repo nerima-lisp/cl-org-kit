@@ -14,14 +14,14 @@
 (defun table-calc-test-decimal (text &optional (limits (make-limits)))
   (org-kit::parse-safe-decimal text :limits limits))
 
-(defun table-calc-test-oracle-path (tree name)
+(defun table-calc-test-oracle-path (tree name &optional (root "oracle"))
   (asdf:system-relative-pathname
    "cl-org-kit"
-   (format nil "t/fixtures/table-calc/oracle/~A/~A" tree name)))
+   (format nil "t/fixtures/table-calc/~A/~A/~A" root tree name)))
 
-(defun table-calc-test-corpus-formulas (name)
+(defun table-calc-test-corpus-formulas (name &optional (root "oracle"))
   (let ((source (uiop:read-file-string
-                 (table-calc-test-oracle-path "corpus" name)))
+                 (table-calc-test-oracle-path "corpus" name root)))
         (formulas '()))
     (with-input-from-string (stream source)
       (loop for line = (read-line stream nil nil)
@@ -33,9 +33,9 @@
                        formulas)))
     (nreverse formulas)))
 
-(defun table-calc-test-oracle-rows (name)
+(defun table-calc-test-oracle-rows (name &optional (root "oracle"))
   (let ((source (uiop:read-file-string
-                 (table-calc-test-oracle-path "expected" name)))
+                 (table-calc-test-oracle-path "expected" name root)))
         (rows '()))
     (with-input-from-string (stream source)
       (loop for line = (read-line stream nil nil)
@@ -95,12 +95,14 @@
                 :to-be -3))))
 
   (it "records formula offsets and parses field, column, named, relative, last-row, and range references"
-    (let* ((formula "$3=$1+$name::@2$3=@+1$-2+@>$1::@3$4=@1$2..@2$1")
+    (let* ((formula "$3=$1+$name::@2$3=@+1$-2+@>$1::@3$4=vsum(@1$2..@2$1)")
            (program (org-kit::table-calc-parse-formula formula))
            (assignments (org-kit::table-calc-program-assignments program))
            (column (first assignments))
            (field (second assignments))
-           (range (org-kit::table-calc-assignment-expression (third assignments)))
+           (range-function
+             (org-kit::table-calc-assignment-expression (third assignments)))
+           (range (first (org-kit::table-calc-expression-children range-function)))
            (sum (org-kit::table-calc-assignment-expression column))
            (relative (first (org-kit::table-calc-expression-children sum)))
            (named (second (org-kit::table-calc-expression-children sum)))
@@ -169,7 +171,7 @@
         (expect (org-kit::table-calc-expression-start range)
                 :to-be (search "@1$2" formula))
         (expect (org-kit::table-calc-expression-end range)
-                :to-be (length formula)))))
+                :to-be (1- (length formula))))))
 
   (it "parses bare @> as the last row in the current column"
     (let* ((formula "@2$3=@>")

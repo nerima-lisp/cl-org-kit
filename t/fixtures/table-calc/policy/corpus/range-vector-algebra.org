@@ -1,0 +1,13 @@
+# T4b policy fixture: general Calc vector algebra stays outside the supported numeric subset.
+# Org 9.8.10 treats these ranges as vectors and applies scalar arithmetic elementwise.
+| 1 | 0 |
+| 2 | 0 |
+#+TBLFM: @1$2=@1$1..@2$1
+
+| 1 | 0 |
+| 2 | 0 |
+#+TBLFM: @1$2=(@1$1..@2$1)+1
+
+| 1 | 0 |
+| 2 | 0 |
+#+TBLFM: @1$2=-@1$1..@2$1

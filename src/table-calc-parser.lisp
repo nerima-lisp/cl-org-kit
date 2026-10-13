@@ -505,6 +505,22 @@
                        :unsupported-format))
     (values mode format-precision)))
 
+(defun table-calc-validate-range-context (formula expression)
+  (loop with pending = (list (cons expression nil))
+        while pending
+        do (let* ((entry (pop pending))
+                  (node (car entry))
+                  (parent-kind (cdr entry))
+                  (kind (table-calc-expression-kind node)))
+             (when (and (eql kind :range)
+                        (not (eql parent-kind :function)))
+               (table-calc-fail formula
+                                (table-calc-expression-start node)
+                                :range-outside-vector-function))
+             (loop for child in (table-calc-expression-children node)
+                   do (push (cons child kind) pending)))
+        finally (return expression)))
+
 (defun table-calc-parse-assignment (parser)
   (let* ((formula (table-calc-parser-formula parser))
          (start (table-calc-position parser)))
@@ -517,6 +533,7 @@
       (let* ((expression (table-calc-parse-expression parser 0))
              (mode :default)
              (format-precision nil))
+        (table-calc-validate-range-context formula expression)
         (when (eql (table-calc-current-kind parser) :suffix)
           (multiple-value-setq (mode format-precision)
             (table-calc-parse-suffix parser (table-calc-advance parser))))
@@ -570,6 +587,13 @@
       (check-limit limits :max-formula-exponent (abs exponent))
       (values exponent position t))))
 
+(defun safe-decimal-strip-trailing-zeroes (coefficient exponent)
+  (loop while (and (not (zerop coefficient))
+                   (zerop (mod coefficient 10)))
+        do (setf coefficient (truncate coefficient 10))
+           (incf exponent))
+  (values coefficient exponent))
+
 (defun parse-safe-decimal (text &key (start 0) (end (length text))
                                      (limits (make-limits)))
   (let ((position start)
@@ -618,9 +642,8 @@
       (setf significant-digits 1)
       (check-limit limits :max-formula-precision significant-digits))
     (let ((scale (- explicit-exponent fraction-digits)))
-      (loop while (and (plusp coefficient) (zerop (mod coefficient 10)))
-            do (setf coefficient (truncate coefficient 10))
-               (incf scale))
+      (multiple-value-setq (coefficient scale)
+        (safe-decimal-strip-trailing-zeroes coefficient scale))
       (check-limit limits :max-formula-exponent (abs scale))
       (when negative
         (setf coefficient (- coefficient)))

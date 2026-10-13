@@ -41,12 +41,6 @@
 (defun table-calc-decimal-digit-count (integer)
   (length (write-to-string (abs integer) :base 10 :radix nil)))
 
-(defun table-calc-strip-decimal-zeroes (coefficient exponent)
-  (loop while (zerop (mod coefficient 10))
-        do (setf coefficient (truncate coefficient 10))
-           (incf exponent))
-  (values coefficient exponent))
-
 (defun table-calc-round-integer (numerator denominator)
   (multiple-value-bind (quotient remainder) (floor numerator denominator)
     (cond ((> (* 2 remainder) denominator) (1+ quotient))
@@ -55,31 +49,25 @@
           (t quotient))))
 
 (defun table-calc-round-decimal (coefficient exponent negative-zero-p precision limits)
-  (let* ((maximum-exponent (limit-value limits :max-formula-exponent))
-         (negative-p (or (minusp coefficient)
-                         (and (zerop coefficient) negative-zero-p))))
-    (when (zerop precision)
-      (check-limit limits :max-formula-precision 1))
+  (let ((negative-p (or (minusp coefficient)
+                        (and (zerop coefficient) negative-zero-p))))
     (when (zerop coefficient)
       (check-limit limits :max-formula-precision 1)
       (return-from table-calc-round-decimal
         (%make-safe-decimal :coefficient 0 :exponent 0
                             :negative-zero-p negative-p)))
     (multiple-value-setq (coefficient exponent)
-      (table-calc-strip-decimal-zeroes coefficient exponent))
+      (safe-decimal-strip-trailing-zeroes coefficient exponent))
     (let ((digits (table-calc-decimal-digit-count coefficient)))
       (when (> digits precision)
         (let* ((discarded-digits (- digits precision))
                (rounded-exponent (+ exponent discarded-digits)))
-          (when (> rounded-exponent maximum-exponent)
-            (check-limit limits :max-formula-exponent
-                         (abs rounded-exponent)))
           (let* ((divisor (expt 10 discarded-digits))
                  (rounded (table-calc-round-integer (abs coefficient) divisor)))
             (setf coefficient (if negative-p (- rounded) rounded)
                   exponent rounded-exponent)))))
     (multiple-value-setq (coefficient exponent)
-      (table-calc-strip-decimal-zeroes coefficient exponent))
+      (safe-decimal-strip-trailing-zeroes coefficient exponent))
     (check-limit limits :max-formula-precision
                  (table-calc-decimal-digit-count coefficient))
     (check-limit limits :max-formula-exponent (abs exponent))
@@ -163,37 +151,27 @@
       (table-calc-round-decimal (* left-coefficient right-coefficient)
                                 exponent nil precision limits))))
 
-(defun table-calc-compare-scaled-integers (left right left-zeroes)
-  (let* ((left-digits (write-to-string (abs left) :base 10 :radix nil))
-         (right-digits (write-to-string (abs right) :base 10 :radix nil))
-         (left-length (+ (length left-digits) left-zeroes)))
-    (loop for index below left-length
-          for left-digit = (if (< index (length left-digits))
-                               (char left-digits index) #\0)
-          for right-digit = (if (< index (length right-digits))
-                                (char right-digits index) #\0)
-          when (char> left-digit right-digit) do (return 1)
-          when (char< left-digit right-digit) do (return -1)
-          finally (return 0))))
-
 (defun table-calc-decimal-ratio-order (numerator denominator)
   (let* ((numerator-coefficient (abs (safe-decimal-coefficient numerator)))
          (denominator-coefficient (abs (safe-decimal-coefficient denominator)))
          (numerator-digits (table-calc-decimal-digit-count numerator-coefficient))
          (denominator-digits (table-calc-decimal-digit-count denominator-coefficient))
-         (difference (- numerator-digits denominator-digits)))
-    (if (minusp difference)
-        (if (>= (table-calc-compare-scaled-integers
-                 numerator-coefficient denominator-coefficient
-                 (- difference))
-                0)
-            difference
-            (1- difference))
-        (if (>= (table-calc-compare-scaled-integers
-                 numerator-coefficient denominator-coefficient 0)
-                0)
-            difference
-            (1- difference)))))
+         (difference (- numerator-digits denominator-digits))
+         (scaled-numerator
+           (%make-safe-decimal
+            :coefficient numerator-coefficient
+            :exponent (max 0 (- difference))
+            :negative-zero-p nil))
+         (scaled-denominator
+           (%make-safe-decimal
+            :coefficient denominator-coefficient
+            :exponent (max 0 difference)
+            :negative-zero-p nil)))
+    (if (>= (safe-decimal-magnitude-compare scaled-numerator
+                                             scaled-denominator)
+            0)
+        difference
+        (1- difference))))
 
 (defun table-calc-decimal-divide (numerator denominator limits target)
   (let* ((numerator-coefficient (safe-decimal-coefficient numerator))
@@ -245,7 +223,7 @@
 
 (defun table-calc-cell-number (raw mode in-range-p limits target)
   (unless (stringp raw)
-    (error 'type-error :datum raw :expected-type 'string))
+    (table-calc-evaluation-error :invalid-value target))
   (let* ((start (position-if-not #'table-calc-space-p raw))
          (end (position-if-not #'table-calc-space-p raw :from-end t)))
     (if (or (null start) (null end))
