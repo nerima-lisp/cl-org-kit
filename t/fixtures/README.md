@@ -59,6 +59,21 @@ E1's supported source-block header interpretation lets `:exports none` suppress 
 E1 ignores `#+HEADER:` and `#+PROPERTY: header-args`, so those forms cannot be relied on to hide
 code; it may still appear in the export.
 
+## Table calculation oracle fixtures
+
+`table-calc/oracle/corpus/` contains formula inputs, and `table-calc/oracle/expected/` contains
+the corresponding results from `org-table-recalculate-buffer-tables`. Regenerate them from the
+repository root with:
+
+```sh
+nix develop -c emacs --batch -Q --script scripts/generate-org-fixtures.el \
+  --table-calc t/fixtures/table-calc/oracle/corpus \
+  t/fixtures/table-calc/oracle/expected
+```
+
+The generated results record Emacs 31.1 and Org 9.8.10. The generator accepts only formulas in
+its literal allowlist.
+
 The coverage check reads the generated trees and reports every `org-element` element and object
 type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
 type.
