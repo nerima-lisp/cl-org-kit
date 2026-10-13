@@ -245,6 +245,31 @@
                       (clock-summary-total-minutes excluded))
                 :to-equal '(75 0)))))
 
+  (it "removes CR from CRLF CLOCK rows before parsing their durations"
+    (let* ((source (format nil "* Scope~%CLOCK: => 0:10~C~%" #\Return))
+           (document (parse-org source))
+           (clock (clock-test-first-clock-node document))
+           (context (clock-test-context "2026-10-12T10:00:00"))
+           (summary
+             (sum-clocks document (clock-test-heading document "Scope")
+                         (clock-test-value "2026-10-12T09:00:00")
+                         (clock-test-value "2026-10-12T10:00:00")
+                         :time-context context)))
+      (with-soft-assertions
+        (expect (find #\Return (node-text clock)) :to-be-truthy)
+        (expect (clock-summary-scoped-minutes summary) :to-be 0)
+        (expect (clock-summary-unscoped-minutes summary) :to-be 10)
+        (expect (clock-summary-total-minutes summary) :to-be 10))))
+
+  (it "returns an empty row when a clock node has no or empty source text"
+    (let* ((detached (make-node :clock))
+           (document (make-document ""))
+           (empty-source (make-node :clock :begin 0 :end 0)))
+      (setf (document-root document) empty-source)
+      (with-soft-assertions
+        (expect (org-kit::clock-row-source-line detached) :to-equal "")
+        (expect (org-kit::clock-row-source-line empty-source) :to-equal ""))))
+
   (it "excludes open entries by default and uses the context reference as their end when opted in"
     (let* ((source (format nil "~{~A~^~%~}"
                            '("* Scope" "CLOCK: [2026-10-12 Mon 09:00]")))
@@ -320,6 +345,12 @@
                 (clock-test-sum (format nil "* Scope~%CLOCK: => x:10") "Scope"
                                 "2026-10-12T09:00:00" "2026-10-12T10:00:00"
                                 context))))
+           (missing-hour-digits
+             (clock-test-error
+              (lambda ()
+                (clock-test-sum (format nil "* Scope~%CLOCK: => :10") "Scope"
+                                "2026-10-12T09:00:00" "2026-10-12T10:00:00"
+                                context))))
            (invalid-timestamp-source
              (format nil
                      "* Scope~%CLOCK: [2026-13-99 Mon 09:00]--[2026-13-99 Mon 10:00] => 0:10"))
@@ -363,10 +394,144 @@
         (clock-test-expect-clock-error bad-duration-syntax :malformed-clock
                                        "CLOCK: => x:10"
                                        "Malformed CLOCK entry")
+        (clock-test-expect-clock-error missing-hour-digits :malformed-clock
+                                       "CLOCK: => :10"
+                                       "Malformed CLOCK entry")
         (clock-test-expect-clock-error
          reversed :malformed-clock
          "CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 09:00] => 1:00"
          "Malformed CLOCK entry"))))
+
+  (it "falls back from corrupted timestamp nodes only when a valid duration exists"
+    (let* ((context (clock-test-context "2026-10-12T12:00:00"))
+           (duration-source
+             (format nil
+                     "* Scope~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:10] => 0:10"))
+           (duration-document (parse-org duration-source))
+           (duration-clock (clock-test-first-clock-node duration-document))
+           (duration-document
+             (progn
+               (setf (node-property duration-clock :value) :not-a-timestamp)
+               duration-document))
+           (duration-summary
+             (sum-clocks duration-document (clock-test-heading duration-document "Scope")
+                         (clock-test-value "2026-10-12T09:00:00")
+                         (clock-test-value "2026-10-12T10:00:00")
+                         :time-context context))
+           (no-duration-source
+             (format nil "* Scope~%CLOCK: [2026-10-12 Mon 09:00]"))
+           (no-duration-document (parse-org no-duration-source))
+           (no-duration-clock (clock-test-first-clock-node no-duration-document))
+           (no-duration-document
+             (progn
+               (setf (node-property no-duration-clock :value) :not-a-timestamp)
+               no-duration-document))
+           (no-duration-error
+             (clock-test-error
+              (lambda ()
+                (sum-clocks no-duration-document
+                            (clock-test-heading no-duration-document "Scope")
+                            (clock-test-value "2026-10-12T09:00:00")
+                            (clock-test-value "2026-10-12T10:00:00")
+                            :time-context context)))))
+      (with-soft-assertions
+        (expect (list (clock-summary-scoped-minutes duration-summary)
+                      (clock-summary-unscoped-minutes duration-summary)
+                      (clock-summary-total-minutes duration-summary))
+                :to-equal '(0 10 10))
+        (clock-test-expect-clock-error no-duration-error :malformed-clock
+                                       "CLOCK: [2026-10-12 Mon 09:00]"
+                                       "Malformed CLOCK entry"))))
+
+  (it "handles diary CLOCK rows as unscoped durations and rejects absent durations"
+    (let* ((context (clock-test-context "2026-10-12T12:00:00"))
+           (duration-source
+             (format nil "* Scope~%CLOCK: <%%(diary-float t 4 2)> => 0:10"))
+           (duration-document (parse-org duration-source))
+           (duration-clock (clock-test-first-clock-node duration-document))
+           (diary-value (node-property duration-clock :value))
+           (duration-summary
+             (sum-clocks duration-document (clock-test-heading duration-document "Scope")
+                         (clock-test-value "2026-10-12T09:00:00")
+                         (clock-test-value "2026-10-12T10:00:00")
+                         :time-context context))
+           (no-duration-line "CLOCK: <%%(diary-float t 4 2)>")
+           (no-duration-source (format nil "* Scope~%~A" no-duration-line))
+           (no-duration-document (parse-org no-duration-source))
+           (no-duration-error
+             (clock-test-error
+              (lambda ()
+                (sum-clocks no-duration-document
+                            (clock-test-heading no-duration-document "Scope")
+                            (clock-test-value "2026-10-12T09:00:00")
+                            (clock-test-value "2026-10-12T10:00:00")
+                            :time-context context)))))
+      (with-soft-assertions
+        (expect (and (node-p diary-value)
+                     (eq (node-type diary-value) :timestamp)
+                     (eq (node-property diary-value :type) :diary))
+                :to-be t)
+        (expect (clock-summary-unscoped-minutes duration-summary) :to-be 10)
+        (expect (clock-summary-total-minutes duration-summary) :to-be 10)
+        (clock-test-expect-clock-error no-duration-error :malformed-clock
+                                       no-duration-line
+                                       "Malformed CLOCK entry"))))
+
+  (it "rethrows invalid timestamps and rejects timestamp-free rows without durations"
+    (let* ((context (clock-test-context "2026-10-12T12:00:00"))
+           (invalid-timestamp-line "CLOCK: [2026-13-99 Mon 09:00]")
+           (invalid-timestamp-document
+             (parse-org (format nil "* Scope~%~A" invalid-timestamp-line)))
+           (invalid-timestamp-error
+             (clock-test-error
+              (lambda ()
+                (sum-clocks invalid-timestamp-document
+                            (clock-test-heading invalid-timestamp-document "Scope")
+                            (clock-test-value "2026-10-12T09:00:00")
+                            (clock-test-value "2026-10-12T10:00:00")
+                            :time-context context))))
+           (missing-timestamp-line "CLOCK: invalid")
+           (missing-timestamp-document
+             (parse-org (format nil "* Scope~%~A" missing-timestamp-line)))
+           (missing-timestamp-error
+             (clock-test-error
+              (lambda ()
+                (sum-clocks missing-timestamp-document
+                            (clock-test-heading missing-timestamp-document "Scope")
+                            (clock-test-value "2026-10-12T09:00:00")
+                            (clock-test-value "2026-10-12T10:00:00")
+                            :time-context context)))))
+      (with-soft-assertions
+        (clock-test-expect-time-error invalid-timestamp-error :invalid-time
+                                      "timestamp has no valid start"
+                                      "Invalid date or time")
+        (clock-test-expect-clock-error missing-timestamp-error :malformed-clock
+                                       missing-timestamp-line
+                                       "Malformed CLOCK entry"))))
+
+  (it "rejects a DST gap interval whose compatible endpoints reverse"
+    (let* ((source
+             (format nil
+                     "* Scope~%CLOCK: [2024-03-10 Sun 02:30]--[2024-03-10 Sun 03:00] => 0:30"))
+           (context (clock-test-context "2024-03-10T12:00:00"
+                                        (resolve-time-zone "America/New_York")))
+           (condition
+             (clock-test-error
+              (lambda ()
+                (clock-test-sum source "Scope"
+                                "2024-03-10T00:00:00"
+                                "2024-03-10T23:59:00" context)))))
+      (with-soft-assertions
+        (clock-test-expect-clock-error condition :malformed-clock
+                                       "interval end precedes start"
+                                       "Malformed CLOCK entry"))))
+
+  (it "recognizes only invalid-time reversed-range timestamp errors"
+    (let ((other-time-error
+            (make-condition 'org-time-error :message "DST gap"
+                            :reason :dst-gap :context "2024-03-10T02:30:00")))
+      (expect (org-kit::clock-reversed-range-error-p other-time-error)
+              :to-be nil)))
 
   (it "reports invalid ranges, mismatched as-of values, and unsupported options"
     (let* ((source (format nil "* Scope~%CLOCK: [2026-10-12 Mon 09:00]"))
@@ -427,7 +592,13 @@
            (wrong-from (funcall capture "2026-10-12T09:00:00" to
                                 :time-context context))
            (wrong-to (funcall capture from "2026-10-12T11:00:00"
-                              :time-context context)))
+                              :time-context context))
+           (missing-root-error
+             (let ((empty-document (make-document "")))
+               (clock-test-error
+                (lambda ()
+                  (sum-clocks empty-document heading from to
+                              :time-context context))))))
       (with-soft-assertions
         (clock-test-expect-clock-error odd-options :unsupported-option
                                        "missing option value"
@@ -446,7 +617,10 @@
         (clock-test-expect-type-error wrong-from "2026-10-12T09:00:00"
                                       'org-time-value)
         (clock-test-expect-type-error wrong-to "2026-10-12T11:00:00"
-                                      'org-time-value))))
+                                      'org-time-value)
+        (expect (typep missing-root-error 'org-kit-error) :to-be t)
+        (expect (org-kit-error-message missing-root-error)
+                :to-equal "Heading does not belong to DOCUMENT"))))
 
   (it "rejects a running clock that starts after the context reference instant"
     (let* ((source (format nil "* Scope~%CLOCK: [2026-10-12 Mon 11:00]"))
@@ -571,11 +745,23 @@
                               :time-context context)))
             (expect (clock-summary-unscoped-minutes summary) :to-be 2))))))
 
-  (it "builds summaries with validated non-negative integer fields"
-    (let ((summary (make-clock-summary :scoped-minutes 3 :unscoped-minutes 2
+  (it "builds summaries with defaults and validated non-negative integer fields"
+    (let ((defaults (make-clock-summary))
+          (slot-defaults (org-kit::%make-clock-summary))
+          (summary (make-clock-summary :scoped-minutes 3 :unscoped-minutes 2
                                        :total-minutes 5
                                        :clipped-interval-count 1)))
       (with-soft-assertions
+        (expect (list (clock-summary-scoped-minutes defaults)
+                      (clock-summary-unscoped-minutes defaults)
+                      (clock-summary-total-minutes defaults)
+                      (clock-summary-clipped-interval-count defaults))
+                :to-equal '(0 0 0 0))
+        (expect (list (clock-summary-scoped-minutes slot-defaults)
+                      (clock-summary-unscoped-minutes slot-defaults)
+                      (clock-summary-total-minutes slot-defaults)
+                      (clock-summary-clipped-interval-count slot-defaults))
+                :to-equal '(0 0 0 0))
         (expect (clock-summary-p summary) :to-be t)
         (expect (clock-summary-scoped-minutes summary) :to-be 3)
         (expect (clock-summary-unscoped-minutes summary) :to-be 2)
