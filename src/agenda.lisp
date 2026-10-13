@@ -402,14 +402,17 @@
                         :max-future-repeats next)
     (setf (agenda-build-state-repeat-count state) next)))
 
-(defun agenda-build-add-entry (state entry)
-  "Append ENTRY only after checking the operation-wide agenda row limit."
+(defun agenda-build-check-entry-limit (state)
+  "Count the next agenda row before constructing it."
   (let ((next (1+ (agenda-build-state-entry-count state))))
     (agenda-check-limit (agenda-build-state-limits state)
                         :max-agenda-entries next)
-    (setf (agenda-build-state-entry-count state) next
-          (agenda-build-state-entries state)
-          (cons entry (agenda-build-state-entries state))))
+    (setf (agenda-build-state-entry-count state) next)))
+
+(defun agenda-build-store-entry (state entry)
+  "Store one entry after its operation-wide row limit has been checked."
+  (setf (agenda-build-state-entries state)
+        (cons entry (agenda-build-state-entries state)))
   entry)
 
 (defun agenda-active-view-p (view)
@@ -519,6 +522,10 @@
                  (funcall function current first-p))
                (when (eq future-repeats :next)
                  (return))
+               (when (>= (agenda-date-ordinal
+                          (agenda-view-start-date current))
+                         (agenda-date-ordinal end-date))
+                 (return))
                (agenda-build-add-repeat state)
                (setf current (agenda-shifted-timestamp-view
                               current amount unit time-context)
@@ -605,11 +612,12 @@
 
 (defun agenda-add-heading-entry (state heading-data kind date
                                 view warning-state scheduled-delay-state source-node)
-  "Check the row budget and append one materialized heading entry."
-  (agenda-build-add-entry
-   state
-   (agenda-make-entry-for-heading heading-data kind date view
-                                   warning-state scheduled-delay-state source-node)))
+  "Check the row budget before constructing and appending one heading entry."
+  (agenda-build-check-entry-limit state)
+  (agenda-build-store-entry
+   state (agenda-make-entry-for-heading heading-data kind date view
+                                        warning-state scheduled-delay-state
+                                        source-node)))
 
 (defun agenda-deadline-warning-start (view warning-days time-context)
   "Return the first local date warned for VIEW's deadline."
@@ -853,12 +861,11 @@ MATCH uses the existing Org match syntax; TIME-CONTEXT is required."
             (when (and todo-state
                        (not (eq (node-property heading :todo-type) :done))
                        (or (null match) (member heading matching :test #'eq)))
-              (agenda-build-add-entry
-               state
-               (agenda-make-entry-for-heading
-                (agenda-heading-entry-data document heading)
-                :todo nil nil nil nil heading))))))
-    )
+              (agenda-build-check-entry-limit state)
+              (agenda-build-store-entry
+               state (agenda-make-entry-for-heading
+                      (agenda-heading-entry-data document heading)
+                      :todo nil nil nil nil heading)))))))
     (make-agenda-result :entries (nreverse (agenda-build-state-entries state))
                         :start-date nil :end-date nil
                         :time-context time-context)))

@@ -140,6 +140,20 @@
   (handler-case (progn (funcall function) nil)
     (error (condition) condition)))
 
+(defun agenda-test-count-heading-entry-constructions (function)
+  (let ((original (symbol-function 'org-kit::agenda-make-entry-for-heading))
+        (count 0))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'org-kit::agenda-make-entry-for-heading)
+                 (lambda (&rest arguments)
+                   (incf count)
+                   (apply original arguments)))
+           (let ((result (funcall function)))
+             (values result count)))
+      (setf (symbol-function 'org-kit::agenda-make-entry-for-heading)
+            original))))
+
 (defun agenda-test-titles-on-date (entries date)
   (loop for entry in entries
         when (and (agenda-entry-date entry)
@@ -235,7 +249,30 @@
                        (agenda-result-entries result) document
                        (not (null (getf case :match))))
                       :to-equal
-                      (agenda-test-expected-entries (getf oracle :entries))))))))))
+                      (agenda-test-expected-entries (getf oracle :entries)))
+              (expect (list (agenda-result-start-date result)
+                            (agenda-result-end-date result))
+                      :to-equal '(nil nil))))))))
+
+  (it "uses the query default of no inherited properties for agenda filters"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+TODO: TODO | DONE~%* TODO Parent~%:PROPERTIES:~%:REGION: west~%:END:~%** TODO Child~%")))
+           (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (matches (agenda-match (list document) "REGION=*{.*}"
+                                  :time-context context))
+           (todos (agenda-result-entries
+                   (agenda-todo-list (list document) :match "REGION=*{.*}"
+                                     :time-context context))))
+      (with-soft-assertions
+        (expect (mapcar (lambda (entry)
+                          (node-property (agenda-match-entry-node entry)
+                                         :raw-value))
+                        matches)
+                :to-equal '("Parent"))
+        (expect (mapcar #'agenda-entry-headline todos)
+                :to-equal '("Parent"))))))
 
 (describe "Agenda calendar and filtering boundaries"
   (it "includes both ends of a civil-date range across a daylight-saving transition"
@@ -277,7 +314,24 @@
           (expect (member "Inactive single date" titles :test #'string=) :to-be nil)
           (expect (some (lambda (title) (search "diary" title :test #'char-equal))
                         titles)
-                  :to-be nil))))))
+                  :to-be nil)))))
+
+  (it "does not scan a canonical planning timestamp as a second active timestamp"
+    (let* ((document
+             (parse-org (format nil "* TODO Scheduled~%SCHEDULED: <2025-01-01>")))
+           (planning nil))
+      (map-nodes (lambda (node)
+                   (when (eq (node-type node) :planning)
+                     (setf planning node)))
+                 (document-root document))
+      (setf (node-children planning) (list (node-property planning :scheduled)))
+      (let ((entries
+              (agenda-result-entries
+               (agenda (list document) (make-org-time-value "2025-01-01")
+                       (make-org-time-value "2025-01-01")
+                       :time-context
+                       (agenda-test-context "2025-01-01T12:00:00+00:00")))))
+        (expect (mapcar #'agenda-entry-kind entries) :to-equal '(:scheduled))))))
 
 (describe "Agenda resource limits and errors"
   (it "enforces inclusive range and row limits below, at and above the ceiling"
@@ -333,6 +387,69 @@
           (expect (org-resource-limit-error-actual over-rows) :to-be 2)
           (expect (org-kit-error-message over-rows)
                   :to-equal "Resource limit exceeded")))))
+
+  (it "uses the minimum limits across documents before constructing agenda rows"
+    (let* ((context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (date (make-org-time-value "2025-01-01"))
+           (end-date (make-org-time-value "2025-01-03"))
+           (high-row-limit
+             (parse-org (format nil "* TODO High~%<2025-01-01>")
+                        :limits (make-limits :max-agenda-entries 4)))
+           (low-row-limit
+             (parse-org (format nil "* TODO Low~%<2025-01-01>")
+                        :limits (make-limits :max-agenda-entries 1)))
+           (high-todo-limit
+             (parse-org "* TODO High" :limits
+                        (make-limits :max-agenda-entries 4)))
+           (low-todo-limit
+             (parse-org "* TODO Low" :limits
+                        (make-limits :max-agenda-entries 1)))
+           (high-range-limit
+             (parse-org "" :limits (make-limits :max-agenda-range-days 4)))
+           (low-range-limit
+             (parse-org "" :limits (make-limits :max-agenda-range-days 2)))
+           (row-result
+             (multiple-value-list
+              (agenda-test-count-heading-entry-constructions
+               (lambda ()
+                 (agenda-test-captured-error
+                  (lambda ()
+                    (agenda (list high-row-limit low-row-limit) date date
+                            :time-context context)))))))
+           (todo-result
+             (multiple-value-list
+              (agenda-test-count-heading-entry-constructions
+               (lambda ()
+                 (agenda-test-captured-error
+                  (lambda ()
+                    (agenda-todo-list (list high-todo-limit low-todo-limit)
+                                      :time-context context)))))))
+           (range-error
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list high-range-limit low-range-limit) date end-date
+                        :time-context context)))))
+      (with-soft-assertions
+        (expect (typep (first row-result) 'org-resource-limit-error) :to-be t)
+        (expect (second row-result) :to-be 1)
+        (when (typep (first row-result) 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name (first row-result))
+                  :to-be :max-agenda-entries)
+          (expect (org-resource-limit-error-limit (first row-result)) :to-be 1)
+          (expect (org-resource-limit-error-actual (first row-result)) :to-be 2))
+        (expect (typep (first todo-result) 'org-resource-limit-error) :to-be t)
+        (expect (second todo-result) :to-be 1)
+        (when (typep (first todo-result) 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name (first todo-result))
+                  :to-be :max-agenda-entries)
+          (expect (org-resource-limit-error-limit (first todo-result)) :to-be 1)
+          (expect (org-resource-limit-error-actual (first todo-result)) :to-be 2))
+        (expect (typep range-error 'org-resource-limit-error) :to-be t)
+        (when (typep range-error 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name range-error)
+                  :to-be :max-agenda-range-days)
+          (expect (org-resource-limit-error-limit range-error) :to-be 2)
+          (expect (org-resource-limit-error-actual range-error) :to-be 3)))))
 
   (it "counts generated repeat occurrences before filtering and aggregates them across documents"
     (let* ((context (agenda-test-context "2025-01-01T12:00:00+00:00"))
@@ -398,6 +515,84 @@
                   :to-be :max-future-repeats)
           (expect (org-resource-limit-error-limit stale-over) :to-be 2)
           (expect (org-resource-limit-error-actual stale-over) :to-be 3)))))
+
+  (it "bounds active timestamp repeats by the range and minimum document cap"
+    (let* ((context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (stale-context (agenda-test-context "2025-01-03T12:00:00+00:00"))
+           (source (format nil "* TODO Active repeat~%<2025-01-01 +1d>"))
+           (empty (parse-org "" :limits
+                             (make-limits :max-future-repeats 0)))
+           (repeat-at-limit
+             (parse-org source :limits (make-limits :max-future-repeats 1)))
+           (repeat-above-limit
+             (parse-org source :limits (make-limits :max-future-repeats 2)))
+           (repeat-over-limit
+             (parse-org source :limits (make-limits :max-future-repeats 0)))
+           (stale-at-limit
+             (parse-org source :limits (make-limits :max-future-repeats 3)))
+           (stale-over-limit
+             (parse-org source :limits (make-limits :max-future-repeats 2)))
+           (aggregate-high
+             (parse-org source :limits (make-limits :max-future-repeats 3)))
+           (aggregate-low
+             (parse-org source :limits (make-limits :max-future-repeats 1)))
+           (jan-1 (make-org-time-value "2025-01-01"))
+           (jan-2 (make-org-time-value "2025-01-02"))
+           (jan-3 (make-org-time-value "2025-01-03"))
+           (jan-4 (make-org-time-value "2025-01-04"))
+           (before-limit
+             (agenda (list empty) jan-2 jan-2 :time-context context))
+           (at-limit
+             (agenda (list repeat-at-limit) jan-2 jan-2
+                     :time-context context))
+           (above-limit
+             (agenda (list repeat-above-limit) jan-2 jan-2
+                     :time-context context))
+           (over-limit
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list repeat-over-limit) jan-2 jan-2
+                        :time-context context))))
+           (stale-entries
+             (agenda-result-entries
+              (agenda (list stale-at-limit) jan-3 jan-4
+                      :time-context stale-context)))
+           (stale-over
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list stale-over-limit) jan-3 jan-4
+                        :time-context stale-context))))
+           (aggregate-over
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list aggregate-high aggregate-low) jan-2 jan-2
+                        :time-context context)))))
+      (with-soft-assertions
+        (expect (agenda-result-entries before-limit) :to-equal nil)
+        (expect (mapcar (lambda (entry)
+                          (org-time-value-iso8601 (agenda-entry-date entry)))
+                        (agenda-result-entries at-limit))
+                :to-equal '("2025-01-02"))
+        (expect (mapcar (lambda (entry)
+                          (org-time-value-iso8601 (agenda-entry-date entry)))
+                        (agenda-result-entries above-limit))
+                :to-equal '("2025-01-02"))
+        (expect (mapcar (lambda (entry)
+                          (org-time-value-iso8601 (agenda-entry-date entry)))
+                        stale-entries)
+                :to-equal '("2025-01-03" "2025-01-04"))
+        (expect (typep over-limit 'org-resource-limit-error) :to-be t)
+        (when (typep over-limit 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit over-limit) :to-be 0)
+          (expect (org-resource-limit-error-actual over-limit) :to-be 1))
+        (expect (typep stale-over 'org-resource-limit-error) :to-be t)
+        (when (typep stale-over 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit stale-over) :to-be 2)
+          (expect (org-resource-limit-error-actual stale-over) :to-be 3))
+        (expect (typep aggregate-over 'org-resource-limit-error) :to-be t)
+        (when (typep aggregate-over 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit aggregate-over) :to-be 1)
+          (expect (org-resource-limit-error-actual aggregate-over) :to-be 2)))))
 
   (it "reports agenda error reason and context and preserves malformed query details"
     (let* ((document (parse-org "* TODO Task"))
@@ -582,7 +777,19 @@
           (expect (org-agenda-error-context invalid-document)
                   :to-equal "not a document"))
         (expect (typep invalid-context 'org-time-error) :to-be t)
-        (expect (typep invalid-date 'org-time-error) :to-be t))))
+        (when (typep invalid-context 'org-time-error)
+          (expect (org-time-error-reason invalid-context) :to-be :invalid-time)
+          (expect (org-time-error-context invalid-context) :to-be nil)
+          (expect (org-kit-error-message invalid-context)
+                  :to-equal "Invalid date or time"))
+        (expect (typep invalid-date 'org-time-error) :to-be t)
+        (when (typep invalid-date 'org-time-error)
+          (expect (org-time-error-reason invalid-date) :to-be :invalid-time)
+          (expect (and (stringp (org-time-error-context invalid-date))
+                       (plusp (length (org-time-error-context invalid-date))))
+                  :to-be t)
+          (expect (org-kit-error-message invalid-date)
+                  :to-equal "Invalid date or time")))))
 
   (it "rejects malformed canonical planning timestamps"
     (let* ((document (parse-org (format nil "* TODO Broken~%DEADLINE: <2025-01-02 Thu>")))
@@ -753,9 +960,14 @@
               (lambda ()
                 (agenda-match (list document) "TODO=\"TODO\""
                               :time-context context))))
-           (todo-error
-             (agenda-test-captured-error
-              (lambda () (agenda-todo-list (list document) :time-context context)))))
+           (todo-result
+             (multiple-value-list
+              (agenda-test-count-heading-entry-constructions
+               (lambda ()
+                 (agenda-test-captured-error
+                  (lambda ()
+                    (agenda-todo-list (list document) :time-context context))))))))
       (with-soft-assertions
         (expect (typep match-error 'org-resource-limit-error) :to-be t)
-        (expect (typep todo-error 'org-resource-limit-error) :to-be t)))))
+        (expect (typep (first todo-result) 'org-resource-limit-error) :to-be t)
+        (expect (second todo-result) :to-be 0)))))
