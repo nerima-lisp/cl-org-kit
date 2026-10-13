@@ -987,6 +987,20 @@
                              :payload (list :expanded-text text)
                              :source-document source-document))
                       nil)))))
+             (prepare-title-macros (node source-document selected-scope depth
+                                         element-depth active-includes active-macros)
+               (loop for segment in (node-property node :title)
+                     when (and (node-p segment)
+                               (eq (node-type segment) :macro))
+                       collect
+                       (progn
+                         (check-limit limits :max-element-depth element-depth)
+                         (multiple-value-bind (views descendant-p)
+                             (prepare-macro segment source-document selected-scope
+                                            depth element-depth active-includes
+                                            active-macros)
+                           (declare (ignore descendant-p))
+                           (cons segment views)))))
              (prepare-node (node source-document selected-scope depth element-depth
                                 active-includes active-macros fragment-p)
                (check-limit limits :max-element-depth element-depth)
@@ -1008,7 +1022,12 @@
                           (let* ((selected-here-p
                                    (and select-active-p
                                         (export-tag-intersection-p tags select-tags)))
-                                 (nested-scope (or selected-scope selected-here-p)))
+                                 (nested-scope (or selected-scope selected-here-p))
+                                 (title-macros
+                                   (prepare-title-macros
+                                    node source-document nested-scope depth
+                                    (1+ element-depth) active-includes
+                                    active-macros)))
                             (multiple-value-bind
                                   (children selected-descendant-p)
                                 (if archive-headline-only-p
@@ -1023,7 +1042,8 @@
                                   (values
                                    (list (%make-export-view
                                           :node node :children children
-                                          :payload (list :selected selected-here-p)
+                                          :payload (list :selected selected-here-p
+                                                         :title-macros title-macros)
                                           :source-document source-document))
                                    (or selected-here-p selected-descendant-p))
                                   (values nil nil)))))))

@@ -356,13 +356,18 @@
         (export-html-write state "</span>"))
       (export-html-write state "</span>"))))
 
-(defun export-html-heading-title (state node)
-  (let ((segments (node-property node :title)))
+(defun export-html-heading-title (state node &optional view)
+  (let ((segments (node-property node :title))
+        (title-macros (and view
+                           (getf (export-view-payload view) :title-macros))))
     (if segments
         (dolist (segment segments)
           (if (node-p segment)
               (progn
-                (export-html-render-node state segment nil nil)
+                (let ((macro-entry (assoc segment title-macros :test #'eq)))
+                  (if macro-entry
+                      (export-html-write-inline-views state (cdr macro-entry))
+                      (export-html-render-node state segment nil nil)))
                 (when (plusp (node-post-blank segment))
                   (export-html-write
                    state (make-string (node-post-blank segment)
@@ -873,7 +878,7 @@
          (export-html-write state "\" role=\"doc-backlink\">")
          (export-html-write state (write-to-string number))
          (export-html-write state "</a></sup>")))
-      (t (export-html-write-raw-text state node)))))
+      )))
 
 (defun export-html-render-footnotes (state)
   (let ((footnotes (export-preparation-footnotes
@@ -951,7 +956,7 @@
                                (export-html-write state "\">")
                                (export-html-write-heading-number state node t)
                                (export-html-write-heading-state state node)
-                               (export-html-heading-title state node)
+                               (export-html-heading-title state node view)
                                (export-html-write state "</a>")
                                (when (and entries
                                           (> (getf (first entries) :level) level))
@@ -965,7 +970,7 @@
 </div>
 "))))
 
-(defun export-html-render-heading (state node child-views)
+(defun export-html-render-heading (state node child-views &optional view)
   (let* ((level (node-property node :level))
          (html-level (1+ level))
          (tag-level (min 6 (max 1 html-level)))
@@ -998,7 +1003,7 @@
     (export-html-write state "\">")
     (export-html-write-heading-number state node)
     (export-html-write-heading-state state node)
-    (export-html-heading-title state node)
+    (export-html-heading-title state node view)
     (export-html-write state "</")
     (export-html-write state tag)
     (export-html-write state ">
@@ -1370,7 +1375,7 @@
          (otherwise
           (export-html-write-node-children state node child-views view))))
       ((:headline :inlinetask)
-       (export-html-render-heading state node child-views))
+       (export-html-render-heading state node child-views view))
       (:paragraph
        (export-html-render-paragraph state node child-views))
       (:center-block
@@ -1401,8 +1406,6 @@
        (export-html-render-export-block state node))
       (:export-snippet
        (export-html-render-snippet state node))
-      (:macro
-       (export-html-write-inline-views state child-views))
       (:horizontal-rule
        (export-html-write state "<hr />
 "))

@@ -659,6 +659,153 @@
         (expect (search "<meta name=\"generator\"" disabled-output)
                 :to-be nil))))
 
+  (it "renders empty headings, heading options, and inline title objects"
+    (let* ((empty-heading
+             (export-org (parse-org (format nil "*~%")) :html))
+           (options
+             (export-org
+              (parse-org
+               (format nil
+                       "#+OPTIONS: todo:nil pri:t~%* TODO [#10] Numeric priority~%"))
+              :html))
+           (enabled-todo
+             (export-org
+              (parse-org (format nil "#+OPTIONS: todo:t~%* TODO Visible~%"))
+              :html))
+           (title-objects
+             (export-org
+              (parse-org
+               (format nil
+                       "#+MACRO: greet Hello $1~%* {{{greet(world)}}}~%* [[https://example.test][linked title]]~%* Footnote [fn::aside]~%"))
+              :html)))
+      (with-soft-assertions
+        (expect (search "<h2" empty-heading) :not :to-be nil)
+        (expect (search "class=\"priority\">[10]" options)
+                :not :to-be nil)
+        (expect (search "class=\"todo TODO\"" options) :to-be nil)
+        (expect (search "class=\"todo TODO\"" enabled-todo)
+                :not :to-be nil)
+        (expect (search "Hello world" title-objects) :not :to-be nil)
+        (expect (search "href=\"https://example.test\"" title-objects)
+                :not :to-be nil)
+        (expect (search "Footnote aside" title-objects) :not :to-be nil))))
+
+  (it "renders nested tables of contents and block footnote children"
+    (let* ((toc
+             (export-org
+              (parse-org
+               (format nil
+                       "#+OPTIONS: toc:3~%* One~%*** Three~%** Two~%"))
+              :html))
+           (footnotes
+             (export-org
+              (parse-org
+               (format nil
+                       "Reference[fn:note].~%~%[fn:note] First paragraph.~%~%  - nested item~%"))
+              :html)))
+      (with-soft-assertions
+        (expect (search "id=\"table-of-contents\"" toc) :not :to-be nil)
+        (expect (search "Three" toc) :not :to-be nil)
+        (expect (search "<ul" footnotes) :not :to-be nil)
+        (expect (search "nested item" footnotes) :not :to-be nil))))
+
+  (it "renders Org block values and timestamps through the public export API"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+BEGIN_EXAMPLE~%example body~%#+END_EXAMPLE~%~%: fixed body~%~%#+BEGIN_SRC emacs-lisp~%(+ 1 1)~%#+END_SRC~%~%Date <2026-10-14 Wed>~%")))
+           (example (export-html-test-node-of-type document :example-block))
+           (fixed-width (export-html-test-node-of-type document :fixed-width))
+           (source (export-html-test-node-of-type document :src-block))
+           (timestamp (export-html-test-node-of-type document :timestamp)))
+      (setf (node-property example :value) nil
+            (node-property fixed-width :value) nil
+            (node-property source :value) nil
+            (node-property timestamp :day-start) 32)
+      (let ((output (export-org document :html)))
+        (with-soft-assertions
+          (expect (search "example body" output) :not :to-be nil)
+          (expect (search "fixed body" output) :not :to-be nil)
+          (expect (search "(+ 1 1)" output) :not :to-be nil)
+          (expect (search "&lt;2026-10-14 Wed&gt;" output)
+                  :not :to-be nil)))))
+
+  (it "handles empty and unterminated Org block values"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+BEGIN_EXAMPLE~%#+END_EXAMPLE~%~%: fixed body~%~%#+BEGIN: empty~%#+END:~%~%#+BEGIN_EXPORT html~%#+END_EXPORT~%")))
+           (example (export-html-test-node-of-type document :example-block))
+           (fixed-width (export-html-test-node-of-type document :fixed-width))
+           (output nil))
+      (setf (node-property example :value) "example tail"
+            (node-property fixed-width :value) "fixed tail")
+      (setf output (export-org document :html))
+      (with-soft-assertions
+        (expect (search "example tail" output) :not :to-be nil)
+        (expect (search "fixed tail" output) :not :to-be nil)
+        (expect (search "<pre class=\"example\">" output)
+                :not :to-be nil))))
+
+  (it "renders descriptive terms, empty table cells, inline code, entities, and rules"
+    (let* ((descriptive (parse-org (format nil "- /Term/ :: Description~%")))
+           (table (parse-org (format nil "| |~%")))
+           (table-cell (export-html-test-node-of-type table :table-cell))
+           (inline (parse-org
+                    (format nil "src_emacs-lisp{(+ 1 1)}~%~%-----~%~%\\alpha~%")))
+           (entity (export-html-test-node-of-type inline :entity)))
+      (setf (node-property table-cell :value) "fallback <&>"
+            (node-property entity :html) "<unsafe>")
+      (let ((descriptive-output (export-org descriptive :html))
+            (table-output (export-org table :html))
+            (inline-output (export-org inline :html)))
+        (with-soft-assertions
+          (expect (search "<dt><i>Term</i></dt>" descriptive-output)
+                  :not :to-be nil)
+          (expect (search "fallback &lt;&amp;&gt;" table-output)
+                  :not :to-be nil)
+          (expect (search "(+ 1 1)" inline-output) :not :to-be nil)
+          (expect (search "<hr />" inline-output) :not :to-be nil)
+          (expect (search "&lt;unsafe&gt;" inline-output) :not :to-be nil)))))
+
+  (it "rejects empty attributes and ATTR_HTML on unsupported nodes"
+    (let* ((empty-attributes
+             (parse-org
+              (format nil
+                      "#+ATTR_HTML: :alt safe~%[[file:image.png]]~%")))
+           (image (export-html-test-node-of-type empty-attributes :link))
+           (unsupported (parse-org (format nil "* Heading~%")))
+           (heading (export-html-test-node-of-type unsupported :headline)))
+      (setf (node-property image :ATTR_HTML) " "
+            (node-property heading :ATTR_HTML) ":id heading")
+      (let ((empty-error
+              (export-html-test-catch-error
+               (lambda () (export-org empty-attributes :html))))
+            (unsupported-error
+              (export-html-test-catch-error
+               (lambda () (export-org unsupported :html)))))
+        (with-soft-assertions
+          (expect (typep empty-error 'org-export-unsupported-syntax) :to-be t)
+          (expect (typep unsupported-error 'org-export-unsupported-syntax)
+                  :to-be t)))))
+
+  (it "keeps malformed entity text escaped after a public node update"
+    (let* ((document (parse-org (format nil "\\alpha")))
+           (entity (export-html-test-node-of-type document :entity)))
+      (setf (node-property entity :html) "<unsafe>")
+      (expect (search "&lt;unsafe&gt;" (export-org document :html))
+              :not :to-be nil)))
+
+  (it "renders a non-paragraph first list child"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "-~%  #+BEGIN_QUOTE~%  quoted child~%  #+END_QUOTE~%  #+BEGIN_CENTER~%  centered child~%  #+END_CENTER~%")))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "quoted child" output) :not :to-be nil)
+        (expect (search "centered child" output) :not :to-be nil))))
+
   (it "does not mutate documents on successful or failed HTML export"
     (let* ((valid (parse-org
                    (format nil "#+ATTR_HTML: :alt safe~%[[file:image.png]]")))
