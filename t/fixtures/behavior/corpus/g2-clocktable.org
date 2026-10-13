@@ -1,0 +1,16 @@
+* Project :project:
+CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 10:00] => 1:00
+** Alpha :focus:
+CLOCK: [2026-10-12 Mon 09:15]--[2026-10-12 Mon 09:45] => 0:30
+*** Focus leaf :leaf:
+CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 10:30] => 0:30
+** Beta :ops:
+CLOCK: [2026-10-12 Mon 10:30]--[2026-10-12 Mon 11:00] => 0:30
+** Open clock
+CLOCK: [2026-10-12 Mon 09:00]
+
+* Outside
+CLOCK: [2026-10-12 Mon 11:00]--[2026-10-12 Mon 11:30] => 0:30
+
+* Unscoped duration
+CLOCK: => 0:15

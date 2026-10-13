@@ -177,17 +177,18 @@
         (concat header "; :effective-tags is captured from org-get-tags at each headline.\n")
         header)))
 
-(defun org-fixture--read-buffer (file)
+(defun org-fixture--read-buffer (file &optional inlinetask-min-level)
   (let ((coding-system-for-read 'utf-8-unix)
         (auto-coding-functions nil)
         (enable-local-variables nil)
         (inhibit-local-variables t))
-    (insert-file-contents file))
-  (when (and (> (point-max) (point-min))
-             (eq (char-after (point-min)) #xfeff))
-    (delete-region (point-min) (1+ (point-min))))
-  (org-mode)
-  (setq-local org-inlinetask-min-level 15))
+    (insert-file-contents file)
+    (when (and (> (point-max) (point-min))
+               (eq (char-after (point-min)) #xfeff))
+      (delete-region (point-min) (1+ (point-min))))
+    (let ((org-inlinetask-min-level (or inlinetask-min-level 15)))
+      (org-mode))
+    (setq-local org-inlinetask-min-level (or inlinetask-min-level 15))))
 
 (defun org-fixture--expected-files (directory)
   (unless (file-directory-p directory)
@@ -519,6 +520,173 @@
     (princ (format "Generated %d G1 clock cases.\n" (length cases)))
     (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
 
+(defun org-fixture--g2-clocktable-read-cases (file)
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8-unix)
+          (read-eval nil))
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (let ((data (read (current-buffer))))
+        (skip-chars-forward " \t\n\r")
+        (unless (and (eobp)
+                     (listp data)
+                     (eq (car-safe data) :cases)
+                     (= (length data) 2)
+                     (proper-list-p (cadr data))
+                     (cadr data))
+          (error "Expected one non-empty (:cases ...) declaration in %s" file))
+        (cadr data)))))
+
+(defun org-fixture--g2-clocktable-validate-cases (cases)
+  (let ((ids (make-hash-table :test #'equal))
+        (known-keys '(:id :action :source :heading-path :from :to :zone
+                      :match :max-depth :inlinetask-min-level))
+        (required-keys '(:id :action :source :heading-path :from :to :zone)))
+    (dolist (case cases)
+      (unless (and (proper-list-p case) (eq (car-safe case) :id))
+        (error "Malformed G2 clocktable case: %S" case))
+      (let ((plist case)
+            (seen nil))
+        (while plist
+          (unless (and (consp plist)
+                       (consp (cdr plist))
+                       (memq (car plist) known-keys)
+                       (not (memq (car plist) seen)))
+            (error "Malformed G2 clocktable case property list: %S" case))
+          (push (car plist) seen)
+          (setq plist (cddr plist)))
+        (unless (cl-every (lambda (key) (memq key seen)) required-keys)
+          (error "Missing required G2 clocktable case property: %S" case))
+        (let ((id (plist-get case :id))
+              (path (plist-get case :heading-path))
+              (depth (plist-get case :max-depth))
+              (inlinetask-min-level (plist-get case :inlinetask-min-level))
+              (match (plist-get case :match)))
+          (unless (and (stringp id)
+                       (not (gethash id ids))
+                       (eq (plist-get case :action) :clocktable-data)
+                       (member (plist-get case :source)
+                               '("g2-clocktable.org" "g2-clocktable-depth.org"))
+                       (proper-list-p path)
+                       path
+                       (cl-every #'stringp path)
+                       (stringp (plist-get case :from))
+                       (stringp (plist-get case :to))
+                       (stringp (plist-get case :zone))
+                       (or (null match) (stringp match))
+                       (or (not (plist-member case :max-depth))
+                           (and (integerp depth) (>= depth 0)))
+                       (or (not (plist-member case :inlinetask-min-level))
+                           (and (integerp inlinetask-min-level)
+                                (> inlinetask-min-level 0))))
+            (error "Invalid G2 clocktable case: %S" case))
+          (puthash id t ids))))
+    cases))
+
+(defun org-fixture--g2-clocktable-heading-position (path)
+  (let ((current-path nil)
+        found)
+    (save-excursion
+      (goto-char (point-min))
+      (while (and (not found)
+                  (re-search-forward "^\\(\\*+\\)[ \t]+.*$" nil t))
+        (let* ((position (match-beginning 0))
+               (level (length (match-string 1)))
+               (title (save-excursion
+                        (goto-char position)
+                        (org-get-heading t t t t))))
+          (setq current-path
+                (append (cl-subseq current-path 0
+                                   (min (1- level) (length current-path)))
+                        (list title)))
+          (when (equal current-path path)
+            (setq found position)))))
+    (or found (error "G2 clocktable heading path not found: %S" path))))
+
+(defun org-fixture--g2-clocktable-org-time (text)
+  (cond
+   ((string-match-p "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'" text)
+    text)
+   ((string-match-p
+     "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}T[0-9]\\{2\\}:[0-9]\\{2\\}:00\\'"
+     text)
+    (format-time-string "%Y-%m-%d %H:%M"
+                        (org-fixture--g1-clock-parse-time text)))
+   (t (error "Invalid G2 clocktable range endpoint: %S" text))))
+
+(defun org-fixture--g2-clocktable-case-result (case corpus-directory)
+  (let* ((source-name (plist-get case :source))
+         (source (expand-file-name source-name corpus-directory))
+         (zone (plist-get case :zone))
+         (process-environment (copy-sequence process-environment))
+         (system-time-locale "C")
+         (org-clock-report-include-clocking-task nil)
+         (inlinetask-min-level (or (plist-get case :inlinetask-min-level) 15))
+         (from (org-fixture--g2-clocktable-org-time (plist-get case :from)))
+         (to (org-fixture--g2-clocktable-org-time (plist-get case :to)))
+         (max-depth (if (plist-member case :max-depth)
+                        (plist-get case :max-depth)
+                      30)))
+    (unless (file-exists-p source)
+      (error "G2 clocktable corpus file does not exist: %s" source-name))
+    (setenv "TZ" zone)
+    (with-temp-buffer
+      (org-fixture--read-buffer source inlinetask-min-level)
+      (let ((heading-position
+             (org-fixture--g2-clocktable-heading-position
+              (plist-get case :heading-path))))
+        (goto-char heading-position)
+        (org-narrow-to-subtree)
+        (goto-char (point-max))
+        (let* ((table
+                (org-clock-get-table-data
+                 source-name
+                 (list :maxlevel max-depth
+                       :match (plist-get case :match)
+                       :tags t
+                       :tstart from
+                       :tend to)))
+               (rows
+                (mapcar (lambda (entry)
+                          (list :level (nth 0 entry)
+                                :title (substring-no-properties (nth 1 entry))
+                                :tags (mapcar #'substring-no-properties (nth 2 entry))
+                                :minutes (nth 4 entry)))
+                        (nth 2 table))))
+          (list :id (plist-get case :id)
+                :org-clock-total-minutes (nth 1 table)
+                :org-clock-rows rows))))))
+
+(defun org-fixture-generate-g2-clocktable
+    (corpus-directory cases-file expected-file)
+  (unless (file-directory-p corpus-directory)
+    (error "Corpus directory does not exist: %s" corpus-directory))
+  (let* ((cases (org-fixture--g2-clocktable-validate-cases
+                 (org-fixture--g2-clocktable-read-cases cases-file)))
+         (results (mapcar (lambda (case)
+                            (org-fixture--g2-clocktable-case-result
+                             case corpus-directory))
+                          cases))
+         (content
+          (org-fixture--check-output
+           (concat
+            (format (concat
+                     "; Generated from org-clock-get-table-data with Emacs %s and Org %s.\n"
+                     "; Each case narrows to its selected heading subtree.\n"
+                     "; Time zones are bound per case; open clocks are excluded.\n"
+                     "; Rows use reduced levels, effective tags, and matched subtree minutes.\n"
+                     "; Inline-task minimum level is case-bound (default 15).\n")
+                    emacs-version (org-version))
+            "(\n"
+            (mapconcat #'org-fixture--cl-value results "\n ")
+            ")\n"))))
+    (make-directory (file-name-directory expected-file) t)
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region content nil expected-file nil 'silent))
+    (princ (format "Wrote %s\n" (file-name-nondirectory expected-file)))
+    (princ (format "Generated %d G2 clocktable cases.\n" (length cases)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
 (defun org-fixture-generate (corpus-directory expected-directory)
   "Generate one .sexp file per .org file under CORPUS-DIRECTORY."
   (unless (file-directory-p corpus-directory)
@@ -544,6 +712,11 @@
                      command-line-args-left)))
     (setq command-line-args-left nil)
     (cond
+     ((and (= (length arguments) 4) (equal (car arguments) "--g2-clocktable"))
+      (org-fixture-generate-g2-clocktable
+       (expand-file-name (nth 1 arguments))
+       (expand-file-name (nth 2 arguments))
+       (expand-file-name (nth 3 arguments))))
      ((and (= (length arguments) 4) (equal (car arguments) "--g1-clock"))
       (org-fixture-generate-g1-clock
        (expand-file-name (nth 1 arguments))
@@ -563,6 +736,7 @@
      (t
       (error (concat
               "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el CORPUS-DIR EXPECTED-DIR\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --g2-clocktable CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --g1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
