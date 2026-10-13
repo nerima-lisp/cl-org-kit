@@ -48,68 +48,45 @@
                          shortened)
             shortened)))))
 
+(defun edit-clocktable-check-character-lower-bound (document characters)
+  (let ((limits (document-limits document)))
+    (check-limit limits :max-output-length characters)
+    (dolist (limit-name
+              (if (document-encoding document)
+                  '(:max-output-octets :max-input-length)
+                  '(:max-input-length :max-output-octets)))
+      (check-limit limits limit-name characters))))
+
 (defun edit-clocktable-check-indentation-size (document row)
   (let ((level (clocktable-row-level row)))
     (when (> level 1)
-      (let* ((indent-length (* 2 (1- level)))
-             (characters (+ 2 indent-length))
-             (encoding (or (document-encoding document) :utf-8))
-             (preamble-length
-               (if (reader-generic-bom-encoding-p encoding)
-                   (edit-encoded-range-octets "" 0 0 encoding)
-                   0))
-             (octets
-               (+ (edit-clocktable-encoded-size "\\_" encoding preamble-length)
-                  (* indent-length
-                     (edit-clocktable-encoded-size
-                      " " encoding preamble-length))))
-             (limits (document-limits document)))
-        (check-limit limits :max-output-length characters)
-        (unless (document-encoding document)
-          (check-limit limits :max-input-length characters))
-        (when (document-encoding document)
-          (check-limit limits :max-input-length octets))
-        (check-limit limits :max-output-octets octets)))))
+      (edit-clocktable-check-character-lower-bound
+       document (+ 2 (* 2 (1- level)))))))
 
 (defun edit-clocktable-time-text (minutes)
-  (format nil "~D:~2,'0D" (floor minutes 60) (mod minutes 60)))
+  (multiple-value-bind (days remainder) (floor minutes 1440)
+    (if (plusp days)
+        (format nil "~Dd ~D:~2,'0D"
+                days (floor remainder 60) (mod remainder 60))
+        (format nil "~D:~2,'0D" (floor minutes 60) (mod minutes 60)))))
 
-(defun edit-clocktable-decimal-digit-count (integer)
-  (if (< integer 10)
-      1
-      (let* ((bits (integer-length integer))
-             (upper (ceiling (* bits 3010299956639812)
-                             10000000000000000)))
-        (if (>= integer (expt 10 (1- upper))) upper (1- upper)))))
-
-(defun edit-clocktable-encoded-size (text encoding preamble-length)
-  (- (edit-encoded-range-octets text 0 (length text) encoding)
-     preamble-length))
+(defun edit-clocktable-time-cell-length-lower-bound (minutes total-p)
+  (let ((days (floor minutes 1440))
+        (wrapping-length (if total-p 2 0)))
+    (+ wrapping-length
+       (if (plusp days)
+           ;; 2^(4n) >= 10^n, so bound digits without formatting DAYS.
+           (+ 6 (1+ (floor (1- (integer-length days)) 4)))
+           4))))
 
 (defun edit-clocktable-check-time-size (document minutes total-p)
-  (let* ((encoding (or (document-encoding document) :utf-8))
-         (digits (edit-clocktable-decimal-digit-count (floor minutes 60)))
-         (characters (+ digits 3 (if total-p 2 0)))
-         (preamble-length
-           (if (reader-generic-bom-encoding-p encoding)
-               (edit-encoded-range-octets "" 0 0 encoding)
-               0))
-         (digit-octets
-           (edit-clocktable-encoded-size "0" encoding preamble-length))
-         (octets
-           (+ (* (+ digits 2) digit-octets)
-              (edit-clocktable-encoded-size ":" encoding preamble-length)
-              (if total-p
-                  (* 2 (edit-clocktable-encoded-size
-                        "*" encoding preamble-length))
-                  0)))
-         (limits (document-limits document)))
-    (check-limit limits :max-output-length characters)
-    (unless (document-encoding document)
-      (check-limit limits :max-input-length characters))
-    (when (document-encoding document)
-      (check-limit limits :max-input-length octets))
-    (check-limit limits :max-output-octets octets)))
+  (let* ((lower-bound
+           (edit-clocktable-time-cell-length-lower-bound minutes total-p)))
+    (edit-clocktable-check-character-lower-bound document lower-bound)
+    (let* ((time (edit-clocktable-time-text minutes))
+           (cell (if total-p (concatenate 'string "*" time "*") time))
+           (characters (length cell)))
+      (edit-clocktable-check-character-lower-bound document characters))))
 
 (defun edit-clocktable-headline-cells (headline)
   (let ((position 0)
