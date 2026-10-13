@@ -71,8 +71,7 @@
         (effective-property document heading "COOKIE_DATA" :inherit t)
       (let* ((tokens (statistics-cookie-data-tokens data))
              (mode (if item :checkbox
-                       (and (statistics-cookie-title-node-p heading cookie)
-                            (or (statistics-cookie-data-mode tokens) :todo))))
+                       (or (statistics-cookie-data-mode tokens) :todo)))
              (local-p (or (eq source heading)
                           (and (listp source)
                                (member heading source :test #'eq))))

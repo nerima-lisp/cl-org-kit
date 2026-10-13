@@ -335,6 +335,23 @@
                 :to-equal source)
         (expect (document-text document) :to-equal source))))
 
+  (it "keeps inline-task cookies outside the parent heading scope"
+    (let* ((source (format nil
+                           "* Parent [0/0]~%- [ ] Parent item [0/0]~%*************** TODO Inline~%- [X] Inline item [9/9]~%*************** END~%"))
+           (expected (format nil
+                             "* Parent [0/1]~%- [ ] Parent item [0/0]~%*************** TODO Inline~%- [X] Inline item [9/9]~%*************** END~%"))
+           (document (parse-org source))
+           (heading (first (statistics-cookies-test-nodes document :headline)))
+           (result-and-updates (multiple-value-list
+                                (update-statistics-cookies document heading)))
+           (result (first result-and-updates)))
+      (with-soft-assertions
+        (expect (mapcar #'statistics-cookie-update-new-value (second result-and-updates))
+                :to-equal '("[0/1]"))
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
   (it "updates title cookies alongside other inline title objects"
     (let* ((source (format nil "* *Parent* [9/9]~%** TODO Child~%"))
            (expected (format nil "* *Parent* [0/1]~%** TODO Child~%"))
@@ -412,12 +429,17 @@
 
   (it "keeps the statistics update API and all of its exported symbols documented"
     (let ((update (make-statistics-cookie-update :node nil :old-value "[1/2]"
-                                                 :new-value "[2/2]")))
+                                                 :new-value "[2/2]"))
+          (default-update (make-statistics-cookie-update)))
       (with-soft-assertions
         (expect (statistics-cookie-update-p update) :to-be t)
         (expect (statistics-cookie-update-node update) :to-be nil)
         (expect (statistics-cookie-update-old-value update) :to-equal "[1/2]")
         (expect (statistics-cookie-update-new-value update) :to-equal "[2/2]")
+        (expect (list (statistics-cookie-update-node default-update)
+                      (statistics-cookie-update-old-value default-update)
+                      (statistics-cookie-update-new-value default-update))
+                :to-equal '(nil nil nil))
         (dolist (name '(statistics-cookie-update make-statistics-cookie-update
                         statistics-cookie-update-p statistics-cookie-update-node
                         statistics-cookie-update-old-value
