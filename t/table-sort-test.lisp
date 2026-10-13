@@ -365,6 +365,50 @@
                  "Table sort range crosses a section boundary" :invalid-range))
         (expect (document-text document) :to-equal source))))
 
+  (it "keeps one-sided row ranges defaulted without hlines and ambiguous with hlines"
+    (let* ((source (format nil "| c |~%| b |~%| a |~%"))
+           (start-only-expected (format nil "| c |~%| a |~%| b |~%"))
+           (end-only-expected (format nil "| b |~%| c |~%| a |~%")))
+      (multiple-value-bind (document result)
+          (table-sort-test-edit source 1 :start 2)
+        (with-soft-assertions
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal start-only-expected)
+          (expect (document-text document) :to-equal source)))
+      (multiple-value-bind (document result)
+          (table-sort-test-edit source 1 :end 2)
+        (with-soft-assertions
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal end-only-expected)
+          (expect (document-text document) :to-equal source))))
+    (let* ((source (format nil "| z |~%| a |~%|---|~%"))
+           (document (parse-org source))
+           (table (table-sort-test-find-table (document-root document)))
+           (start-only
+             (table-sort-test-condition
+              (lambda ()
+                (table-sort-rows document table 1
+                                 :order :ascending :type :lexical
+                                 :start 1))))
+           (end-only
+             (table-sort-test-condition
+              (lambda ()
+                (table-sort-rows document table 1
+                                 :order :ascending :type :lexical
+                                 :end 2)))))
+      (with-soft-assertions
+        (expect start-only
+                :to-equal
+                (table-sort-test-table-error
+                 "A row range is required for a table with sections"
+                 :ambiguous-range))
+        (expect end-only
+                :to-equal
+                (table-sort-test-table-error
+                 "A row range is required for a table with sections"
+                 :ambiguous-range))
+        (expect (document-text document) :to-equal source))))
+
   (it "rejects a pipe table with no standard rows"
     (let* ((source (format nil "|---|~%"))
            (document (parse-org source))
