@@ -48,33 +48,23 @@
 (defun reader-heading-todo-declaration-info (source-key context offset)
   (when source-key
     (let ((normalized (string-upcase source-key)))
-      (dolist (entry '(("TODO" . :todo)
-                       ("SEQ_TODO" . :seq-todo)
-                       ("TYP_TODO" . :typ-todo)))
-        (let* ((base (car entry))
-               (base-length (length base)))
-          (cond
-            ((string= normalized base)
-             (return-from reader-heading-todo-declaration-info
-               (values (cdr entry) nil t)))
-            ((and (> (length normalized) base-length)
-                  (string= normalized base :end1 base-length :end2 base-length)
-                  (char= (char normalized base-length) #\[))
-             (let* ((source-length (length source-key))
-                    (id-start (1+ base-length))
-                    (id-end (1- source-length)))
-               (unless (and (> id-end id-start)
-                            (char= (char source-key id-end) #\])
-                            (loop for index from id-start below id-end
-                                  for character = (char source-key index)
-                                  always (not (find character
-                                                   '(#\[ #\] #\Space #\Tab)))))
-                 (reader-heading-settings-error
-                  context offset "Malformed TODO sequence ID in ~A" source-key))
-               (return-from reader-heading-todo-declaration-info
-                 (values (cdr entry)
-                         (subseq source-key id-start id-end)
-                         t))))))))))
+      (multiple-value-bind (kind base-length sequence-id-p)
+          (org-setting-todo-declaration-prefix normalized)
+        (when kind
+          (if sequence-id-p
+              (let* ((source-length (length source-key))
+                     (id-start (1+ base-length))
+                     (id-end (1- source-length)))
+                (unless (and (> id-end id-start)
+                             (char= (char source-key id-end) #\])
+                             (loop for index from id-start below id-end
+                                   for character = (char source-key index)
+                                   always (not (find character
+                                                    '(#\[ #\] #\Space #\Tab)))))
+                  (reader-heading-settings-error
+                   context offset "Malformed TODO sequence ID in ~A" source-key))
+                (values kind (subseq source-key id-start id-end) t))
+              (values kind nil t))))))
 
 (defun reader-heading-todo-name-valid-p (name)
   (and (plusp (length name))

@@ -13,21 +13,31 @@
     ("TAGS" . :tag-alist)
     ("TODO-KEYWORDS" . :todo-keywords)))
 
+(defun org-setting-todo-declaration-prefix (name)
+  (loop for (base . kind) in '(("TODO" . :todo)
+                               ("SEQ_TODO" . :seq-todo)
+                               ("TYP_TODO" . :typ-todo))
+        for base-length = (length base)
+        when (string= name base)
+          return (values kind base-length nil)
+        when (and (> (length name) base-length)
+                  (string= name base :end1 base-length :end2 base-length)
+                  (char= (char name base-length) #\[))
+          return (values kind base-length t)
+        finally (return (values nil nil nil))))
+
 (defun org-setting-key (key)
   "Return the document-settings key for an Org setting name, or NIL if unknown.
 KEY may be a string or symbol; names are case-insensitive."
   (let* ((source-name (if (stringp key) key (symbol-name key)))
          (name (string-upcase source-name)))
     (cond
-      ((member name '("TODO" "SEQ_TODO" "TYP_TODO") :test #'string=)
-       :todo-keywords)
-      ((and (>= (length name) 6)
-            (or (string= name "TODO[" :end1 5 :end2 5)
-                (and (>= (length name) 9)
-                     (string= name "SEQ_TODO[" :end1 9 :end2 9))
-                (and (>= (length name) 9)
-                     (string= name "TYP_TODO[" :end1 9 :end2 9)))
-            (char= (char name (1- (length name))) #\]))
+      ((multiple-value-bind (kind base-length sequence-id-p)
+             (org-setting-todo-declaration-prefix name)
+         (declare (ignore base-length))
+         (and kind
+              (or (not sequence-id-p)
+                  (char= (char name (1- (length name))) #\]))))
        :todo-keywords)
       (t (cdr (assoc name +org-setting-keys+ :test #'string=))))))
 
