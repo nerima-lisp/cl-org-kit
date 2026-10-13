@@ -1243,6 +1243,19 @@
         (expect (document-text large-delete-document)
                 :to-equal large-delete-source))))
 
+  (it "increments all-nine absolute references when inserting a column"
+    (let* ((source (format nil "| A |~%| x |~%#+TBLFM: $9=$9~%"))
+           (expected
+             (format nil "|   | A |~%|   | x |~%#+TBLFM: $10=$10~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node
+                   (document-root document) :table))
+           (result (table-insert-column document table 1)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
   (it "renders empty table columns and honors alignment and width cookies"
     (let* ((hline-source
              (format nil "| A |~%|---|~%| x |~%#+TBLFM: $1=1~%"))
