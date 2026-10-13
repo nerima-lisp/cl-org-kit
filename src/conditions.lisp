@@ -213,6 +213,7 @@ REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
 (defun org-time-error-context (condition)
   "Return the bounded, escaped time or zone excerpt, or NIL."
   (slot-value condition 'context))
+
 (defun org-clock-error-reason (condition)
   "Return the keyword classifying why the clock operation failed."
   (slot-value condition 'reason))

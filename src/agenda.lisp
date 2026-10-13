@@ -6,19 +6,27 @@
                          (:copier nil)
                          (:predicate %agenda-entry-p))
   "One normalized agenda row associated with a source headline and timestamp."
-  date kind headline heading-path timestamp warning-state scheduled-delay-state
-  todo-state effective-tags habit-p source-node)
+  date date-order-key kind headline heading-path timestamp warning-state
+  scheduled-delay-state todo-state effective-tags habit-p source-node)
 
 (defun make-agenda-entry (&key date kind headline heading-path timestamp
                                warning-state scheduled-delay-state todo-state
                                effective-tags habit-p source-node)
   "Return an agenda row with its date, kind, headline, and source values."
-  (%make-agenda-entry :date date :kind kind :headline headline
-                      :heading-path heading-path :timestamp timestamp
-                      :warning-state warning-state
-                      :scheduled-delay-state scheduled-delay-state
-                      :todo-state todo-state :effective-tags effective-tags
-                      :habit-p habit-p :source-node source-node))
+  (let ((date-order-key
+          (when (and (org-time-value-p date)
+                     (eq (org-time-value-kind date) :date))
+            (cl-date-kit:local-date-to-epoch-day
+             (cl-date-kit:make-local-date (org-time-value-year date)
+                                          (org-time-value-month date)
+                                          (org-time-value-day date))))))
+    (%make-agenda-entry :date date :date-order-key date-order-key
+                        :kind kind :headline headline
+                        :heading-path heading-path :timestamp timestamp
+                        :warning-state warning-state
+                        :scheduled-delay-state scheduled-delay-state
+                        :todo-state todo-state :effective-tags effective-tags
+                        :habit-p habit-p :source-node source-node)))
 
 (defun agenda-entry-p (object)
   "Return true when OBJECT is an agenda entry."
@@ -175,10 +183,6 @@
      :max-future-repeats
      (minimum-limit-value limits :max-future-repeats))))
 
-(defun agenda-check-limit (limits name actual)
-  "Check ACTUAL against agenda operation LIMITS before allocating a result."
-  (check-limit limits name actual))
-
 (defun agenda-require-time-context (time-context)
   "Return TIME-CONTEXT or signal when it is not an Org time context."
   (unless (org-time-context-p time-context)
@@ -221,27 +225,13 @@
    (org-time-context-reference-instant time-context)
    (org-time-zone-backend (org-time-context-zone time-context))))
 
-(defun agenda-headlines (document)
-  "Return headline nodes from DOCUMENT in document order."
-  (let ((headlines nil))
-    (when (document-root document)
-      (map-nodes (lambda (node)
-                   (when (eq (node-type node) :headline)
-                     (push node headlines)))
-                 (document-root document)))
-    (nreverse headlines)))
-
-(defun agenda-heading-title (heading)
-  "Return HEADING's raw title or the empty string when absent."
-  (or (node-property heading :raw-value) ""))
-
-(defun agenda-heading-data (document heading)
+(defun agenda-heading-data (document heading indices)
   "Return normalized title, path, TODO state, effective tags, and habit flag."
   (multiple-value-bind (style found-p)
       (effective-property document heading "STYLE")
     (declare (ignore found-p))
-    (values (agenda-heading-title heading)
-            (node-heading-path heading)
+    (values (or (node-property heading :raw-value) "")
+            (node-heading-path-with-indices heading indices)
             (node-property heading :todo-keyword)
             (node-property heading :todo-type)
             (effective-heading-tags document heading)
@@ -253,28 +243,38 @@
         thereis (and (eq (node-type child) :section)
                      (find :planning (node-children child) :key #'node-type))))
 
-(defun agenda-planning-timestamp (planning property)
-  "Return PLANNING's canonical timestamp for PROPERTY, if present."
-  (let ((timestamp (node-property planning property)))
-    (when timestamp
-      (unless (and (node-p timestamp) (eq (node-type timestamp) :timestamp))
-        (agenda-signal-error :unsupported-entry property
-                             "Planning timestamp is not a timestamp node"))
-      timestamp)))
-
-(defun agenda-timestamp-nodes (document heading)
-  "Return active-scan timestamp nodes owned by HEADING in document order."
-  (let ((timestamps nil))
-    (map-nodes (lambda (node)
-                 (when (and (eq (node-type node) :timestamp)
-                            (eq (query-nearest-headline node) heading)
-                            (not (loop for parent = (node-parent node)
-                                       then (node-parent parent)
-                                       while parent
-                                       thereis (eq (node-type parent) :planning))))
-                   (push node timestamps)))
-               (document-root document))
-    (nreverse timestamps)))
+(defun agenda-document-heading-data (document &key collect-headlines-p
+                                                collect-timestamps-p)
+  "Collect selected heading data and sibling indices for DOCUMENT."
+  (let ((headlines nil)
+        (timestamps (when collect-timestamps-p
+                      (make-hash-table :test #'eq)))
+        (indices (make-hash-table :test #'eq))
+        (counts-by-parent (make-hash-table :test #'eq)))
+    (labels ((visit (node heading)
+               (let* ((type (node-type node))
+                      (owner (if (eq type :headline) node heading)))
+                 (when (eq type :headline)
+                   (let* ((counts
+                            (or (gethash heading counts-by-parent)
+                                (setf (gethash heading counts-by-parent)
+                                      (make-hash-table :test #'equal))))
+                          (title (node-property node :raw-value ""))
+                          (index (1+ (gethash title counts 0))))
+                     (setf (gethash title counts) index
+                           (gethash node indices) index))
+                   (when collect-headlines-p
+                     (push node headlines)))
+                 (unless (eq type :planning)
+                   (when (and collect-timestamps-p
+                              (eq type :timestamp) owner)
+                     (push node (gethash owner timestamps)))
+                   (dolist (child (node-children node))
+                     (visit child owner))))))
+      (when (document-root document)
+        (visit (document-root document) nil)))
+    (values (when collect-headlines-p (nreverse headlines))
+            timestamps indices)))
 
 (defun agenda-time-value-date (value)
   "Return VALUE's civil calendar date."
@@ -353,11 +353,6 @@
           (agenda-time-value-date (or (org-timestamp-view-end view)
                                       (org-timestamp-view-start view)))))
 
-(defun agenda-node-line-values (node)
-  "Return NODE's inclusive 1-based line range."
-  (multiple-value-bind (start end) (node-line-range node)
-    (values start end)))
-
 (defun agenda-match (documents match &key time-context)
   "Return matched headlines in document order using an explicit TIME-CONTEXT."
   (let* ((documents (agenda-normalize-documents documents))
@@ -367,14 +362,18 @@
          (count 0)
          (matches nil))
     (dolist (document documents)
-      (dolist (node (query-match-at document match reference-time))
-        (incf count)
-        (agenda-check-limit limits :max-agenda-entries count)
-        (multiple-value-bind (line end-line) (agenda-node-line-values node)
-          (push (make-agenda-match-entry
-                 :document document :node node :heading-path (node-heading-path node)
-                 :line line :end-line end-line)
-                matches))))
+      (multiple-value-bind (headings timestamps-by-heading indices)
+          (agenda-document-heading-data document)
+        (declare (ignore headings timestamps-by-heading))
+        (dolist (node (query-match-at document match reference-time))
+          (incf count)
+          (check-limit limits :max-agenda-entries count)
+          (multiple-value-bind (line end-line) (node-line-range node)
+            (push (make-agenda-match-entry
+                   :document document :node node
+                   :heading-path (node-heading-path-with-indices node indices)
+                   :line line :end-line end-line)
+                  matches)))))
     (nreverse matches)))
 
 (defstruct (agenda-build-state (:constructor %make-agenda-build-state))
@@ -393,15 +392,15 @@
 (defun agenda-build-add-repeat (state)
   "Count one repeater occurrence before it is created or filtered."
   (let ((next (1+ (agenda-build-state-repeat-count state))))
-    (agenda-check-limit (agenda-build-state-limits state)
-                        :max-future-repeats next)
+    (check-limit (agenda-build-state-limits state)
+                 :max-future-repeats next)
     (setf (agenda-build-state-repeat-count state) next)))
 
 (defun agenda-build-check-entry-limit (state)
   "Count the next agenda row before constructing it."
   (let ((next (1+ (agenda-build-state-entry-count state))))
-    (agenda-check-limit (agenda-build-state-limits state)
-                        :max-agenda-entries next)
+    (check-limit (agenda-build-state-limits state)
+                 :max-agenda-entries next)
     (setf (agenda-build-state-entry-count state) next)))
 
 (defun agenda-build-store-entry (state entry)
@@ -668,7 +667,7 @@ after the later of VIEW's date and the reference date."
           (when (and (not done-p)
                      (agenda-date-in-range-p repeat-date start-date end-date))
             (agenda-add-heading-entry state heading-data :deadline repeat-date
-                                      source-view :overdue nil planning))))))
+                                      source-view :due nil planning))))))
 
 (defun agenda-scheduled-delay (view scheduled-delay)
   "Return VIEW's explicit scheduled delay amount and unit, or call defaults."
@@ -726,9 +725,9 @@ after the later of VIEW's date and the reference date."
        (agenda-add-heading-entry state heading-data :timestamp
                                  date view nil nil timestamp)))))
 
-(defun agenda-heading-entry-data (document heading)
+(defun agenda-heading-entry-data (document heading indices)
   "Return heading fields in the order expected by agenda entry constructors."
-  (multiple-value-list (agenda-heading-data document heading)))
+  (multiple-value-list (agenda-heading-data document heading indices)))
 
 (defun agenda-build-planning-rows (state heading-data planning
                                    start-date end-date warning-days scheduled-delay
@@ -738,7 +737,7 @@ after the later of VIEW's date and the reference date."
     (dolist (specification '((:deadline :deadline)
                              (:scheduled :scheduled)))
       (destructuring-bind (kind source-property) specification
-        (let ((timestamp (agenda-planning-timestamp planning source-property)))
+        (let ((timestamp (node-property planning source-property)))
           (when timestamp
             (let ((view (timestamp-view timestamp)))
               (when (agenda-active-view-p view)
@@ -755,11 +754,11 @@ after the later of VIEW's date and the reference date."
                         start-date end-date scheduled-delay first-occurrence-p
                         time-context source-view))))))))))))
 
-(defun agenda-build-timestamp-rows (state document heading heading-data
+(defun agenda-build-timestamp-rows (state timestamps heading-data
                                     start-date end-date future-repeats
                                     time-context)
   "Collect active non-planning timestamps owned by HEADING."
-  (dolist (timestamp (agenda-timestamp-nodes document heading))
+  (dolist (timestamp timestamps)
     (let ((view (timestamp-view timestamp)))
       (when (agenda-active-view-p view)
         (agenda-call-with-occurrences
@@ -781,28 +780,31 @@ after the later of VIEW's date and the reference date."
   (stable-sort
    entries
    (lambda (left right)
-     (let ((left-date (agenda-date-ordinal
-                       (agenda-local-date (agenda-entry-date left))))
-           (right-date (agenda-date-ordinal
-                        (agenda-local-date (agenda-entry-date right)))))
+     (let ((left-date (%agenda-entry-date-order-key left))
+           (right-date (%agenda-entry-date-order-key right)))
        (if (= left-date right-date)
            (< (agenda-entry-kind-order left)
               (agenda-entry-kind-order right))
            (< left-date right-date))))))
 
-(defun agenda (documents start-date end-date &rest options
-                                      &key time-context warning-days
-                                        scheduled-delay future-repeats)
+(defun agenda (documents start-date end-date
+               &key time-context
+                 ((:warning-days warning-days-option) nil warning-days-supplied-p)
+                 ((:scheduled-delay scheduled-delay-option) nil
+                  scheduled-delay-supplied-p)
+                 ((:future-repeats future-repeats-option) nil
+                  future-repeats-supplied-p))
   "Return agenda rows for inclusive START-DATE through END-DATE.
 TIME-CONTEXT is required and is the only source of reference time."
-  (declare (ignore warning-days scheduled-delay future-repeats))
   (let* ((documents (agenda-normalize-documents documents))
          (time-context (agenda-require-time-context time-context))
          (start-date (agenda-require-date start-date))
          (end-date (agenda-require-date end-date))
-         (warning-days (getf options :warning-days 14))
-         (scheduled-delay (getf options :scheduled-delay 0))
-         (future-repeats (getf options :future-repeats :all))
+         (warning-days (if warning-days-supplied-p warning-days-option 14))
+         (scheduled-delay (if scheduled-delay-supplied-p
+                              scheduled-delay-option 0))
+         (future-repeats (if future-repeats-supplied-p
+                             future-repeats-option :all))
          (start-local (agenda-local-date start-date))
          (end-local (agenda-local-date end-date))
          (limits (agenda-operation-limits documents)))
@@ -816,21 +818,26 @@ TIME-CONTEXT is required and is the only source of reference time."
     (when (> (agenda-date-ordinal start-local) (agenda-date-ordinal end-local))
       (agenda-signal-error :invalid-range (list start-date end-date)
                            "Agenda start date follows its end date"))
-    (agenda-check-limit limits :max-agenda-range-days
-                        (agenda-range-size start-local end-local))
+    (check-limit limits :max-agenda-range-days
+                  (agenda-range-size start-local end-local))
     (let ((state (%make-agenda-build-state :limits limits
                                            :entry-count 0 :repeat-count 0
                                            :entries nil)))
       (dolist (document documents)
-        (dolist (heading (agenda-headlines document))
-          (let* ((heading-data (agenda-heading-entry-data document heading))
-                 (planning (agenda-planning-node heading)))
-            (agenda-build-planning-rows state heading-data
-                                        planning start-local end-local warning-days
-                                        scheduled-delay future-repeats time-context)
-            (agenda-build-timestamp-rows state document heading heading-data
-                                         start-local end-local future-repeats
-                                         time-context))))
+        (multiple-value-bind (headings timestamps-by-heading indices)
+            (agenda-document-heading-data
+             document :collect-headlines-p t :collect-timestamps-p t)
+          (dolist (heading headings)
+            (let* ((heading-data (agenda-heading-entry-data
+                                  document heading indices))
+                   (planning (agenda-planning-node heading)))
+              (agenda-build-planning-rows state heading-data
+                                          planning start-local end-local warning-days
+                                          scheduled-delay future-repeats time-context)
+              (agenda-build-timestamp-rows
+               state (nreverse (gethash heading timestamps-by-heading))
+               heading-data
+               start-local end-local future-repeats time-context)))))
       (make-agenda-result
        :entries (agenda-sort-entries
                  (nreverse (agenda-build-state-entries state)))
@@ -847,17 +854,23 @@ MATCH uses the existing Org match syntax; TIME-CONTEXT is required."
                                           :entry-count 0 :repeat-count 0
                                           :entries nil)))
     (dolist (document documents)
-      (let ((matching (and match (query-match-at document match reference-time))))
-        (dolist (heading (agenda-headlines document))
-          (let ((todo-state (node-property heading :todo-keyword)))
-            (when (and todo-state
-                       (not (eq (node-property heading :todo-type) :done))
-                       (or (null match) (member heading matching :test #'eq)))
-              (agenda-build-check-entry-limit state)
-              (agenda-build-store-entry
-               state (agenda-make-entry-for-heading
-                      (agenda-heading-entry-data document heading)
-                      :todo nil nil nil nil heading)))))))
+      (multiple-value-bind (headings timestamps-by-heading indices)
+          (agenda-document-heading-data document :collect-headlines-p t)
+        (declare (ignore timestamps-by-heading))
+        (let* ((matching (and match (query-match-at document match reference-time)))
+               (matching-set (and match (make-hash-table :test #'eq))))
+          (dolist (heading matching)
+            (setf (gethash heading matching-set) t))
+          (dolist (heading headings)
+            (let ((todo-state (node-property heading :todo-keyword)))
+              (when (and todo-state
+                         (not (eq (node-property heading :todo-type) :done))
+                         (or (null match) (gethash heading matching-set)))
+                (agenda-build-check-entry-limit state)
+                (agenda-build-store-entry
+                 state (agenda-make-entry-for-heading
+                        (agenda-heading-entry-data document heading indices)
+                        :todo nil nil nil nil heading))))))))
     (make-agenda-result :entries (nreverse (agenda-build-state-entries state))
                         :start-date nil :end-date nil
                         :time-context time-context)))

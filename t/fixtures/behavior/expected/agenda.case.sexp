@@ -1423,7 +1423,7 @@
 			 "Deadline repeating warning -1d"
 			 :heading-path
 			 ("Parent" "Deadline repeating warning -1d")
-			 :warning-state :overdue :warning-days 1
+			 :warning-state :due :warning-days 1
 			 :scheduled-delay-state nil
 			 :scheduled-delay-days nil :todo-state "TODO"
 			 :effective-tags
@@ -1900,7 +1900,7 @@
 			 "Deadline repeating warning -1d"
 			 :heading-path
 			 ("Parent" "Deadline repeating warning -1d")
-			 :warning-state :overdue :warning-days 1
+			 :warning-state :due :warning-days 1
 			 :scheduled-delay-state nil
 			 :scheduled-delay-days nil :todo-state "TODO"
 			 :effective-tags
@@ -2124,7 +2124,7 @@
 			 "Deadline repeating warning -1d"
 			 :heading-path
 			 ("Parent" "Deadline repeating warning -1d")
-			 :warning-state :overdue :warning-days 1
+			 :warning-state :due :warning-days 1
 			 :scheduled-delay-state nil
 			 :scheduled-delay-days nil :todo-state "TODO"
 			 :effective-tags
@@ -2520,7 +2520,7 @@
 			 "Deadline repeating warning -1d"
 			 :heading-path
 			 ("Parent" "Deadline repeating warning -1d")
-			 :warning-state :overdue :warning-days 1
+			 :warning-state :due :warning-days 1
 			 :scheduled-delay-state nil
 			 :scheduled-delay-days nil :todo-state "TODO"
 			 :effective-tags
@@ -2744,7 +2744,7 @@
 			 "Deadline repeating warning -1d"
 			 :heading-path
 			 ("Parent" "Deadline repeating warning -1d")
-			 :warning-state :overdue :warning-days 1
+			 :warning-state :due :warning-days 1
 			 :scheduled-delay-state nil
 			 :scheduled-delay-days nil :todo-state "TODO"
 			 :effective-tags
@@ -3140,7 +3140,7 @@
 			 "Deadline repeating warning -1d"
 			 :heading-path
 			 ("Parent" "Deadline repeating warning -1d")
-			 :warning-state :overdue :warning-days 1
+			 :warning-state :due :warning-days 1
 			 :scheduled-delay-state nil
 			 :scheduled-delay-days nil :todo-state "TODO"
 			 :effective-tags
