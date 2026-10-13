@@ -188,7 +188,7 @@
                          (setf *emitter-odd-levels* nil))))))
           (when (and (not kind)
                      (org-setting-todo-declaration-prefix (string-upcase key)))
-            (emitter-add-todo-setting node key value))))))
+            (emitter-add-todo-setting node key value)))))))
 
 (defun emitter-raw-block-body (node value closer)
   (let ((body (emitter-normalize-newlines value)))
