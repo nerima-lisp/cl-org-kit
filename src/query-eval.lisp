@@ -598,13 +598,24 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
               (and present (node-p timestamp)
                    (eq (node-type timestamp) :timestamp))))))
 
+(defun query-todo-sequence-keyword-name (entry)
+  (cond
+    ((stringp entry) entry)
+    ((and (consp entry)
+          (consp (cdr entry))
+          (eq (car entry) :keyword)
+          (stringp (cadr entry)))
+     (cadr entry))))
+
 (defun query-done-keyword-p (keyword document)
   (let* ((settings (document-settings document))
          (sequences (getf settings :todo-sequences))
          (keywords (getf settings :todo-keywords)))
     (or (loop for sequence in sequences
-              thereis (member keyword (getf sequence :done-keywords)
-                              :test #'string=))
+              thereis (some (lambda (entry)
+                              (let ((name (query-todo-sequence-keyword-name entry)))
+                                (and name (string= keyword name))))
+                            (getf sequence :done-keywords)))
         (loop for entry in keywords
               thereis (and (consp entry) (stringp (car entry))
                            (string= keyword (car entry))

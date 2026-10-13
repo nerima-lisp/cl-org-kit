@@ -159,13 +159,23 @@
                                                    (:regexp "^file_")))
                 :to-equal '("parent_before" "parent_after" "child_before"
                             "shared" "child_after"))
+        (expect (effective-heading-tags document child
+                                        :inherit '(:exclude ("absent")))
+                :to-equal '("file_before" "file_after" "parent_before"
+                            "parent_after" "child_before" "shared"
+                            "child_after"))
+        (expect (effective-heading-tags document child
+                                        :inherit '(:exclude "absent"))
+                :to-equal '("file_before" "file_after" "parent_before"
+                            "parent_after" "child_before" "shared"
+                            "child_after"))
         (expect (document-text document) :to-equal before))))
 
   (it "resolves direct, inherited, appended, and document properties"
     (let* ((document
              (parse-org
               (format nil
-                      "#+PROPERTY: FALLBACK global-value~%#+PROPERTY: X global~%* Root :ancestor:~%:PROPERTIES:~%:INHERITED: root-value~%:SHARED: root-value~%:LAYERED: root-direct~%:LAYERED+: root-plus~%:SEQUENCE+: root-plus~%:X+: root-plus~%:END:~%** Child :child:~%:PROPERTIES:~%:LOCAL: child-value~%:SHARED: child-value~%:SEQUENCE: child-direct~%:SEQUENCE+: child-plus~%:LAYERED+: child-plus~%:X+: child-plus~%:END:~%*** Grandchild~%:PROPERTIES:~%:SEQUENCE+: grandchild-plus~%:LAYERED+: grandchild-plus~%:X+: grandchild-plus~%:END:~%")))
+                      "#+PROPERTY: FALLBACK global-value~%#+PROPERTY: X global~%* Root :ancestor:~%:PROPERTIES:~%:DESCRIPTION~%:INHERITED: root-value~%:SHARED: root-value~%:LAYERED: root-direct~%:LAYERED+: root-plus~%:SEQUENCE+: root-plus~%:X+: root-plus~%:END:~%** Child :child:~%:PROPERTIES:~%:LOCAL: child-value~%:SHARED: child-value~%:SEQUENCE: child-direct~%:SEQUENCE+: child-plus~%:LAYERED+: child-plus~%:X+: child-plus~%:END:~%*** Grandchild~%:PROPERTIES:~%:SEQUENCE+: grandchild-plus~%:LAYERED+: grandchild-plus~%:X+: grandchild-plus~%:END:~%")))
            (headings (org-semantics-test-headings document))
            (root (first headings))
            (child (second headings))
@@ -200,6 +210,11 @@
           (expect source :to-be root))
         (multiple-value-bind (value source)
             (effective-property document grandchild "INHERITED"
+                                :inherit '(:exclude UNRELATED))
+          (expect value :to-equal "root-value")
+          (expect source :to-be root))
+        (multiple-value-bind (value source)
+            (effective-property document grandchild "INHERITED"
                                 :inherit '(:exclude ("INHERITED")))
           (expect value :to-be nil)
           (expect source :to-be nil))
@@ -220,6 +235,15 @@
             (effective-property document grandchild "X")
           (expect value :to-equal "grandchild-plus")
           (expect source :to-equal (list grandchild)))
+        (multiple-value-bind (value source)
+            (effective-property document grandchild "SHARED"
+                                :inherit '(SHARED))
+          (expect value :to-equal "child-value")
+          (expect source :to-be child))
+        (multiple-value-bind (value source)
+            (effective-property document grandchild 'LOCAL :inherit t)
+          (expect value :to-equal "child-value")
+          (expect source :to-be child))
         (multiple-value-bind (value source)
             (effective-property document grandchild "SEQUENCE" :inherit t)
           (expect value :to-equal
@@ -287,4 +311,53 @@
            (expect (integerp (org-query-error-position condition)) :to-be t)
            t))
        :to-be t)
+      (signals type-error
+        (effective-heading-tags :not-a-document heading))
+      (expect
+       (handler-case
+           (progn (effective-heading-tags document nil) nil)
+         (org-edit-error (condition)
+           (expect (org-edit-error-reason condition) :to-be :target-not-found)
+           t))
+       :to-be t)
+      (signals org-query-error
+        (effective-heading-tags document heading :inherit '(42)))
+      (signals org-query-error
+        (effective-heading-tags document heading :inherit "shared"))
+      (signals org-query-error
+        (effective-heading-tags document heading
+                                :inherit '(:exclude (:regexp))))
+      (signals org-query-error
+        (effective-heading-tags document heading
+                                :inherit '(:exclude (:exclude . malformed))))
+      (signals org-query-error
+        (effective-heading-tags document heading :inherit '(:exclude 42)))
+      (signals org-query-error
+        (effective-heading-tags document heading
+                                :inherit '(:regexp 42)))
+      (signals type-error
+        (effective-property document heading 42))
       (expect (document-text document) :to-equal before))))
+
+(describe "Effective document properties"
+  (it "uses the last document property declaration"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+PROPERTY: RESULT first~%#+PROPERTY: RESULT second~%* Heading~%")))
+           (heading (first (org-semantics-test-headings document))))
+      (multiple-value-bind (value source)
+          (effective-property document heading "RESULT" :inherit t)
+        (expect value :to-equal "second")
+        (expect source :to-be :document))))
+
+  (it "skips malformed global property entries while resolving fallback"
+    (let* ((document
+             (parse-org "* Heading"
+                        :settings
+                        '(:property-settings (42 ("RESULT" . "global-value")))))
+           (heading (first (org-semantics-test-headings document))))
+      (multiple-value-bind (value source)
+          (effective-property document heading "RESULT" :inherit t)
+        (expect value :to-equal "global-value")
+        (expect source :to-be :document)))))

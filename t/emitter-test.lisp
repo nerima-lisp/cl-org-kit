@@ -516,6 +516,25 @@
           (expect (node-property emitted-headline :todo-type)
                   :to-equal :done)))))
 
+  (it "keeps unique TYP_TODO keywords when merging emitted TODO settings"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%#+TYP_TODO: IDEA | REJECTED~%* IDEA Item~%"))
+           (document (parse-org source))
+           (output (emit-org (document-root document)))
+           (emitted (parse-org output)))
+      (with-soft-assertions
+        (expect output :to-equal source)
+        (expect (getf (document-settings emitted) :todo-keywords)
+                :to-equal '(("IDEA" . :todo) ("REJECTED" . :done))))))
+
+  (it "keeps the first repeated ordinary TODO keyword"
+    (expect (org-kit::emitter-merge-todo-keywords
+             '(("SHARED" . :todo) ("SHARED" . :done) ("WAIT" . :todo))
+             '(("TYPED" . :done)))
+            :to-equal '(("SHARED" . :todo) ("WAIT" . :todo)
+                        ("TYPED" . :done))))
+
   (it "preserves structured headline titles and document heading settings"
     (let* ((tree
              (make-node

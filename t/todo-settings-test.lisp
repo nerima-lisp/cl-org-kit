@@ -77,6 +77,23 @@
                   ("NEXT" :todo) ("FINISHED" :done)
                   ("IDEA" :todo) ("REJECTED" :done))))))
 
+  (it "keeps logging modes when keywords have no fast key"
+    (let* ((settings
+             (document-settings
+              (parse-org "#+TODO: WAIT(@) | DONE(!) CANCELLED(/)")))
+           (sequence (first (getf settings :todo-sequences))))
+      (with-soft-assertions
+        (expect (getf (first (getf sequence :todo-keywords)) :logging-mode)
+                :to-be :note)
+        (expect (getf (first (getf sequence :todo-keywords)) :fast-key)
+                :to-be nil)
+        (expect (mapcar (lambda (keyword)
+                          (list (getf keyword :logging-mode)
+                                (getf keyword :exit-logging-p)
+                                (getf keyword :fast-key)))
+                        (getf sequence :done-keywords))
+                :to-equal '((:timestamp nil nil) (:none t nil))))))
+
   (it "uses active keywords first when an inactive declaration repeats one"
     (let* ((document
              (parse-org
@@ -138,11 +155,36 @@
                  "#+TODO[flow]: FIRST | LAST"
                  "#+SEQ_TODO[flow]: NEXT | FINISHED")))
       (signals org-parse-error
+               (parse-org "#+TODO[bad id]: FIRST | LAST"))
+      (signals org-parse-error
                (parse-org "#+TODO: TODO | TODO"))
       (signals org-parse-error
                (parse-org "#+TODO: (TODO) DONE"))
       (signals org-parse-error
                (parse-org "#+SEQ_TODO[flow: NEXT | DONE"))))
+
+  (it "rejects malformed logging markers and TODO sequence boundaries"
+    (dolist (source
+             '("#+TODO: TODO) | DONE"
+               "#+TODO: TODO(OPEN | DONE"
+               "#+TODO: TODO(@@) | DONE"
+               "#+TODO: TODO(!!) | DONE"
+               "#+TODO: TODO(//) | DONE"
+               "#+TODO: TODO(ab) | DONE"
+               "#+TODO:"
+               "#+TODO: OPEN | DONE | CANCELLED"))
+      (signals org-parse-error (parse-org source))))
+
+  (it "rejects malformed TODO tokens before they can reach settings"
+    (dolist (token '("A B" "TODO(x)tail" "TODO((x))" "TODO(x))"))
+      (signals org-parse-error
+        (org-kit::reader-heading-todo-keyword token nil 0)))
+    (let ((settings
+            (document-settings
+             (parse-org "" :settings '(:todo-keywords nil)))))
+      (with-soft-assertions
+        (expect (getf settings :todo-keywords) :to-be nil)
+        (expect (getf settings :todo-sequences) :to-be nil))))
 
   (it "signals a located parse error and preserves success and error inputs"
     (let* ((valid-input
@@ -202,6 +244,78 @@
         (expect (getf settings :property-settings)
                 :to-equal '(("HEADER-ARGS" . ":eval never")
                             ("CATEGORY" . "Notes"))))))
+
+  (it "normalizes explicit canonical TODO sequences and source setting keys"
+    (let* ((sequence
+             '(:kind :sequence
+               :declaration-kind :todo
+               :sequence-id "manual"
+               :declaration-index 1
+               :todo-keywords ((:keyword "OPEN" :logging-mode :none
+                                :exit-logging-p nil :fast-key nil))
+               :done-keywords ((:keyword "CLOSED" :logging-mode :none
+                                :exit-logging-p nil :fast-key nil))))
+           (settings
+             (document-settings
+              (parse-org "" :settings (list :todo-sequences (list sequence))))))
+      (with-soft-assertions
+        (expect (getf settings :todo-sequences) :to-equal (list sequence))
+        (expect (getf settings :todo-keywords)
+                :to-equal '(("OPEN" . :todo) ("CLOSED" . :done)))
+        (expect (org-kit::reader-heading-setting-kind "TODO[manual]")
+                :to-be :todo)
+        (expect (org-kit::reader-heading-setting-kind "SEQ_TODO[manual]")
+                :to-be :todo)
+        (expect (org-kit::reader-heading-setting-kind "TYP_TODO[manual]")
+                :to-be :todo)
+        (expect (org-kit::reader-heading-setting-kind "TODO[manual")
+                :to-be nil)
+        (expect (org-kit::reader-heading-setting-kind 42) :to-be nil))))
+
+  (it "preserves and safely ignores malformed explicit TODO keyword settings"
+    (dolist (keywords '(42 (42 (:WAIT) ("UNKNOWN" . :other))))
+      (let* ((document
+               (parse-org "* TODO Entry"
+                          :settings (list :todo-keywords keywords)))
+             (heading (first (todo-settings-test-headlines document))))
+        (with-soft-assertions
+          (expect (getf (document-settings document) :todo-keywords)
+                  :to-equal keywords)
+          (expect (node-property heading :todo-keyword) :to-be nil)))))
+
+  (it "preserves malformed explicit TODO sequences without using them"
+    (dolist (sequences
+             '(42
+               ((:kind :sequence :declaration-kind :todo
+                 :sequence-id "bad-value" :declaration-index 1
+                 :todo-keywords 42 :done-keywords nil))
+               ((:kind :sequence :declaration-kind :todo
+                 :sequence-id "bad-entry" :declaration-index 1
+                 :todo-keywords (42) :done-keywords nil))
+               ((:kind :sequence :declaration-kind :todo
+                 :sequence-id "bad-keyword" :declaration-index 1
+                 :todo-keywords ((:keyword 42)) :done-keywords nil))
+               ((:kind :sequence :declaration-kind :unknown
+                 :sequence-id "bad-kind" :declaration-index 1
+                 :todo-keywords nil :done-keywords nil))))
+      (let* ((document
+               (parse-org "* TODO Entry"
+                          :settings (list :todo-sequences sequences)))
+             (settings (document-settings document))
+             (heading (first (todo-settings-test-headlines document))))
+        (with-soft-assertions
+          (expect (getf settings :todo-sequences) :to-equal sequences)
+          (expect (getf settings :todo-keywords)
+                  :to-equal '(("TODO" . :todo) ("DONE" . :done)))
+          (expect (node-property heading :todo-keyword) :to-equal "TODO")
+          (expect (node-property heading :todo-type) :to-be :todo)))))
+
+  (it "rejects PROPERTY declarations without a name and accepts a valueless name"
+    (signals org-parse-error
+      (parse-org "#+PROPERTY:"))
+    (expect (getf (document-settings (parse-org "#+PROPERTY: EMPTY"))
+                  :property-settings)
+            :to-equal '(("EMPTY" . ""))))
 
   (it "omits tag and property settings when no corresponding directive exists"
     (let* ((document (parse-org "* Plain heading"))

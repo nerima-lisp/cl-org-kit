@@ -279,7 +279,5 @@ contributes, :DOCUMENT for a #+PROPERTY fallback, or NIL when absent."
         (return-from effective-property
           (if plus-p
               (values (format nil "~{~A~^~%~}" values) sources)
-              (if sources
-                  (values (car values) (car (last sources)))
-                  (values (car values) :document)))))
+              (values (car values) (car (last sources))))))
       (values nil nil))))

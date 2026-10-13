@@ -1058,6 +1058,19 @@
           (expect (query-eval-test-titles
                    (org-kit:query-list malformed-keywords '(:todo-present)))
                   :to-equal '("Entry")))
+        (let ((sequence-keywords (parse-org "")))
+          (setf (org-kit:document-settings sequence-keywords)
+                '(:todo-sequences
+                  ((:done-keywords
+                    ("FINISHED" (:keyword "ARCHIVED" :logging-mode :none)
+                     42 (:keyword . "MALFORMED") (:keyword 7))))))
+          (with-soft-assertions
+            (expect (org-kit::query-done-keyword-p "FINISHED" sequence-keywords)
+                    :to-be t)
+            (expect (org-kit::query-done-keyword-p "ARCHIVED" sequence-keywords)
+                    :to-be t)
+            (expect (org-kit::query-done-keyword-p "UNKNOWN" sequence-keywords)
+                    :to-be nil)))
         (let ((legacy-document
                 (parse-org "* DONE Entry"
                            :settings '(:todo-keywords (("DONE"))))))
