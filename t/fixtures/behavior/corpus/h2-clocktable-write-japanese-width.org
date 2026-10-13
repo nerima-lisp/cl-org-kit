@@ -1,0 +1,7 @@
+日本語の見出し幅を検証します。
+
+#+BEGIN: clocktable :narrow 40! :maxlevel 1
+stale body
+#+END:
+
+日本語の後続本文を保持します。

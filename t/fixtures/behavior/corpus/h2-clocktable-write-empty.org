@@ -1,0 +1,6 @@
+Before empty clocktable.
+
+#+BEGIN: clocktable :maxlevel 0 :indent nil :narrow 1
+#+END:
+
+After empty clocktable.

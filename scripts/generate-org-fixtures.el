@@ -1906,6 +1906,160 @@
 (advice-add 'org-fixture--t5b-render-file :around
             #'org-fixture--t5b-render-file-around)
 
+(defun org-fixture--h2-clocktable-read-cases (file)
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8-unix)
+          (read-eval nil))
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (let ((data (read (current-buffer))))
+        (skip-chars-forward " \t\n\r")
+        (unless (and (eobp)
+                     (listp data)
+                     (eq (car-safe data) :cases)
+                     (= (length data) 2)
+                     (proper-list-p (cadr data))
+                     (cadr data))
+          (error "Expected one non-empty (:cases ...) declaration in %s" file))
+        (cadr data)))))
+
+(defun org-fixture--h2-clocktable-validate-cases (cases)
+  (let ((ids (make-hash-table :test #'equal)))
+    (dolist (case cases)
+      (unless (and (proper-list-p case)
+                   (eq (car-safe case) :id)
+                   (stringp (plist-get case :id))
+                   (not (gethash (plist-get case :id) ids))
+                   (stringp (plist-get case :source))
+                   (integerp (plist-get case :total-minutes))
+                   (>= (plist-get case :total-minutes) 0)
+                   (proper-list-p (plist-get case :rows)))
+        (error "Invalid H2 clocktable case: %S" case))
+      (puthash (plist-get case :id) t ids)
+      (dolist (row (plist-get case :rows))
+        (unless (and (proper-list-p row)
+                     (integerp (plist-get row :level))
+                     (> (plist-get row :level) 0)
+                     (stringp (plist-get row :title))
+                     (or (null (plist-get row :tags))
+                         (and (proper-list-p (plist-get row :tags))
+                              (cl-every #'stringp (plist-get row :tags))))
+                     (integerp (plist-get row :minutes))
+                     (>= (plist-get row :minutes) 0))
+          (error "Invalid H2 clocktable row: %S" row)))
+      (unless (and (plist-member case :source)
+                   (plist-member case :total-minutes)
+                   (plist-member case :rows))
+        (error "Missing H2 clocktable case property: %S" case)))
+    cases))
+
+(defun org-fixture--h2-clocktable-table (case)
+  (let* ((entries
+          (mapcar (lambda (row)
+                    (list (plist-get row :level)
+                          (plist-get row :title)
+                          (plist-get row :tags)
+                          nil
+                          (plist-get row :minutes)
+                          nil))
+                  (plist-get case :rows)))
+         (tables (list (list (plist-get case :source)
+                             (plist-get case :total-minutes)
+                             entries)))
+         (params (org-combine-plists org-clocktable-defaults '(:header ""))))
+    (with-temp-buffer
+      (org-mode)
+      (org-clocktable-write-default (point-min) tables params)
+      (buffer-string))))
+
+(defun org-fixture--h2-clocktable-updated-source (source table)
+  (with-temp-buffer
+    (insert source)
+    (let* ((case-fold-search t)
+           (tree (org-element-parse-buffer))
+           (block
+            (org-element-map tree 'dynamic-block
+              (lambda (element)
+                (when (equal (org-element-property :block-name element)
+                             "clocktable")
+                  element))
+              nil t)))
+      (unless block
+        (error "No clocktable dynamic block in H2 fixture source"))
+      (goto-char (org-element-property :begin block))
+      (forward-line 1)
+      (let ((start (point))
+            end)
+        (unless (re-search-forward "^[ \t]*#\\+END:[ \t]*$" nil t)
+          (error "Clocktable dynamic block has no #+END line"))
+        (setq end (line-beginning-position))
+        (concat (buffer-substring-no-properties (point-min) start)
+                table
+                (buffer-substring-no-properties end (point-max)))))))
+
+(defun org-fixture--h2-clocktable-render-case (case corpus-directory)
+  (let* ((source-file (expand-file-name (plist-get case :source)
+                                        corpus-directory))
+         (_ (unless (file-exists-p source-file)
+              (error "H2 clocktable corpus file does not exist: %s"
+                     (plist-get case :source))))
+         (source
+          (with-temp-buffer
+            (let ((coding-system-for-read 'utf-8-unix))
+              (insert-file-contents source-file))
+            (buffer-string)))
+         (table (org-fixture--h2-clocktable-table case)))
+    (list :id (plist-get case :id)
+          :org-clocktable-body table
+          :org-updated-document
+          (org-fixture--h2-clocktable-updated-source source table))))
+
+(defun org-fixture-generate-h2-clocktable
+    (corpus-directory cases-file expected-file)
+  (unless (file-directory-p corpus-directory)
+    (error "H2 clocktable corpus directory does not exist: %s" corpus-directory))
+  (let* ((cases (org-fixture--h2-clocktable-validate-cases
+                 (org-fixture--h2-clocktable-read-cases cases-file)))
+         (results (mapcar (lambda (case)
+                            (org-fixture--h2-clocktable-render-case
+                             case corpus-directory))
+                          cases))
+         (content
+          (org-fixture--check-output
+           (concat
+            (format "; Generated from org-clocktable-write-default with Emacs %s and Org %s.\n"
+                    emacs-version (org-version))
+            "; Policy fixture: omit Org's volatile current-time caption for pure H2 editing.\n"
+            "; Formatting uses org-clocktable-defaults; all supplied rows are retained.\n"
+            "(:cases\n ("
+            (mapconcat #'org-fixture--cl-value results "\n ")
+            "))\n"))))
+    (make-directory (file-name-directory expected-file) t)
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region content nil expected-file nil 'silent))
+    (princ (format "Wrote %s\n" (file-name-nondirectory expected-file)))
+    (princ (format "Generated %d H2 clocktable cases.\n" (length cases)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
+(defun org-fixture--h2-clocktable-main-around (original)
+  (let ((arguments (if (equal (car command-line-args-left) "--")
+                       (cdr command-line-args-left)
+                     command-line-args-left)))
+    (if (equal (car arguments) "--h2-clocktable")
+        (progn
+          (setq command-line-args-left nil)
+          (unless (= (length arguments) 4)
+            (error (concat
+                    "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+                    "--h2-clocktable CORPUS-DIR CASES-FILE EXPECTED-FILE")))
+          (org-fixture-generate-h2-clocktable
+           (expand-file-name (nth 1 arguments))
+           (expand-file-name (nth 2 arguments))
+           (expand-file-name (nth 3 arguments))))
+      (funcall original))))
+
+(advice-add 'org-fixture--main :around #'org-fixture--h2-clocktable-main-around)
+
 (org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here

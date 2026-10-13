@@ -1,0 +1,7 @@
+Before pipe-title clocktable.
+
+#+BEGIN: clocktable :tags t
+stale pipe body
+#+END:
+
+After pipe-title clocktable.

@@ -1,0 +1,7 @@
+前文: 日本語の文字を保持します。
+
+#+BEGIN: clocktable :scope invalid :maxlevel 1 :indent nil :narrow 1 :tags t
+stale table body
+#+END:
+
+後文: 日本語の文字を保持します。
