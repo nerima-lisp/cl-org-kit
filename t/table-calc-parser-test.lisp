@@ -114,6 +114,8 @@
               (second (org-kit::table-calc-expression-children relative-and-last))))
            (underscore-name (table-calc-test-assignment-expression "$1=$_name"))
            (punctuated-name (table-calc-test-assignment-expression "$1=$col-2"))
+           (punctuated-children
+             (org-kit::table-calc-expression-children punctuated-name))
            (range-children (org-kit::table-calc-expression-children range))
            (range-start (org-kit::table-calc-expression-value (first range-children)))
            (range-end (org-kit::table-calc-expression-value (second range-children))))
@@ -141,9 +143,14 @@
         (expect (org-kit::table-calc-reference-column-value
                  (org-kit::table-calc-expression-value underscore-name))
                 :to-equal "_name")
+        (expect (org-kit::table-calc-expression-kind punctuated-name) :to-be :binary)
+        (expect (org-kit::table-calc-expression-value punctuated-name) :to-be #\-)
         (expect (org-kit::table-calc-reference-column-value
-                 (org-kit::table-calc-expression-value punctuated-name))
-                :to-equal "col-2")
+                 (org-kit::table-calc-expression-value (first punctuated-children)))
+                :to-equal "col")
+        (expect (org-kit::safe-decimal-rational
+                 (org-kit::table-calc-expression-value (second punctuated-children)))
+                :to-be 2)
         (expect (org-kit::table-calc-reference-row-kind relative-reference)
                 :to-be :relative)
         (expect (org-kit::table-calc-reference-row-value relative-reference)
@@ -477,7 +484,7 @@
                                                (table-calc-test-decimal "-2"))
                 :to-be -1))))
 
-  (it "matches the committed Emacs oracle corpus without reading fixture forms"
+  (it "parses every formula in the Emacs oracle corpus"
     (let* ((corpus-formulas
              (append (table-calc-test-corpus-formulas "arithmetic.org")
                      (table-calc-test-corpus-formulas "references.org")))
@@ -490,7 +497,7 @@
         (expect values
                 :to-equal '("0.16666667" "2.75" "4.4" "2" "-6" "-6" "5"
                             "9" "1e-3" "22" "33" "3" "6" "2" "1" "3"
-                            "3" "11" "6" "9" "11,20,33"))
+                            "3" "11" "6" "9" "9" "11,20,33"))
         (dolist (row rows)
           (let* ((formula (car row))
                  (program (org-kit::table-calc-parse-formula formula))

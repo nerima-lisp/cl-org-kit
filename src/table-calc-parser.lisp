@@ -42,8 +42,7 @@
 
 (defun table-calc-name-character-p (character)
   (or (table-calc-name-start-p character)
-      (table-calc-digit-p character)
-      (char= character #\-)))
+      (table-calc-digit-p character)))
 
 (defun table-calc-space-p (character)
   (find character '(#\Space #\Tab #\Return #\Newline)))
@@ -184,7 +183,7 @@
                       (emit token end)))
                    (t
                     (table-calc-fail formula position :unsupported-character)))))
-      (nreverse tokens))))
+      (coerce (nreverse tokens) 'simple-vector))))
 
 (defun table-calc-token-text (parser token)
   (subseq (table-calc-parser-formula parser)
@@ -192,7 +191,10 @@
           (table-calc-token-end token)))
 
 (defun table-calc-current-token (parser)
-  (nth (table-calc-parser-cursor parser) (table-calc-parser-tokens parser)))
+  (let ((cursor (table-calc-parser-cursor parser))
+        (tokens (table-calc-parser-tokens parser)))
+    (when (< cursor (length tokens))
+      (svref tokens cursor))))
 
 (defun table-calc-current-kind (parser)
   (let ((token (table-calc-current-token parser)))
@@ -226,7 +228,7 @@
                                                 (char= character #\0))
                                               digits)))
          (normalized (if first-nonzero (subseq digits first-nonzero) "0"))
-         (maximum (write-to-string most-positive-fixnum)))
+         (maximum (write-to-string most-positive-fixnum :base 10 :radix nil)))
     (unless digits
       (table-calc-fail (table-calc-parser-formula parser)
                        (table-calc-token-start token) :invalid-reference))
@@ -294,8 +296,8 @@
                 column-value (table-calc-token-value (table-calc-advance parser))))
          (t
           (table-calc-fail formula (table-calc-position parser) :invalid-reference)))))
-    (let* ((last-token (nth (1- (table-calc-parser-cursor parser))
-                            (table-calc-parser-tokens parser)))
+    (let* ((last-token (svref (table-calc-parser-tokens parser)
+                              (1- (table-calc-parser-cursor parser))))
            (end (table-calc-token-end last-token)))
       (%make-table-calc-reference :row-kind row-kind :row-value row-value
                                   :column-kind column-kind :column-value column-value
@@ -309,11 +311,10 @@
     (%make-table-calc-expression :kind kind :start start :end end
                                  :value value :children children :depth depth)))
 
-(defun table-calc-enter-nesting (parser position)
+(defun table-calc-enter-nesting (parser)
   (let ((depth (1+ (table-calc-parser-nesting parser))))
     (check-limit (table-calc-parser-limits parser) :max-formula-ast-depth depth)
-    (setf (table-calc-parser-nesting parser) depth)
-    position))
+    (setf (table-calc-parser-nesting parser) depth)))
 
 (defun table-calc-leave-nesting (parser)
   (decf (table-calc-parser-nesting parser)))
@@ -348,7 +349,7 @@
       ((member kind '(:plus :minus))
        (let* ((operator (table-calc-advance parser))
               (start (table-calc-token-start operator)))
-         (table-calc-enter-nesting parser start)
+         (table-calc-enter-nesting parser)
          (unwind-protect
               (let ((child (table-calc-parse-prefix parser)))
                 (table-calc-node parser :unary start (table-calc-expression-end child)
@@ -377,13 +378,13 @@
       ((eql kind :identifier)
        (table-calc-parse-function parser token))
       ((eql kind :left-paren)
-       (let ((open (table-calc-advance parser)))
-         (table-calc-enter-nesting parser (table-calc-token-start open))
+       (let ((start (table-calc-token-start (table-calc-advance parser))))
+         (table-calc-enter-nesting parser)
          (unwind-protect
               (let* ((expression (table-calc-parse-expression parser 0))
                      (close (table-calc-expect parser :right-paren :unmatched-parenthesis)))
                 (setf (table-calc-expression-start expression)
-                      (table-calc-token-start open)
+                      start
                       (table-calc-expression-end expression)
                       (table-calc-token-end close))
                 expression)
@@ -400,9 +401,9 @@
       (table-calc-fail formula (table-calc-token-start name-token) :unknown-symbol))
     (unless (member name allowed :test #'string=)
       (table-calc-fail formula (table-calc-token-start name-token) :unknown-function))
-    (let ((open (table-calc-advance parser)))
-      (table-calc-enter-nesting parser (table-calc-token-start open))
-      (unwind-protect
+    (table-calc-advance parser)
+    (table-calc-enter-nesting parser)
+    (unwind-protect
            (let* ((argument (table-calc-parse-expression parser 0))
                   (close (table-calc-expect parser :right-paren :malformed-function)))
              (unless (eql (table-calc-expression-kind argument) :range)
@@ -410,9 +411,14 @@
                                 :unsupported-function-argument))
              (table-calc-node parser :function (table-calc-token-start name-token)
                               (table-calc-token-end close)
-                              (intern (string-upcase name) :keyword)
+                              (cdr (assoc name '(("vsum" . :vsum)
+                                                 ("vmean" . :vmean)
+                                                 ("vmin" . :vmin)
+                                                 ("vmax" . :vmax)
+                                                 ("vcount" . :vcount))
+                                           :test #'string=))
                               (list argument)))
-        (table-calc-leave-nesting parser)))))
+      (table-calc-leave-nesting parser))))
 
 (defun table-calc-parse-expression (parser minimum-precedence)
   (let ((left (table-calc-parse-prefix parser)))
@@ -519,15 +525,15 @@
          :mode mode :format-precision format-precision
          :start start
          :end (table-calc-token-end
-               (nth (1- (table-calc-parser-cursor parser))
-                    (table-calc-parser-tokens parser))))))))
+               (svref (table-calc-parser-tokens parser)
+                      (1- (table-calc-parser-cursor parser)))))))))
 
 (defun table-calc-parse-formula (formula &optional (limits (make-limits)))
   (let* ((tokens (table-calc-tokenize formula limits))
          (parser (%make-table-calc-parser :formula formula :tokens tokens
                                           :cursor 0 :limits limits :nesting 0))
          (assignments '()))
-    (unless tokens
+    (when (zerop (length tokens))
       (table-calc-fail formula 0 :empty-formula))
     (loop
       do (push (table-calc-parse-assignment parser) assignments)
@@ -629,8 +635,10 @@
           (t (/ coefficient (expt 10 (- exponent)))))))
 
 (defun safe-decimal-magnitude-compare (left right)
-  (let* ((left-digits (write-to-string (abs (safe-decimal-coefficient left))))
-         (right-digits (write-to-string (abs (safe-decimal-coefficient right))))
+  (let* ((left-digits (write-to-string (abs (safe-decimal-coefficient left))
+                                       :base 10 :radix nil))
+         (right-digits (write-to-string (abs (safe-decimal-coefficient right))
+                                        :base 10 :radix nil))
          (left-order (+ (length left-digits) (safe-decimal-exponent left)))
          (right-order (+ (length right-digits) (safe-decimal-exponent right))))
     (cond
