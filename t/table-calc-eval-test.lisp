@@ -218,10 +218,8 @@
     (let ((rows (table-calc-test-oracle-rows "t4b/format-rounding.tsv")))
       (expect (> (length rows) 0) :to-be t)
       (dolist (row rows)
-        (let ((actual (table-calc-eval-test-evaluate (car row))))
-          (if (string= (car row) "@1$2=-0")
-              (expect actual :to-equal "-0")
-              (expect actual :to-equal (cdr row))))))
+        (expect (table-calc-eval-test-evaluate (car row))
+                :to-equal (cdr row))))
     (expect (table-calc-eval-test-evaluate "@1$1=1.15;%.1f")
             :to-equal "1.2")
     (expect (table-calc-eval-test-evaluate "@1$1=-0;%.2f")
@@ -356,3 +354,46 @@
                                        :limits over-limits
                                        :work-budget over-budget)
        :max-formula-work 2 3)))
+
+(describe "table formula evaluator work limits"
+  (it "charges cell and vector work before reading cells"
+    (let* ((formula "@1$3=vsum(@1$1..@1$2)")
+           (assignment (table-calc-eval-test-assignment formula))
+           (reads 0)
+           (read-cell (lambda (row column)
+                        (declare (ignore row))
+                        (incf reads)
+                        (if (= column 1) "1" "2")))
+           (position-function
+             (table-calc-eval-test-position-function 1 3 1 nil)))
+      (expect (org-kit::table-calc-evaluate-assignment
+               assignment position-function read-cell
+               :limits (make-limits :max-formula-work 8))
+              :to-equal "3")
+      (expect reads :to-equal 2)
+      (setf reads 0)
+      (table-calc-eval-test-expect-limit
+       (handler-case
+           (org-kit::table-calc-evaluate-assignment
+            assignment position-function read-cell
+            :limits (make-limits :max-formula-work 7))
+         (error (condition) condition))
+       :max-formula-work 7 8)
+      (expect reads :to-equal 0))
+    (let* ((assignment (table-calc-eval-test-assignment "@1$3=@1$1"))
+           (reads 0)
+           (position-function
+             (table-calc-eval-test-position-function 1 3 1 nil))
+           (condition
+             (handler-case
+                 (org-kit::table-calc-evaluate-assignment
+                  assignment position-function
+                  (lambda (row column)
+                    (declare (ignore row column))
+                    (incf reads)
+                    "1")
+                  :limits (make-limits :max-formula-work 1))
+               (error (condition) condition))))
+      (table-calc-eval-test-expect-limit
+       condition :max-formula-work 1 2)
+      (expect reads :to-equal 0))))
