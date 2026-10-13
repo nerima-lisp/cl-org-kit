@@ -26,14 +26,22 @@
   (loop with row-count = 0
         with rule-count = 0
         with width = 0
+        with row-section-count = 0
+        with row-section-p = nil
         for row in (node-children table)
         for row-type = (node-property row :type)
         do (if (eq row-type :rule)
-               (incf rule-count)
+               (progn
+                 (incf rule-count)
+                 (setf row-section-p nil))
                (progn
                  (incf row-count)
+                 (unless row-section-p
+                   (incf row-section-count)
+                   (setf row-section-p t))
                  (setf width (max width (length (node-children row))))))
-        finally (return (values row-count rule-count width))))
+        finally (return (values row-count rule-count width
+                                row-section-count))))
 
 (defun table-sort-range-sections (table start end)
   (loop with section = 0
@@ -142,7 +150,7 @@
       (table-sort-signal-error target :invalid-value
                                "Table sort type must be lexical or numeric"))
     (table-sort-check-output-limits document source)
-    (multiple-value-bind (row-count rule-count width)
+    (multiple-value-bind (row-count rule-count width row-section-count)
         (table-sort-table-metadata table)
       (when (zerop row-count)
         (table-sort-signal-error target :invalid-range
@@ -150,7 +158,9 @@
       (unless (and (integerp column) (<= 1 column width))
         (table-sort-signal-error target :invalid-index
                                  "Table sort column is outside the table width"))
-      (when (and (plusp rule-count) (or (null start) (null end)))
+      (when (and (or (null start) (null end))
+                 (or (> row-section-count 1)
+                     (and (or start end) (plusp rule-count))))
         (table-sort-signal-error target :ambiguous-range
                                  "A row range is required for a table with sections"))
       (let ((range-start (or start 1))

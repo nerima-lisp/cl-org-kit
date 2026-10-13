@@ -1871,6 +1871,41 @@
 
 (advice-add 'org-fixture--dispatch-main :around #'org-fixture--t5b-main-around)
 
+(defun org-fixture--t5b-render-file-without-range (file)
+  (dolist (metadata org-fixture--t5b-required-metadata)
+    (unless (with-temp-buffer
+              (let ((coding-system-for-read 'utf-8-unix))
+                (insert-file-contents file))
+              (goto-char (point-min))
+              (re-search-forward (concat "^# " (regexp-quote metadata) "$") nil t))
+      (error "Missing T5b fixture metadata %S in %s" metadata file)))
+  (let* ((type (org-fixture--t5b-metadata file "Sort type"))
+         (order (org-fixture--t5b-metadata file "Order"))
+         (sort-type
+          (cond
+           ((and (equal type "lexical") (equal order "ascending")) ?a)
+           ((and (equal type "lexical") (equal order "descending")) ?A)
+           ((and (equal type "numeric") (equal order "ascending")) ?n)
+           ((and (equal type "numeric") (equal order "descending")) ?N)
+           (t (error "Invalid T5b sort type/order in %s" file))))
+         (column (org-fixture--t5b-positive-integer file "Column")))
+    (with-temp-buffer
+      (org-fixture--read-buffer file)
+      (org-fixture--t5b-row-position file 1 column)
+      (cl-letf (((symbol-function 'read-number)
+                 (lambda (&rest _arguments) column)))
+        (org-table-sort-lines nil sort-type nil nil t))
+      (org-fixture--check-output (buffer-string)))))
+
+(defun org-fixture--t5b-render-file-around (original file)
+  (if (and (equal (org-fixture--t5b-metadata file "Start") "omitted")
+           (equal (org-fixture--t5b-metadata file "End") "omitted"))
+      (org-fixture--t5b-render-file-without-range file)
+    (funcall original file)))
+
+(advice-add 'org-fixture--t5b-render-file :around
+            #'org-fixture--t5b-render-file-around)
+
 (org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here

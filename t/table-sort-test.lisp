@@ -127,6 +127,8 @@
                      ("selected-range.org" 1 :ascending :lexical 3 4)
                      ("hline-first-section.org" 1 :ascending :lexical 2 3)
                      ("hline-second-section.org" 1 :ascending :lexical 4 5)
+                     ("one-row-section-trailing-hline.org"
+                      1 :ascending :lexical nil nil)
                      ("no-hline-whole-table.org" 1 :ascending :lexical 1 4)))
         (destructuring-bind (filename column order type start end) case
           (multiple-value-bind (source expected document result)
@@ -330,7 +332,7 @@
                 :to-be t)
         (expect (document-text document) :to-equal source))))
 
-  (it "preserves hlines and rejects omitted or cross-section row ranges"
+  (it "preserves hlines and rejects omitted ranges for multiple sections"
     (let* ((source
              (format nil
                      "| header |~%|---|~%| zed |~%| amber |~%|---|~%| delta |~%| charlie |~%"))
