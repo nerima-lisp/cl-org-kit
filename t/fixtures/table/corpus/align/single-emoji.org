@@ -1,0 +1,11 @@
+# T2 fixture metadata: GNU Emacs 31.1; Org 9.8.10
+# Generator mode: org-table-align
+# Backend: none
+# Encoding: UTF-8
+# Reference time: 2000-01-01T00:00:00Z (fixed; unused)
+# Zone/DST policy: UTC; DST not applicable
+# Unicode width data: Unicode 17.0.0
+| label | glyph |
+|-------+-------|
+| person | 🧑 |
+| plain | x |

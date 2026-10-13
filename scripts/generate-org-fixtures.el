@@ -820,6 +820,75 @@
     (princ (format "Generated %d table-calc oracle manifests.\n" (length files)))
     (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
 
+;;; T2 table alignment fixtures
+
+(defconst org-fixture--table-align-required-metadata
+  '("GNU Emacs 31.1; Org 9.8.10"
+    "Generator mode: org-table-align"
+    "Backend: none"
+    "Encoding: UTF-8"
+    "Reference time: 2000-01-01T00:00:00Z (fixed; unused)"
+    "Zone/DST policy: UTC; DST not applicable"
+    "Unicode width data: Unicode 17.0.0"))
+
+(defun org-fixture--table-align-render-file (file)
+  (with-temp-buffer
+    (org-fixture--read-buffer file)
+    (let ((source (buffer-string)))
+      (dolist (metadata org-fixture--table-align-required-metadata)
+        (unless (string-match-p (regexp-quote metadata) source)
+          (error "Missing T2 fixture metadata %S in %s" metadata file))))
+    (goto-char (point-min))
+    (unless (re-search-forward "^[ \t]*|" nil t)
+      (error "No Org pipe table found in %s" file))
+    (goto-char (match-beginning 0))
+    (org-table-align)
+    (buffer-string)))
+
+(defun org-fixture-generate-table-align (corpus-directory expected-directory)
+  "Generate org-table-align results for T2 CORPUS-DIRECTORY fixtures."
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "T2 oracle requires Emacs 31.1 and Org 9.8.10; found %s and %s"
+           emacs-version (org-version)))
+  (unless (file-directory-p corpus-directory)
+    (error "Corpus directory does not exist: %s" corpus-directory))
+  (let ((files (sort (directory-files-recursively corpus-directory "\\.org\\'")
+                     #'string<)))
+    (unless files (error "No .org files found under %s" corpus-directory))
+    (dolist (file files)
+      (let* ((relative (file-relative-name file corpus-directory))
+             (output (expand-file-name relative expected-directory))
+             (content (org-fixture--check-output
+                       (org-fixture--table-align-render-file file))))
+        (make-directory (file-name-directory output) t)
+        (let ((coding-system-for-write 'utf-8-unix))
+          (write-region content nil output nil 'silent))
+        (princ (format "Wrote %s\n" relative))))
+    (princ (format "Generated %d T2 table-align fixtures.\n" (length files)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
+(defun org-fixture--table-align-main ()
+  (let ((arguments (if (equal (car command-line-args-left) "--")
+                       (cdr command-line-args-left)
+                     command-line-args-left)))
+    (setq command-line-args-left nil)
+    (if (and (= (length arguments) 3)
+             (equal (car arguments) "--table-align"))
+        (org-fixture-generate-table-align
+         (expand-file-name (nth 1 arguments))
+         (expand-file-name (nth 2 arguments)))
+      (error (concat
+              "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+              "--table-align CORPUS-DIR EXPECTED-DIR")))))
+
+(defun org-fixture--dispatch-main ()
+  (if (equal (car command-line-args-left) "--table-align")
+      (org-fixture--table-align-main)
+    (org-fixture--main)))
+
+;;; End T2 table alignment fixtures
+
 (defun org-fixture--main ()
   (let ((arguments (if (equal (car command-line-args-left) "--")
                        (cdr command-line-args-left)
@@ -859,6 +928,6 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
-(org-fixture--main)
+(org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here
