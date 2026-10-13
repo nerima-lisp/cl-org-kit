@@ -422,7 +422,7 @@
                            "0"
                            "INVALID")
                        (write-to-string mapped :base 10 :radix nil))))))
-        ((eq value :too-large)
+        (t
          (let ((mapped
                  (table-edit-decimal-coordinate-map
                   (subseq formula start end) operation)))
@@ -530,18 +530,13 @@
 (defun table-edit-render-assignment (formula assignment edits)
   (multiple-value-bind (start end)
       (table-edit-formula-assignment-output-bounds formula assignment)
-    (let ((local-edits (remove-if-not
-                        (lambda (edit)
-                          (and (<= start (first edit))
-                               (<= (second edit) end)))
-                        edits)))
-      (table-edit-apply-component-edits
-       (subseq formula start end)
-       (mapcar (lambda (edit)
-                 (list (- (first edit) start)
-                       (- (second edit) start)
-                       (third edit)))
-               local-edits)))))
+    (table-edit-apply-component-edits
+     (subseq formula start end)
+     (mapcar (lambda (edit)
+               (list (- (first edit) start)
+                     (- (second edit) start)
+                     (third edit)))
+             edits))))
 
 (defun table-edit-formula-output (formula kept-pairs edits removed-p terminal-p)
   (if (not removed-p)
@@ -563,8 +558,7 @@
          (end (cdr range))
          (newline (position #\Newline source :start start :end end))
          (line-end (or newline end))
-         (content-end (if (and (> line-end start)
-                               (char= (char source (1- line-end)) #\Return))
+         (content-end (if (char= (char source (1- line-end)) #\Return)
                           (1- line-end)
                           line-end))
          (colon (position #\: source :start start :end content-end)))
@@ -1441,11 +1435,9 @@
          (prefix (subseq source (node-begin first-row) first-bar))
          (prefix-start (node-begin first-row))
          (prefix-end first-bar)
-         (last-row (car (last original-rows)))
          (last-row-end (node-contents-end table))
          (final-newline-p
-           (and (> last-row-end (node-begin last-row))
-                (char= (char source (1- last-row-end)) #\Newline)))
+           (char= (char source (1- last-row-end)) #\Newline))
          (newline (let ((line-ending
                           (table-edit-row-line-ending source first-row)))
                     (if (plusp (length line-ending))
