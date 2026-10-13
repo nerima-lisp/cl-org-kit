@@ -463,7 +463,7 @@
                    (table-calc-assignment-expression assignment)
                    operation formula))
       (push edit edits))
-    (stable-sort edits #'< :key #'first)))
+    (nreverse edits)))
 
 (defun table-edit-deleted-target-p (assignment operation)
   (and (eq (getf operation :kind) :delete)
@@ -641,7 +641,7 @@
                         (push (list assignment edits) kept-pairs)
                         (dolist (edit edits) (push edit all-edits)))))
                 (setf kept-pairs (nreverse kept-pairs)
-                      all-edits (stable-sort (nreverse all-edits) #'< :key #'first))
+                      all-edits (nreverse all-edits))
                 (let* ((terminal-p
                          (and kept-pairs
                               (or (table-edit-formula-terminal-p formula)
