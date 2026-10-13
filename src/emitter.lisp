@@ -28,6 +28,11 @@
     (dolist (string strings)
       (write-string string stream))))
 
+(defun emitter-proper-list-p (value)
+  (and (listp value)
+       (handler-case (integerp (list-length value))
+         (type-error () nil))))
+
 (defun emitter-required-string (node key)
   (multiple-value-bind (value present) (node-property node key)
     (unless (and present (stringp value))
@@ -537,7 +542,18 @@
                            (eq (node-type child) :table-row))
                          children)
             (emitter-fail node "Org tables can contain only table rows"))
-          (emitter-element-sequence children))
+          (let ((formulas (node-property node :tblfm)))
+            (unless (and (emitter-proper-list-p formulas)
+                         (every #'stringp formulas))
+              (emitter-fail node "table formulas must be a list of strings"))
+            (concatenate
+             'string
+             (emitter-element-sequence children)
+             (with-output-to-string (stream)
+               (dolist (formula (reverse formulas))
+                 (format stream "#+TBLFM: ~A~%"
+                         (emitter-trimmed-line-value
+                          node formula "table formula")))))))
          (:table.el
           (let ((source (node-text node)))
             (if source

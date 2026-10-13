@@ -232,15 +232,24 @@
              (body (subseq line indent)))
         (and (>= (length body) 3)
              (char= (char body 0) #\+)
-             (some (lambda (character) (char= character #\-)) body)
+             (some (lambda (character)
+                     (find character '(#\- #\=)))
+                   body)
              (every (lambda (character)
-                      (find character '(#\+ #\- #\: #\Space #\Tab)))
+                      (find character
+                            '(#\+ #\- #\= #\: #\Space #\Tab)))
                     body)))))
 
   (defun reader-table-formula-line-p (context offset)
     (multiple-value-bind (key value) (reader-keyword-fields context offset)
       (declare (ignore value))
       (and key (string= key "TBLFM"))))
+
+  (defun reader-table-formula-details (context offset limit)
+    (multiple-value-bind (key value) (reader-keyword-fields context offset)
+      (when (and key (string= key "TBLFM"))
+        (let ((after-line (min limit (reader-next-line context offset))))
+          (values value (cons offset after-line) after-line)))))
 
   (defun reader-table-el-line-p (context offset limit)
     (or (reader-table-el-border-line-p context offset limit)
@@ -249,19 +258,39 @@
 
   (defun reader-parse-table-el (context start limit depth)
     (let ((position start)
-          (table-end nil))
+          (table-end nil)
+          (table-value-end nil)
+          (tblfm nil)
+          (tblfm-ranges nil))
       (loop while (and (< position limit)
                        (reader-table-el-line-p context position limit))
-            do (setf table-end (min limit (reader-next-line context position))
-                     position table-end))
+            do (multiple-value-bind (formula span after-line)
+                   (reader-table-formula-details context position limit)
+                 (if span
+                     (setf tblfm (cons formula tblfm)
+                           tblfm-ranges (cons span tblfm-ranges)
+                           table-end after-line
+                           position after-line)
+                     (setf table-end (min limit
+                                          (reader-next-line context position))
+                           table-value-end table-end
+                           position table-end))))
       (when table-end
-        (values (make-reader-node context :table
-                                  :begin start :end table-end
-                                  :contents-begin nil :contents-end nil
-                                  :post-affiliated start
-                                  :properties '(:type :table.el :tblfm nil)
-                                  :depth depth)
-                table-end))))
+        (let ((properties
+                (list :type :table.el
+                      :value (subseq (reader-context-text context)
+                                     start table-value-end)
+                      :tblfm tblfm)))
+          (when tblfm-ranges
+            (setf (getf properties :reader-tblfm-ranges)
+                  (nreverse tblfm-ranges)))
+          (values (make-reader-node context :table
+                                    :begin start :end table-end
+                                    :contents-begin nil :contents-end nil
+                                    :post-affiliated start
+                                    :properties properties
+                                    :depth depth)
+                  table-end)))))
 
   (defun reader-table-rule-row-p (context bar-position content-end)
     (let* ((text (reader-context-text context))
@@ -364,22 +393,37 @@
                      table-contents-end (node-end row)
                      position table-end)))
     (when rows
-      (values (make-reader-node context :table
-                                :begin start :end table-end
-                                :contents-begin start :contents-end table-contents-end
-                                :post-affiliated start
-                                :properties (list :type :org :tblfm nil)
-                                :children (nreverse rows) :depth depth)
-              table-end))))
+      (let ((tblfm nil)
+            (tblfm-ranges nil))
+        (loop while (< position limit)
+              do (multiple-value-bind (formula span after-line)
+                     (reader-table-formula-details context position limit)
+                   (unless span
+                     (return))
+                   (push formula tblfm)
+                   (push span tblfm-ranges)
+                   (setf position after-line
+                         table-end after-line)))
+        (let ((properties (list :type :org :tblfm tblfm)))
+          (when tblfm-ranges
+            (setf (getf properties :reader-tblfm-ranges)
+                  (nreverse tblfm-ranges)))
+          (values (make-reader-node context :table
+                                    :begin start :end table-end
+                                    :contents-begin start
+                                    :contents-end table-contents-end
+                                    :post-affiliated start
+                                    :properties properties
+                                    :children (nreverse rows) :depth depth)
+                  table-end))))))
 
 
   (defmethod parse-collection-at ((context reader-context) start limit depth)
     (let ((table-row (reader-table-row-start context start limit))
-          (table-el (or (reader-table-el-border-line-p context start limit)
-                        (reader-table-formula-line-p context start)))
           (marker (reader-list-marker-at context start limit)))
       (cond
-        (table-el (reader-parse-table-el context start limit depth))
+        ((reader-table-el-border-line-p context start limit)
+         (reader-parse-table-el context start limit depth))
         (table-row (reader-parse-org-table context start limit depth))
         (marker (reader-parse-plain-list context start limit depth marker))
         (t (values nil nil)))))

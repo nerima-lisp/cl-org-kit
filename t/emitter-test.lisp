@@ -53,6 +53,10 @@
         ;; Headline raw-value duplicates source spelling; title objects carry its structure.
         (loop for (key value) on (node-properties node) by #'cddr
               unless (or (emitter-test-reader-property-p key)
+                         ;; The table.el raw body is projected separately from source text below.
+                         (and (eq (node-type node) :table)
+                              (eq (node-property node :type) :table.el)
+                              (eq key :value))
                          (and (eq (node-type node) :headline)
                               (eq key :raw-value)))
                 append (list key (emitter-test-value-projection value)))
@@ -164,6 +168,41 @@
         (expect (emitter-test-generated-projection tree)
                 :to-equal
                 (emitter-test-generated-projection (document-root parsed))))))
+
+  (it "round trips pipe table formulas in their source order"
+    (dolist (source (list (format nil "|a|~%#+TBLFM: $1=$1~%")
+                          (format nil "|a|~%#+TBLFM: $1=$1+1~%#+TBLFM: $1=$1-1~%")))
+      (let* ((root (document-root (parse-org source)))
+             (expected (emitter-test-node-projection root))
+             (output (emit-org root))
+             (actual
+               (emitter-test-node-projection
+                (document-root (parse-org output)))))
+        (with-soft-assertions
+          (expect output :to-equal source)
+          (expect actual :to-equal expected)))))
+
+  (it "round trips table.el formulas from the opaque source"
+    (let* ((source (format nil "+---+~%| x |~%+---+~%#+TBLFM: $1=$1~%"))
+           (root (document-root (parse-org source)))
+           (expected (emitter-test-node-projection root))
+           (output (emit-org root))
+           (actual
+             (emitter-test-node-projection
+              (document-root (parse-org output)))))
+      (with-soft-assertions
+        (expect output :to-equal source)
+        (expect actual :to-equal expected))))
+
+  (it "rejects malformed pipe table formula properties"
+    (let* ((root (document-root (parse-org (format nil "|a|~%"))))
+           (table (first (node-children (first (node-children root)))))
+           (cycle (list "$1=$1")))
+      (setf (cdr cycle) cycle)
+      (dolist (formulas (list "not a list" (list 1)
+                              (cons "$1=$1" "dotted") cycle))
+        (setf (node-property table :tblfm) formulas)
+        (signals org-kit-error (emit-org root)))))
 
   (it "rejects raw-value-only headline titles that parse as inline objects"
     (let ((headline
