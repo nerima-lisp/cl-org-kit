@@ -80,14 +80,7 @@
                (if (eq mode :checkbox)
                    (and local-p
                         (member "recursive" tokens :test #'string=))
-                   (or (member "recursive" tokens :test #'string=)
-                       (multiple-value-bind
-                             (indicator hierarchical-value)
-                           (get-properties
-                            (document-settings document)
-                            '(:org-hierarchical-todo-statistics))
-                         (and (eq indicator :org-hierarchical-todo-statistics)
-                              (not hierarchical-value)))))))
+                   (member "recursive" tokens :test #'string=))))
         (values mode item (not (null recursive-p)))))))
 
 (defun statistics-cookie-in-scope-p (heading cookie title-nodes)

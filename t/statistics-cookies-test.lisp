@@ -139,32 +139,42 @@
       (expect (org-kit::statistics-cookie-data-tokens "") :to-equal nil)
       (expect (org-kit::statistics-cookie-data-tokens nil) :to-equal nil)))
 
-  (it "uses the Org hierarchical TODO setting and the contract's direct default"
+  (it "defaults to direct TODO statistics, uses COOKIE_DATA for recursion, and ignores the legacy setting"
     (let* ((source (format nil "* Parent [0/0]~%** TODO Direct~%*** DONE Nested~%"))
-           (direct-document
-             (parse-org source
-                        :settings '(:org-hierarchical-todo-statistics t)))
-           (direct-heading (statistics-cookies-test-heading direct-document))
-           (direct-result (update-statistics-cookies direct-document direct-heading))
-           (recursive-document
-             (parse-org source
-                        :settings '(:org-hierarchical-todo-statistics nil)))
-           (recursive-heading (statistics-cookies-test-heading recursive-document))
-           (recursive-result
-             (update-statistics-cookies recursive-document recursive-heading))
+           (expected-direct
+             (format nil "* Parent [0/1]~%** TODO Direct~%*** DONE Nested~%"))
+           (recursive-source
+             (format nil
+                     "* Parent [0/0]~%:PROPERTIES:~%:COOKIE_DATA: todo recursive~%:END:~%** TODO Direct~%*** DONE Nested~%"))
+           (expected-recursive
+             (format nil
+                     "* Parent [1/2]~%:PROPERTIES:~%:COOKIE_DATA: todo recursive~%:END:~%** TODO Direct~%*** DONE Nested~%"))
            (default-document (parse-org source))
-           (default-heading (statistics-cookies-test-heading default-document))
-           (default-result (update-statistics-cookies default-document default-heading)))
+           (legacy-enabled-document
+             (parse-org source :settings '(:org-hierarchical-todo-statistics t)))
+           (legacy-disabled-document
+             (parse-org source :settings '(:org-hierarchical-todo-statistics nil)))
+           (recursive-document (parse-org recursive-source))
+           (direct-results
+             (mapcar (lambda (document)
+                       (update-statistics-cookies
+                        document (statistics-cookies-test-heading document)))
+                     (list default-document legacy-enabled-document
+                           legacy-disabled-document)))
+           (recursive-result
+             (update-statistics-cookies
+              recursive-document
+              (statistics-cookies-test-heading recursive-document))))
       (with-soft-assertions
-        (expect (document-text (edit-result-updated-document direct-result))
-                :to-equal (format nil "* Parent [0/1]~%** TODO Direct~%*** DONE Nested~%"))
+        (dolist (result direct-results)
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal expected-direct))
         (expect (document-text (edit-result-updated-document recursive-result))
-                :to-equal (format nil "* Parent [1/2]~%** TODO Direct~%*** DONE Nested~%"))
-        (expect (document-text (edit-result-updated-document default-result))
-                :to-equal (format nil "* Parent [0/1]~%** TODO Direct~%*** DONE Nested~%"))
-        (expect (document-text direct-document) :to-equal source)
-        (expect (document-text recursive-document) :to-equal source)
-        (expect (document-text default-document) :to-equal source))))
+                :to-equal expected-recursive)
+        (dolist (document (list default-document legacy-enabled-document
+                                legacy-disabled-document))
+          (expect (document-text document) :to-equal source))
+        (expect (document-text recursive-document) :to-equal recursive-source))))
 
   (it "inherits TODO COOKIE_DATA for child headings but scopes checkbox recursion locally"
     (let* ((todo-source
