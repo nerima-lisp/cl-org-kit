@@ -86,13 +86,10 @@
                  (plusp comparison)))))))
 
 (defun table-sort-row-content-end (source row)
-  (let ((start (node-begin row))
-        (end (node-end row)))
-    (when (and (> end start)
-               (char= (char source (1- end)) #\Newline))
+  (let ((end (node-end row)))
+    (when (char= (char source (1- end)) #\Newline)
       (decf end)
-      (when (and (> end start)
-                 (char= (char source (1- end)) #\Return))
+      (when (char= (char source (1- end)) #\Return)
         (decf end)))
     end))
 

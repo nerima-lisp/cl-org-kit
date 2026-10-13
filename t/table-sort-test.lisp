@@ -417,6 +417,11 @@
               (lambda ()
                 (table-sort-rows document table 0
                                  :order :ascending :type :lexical))))
+           (bad-column-type
+             (table-sort-test-condition
+              (lambda ()
+                (table-sort-rows document table :first
+                                 :order :ascending :type :lexical))))
            (bad-row-index
              (table-sort-test-condition
               (lambda ()
@@ -468,6 +473,10 @@
                 (format nil "Edit target resolves to multiple nodes (ambiguous-target) for target ~A"
                         (fifth ambiguous-target)))
         (expect bad-column
+                :to-equal
+                (table-sort-test-table-error
+                 "Table sort column is outside the table width" :invalid-index))
+        (expect bad-column-type
                 :to-equal
                 (table-sort-test-table-error
                  "Table sort column is outside the table width" :invalid-index))
