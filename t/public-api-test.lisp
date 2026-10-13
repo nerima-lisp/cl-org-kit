@@ -71,7 +71,8 @@
     ;; Format-preserving element edits
     "REPLACE-BLOCK-BODY" "SET-CHECKBOX-STATE"
     ;; T2 table alignment
-    "TABLE-ALIGN"
+    "TABLE-ALIGN" "TABLE-INSERT-ROW" "TABLE-DELETE-ROW" "TABLE-MOVE-ROW"
+    "TABLE-INSERT-COLUMN" "TABLE-DELETE-COLUMN" "TABLE-MOVE-COLUMN"
     ;; T5b stable table sort
     "TABLE-SORT-ROWS"
     ;; Statistics cookies
@@ -210,10 +211,22 @@ docs/src/reference/node-model.md.")
         (expect (list name (and (documented-p (find-symbol name "ORG-KIT")) t))
                 :to-equal (list name t)))))
 
-  (it "pins the table edit and formula API documentation"
+  (it "pins the T2, T3, and table formula API documentation"
     (with-soft-assertions
       (expect (documentation 'table-align 'function)
               :to-equal "Align a pipe table and return its validated edit result.")
+      (expect (documentation 'table-insert-row 'function)
+              :to-equal "Insert a row in a pipe table and return its validated edit result.")
+      (expect (documentation 'table-delete-row 'function)
+              :to-equal "Delete a row from a pipe table and return its validated edit result.")
+      (expect (documentation 'table-move-row 'function)
+              :to-equal "Move a row in a pipe table and return its validated edit result.")
+      (expect (documentation 'table-insert-column 'function)
+              :to-equal "Insert a column in a pipe table and return its validated edit result.")
+      (expect (documentation 'table-delete-column 'function)
+              :to-equal "Delete a column from a pipe table and return its validated edit result.")
+      (expect (documentation 'table-move-column 'function)
+              :to-equal "Move a column in a pipe table and return its validated edit result.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.

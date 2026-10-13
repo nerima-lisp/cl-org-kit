@@ -30,6 +30,10 @@
  (:id "row-insert-after-last" :source "formula-table.org"
   :action :insert-row :index 5
   :values ("new" "seven" "eight"))
+ (:id "row-insert-empty-values" :source "formula-table.org"
+  :action :insert-row :index 2 :values nil)
+ (:id "row-insert-short-values" :source "formula-table.org"
+  :action :insert-row :index 2 :values ("brief"))
  (:id "row-delete-middle" :source "formula-table.org"
   :action :delete-row :index 3)
  (:id "row-delete-last" :source "formula-table.org"
@@ -50,4 +54,8 @@
   :action :delete-row :index 3)
  (:id "ragged-column-insert" :source "ragged.org"
   :action :insert-column :index 2
-  :values ("inserted" "x" "y" "z")))
+  :values ("inserted" "x" "y" "z"))
+ (:id "row-delete-sole" :source "sole-row.org"
+  :action :delete-row :index 1)
+ (:id "column-delete-sole" :source "sole-column.org"
+  :action :delete-column :index 1))

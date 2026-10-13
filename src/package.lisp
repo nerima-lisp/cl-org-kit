@@ -67,7 +67,8 @@
    ;; Format-preserving element edits
    #:replace-block-body #:set-checkbox-state
    ;; Format-preserving table edits
-   #:table-align
+   #:table-align #:table-insert-row #:table-delete-row #:table-move-row
+   #:table-insert-column #:table-delete-column #:table-move-column
    #:table-sort-rows
    ;; Statistics cookies
    #:statistics-cookie-update #:make-statistics-cookie-update

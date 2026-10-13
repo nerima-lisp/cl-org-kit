@@ -5,7 +5,8 @@
   kind start end value)
 
 (defstruct (table-calc-reference (:constructor %make-table-calc-reference))
-  row-kind row-value column-kind column-value start end)
+  row-kind row-value column-kind column-value
+  row-start row-end column-start column-end start end)
 
 (defstruct (table-calc-expression (:constructor %make-table-calc-expression))
   kind start end value children depth)
@@ -244,8 +245,12 @@
          (start (table-calc-token-start start-token))
          (row-kind :current)
          (row-value nil)
+         (row-start nil)
+         (row-end nil)
          (column-kind nil)
-         (column-value nil))
+         (column-value nil)
+         (column-start nil)
+         (column-end nil))
     (cond
       ((eql (table-calc-current-kind parser) :at)
        (table-calc-advance parser)
@@ -261,7 +266,17 @@
          ((eql (table-calc-current-kind parser) :number)
           (let ((token (table-calc-advance parser)))
             (setf row-kind :absolute
-                  row-value (table-calc-reference-integer parser token))))
+                  row-value (table-calc-reference-integer parser token)
+                  row-start (table-calc-token-start token)
+                  row-end (table-calc-token-end token))))
+         ((and (eql (table-calc-current-kind parser) :identifier)
+               (string= (table-calc-token-value
+                         (table-calc-current-token parser))
+                        "INVALID"))
+          (let ((token (table-calc-advance parser)))
+            (setf row-kind :invalid
+                  row-start (table-calc-token-start token)
+                  row-end (table-calc-token-end token))))
          (t
           (table-calc-fail formula (table-calc-position parser) :invalid-reference)))
        (if (and (eql row-kind :last)
@@ -271,15 +286,26 @@
              (table-calc-expect parser :dollar :invalid-reference)
              (cond
                ((eql row-kind :relative)
-                (table-calc-expect parser :minus :invalid-reference)
+                (let ((minus (table-calc-expect parser :minus :invalid-reference)))
+                  (setf column-start (table-calc-token-start minus)))
                 (let* ((token (table-calc-expect parser :number :invalid-reference))
                        (value (table-calc-reference-integer parser token)))
                   (setf column-kind :relative
-                        column-value (if (integerp value) (- value) value))))
+                        column-value (if (integerp value) (- value) value)
+                        column-end (table-calc-token-end token))))
                ((eql (table-calc-current-kind parser) :number)
                 (let ((token (table-calc-advance parser)))
                   (setf column-kind :absolute
-                        column-value (table-calc-reference-integer parser token))))
+                        column-value (table-calc-reference-integer parser token)
+                        column-start (table-calc-token-start token)
+                        column-end (table-calc-token-end token))))
+               ((and (not (eql row-kind :relative))
+                     (eql (table-calc-current-kind parser) :identifier))
+                (let ((token (table-calc-advance parser)))
+                  (setf column-kind :name
+                        column-value (table-calc-token-value token)
+                        column-start (table-calc-token-start token)
+                        column-end (table-calc-token-end token))))
                (t
                 (table-calc-fail formula (table-calc-position parser)
                                  :invalid-reference))))))
@@ -290,10 +316,15 @@
          ((eql (table-calc-current-kind parser) :number)
           (let ((token (table-calc-advance parser)))
             (setf column-kind :absolute
-                  column-value (table-calc-reference-integer parser token))))
+                  column-value (table-calc-reference-integer parser token)
+                  column-start (table-calc-token-start token)
+                  column-end (table-calc-token-end token))))
          ((eql (table-calc-current-kind parser) :identifier)
-          (setf column-kind :name
-                column-value (table-calc-token-value (table-calc-advance parser))))
+          (let ((token (table-calc-advance parser)))
+            (setf column-kind :name
+                  column-value (table-calc-token-value token)
+                  column-start (table-calc-token-start token)
+                  column-end (table-calc-token-end token))))
          (t
           (table-calc-fail formula (table-calc-position parser) :invalid-reference)))))
     (let* ((last-token (svref (table-calc-parser-tokens parser)
@@ -301,6 +332,8 @@
            (end (table-calc-token-end last-token)))
       (%make-table-calc-reference :row-kind row-kind :row-value row-value
                                   :column-kind column-kind :column-value column-value
+                                  :row-start row-start :row-end row-end
+                                  :column-start column-start :column-end column-end
                                   :start start :end end))))
 
 (defun table-calc-node (parser kind start end value children)
@@ -444,10 +477,14 @@
          (row-kind (table-calc-reference-row-kind reference))
          (column-kind (table-calc-reference-column-kind reference)))
     (cond
-      ((and (eql row-kind :absolute) (eql column-kind :absolute))
+      ((and (eql row-kind :absolute)
+            (member column-kind '(:absolute :name)))
        (values :field reference))
-      ((and (eql row-kind :current) (eql column-kind :absolute))
+      ((and (eql row-kind :current)
+            (member column-kind '(:absolute :name)))
        (values :column reference))
+      ((eql row-kind :invalid)
+       (values :invalid reference))
       (t
        (table-calc-fail (table-calc-parser-formula parser)
                         (table-calc-reference-start reference)
@@ -558,7 +595,7 @@
              (progn
                (table-calc-advance parser)
                (when (null (table-calc-current-token parser))
-                 (table-calc-fail formula (length formula) :empty-assignment)))
+                 (return)))
              (return)))
     (when (table-calc-current-token parser)
       (table-calc-fail formula (table-calc-position parser) :trailing-syntax))

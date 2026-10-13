@@ -2329,6 +2329,43 @@
       (kill-buffer old-buffer)
       (kill-buffer new-buffer))))
 
+(defun org-fixture--table-edit-trailing-space-p (text)
+  (string-match-p "[ \t]+\n" text))
+
+(defun org-fixture--table-edit-lines (text)
+  (unless (and (> (length text) 0)
+               (= (aref text (1- (length text))) ?\n))
+    (error "T3 oracle text must end with a newline"))
+  (mapcar #'substring-no-properties
+          (butlast (split-string text "\n" nil))))
+
+(defun org-fixture--table-edit-join-lines (lines)
+  (concat (mapconcat #'identity lines "\n") "\n"))
+
+(defun org-fixture--table-edit-encoded-oracle (source-after diff-content)
+  (let* ((print-length nil)
+         (print-level nil)
+         (encoded
+          (with-temp-buffer
+            (prin1 (list :source-after
+                         (org-fixture--table-edit-lines source-after)
+                         :diff
+                         (org-fixture--table-edit-lines diff-content))
+                   (current-buffer))
+            (insert "\n")
+            (buffer-string)))
+         (decoded
+          (let ((read-eval nil))
+            (car (read-from-string encoded)))))
+    (unless (and (equal (substring-no-properties source-after)
+                        (org-fixture--table-edit-join-lines
+                         (plist-get decoded :source-after)))
+                 (equal (substring-no-properties diff-content)
+                        (org-fixture--table-edit-join-lines
+                         (plist-get decoded :diff))))
+      (error "T3 encoded oracle did not round-trip exact Org bytes"))
+    encoded))
+
 (defun org-fixture-generate-table-edit (corpus-directory operations-file
                                                         expected-directory)
   "Generate Org source-after and unified-diff oracles for T3 operations."
@@ -2350,7 +2387,10 @@
              (source-after (expand-file-name (concat id ".org")
                                              source-after-directory))
              (diff-file (expand-file-name (concat id ".diff") diff-directory))
-             before after diff-content)
+             (encoded-directory (expand-file-name "encoded" expected-directory))
+             (encoded-file (expand-file-name (concat id ".sexp")
+                                             encoded-directory))
+             encode-p before after diff-content)
         (unless (file-exists-p input)
           (error "T3 corpus source does not exist: %s" source))
         (pcase-let ((`(,old ,new) (org-fixture--table-edit-run
@@ -2363,13 +2403,27 @@
               (org-fixture--table-edit-diff
                before after (concat "corpus/" source)
                (concat "source-after/" id ".org")))
+        (setq encode-p
+              (or (org-fixture--table-edit-trailing-space-p after)
+                  (org-fixture--table-edit-trailing-space-p diff-content)))
         (make-directory source-after-directory t)
         (make-directory diff-directory t)
         (let ((coding-system-for-write 'utf-8-unix))
-          (write-region (org-fixture--check-output after)
-                        nil source-after nil 'silent)
-          (write-region (org-fixture--check-output diff-content)
-                        nil diff-file nil 'silent))
+          (if encode-p
+              (progn
+                (make-directory encoded-directory t)
+                (when (file-exists-p source-after) (delete-file source-after))
+                (when (file-exists-p diff-file) (delete-file diff-file))
+                (write-region
+                 (org-fixture--check-output
+                  (org-fixture--table-edit-encoded-oracle after diff-content))
+                 nil encoded-file nil 'silent))
+            (progn
+              (when (file-exists-p encoded-file) (delete-file encoded-file))
+              (write-region (org-fixture--check-output after)
+                            nil source-after nil 'silent)
+              (write-region (org-fixture--check-output diff-content)
+                            nil diff-file nil 'silent))))
         (princ (format "Wrote T3 oracle %s\n" id))))
     (princ (format "Generated %d T3 table-edit oracle cases.\n" (length cases)))
     (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
