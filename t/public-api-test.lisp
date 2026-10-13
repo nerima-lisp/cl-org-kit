@@ -71,6 +71,8 @@
     "REPLACE-BLOCK-BODY" "SET-CHECKBOX-STATE"
     ;; T2 table alignment
     "TABLE-ALIGN"
+    ;; T5b stable table sort
+    "TABLE-SORT-ROWS"
     ;; Statistics cookies
     "STATISTICS-COOKIE-UPDATE" "MAKE-STATISTICS-COOKIE-UPDATE"
     "STATISTICS-COOKIE-UPDATE-P" "STATISTICS-COOKIE-UPDATE-NODE"
@@ -215,6 +217,12 @@ docs/src/reference/node-model.md.")
               :to-equal
               "Signalled when a table edit is unsupported. TARGET describes the
 addressed table and REASON classifies the table-specific failure.")))
+
+  (it "pins the T5b public API documentation"
+    (with-soft-assertions
+      (expect (documentation 'table-sort-rows 'function)
+              :to-equal
+              "Stable-sort rows in an Org pipe table and return its validated edit result.")))
 
   (it "keeps the package name stable and nickname-free"
     (expect (package-name (find-package "ORG-KIT")) :to-equal "ORG-KIT")

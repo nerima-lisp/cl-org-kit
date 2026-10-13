@@ -67,6 +67,7 @@
    #:replace-block-body #:set-checkbox-state
    ;; Format-preserving table edits
    #:table-align
+   #:table-sort-rows
    ;; Statistics cookies
    #:statistics-cookie-update #:make-statistics-cookie-update
    #:statistics-cookie-update-p #:statistics-cookie-update-node
