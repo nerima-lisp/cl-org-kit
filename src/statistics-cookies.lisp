@@ -40,7 +40,8 @@
           with tokens = nil
           for index from 0 to (length value)
           for boundary-p = (or (= index (length value))
-                               (find (char value index) '(#\Space #\Tab)))
+                               (find (char value index)
+                                     '(#\Space #\Tab #\Newline #\Return #\Page)))
           do (cond
                ((and boundary-p start)
                 (push (string-downcase (subseq value start index)) tokens)
@@ -72,7 +73,9 @@
              (mode (if item :checkbox
                        (and (statistics-cookie-title-node-p heading cookie)
                             (or (statistics-cookie-data-mode tokens) :todo))))
-             (local-p (eq source heading))
+             (local-p (or (eq source heading)
+                          (and (listp source)
+                               (member heading source :test #'eq))))
              (recursive-p
                (if (eq mode :checkbox)
                    (and local-p

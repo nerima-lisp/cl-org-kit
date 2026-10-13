@@ -1,0 +1,12 @@
+* Checklist [0/0]
+:PROPERTIES:
+:COOKIE_DATA: checkbox
+:COOKIE_DATA+: recursive
+:END:
+- [X] Direct complete
+- [ ] Direct open
+  - [X] Nested complete
+** Local heading [0/0]
+- [X] Local complete
+- [ ] Local open
+  - [X] Local nested complete

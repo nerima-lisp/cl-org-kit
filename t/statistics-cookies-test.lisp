@@ -4,7 +4,8 @@
 (defparameter +statistics-cookie-oracle-fixtures+
   '("todo-direct" "todo-recursive" "checkbox-direct" "checkbox-recursive"
     "checkbox-recursive-only" "checkbox-noninherit" "todo-zero" "percent-floor"
-    "multiple-cookies"))
+    "multiple-cookies" "todo-plus-recursive"
+    "checkbox-plus-recursive-local-heading"))
 
 (defun statistics-cookies-test-nodes-in-tree (document types)
   (let ((nodes nil))
