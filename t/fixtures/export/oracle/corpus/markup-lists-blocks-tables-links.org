@@ -1,0 +1,33 @@
+#+TITLE: HTML structure compatibility
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+#+LANGUAGE: en
+#+OPTIONS: toc:1 num:nil
+
+* Markup and structure
+:PROPERTIES:
+:CUSTOM_ID: markup-structure
+:END:
+Text with *bold*, /italic/, _underlined_, +struck+, =verbatim=, and ~code~.
+Rendered link: [[https://example.test/path?q=a&b=c][A label with & and <angle brackets>]].
+
+- First item
+- Second item
+  - Nested item
+
+#+BEGIN_QUOTE
+Quoted paragraph with [[https://example.test/quote][a rendered link]].
+#+END_QUOTE
+
+#+BEGIN_EXAMPLE
+literal <tag> & "quotes"
+#+END_EXAMPLE
+
+#+BEGIN_SRC text :exports code
+source <tag> & "quotes"
+#+END_SRC
+
+| Name | Table Values |
+|------+--------------|
+| Alpha | *bold text!* |
+| Beta | [[https://example.test/table][table link]] |

@@ -201,7 +201,7 @@
 <h2 id="orgb09922b">Existing results are exported without execution</h2>
 <div class="outline-text-2" id="text-orgb09922b">
 <div class="org-src-container">
-<pre class="src src-emacs-lisp"><code>(<span style="font-weight: bold;">error</span> <span style="font-style: italic;">"Babel must remain disabled"</span>)
+<pre class="src src-emacs-lisp"><code>(error "Babel must remain disabled")
 </code></pre>
 </div>
 
@@ -210,12 +210,7 @@ preexisting both result
 </pre>
 
 <div class="org-src-container">
-<pre class="src src-emacs-lisp"><code>(<span style="font-weight: bold;">error</span> <span style="font-style: italic;">"Code-only block was not evaluated"</span>)
-</code></pre>
-</div>
-
-<div class="org-src-container">
-<pre class="src src-emacs-lisp"><code>(<span style="font-weight: bold;">error</span> <span style="font-style: italic;">"Results-only block was not evaluated"</span>)
+<pre class="src src-emacs-lisp"><code>(error "Code-only block was not evaluated")
 </code></pre>
 </div>
 
@@ -224,30 +219,7 @@ preexisting results-only output
 </pre>
 
 <div class="org-src-container">
-<pre class="src src-emacs-lisp"><code>(<span style="font-weight: bold;">error</span> <span style="font-style: italic;">"Hidden block was not evaluated"</span>)
-</code></pre>
-</div>
-
-<pre class="example">
-hidden preexisting output
-</pre>
-
-<div class="org-src-container">
-<pre class="src src-emacs-lisp"><code>(<span style="font-weight: bold;">error</span> <span style="font-style: italic;">"Adjacent hidden results block was not evaluated"</span>)
-</code></pre>
-</div>
-
-<pre class="example">
-adjacent hidden output
-</pre>
-
-<div class="org-src-container">
-<pre class="src src-emacs-lisp"><code>(<span style="font-weight: bold;">error</span> <span style="font-style: italic;">"Default source block was not evaluated"</span>)
-</code></pre>
-</div>
-
-<div class="org-src-container">
-<pre class="src src-emacs-lisp"><code>(<span style="font-weight: bold;">error</span> <span style="font-style: italic;">"Non-adjacent results source block was not evaluated"</span>)
+<pre class="src src-emacs-lisp"><code>(error "Default source block was not evaluated")
 </code></pre>
 </div>
 

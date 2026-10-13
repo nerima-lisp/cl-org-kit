@@ -1,0 +1,4 @@
+#+TITLE: Allowed HTML attributes
+
+#+ATTR_HTML: :alt safe-alt :class safe-class :height 24 :id safe-id :title safe"onclick="alert(1) :width 64
+[[file:image.png]]

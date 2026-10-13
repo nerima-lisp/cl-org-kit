@@ -1,0 +1,3 @@
+#+TITLE: HTML text escaping
+
+Literal markup: <script>alert("xss")</script> & <img src="x" onerror="alert(1)">.

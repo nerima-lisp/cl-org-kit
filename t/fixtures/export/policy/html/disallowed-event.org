@@ -1,0 +1,6 @@
+#+TITLE: Rejected HTML event attribute
+
+#+ATTR_HTML: :onerror "alert(1)"
+| Key | Value |
+|-----+-------|
+| safe | data |

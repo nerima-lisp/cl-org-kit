@@ -1,0 +1,3 @@
+#+TITLE: Unsafe URL rejection
+
+Links: [[javascript:alert(1)][javascript label]] / [[JaVaScRiPt:alert(1)][mixed-case javascript label]] / [[data:text/html,alert(1)][data label]] / [[file:private.txt][file label]] / [[//evil.example/path][protocol-relative label]] / [[https://example.test/?q=a&b=c][safe label]].

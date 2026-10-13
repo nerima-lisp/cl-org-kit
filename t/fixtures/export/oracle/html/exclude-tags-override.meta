@@ -11,3 +11,5 @@ source=exclude-tags-override.org
 source-sha256=a518e41db2c9d5d4bbf7ebcf6fc25e2bf05766d85eba11ff4c40a92565b1cec9
 include-source=none
 include-source-sha256=none
+html-source-fontification=disabled
+html-babel-evaluation=disabled

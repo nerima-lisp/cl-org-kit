@@ -11,3 +11,5 @@ source=metadata-selection.org
 source-sha256=29bea16f9b2d370f3475c8492e8ef6bdd2bc0e778d884b35b2559b1b156e4cad
 include-source=none
 include-source-sha256=none
+html-source-fontification=disabled
+html-babel-evaluation=disabled

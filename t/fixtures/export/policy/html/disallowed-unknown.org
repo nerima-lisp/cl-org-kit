@@ -1,0 +1,6 @@
+#+TITLE: Rejected unknown HTML attribute
+
+#+ATTR_HTML: :data-custom "value"
+| Key | Value |
+|-----+-------|
+| safe | data |

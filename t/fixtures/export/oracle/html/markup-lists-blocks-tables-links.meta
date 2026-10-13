@@ -1,0 +1,15 @@
+emacs=31.1
+org=9.8.10
+generator-mode=export-oracle-v1
+backend=html
+encoding=UTF-8
+reference-time=2000-01-01T00:00:00Z
+time-zone=UTC
+dst-policy=compatible
+unicode-width-data=Unicode-17.0.0
+source=markup-lists-blocks-tables-links.org
+source-sha256=fee475c30b72b32e66dc9aa54249d755ca555a9fa6033dac096706d1e9b7cf8c
+include-source=none
+include-source-sha256=none
+html-source-fontification=disabled
+html-babel-evaluation=disabled

@@ -1,0 +1,6 @@
+#+TITLE: Rejected HTML style attribute
+
+#+ATTR_HTML: :style "color: red"
+| Key | Value |
+|-----+-------|
+| safe | data |

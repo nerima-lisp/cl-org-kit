@@ -1,0 +1,7 @@
+#+TITLE: Raw HTML policy
+
+#+BEGIN_EXPORT html
+<script>alert("block")</script>
+#+END_EXPORT
+
+Inline @@html:<img src=x onerror="alert(1)">@@ snippet.
