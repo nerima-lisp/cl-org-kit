@@ -763,8 +763,7 @@
     count))
 
 (defun export-limits-with-node-budget (limits node-budget)
-  (let ((arguments nil)
-        (node-limit-found-p nil))
+  (let ((arguments nil))
     (dolist (slot (sb-mop:class-slots (find-class 'limits)))
       (let* ((slot-name (sb-mop:slot-definition-name slot))
              (name (intern (string-upcase (symbol-name slot-name)) :keyword))
@@ -773,18 +772,9 @@
                                      (string-upcase (symbol-name slot-name)))
                         (find-package "ORG-KIT")))
              (value (if (eq name :max-node-count)
-                        (progn
-                          (setf node-limit-found-p t)
-                          node-budget)
-                        (progn
-                          (unless (and accessor (fboundp accessor))
-                            (export-error :export :incomplete-limits nil
-                                          "A limits slot has no accessor"))
-                          (funcall (symbol-function accessor) limits)))))
+                        node-budget
+                        (funcall (symbol-function accessor) limits))))
         (push (cons name value) arguments)))
-    (unless node-limit-found-p
-      (export-error :export :incomplete-limits nil
-                    "The limits structure has no node-count slot"))
     (apply #'make-limits
            (mapcan (lambda (argument)
                      (list (car argument) (cdr argument)))

@@ -1505,3 +1505,25 @@
           (expect (org-resource-limit-error-actual below) :to-be length))
         (expect at :to-equalp expected)
         (expect above :to-equalp expected)))))
+
+(describe "E1 export fragment limits"
+  (it "preserves configured parser limits through the public export API"
+    (let* ((document
+             (parse-org "#+INCLUDE: \"part.org\""
+                        :limits (make-limits :max-heading-depth 2)))
+           (condition
+             (export-core-test-catch-error
+              (lambda ()
+                (export-org
+                 document :html
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   (format nil "* One~%** Two~%*** Three")))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-heading-depth)
+          (expect (org-resource-limit-error-limit condition) :to-be 2)
+          (expect (org-resource-limit-error-actual condition) :to-be 3))))))
