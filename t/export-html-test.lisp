@@ -512,10 +512,13 @@
     (let* ((document
              (parse-org
               (format nil "$x < y$~%~%\\begin{equation}~%x < y~%\\end{equation}")))
-           (output (export-org document :html)))
-      (with-soft-assertions
-        (expect (search "x &lt; y" output) :not :to-be nil)
-        (expect (search "x < y" output) :to-be nil))))
+           (environment
+             (export-html-test-node-of-type document :latex-environment)))
+      (setf (node-property environment :value) nil)
+      (let ((output (export-org document :html)))
+        (with-soft-assertions
+          (expect (search "x &lt; y" output) :not :to-be nil)
+          (expect (search "x < y" output) :to-be nil)))))
 
   (it "renders timestamps as time elements with ISO dates"
     (let* ((document (parse-org "Date <2026-10-14 Wed>"))
@@ -662,6 +665,9 @@
   (it "renders empty headings, heading options, and inline title objects"
     (let* ((empty-heading
              (export-org (parse-org (format nil "*~%")) :html))
+           (raw-title (parse-org (format nil "* Raw title fallback~%")))
+           (raw-heading
+             (export-html-test-node-of-type raw-title :headline))
            (options
              (export-org
               (parse-org
@@ -678,8 +684,11 @@
                (format nil
                        "#+MACRO: greet Hello $1~%* {{{greet(world)}}}~%* [[https://example.test][linked title]]~%* Footnote [fn::aside]~%"))
               :html)))
+      (setf (node-property raw-heading :title) nil)
       (with-soft-assertions
         (expect (search "<h2" empty-heading) :not :to-be nil)
+        (expect (search "Raw title fallback" (export-org raw-title :html))
+                :not :to-be nil)
         (expect (search "class=\"priority\">[10]" options)
                 :not :to-be nil)
         (expect (search "class=\"todo TODO\"" options) :to-be nil)
@@ -689,6 +698,25 @@
         (expect (search "href=\"https://example.test\"" title-objects)
                 :not :to-be nil)
         (expect (search "Footnote aside" title-objects) :not :to-be nil))))
+
+  (it "uses the public export API's default string output"
+    (let ((output (export-org (parse-org "default output") :html)))
+      (with-soft-assertions
+        (expect (typep output 'string) :to-be t)
+        (expect (search "default output" output) :not :to-be nil))))
+
+  (it "keeps the first reference alias for duplicate Org targets"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+OPTIONS: toc:nil num:nil~%<<repeat>> first target~%<<repeat>> second target~%[[repeat]]~%")))
+           (output (export-org document :html))
+           (first-anchor (search "<a id=\"" output))
+           (id-start (and first-anchor (+ first-anchor (length "<a id=\""))))
+           (id-end (and id-start (position #\" output :start id-start)))
+           (first-id (and id-start id-end (subseq output id-start id-end))))
+      (expect (and first-id (search (format nil "href=\"#~A\"" first-id) output))
+              :not :to-be nil)))
 
   (it "renders nested tables of contents and block footnote children"
     (let* ((toc
@@ -734,7 +762,7 @@
     (let* ((document
              (parse-org
               (format nil
-                      "#+BEGIN_EXAMPLE~%#+END_EXAMPLE~%~%: fixed body~%~%#+BEGIN: empty~%#+END:~%~%#+BEGIN_EXPORT html~%#+END_EXPORT~%")))
+                      "#+BEGIN_EXAMPLE~%#+END_EXAMPLE~%~%: fixed body~%~%#+BEGIN: empty~%#+END:~%~%#+BEGIN: populated~%dynamic body~%#+END:~%~%#+BEGIN_EXPORT html~%#+END_EXPORT~%")))
            (example (export-html-test-node-of-type document :example-block))
            (fixed-width (export-html-test-node-of-type document :fixed-width))
            (output nil))
@@ -745,7 +773,8 @@
         (expect (search "example tail" output) :not :to-be nil)
         (expect (search "fixed tail" output) :not :to-be nil)
         (expect (search "<pre class=\"example\">" output)
-                :not :to-be nil))))
+                :not :to-be nil)
+        (expect (search "dynamic body" output) :not :to-be nil))))
 
   (it "renders descriptive terms, empty table cells, inline code, entities, and rules"
     (let* ((descriptive (parse-org (format nil "- /Term/ :: Description~%")))
@@ -800,11 +829,11 @@
     (let* ((document
              (parse-org
               (format nil
-                      "-~%  #+BEGIN_QUOTE~%  quoted child~%  #+END_QUOTE~%  #+BEGIN_CENTER~%  centered child~%  #+END_CENTER~%")))
+                      "- ~%  - nested child~%~%  + another nested child~%")))
            (output (export-org document :html)))
       (with-soft-assertions
-        (expect (search "quoted child" output) :not :to-be nil)
-        (expect (search "centered child" output) :not :to-be nil))))
+        (expect (search "nested child" output) :not :to-be nil)
+        (expect (search "another nested child" output) :not :to-be nil))))
 
   (it "does not mutate documents on successful or failed HTML export"
     (let* ((valid (parse-org
