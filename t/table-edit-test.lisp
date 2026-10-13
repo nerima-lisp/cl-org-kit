@@ -1029,4 +1029,78 @@
         (expect (search "||" updated-source) :not :to-be nil)
         (expect (search "#+TBLFM: " updated-source) :not :to-be nil)
         (expect (document-text document) :to-equal source))))
+
+  (it "preserves TBLFM separators, format suffixes, spacing, and empty formulas"
+    (let* ((empty-source (format nil "| A |~%| x |~%#+TBLFM:~%"))
+           (empty-document (parse-org empty-source))
+           (empty-table
+             (table-edit-test-find-node (document-root empty-document) :table))
+           (empty-result (table-insert-row empty-document empty-table 2))
+           (terminal-source
+             (format nil
+                     "| A | B | C |~%|---+---+---|~%| x | y | z |~%#+TBLFM: $1=1::$2=2::$3=3::~%"))
+           (terminal-document (parse-org terminal-source))
+           (terminal-table
+             (table-edit-test-find-node (document-root terminal-document) :table))
+           (terminal-result
+             (table-delete-column terminal-document terminal-table 2))
+           (column-input
+             (format nil "| A | B |~%| x | y |~%"))
+           (column-expected
+             (format nil "|   | A | B |~%|   | x | y |~%"))
+           (suffix-source
+             (concatenate 'string column-input
+                          (format nil "#+TBLFM: $1=1;%.2f::$2=2~%")))
+           (suffix-terminal-source
+             (concatenate 'string column-input
+                          (format nil "#+TBLFM: $1=1;%.2f~%")))
+           (spaced-source
+             (concatenate 'string column-input
+                          (format nil
+                                  "#+TBLFM:   $1=1   ::   $2=2   ~%")))
+           (crlf (concatenate 'string (string #\Return) (string #\Newline)))
+           (crlf-source
+             (concatenate 'string "| A |" crlf "| x |" crlf
+                          "#+TBLFM: $1=1   " crlf))
+           (crlf-expected
+             (concatenate 'string "| A |" crlf "|   |" crlf "| x |" crlf
+                          "#+TBLFM: $1=1   " crlf)))
+      (labels ((insert-first-column (source)
+                 (let* ((document (parse-org source))
+                        (table
+                          (table-edit-test-find-node
+                           (document-root document) :table))
+                        (result (table-insert-column document table 1)))
+                   (document-text (edit-result-updated-document result)))))
+        (with-soft-assertions
+          (expect (document-text (edit-result-updated-document empty-result))
+                  :to-equal (format nil "| A |~%|   |~%| x |~%#+TBLFM:~%"))
+          (expect (document-text terminal-document) :to-equal terminal-source)
+          (expect (document-text
+                   (edit-result-updated-document terminal-result))
+                  :to-equal
+                  (format nil
+                          "| A | C |~%|---+---|~%| x | z |~%#+TBLFM: $1=1::$2=3::~%"))
+          (expect (insert-first-column suffix-source)
+                  :to-equal
+                  (concatenate 'string column-expected
+                               (format nil
+                                       "#+TBLFM: $2=1;%.2f::$3=2~%")))
+          (expect (insert-first-column suffix-terminal-source)
+                  :to-equal
+                  (concatenate 'string column-expected
+                               (format nil "#+TBLFM: $2=1;%.2f~%")))
+          (expect (insert-first-column spaced-source)
+                  :to-equal
+                  (concatenate 'string column-expected
+                               (format nil
+                                       "#+TBLFM:   $2=1   ::   $3=2   ~%")))
+          (let* ((document (parse-org crlf-source))
+                 (table
+                   (table-edit-test-find-node (document-root document) :table))
+                 (result (table-insert-row document table 2)))
+            (expect (document-text (edit-result-updated-document result))
+                    :to-equal crlf-expected)
+            (expect (document-text document) :to-equal crlf-source))
+          (expect (document-text empty-document) :to-equal empty-source)))))
 )
