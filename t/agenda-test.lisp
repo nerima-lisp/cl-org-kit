@@ -465,3 +465,297 @@
           (expect (agenda-test-document-signature document) :to-equal before)
           (expect (write-org document) :to-equal source)
           (expect (length (getf case-data :snapshots)) :to-be 12))))))
+
+(describe "Agenda record API and validation"
+  (it "constructs and reads every public agenda record field"
+    (let* ((default-entry (org-kit::%make-agenda-entry))
+           (default-result (org-kit::%make-agenda-result))
+           (default-match-entry (org-kit::%make-agenda-match-entry))
+           (default-state (org-kit::%make-agenda-build-state))
+           (document (parse-org (format nil "* TODO Row :tag:~%<2025-01-01 Wed>")))
+           (heading nil)
+           (timestamp nil))
+      (map-nodes (lambda (node)
+                   (case (node-type node)
+                     (:headline (setf heading node))
+                     (:timestamp (setf timestamp node))))
+                 (document-root document))
+      (let* ((date (make-org-time-value "2025-01-01"))
+             (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+             (view (timestamp-view timestamp))
+             (path (node-heading-path heading))
+             (entry (make-agenda-entry
+                     :date date :kind :timestamp :headline "Row"
+                     :heading-path path :timestamp view
+                     :warning-state :due :scheduled-delay-state :delayed
+                     :todo-state "TODO" :effective-tags '("tag")
+                     :habit-p t :source-node timestamp))
+             (result (make-agenda-result :entries (list entry) :start-date date
+                                         :end-date date :time-context context))
+             (match-entry (make-agenda-match-entry
+                           :document document :node heading :heading-path path
+                           :line 1 :end-line 2)))
+        (with-soft-assertions
+          (expect (list (agenda-entry-p default-entry)
+                        (agenda-entry-date default-entry)
+                        (agenda-entry-kind default-entry)
+                        (agenda-entry-headline default-entry)
+                        (agenda-entry-heading-path default-entry)
+                        (agenda-entry-timestamp default-entry)
+                        (agenda-entry-warning-state default-entry)
+                        (agenda-entry-scheduled-delay-state default-entry)
+                        (agenda-entry-todo-state default-entry)
+                        (agenda-entry-effective-tags default-entry)
+                        (agenda-entry-habit-p default-entry)
+                        (agenda-entry-source-node default-entry))
+                  :to-equal (list t nil nil nil nil nil nil nil nil nil nil nil))
+          (expect (list (agenda-result-p default-result)
+                        (agenda-result-entries default-result)
+                        (agenda-result-start-date default-result)
+                        (agenda-result-end-date default-result)
+                        (agenda-result-time-context default-result))
+                  :to-equal (list t nil nil nil nil))
+          (expect (list (agenda-match-entry-p default-match-entry)
+                        (agenda-match-entry-document default-match-entry)
+                        (agenda-match-entry-node default-match-entry)
+                        (agenda-match-entry-heading-path default-match-entry)
+                        (agenda-match-entry-line default-match-entry)
+                        (agenda-match-entry-end-line default-match-entry))
+                  :to-equal (list t nil nil nil nil nil))
+          (expect (list (org-kit::agenda-build-state-entry-count default-state)
+                        (org-kit::agenda-build-state-repeat-count default-state)
+                        (org-kit::agenda-build-state-entries default-state))
+                  :to-equal '(nil nil nil))
+          (expect (agenda-entry-p entry) :to-be t)
+          (expect (list (agenda-entry-date entry) (agenda-entry-kind entry)
+                        (agenda-entry-headline entry)
+                        (agenda-entry-heading-path entry)
+                        (agenda-entry-timestamp entry)
+                        (agenda-entry-warning-state entry)
+                        (agenda-entry-scheduled-delay-state entry)
+                        (agenda-entry-todo-state entry)
+                        (agenda-entry-effective-tags entry)
+                        (agenda-entry-habit-p entry)
+                        (agenda-entry-source-node entry))
+                  :to-equal (list date :timestamp "Row" path view :due :delayed
+                                  "TODO" '("tag") t timestamp))
+          (expect (agenda-result-p result) :to-be t)
+          (expect (list (agenda-result-entries result)
+                        (agenda-result-start-date result)
+                        (agenda-result-end-date result)
+                        (agenda-result-time-context result))
+                  :to-equal (list (list entry) date date context))
+          (expect (agenda-match-entry-p match-entry) :to-be t)
+          (expect (list (agenda-match-entry-document match-entry)
+                        (agenda-match-entry-node match-entry)
+                        (agenda-match-entry-heading-path match-entry)
+                        (agenda-match-entry-line match-entry)
+                        (agenda-match-entry-end-line match-entry))
+                  :to-equal (list document heading path 1 2))))))
+
+  (it "rejects malformed document lists, invalid contexts and date-time range endpoints"
+    (let* ((document (parse-org "* TODO One"))
+           (date (make-org-time-value "2025-01-01"))
+           (date-time (make-org-time-value "2025-01-01T12:00:00+00:00"))
+           (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (improper-documents
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (cons document :tail) date date :time-context context))))
+           (invalid-document
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list "not a document") date date :time-context context))))
+           (invalid-context
+             (agenda-test-captured-error
+              (lambda () (agenda nil date date))))
+           (invalid-date
+             (agenda-test-captured-error
+              (lambda () (agenda nil date-time date :time-context context)))))
+      (with-soft-assertions
+        (expect (typep improper-documents 'org-agenda-error) :to-be t)
+        (when (typep improper-documents 'org-agenda-error)
+          (expect (org-agenda-error-reason improper-documents)
+                  :to-be :unsupported-entry))
+        (expect (typep invalid-document 'org-agenda-error) :to-be t)
+        (when (typep invalid-document 'org-agenda-error)
+          (expect (org-agenda-error-context invalid-document)
+                  :to-equal "not a document"))
+        (expect (typep invalid-context 'org-time-error) :to-be t)
+        (expect (typep invalid-date 'org-time-error) :to-be t))))
+
+  (it "rejects malformed canonical planning timestamps"
+    (let* ((document (parse-org (format nil "* TODO Broken~%DEADLINE: <2025-01-02 Thu>")))
+           (planning nil)
+           (context (agenda-test-context "2025-01-01T12:00:00+00:00")))
+      (map-nodes (lambda (node)
+                   (when (eq (node-type node) :planning)
+                     (setf planning node)))
+                 (document-root document))
+      (setf (node-property planning :deadline) "broken")
+      (let ((condition
+              (agenda-test-captured-error
+               (lambda ()
+                 (agenda (list document) (make-org-time-value "2025-01-01")
+                         (make-org-time-value "2025-01-03")
+                         :time-context context)))))
+        (expect (typep condition 'org-agenda-error) :to-be t)
+        (when (typep condition 'org-agenda-error)
+          (expect (org-agenda-error-reason condition) :to-be :unsupported-entry)
+          (expect (org-agenda-error-context condition) :to-equal ":DEADLINE")))))
+
+  (it "returns nil date bounds for an empty default agenda and TODO result"
+    (let* ((start (make-org-time-value "2025-01-01"))
+           (end (make-org-time-value "2025-01-02"))
+           (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (result (agenda nil start end :time-context context))
+           (todos (agenda-todo-list nil :time-context context)))
+      (with-soft-assertions
+        (expect (agenda-result-start-date result) :to-equal start)
+        (expect (agenda-result-end-date result) :to-equal end)
+        (expect (agenda-result-time-context result) :to-equal context)
+        (expect (agenda-result-entries result) :to-equal '())
+        (expect (agenda-result-start-date todos) :to-be nil)
+        (expect (agenda-result-end-date todos) :to-be nil)
+        (expect (agenda-result-entries todos) :to-equal '())))))
+
+(describe "Agenda timestamp repeater boundaries"
+  (it "shifts date-only repeaters by day, week, month and year"
+    (let* ((document
+             (parse-org
+              (format nil "* TODO Day~%<2025-01-01 Wed +1d>~%* TODO Week~%<2025-01-01 Wed +1w>~%* TODO Month~%<2025-01-01 Wed +1m>~%* TODO Year~%<2025-01-01 Wed +1y>")))
+           (entries
+             (agenda-result-entries
+              (agenda (list document) (make-org-time-value "2025-01-01")
+                      (make-org-time-value "2025-01-02")
+                      :time-context
+                      (agenda-test-context "2025-01-01T00:00:00+00:00")))))
+      (expect (length entries) :to-be 5)))
+
+  (it "shifts date-time repeaters by calendar units and preserves a range end"
+    (let* ((document
+             (parse-org
+              (format nil "* TODO Day~%<2025-01-01 Wed 09:00 +1d>~%* TODO Week~%<2025-01-01 Wed 09:00 +1w>~%* TODO Month~%<2025-01-01 Wed 09:00 +1m>~%* TODO Year~%<2025-01-01 Wed 09:00 +1y>")))
+           (entries
+             (agenda-result-entries
+              (agenda (list document) (make-org-time-value "2025-01-01")
+                      (make-org-time-value "2025-01-02")
+                      :time-context
+                      (agenda-test-context "2025-01-01T00:00:00+00:00")))))
+      (expect (length entries) :to-be 5))
+    (let* ((document (parse-org
+                      (format nil "* TODO Range~%<2025-01-01 Wed 09:00-10:00 ++1d>")))
+           (result (agenda (list document) (make-org-time-value "2025-01-02")
+                           (make-org-time-value "2025-01-02")
+                           :time-context
+                           (agenda-test-context "2025-01-02T08:00:00+00:00")))
+           (view (agenda-entry-timestamp (first (agenda-result-entries result)))))
+      (expect (org-time-value-iso8601 (org-timestamp-view-start view))
+              :to-equal "2025-01-02T09:00:00")
+      (expect (org-time-value-iso8601 (org-timestamp-view-end view))
+              :to-equal "2025-01-02T10:00:00"))
+    (let* ((document (parse-org
+                      (format nil "* TODO Restart range~%<2025-01-01 Wed 09:00-10:00 .+1d>")))
+           (entries (agenda-result-entries
+                     (agenda (list document) (make-org-time-value "2025-01-01")
+                             (make-org-time-value "2025-01-03")
+                             :time-context
+                             (agenda-test-context "2025-01-02T08:00:00+00:00"))))
+           (view (agenda-entry-timestamp (first entries))))
+      (expect (org-time-value-iso8601 (org-timestamp-view-start view))
+              :to-equal "2025-01-03T08:00:00")
+      (expect (org-time-value-iso8601 (org-timestamp-view-end view))
+              :to-equal "2025-01-03T10:00:00")))
+
+  (it "handles catch-up, restart, next and none repeat policies for active timestamps"
+    (let* ((context (agenda-test-context "2025-01-03T12:00:00+00:00"))
+           (start (make-org-time-value "2025-01-01"))
+           (end (make-org-time-value "2025-01-05"))
+           (all (parse-org
+                 (format nil "* TODO Catch-up~%<2025-01-01 Wed ++1d>~%* TODO Restart~%<2025-01-01 Wed .+1d>")))
+           (next (parse-org (format nil "* TODO Next~%<2025-01-01 Wed +1d>")))
+           (none (parse-org (format nil "* TODO None~%<2025-01-01 Wed +1d>")))
+           (all-entries (agenda-result-entries
+                         (agenda (list all) start end :time-context context)))
+           (next-entries (agenda-result-entries
+                          (agenda (list next) start end :time-context context
+                                  :future-repeats :next)))
+           (none-entries (agenda-result-entries
+                          (agenda (list none) start end :time-context context
+                                  :future-repeats :none))))
+      (with-soft-assertions
+        (expect (mapcar (lambda (entry)
+                          (list (agenda-entry-headline entry)
+                                (org-time-value-iso8601 (agenda-entry-date entry))))
+                        all-entries)
+                :to-equal '(("Catch-up" "2025-01-03")
+                            ("Catch-up" "2025-01-04")
+                            ("Restart" "2025-01-04")
+                            ("Catch-up" "2025-01-05")
+                            ("Restart" "2025-01-05")))
+        (expect (mapcar (lambda (entry)
+                          (org-time-value-iso8601 (agenda-entry-date entry)))
+                        next-entries)
+                :to-equal '("2025-01-03"))
+        (expect (mapcar (lambda (entry)
+                          (org-time-value-iso8601 (agenda-entry-date entry)))
+                        none-entries)
+                :to-equal '("2025-01-01")))))
+
+  (it "uses the explicit zone for hourly repeaters across a daylight-saving jump"
+    (let* ((document (parse-org
+                      (format nil "* TODO Hourly~%<2025-03-30 Sun 01:30 +2h>")))
+           (entries (agenda-result-entries
+                     (agenda (list document) (make-org-time-value "2025-03-30")
+                             (make-org-time-value "2025-03-30")
+                             :time-context
+                             (agenda-test-context "2025-03-30T03:45:00"
+                                                  "Europe/Berlin")
+                             :future-repeats :next)))
+           (times (mapcar (lambda (entry)
+                            (org-time-value-iso8601
+                             (org-timestamp-view-start
+                              (agenda-entry-timestamp entry))))
+                          entries)))
+      (with-soft-assertions
+        (expect times :to-equal '("2025-03-30T04:30:00")))))
+
+  (it "uses negative hourly warning shifts and default agenda options"
+    (let* ((document (parse-org
+                      (format nil "* TODO Deadline~%DEADLINE: <2025-01-02 Thu -2h>")))
+           (result (agenda (list document) (make-org-time-value "2025-01-01")
+                           (make-org-time-value "2025-01-02")
+                           :time-context
+                           (agenda-test-context "2025-01-01T12:00:00+00:00")))
+           (rows (agenda-result-entries result))
+           (default-warning
+             (parse-org (format nil "* TODO Default warning~%DEADLINE: <2025-01-10 Fri>")))
+           (default-rows
+             (agenda-result-entries
+              (agenda (list default-warning)
+                      (make-org-time-value "2025-01-01")
+                      (make-org-time-value "2025-01-01")
+                      :time-context
+                      (agenda-test-context "2025-01-01T12:00:00+00:00")))))
+      (with-soft-assertions
+        (expect (mapcar #'agenda-entry-warning-state rows)
+                :to-equal '(:prewarning :due))
+        (expect (mapcar #'agenda-entry-warning-state default-rows)
+                :to-equal '(:prewarning)))))
+
+  (it "enforces zero row limits for agenda matching and TODO listing"
+    (let* ((document
+             (parse-org "* TODO Limited"
+                        :limits (make-limits :max-agenda-entries 0)))
+           (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (match-error
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda-match (list document) "TODO=\"TODO\""
+                              :time-context context))))
+           (todo-error
+             (agenda-test-captured-error
+              (lambda () (agenda-todo-list (list document) :time-context context)))))
+      (with-soft-assertions
+        (expect (typep match-error 'org-resource-limit-error) :to-be t)
+        (expect (typep todo-error 'org-resource-limit-error) :to-be t)))))

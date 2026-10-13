@@ -6,17 +6,8 @@
                          (:copier nil)
                          (:predicate %agenda-entry-p))
   "One normalized agenda row associated with a source headline and timestamp."
-  (date nil :read-only t)
-  (kind nil :read-only t)
-  (headline nil :read-only t)
-  (heading-path nil :read-only t)
-  (timestamp nil :read-only t)
-  (warning-state nil :read-only t)
-  (scheduled-delay-state nil :read-only t)
-  (todo-state nil :read-only t)
-  (effective-tags nil :read-only t)
-  (habit-p nil :read-only t)
-  (source-node nil :read-only t))
+  date kind headline heading-path timestamp warning-state scheduled-delay-state
+  todo-state effective-tags habit-p source-node)
 
 (defun make-agenda-entry (&key date kind headline heading-path timestamp
                                warning-state scheduled-delay-state todo-state
@@ -82,10 +73,7 @@
                          (:copier nil)
                          (:predicate %agenda-result-p))
   "A sequence of normalized agenda entries and its explicit time context."
-  (entries nil :read-only t)
-  (start-date nil :read-only t)
-  (end-date nil :read-only t)
-  (time-context nil :read-only t))
+  entries start-date end-date time-context)
 
 (defun make-agenda-result (&key entries start-date end-date time-context)
   "Return an agenda result containing ENTRIES and the requested date range."
@@ -117,11 +105,7 @@
                                (:copier nil)
                                (:predicate %agenda-match-entry-p))
   "A matched headline with its source document and line range."
-  (document nil :read-only t)
-  (node nil :read-only t)
-  (heading-path nil :read-only t)
-  (line nil :read-only t)
-  (end-line nil :read-only t))
+  document node heading-path line end-line)
 
 (defun make-agenda-match-entry (&key document node heading-path line end-line)
   "Return a match result for NODE in DOCUMENT."
@@ -342,8 +326,7 @@
                          (:day (cl-date-kit:local-date-time-plus-days local amount))
                          (:week (cl-date-kit:local-date-time-plus-weeks local amount))
                          (:month (cl-date-kit:local-date-time-plus-months local amount))
-                         (:year (cl-date-kit:local-date-time-plus-years local amount))
-                         (otherwise (%org-time-error :invalid-time unit))))
+                         (:year (cl-date-kit:local-date-time-plus-years local amount))))
                      (shifted-value (agenda-date-time-value shifted)))
                 (%time-value-to-instant shifted-value
                                         zone
@@ -400,10 +383,7 @@
     (nreverse matches)))
 
 (defstruct (agenda-build-state (:constructor %make-agenda-build-state))
-  limits
-  (entry-count 0)
-  (repeat-count 0)
-  (entries nil))
+  limits entry-count repeat-count entries)
 
 (defun agenda-validate-option (predicate value name)
   "Signal an agenda option error unless PREDICATE accepts VALUE."
@@ -487,32 +467,13 @@
                (agenda-date-time-value reference))))
     (agenda-view-with-start view new-start time-context)))
 
-(defun agenda-occurrence-relevant-p (view end-date kind time-context warning-days)
+(defun agenda-occurrence-relevant-p (view end-date)
   "Return whether VIEW might contribute a row through END-DATE."
-  (let ((start-date (agenda-view-start-date view)))
-    (cond
-      ((eq kind :deadline)
-       (let* ((amount (or (org-timestamp-view-warning-amount view)
-                          warning-days))
-              (unit (or (org-timestamp-view-warning-unit view) :day))
-              (deadline-value (or (org-timestamp-view-end view)
-                                  (org-timestamp-view-start view)))
-              (warning-start
-                (agenda-time-value-date
-                 (agenda-add-interval deadline-value
-                                      (- amount) unit time-context))))
-         (or (<= (agenda-date-ordinal
-                  (agenda-time-value-date deadline-value))
-                 (agenda-date-ordinal end-date))
-             (<= (agenda-date-ordinal warning-start)
-                 (agenda-date-ordinal end-date)))))
-      ((eq kind :scheduled)
-       (<= (agenda-date-ordinal start-date) (agenda-date-ordinal end-date)))
-      (t (<= (agenda-date-ordinal start-date)
-             (agenda-date-ordinal end-date))))))
+  (<= (agenda-date-ordinal (agenda-view-start-date view))
+      (agenda-date-ordinal end-date)))
 
-(defun agenda-call-with-timestamp-occurrences (view kind end-date time-context
-                                              future-repeats warning-days
+(defun agenda-call-with-timestamp-occurrences (view end-date time-context
+                                              future-repeats
                                               state function)
   "Call FUNCTION for timestamp occurrences using the agenda repeater policy."
   (let ((amount (org-timestamp-view-repeater-amount view))
@@ -551,8 +512,7 @@
                  (setf current (agenda-shifted-timestamp-view
                                 current amount unit time-context)
                        first-p nil)))
-      (loop while (agenda-occurrence-relevant-p
-                   current end-date kind time-context warning-days)
+      (loop while (agenda-occurrence-relevant-p current end-date)
             do (when (or catch-up-p restart-p
                          (not (agenda-view-before-reference-p
                                current time-context)))
@@ -606,15 +566,14 @@
                               current amount unit time-context))))))
 
 (defun agenda-call-with-occurrences (view kind end-date time-context
-                                    future-repeats warning-days
+                                    future-repeats
                                     state function)
   "Call FUNCTION for selected timestamp or planning occurrences."
   (if (member kind '(:deadline :scheduled) :test #'eq)
       (agenda-call-with-planning-occurrences
        view end-date time-context future-repeats state function)
       (agenda-call-with-timestamp-occurrences
-       view kind end-date time-context future-repeats warning-days
-       state function)))
+       view end-date time-context future-repeats state function)))
 
 (defun agenda-intersect-date-ranges (from-date to-date start-date end-date function)
   "Call FUNCTION for each date in the inclusive intersection of two ranges."
@@ -784,8 +743,7 @@
             (let ((view (timestamp-view timestamp)))
               (when (agenda-active-view-p view)
                 (agenda-call-with-occurrences
-                 view kind end-date time-context future-repeats
-                 warning-days state
+                 view kind end-date time-context future-repeats state
                  (lambda (occurrence first-occurrence-p source-view)
                    (if (eq kind :deadline)
                        (agenda-add-deadline-rows
@@ -799,14 +757,13 @@
 
 (defun agenda-build-timestamp-rows (state document heading heading-data
                                     start-date end-date future-repeats
-                                    warning-days time-context)
+                                    time-context)
   "Collect active non-planning timestamps owned by HEADING."
   (dolist (timestamp (agenda-timestamp-nodes document heading))
     (let ((view (timestamp-view timestamp)))
       (when (agenda-active-view-p view)
         (agenda-call-with-occurrences
-         view :timestamp end-date time-context future-repeats
-         warning-days state
+         view :timestamp end-date time-context future-repeats state
          (lambda (occurrence first-occurrence-p)
            (declare (ignore first-occurrence-p))
            (agenda-add-timestamp-rows state heading-data
@@ -817,8 +774,7 @@
   (ecase (agenda-entry-kind entry)
     (:deadline 0)
     (:scheduled 1)
-    (:timestamp 2)
-    (:todo 3)))
+    (:timestamp 2)))
 
 (defun agenda-sort-entries (entries)
   "Sort rows by local date and source kind while preserving equal-key order."
@@ -834,16 +790,19 @@
               (agenda-entry-kind-order right))
            (< left-date right-date))))))
 
-(defun agenda (documents start-date end-date &key time-context
-                                      (warning-days 14)
-                                      (scheduled-delay 0)
-                                      (future-repeats :all))
+(defun agenda (documents start-date end-date &rest options
+                                      &key time-context warning-days
+                                        scheduled-delay future-repeats)
   "Return agenda rows for inclusive START-DATE through END-DATE.
 TIME-CONTEXT is required and is the only source of reference time."
+  (declare (ignore warning-days scheduled-delay future-repeats))
   (let* ((documents (agenda-normalize-documents documents))
          (time-context (agenda-require-time-context time-context))
          (start-date (agenda-require-date start-date))
          (end-date (agenda-require-date end-date))
+         (warning-days (getf options :warning-days 14))
+         (scheduled-delay (getf options :scheduled-delay 0))
+         (future-repeats (getf options :future-repeats :all))
          (start-local (agenda-local-date start-date))
          (end-local (agenda-local-date end-date))
          (limits (agenda-operation-limits documents)))
@@ -859,7 +818,9 @@ TIME-CONTEXT is required and is the only source of reference time."
                            "Agenda start date follows its end date"))
     (agenda-check-limit limits :max-agenda-range-days
                         (agenda-range-size start-local end-local))
-    (let ((state (%make-agenda-build-state :limits limits)))
+    (let ((state (%make-agenda-build-state :limits limits
+                                           :entry-count 0 :repeat-count 0
+                                           :entries nil)))
       (dolist (document documents)
         (dolist (heading (agenda-headlines document))
           (let* ((heading-data (agenda-heading-entry-data document heading))
@@ -869,7 +830,7 @@ TIME-CONTEXT is required and is the only source of reference time."
                                         scheduled-delay future-repeats time-context)
             (agenda-build-timestamp-rows state document heading heading-data
                                          start-local end-local future-repeats
-                                         warning-days time-context))))
+                                         time-context))))
       (make-agenda-result
        :entries (agenda-sort-entries
                  (nreverse (agenda-build-state-entries state)))
@@ -882,7 +843,9 @@ MATCH uses the existing Org match syntax; TIME-CONTEXT is required."
          (time-context (agenda-require-time-context time-context))
          (limits (agenda-operation-limits documents))
          (reference-time (agenda-query-reference-time time-context))
-         (state (%make-agenda-build-state :limits limits)))
+         (state (%make-agenda-build-state :limits limits
+                                          :entry-count 0 :repeat-count 0
+                                          :entries nil)))
     (dolist (document documents)
       (let ((matching (and match (query-match-at document match reference-time))))
         (dolist (heading (agenda-headlines document))
