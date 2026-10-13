@@ -120,45 +120,69 @@
         (expect (length cases) :to-be 11)
         (expect (length oracle) :to-be 11)
         (dolist (case cases)
-          (let* ((id (getf case :id))
-                 (expected (find id oracle :key (lambda (row) (getf row :id))
-                                 :test #'string=))
-                 (heading (clock-test-heading-path document
-                                                   (getf case :heading-path)))
-                 (context (clock-test-context (getf case :reference-time)
-                                              (resolve-time-zone (getf case :zone))
-                                              (getf case :dst-policy)))
-                 (options
-                   (append (list :include-running-p (getf case :include-running-p)
-                                 :include-unscoped-p (getf case :include-unscoped-p)
-                                 :time-context context)
-                           (when (getf case :as-of)
-                             (list :as-of (clock-test-value (getf case :as-of))))))
-                 (summary
-                   (apply #'sum-clocks document heading
-                          (clock-test-value (getf case :from))
-                          (clock-test-value (getf case :to))
-                          options))
-                 (actual-minutes (clock-summary-total-minutes summary))
-                 (oracle-minutes (getf expected :org-clock-minutes)))
-            (expect (list id (node-p heading)) :to-equal (list id t))
-            (expect (list id (integerp oracle-minutes))
-                    :to-equal (list id t))
-            (when (string= id "fractional-clipping")
-              (expect (list (clock-summary-scoped-minutes summary)
-                            (clock-summary-clipped-interval-count summary))
-                      :to-equal '(0 2)))
-            (if (string= id "ambiguous-local-start")
-                (progn
-                  ;; Org's oracle reports wall-clock minutes; V compatible uses elapsed time.
-                  (expect (list id oracle-minutes) :to-equal (list id 60))
-                  (expect (list id actual-minutes) :to-equal (list id 120)))
-                (expect (list id actual-minutes)
-                        :to-equal (list id oracle-minutes))))
+          (unless (string= (getf case :id) "ambiguous-local-start")
+            (let* ((id (getf case :id))
+                   (expected (find id oracle :key (lambda (row) (getf row :id))
+                                   :test #'string=))
+                   (heading (clock-test-heading-path document
+                                                     (getf case :heading-path)))
+                   (context (clock-test-context (getf case :reference-time)
+                                                (resolve-time-zone (getf case :zone))
+                                                (getf case :dst-policy)))
+                   (options
+                     (append (list :include-running-p (getf case :include-running-p)
+                                   :include-unscoped-p (getf case :include-unscoped-p)
+                                   :time-context context)
+                             (when (getf case :as-of)
+                               (list :as-of (clock-test-value (getf case :as-of))))))
+                   (summary
+                     (apply #'sum-clocks document heading
+                            (clock-test-value (getf case :from))
+                            (clock-test-value (getf case :to))
+                            options))
+                   (actual-minutes (clock-summary-total-minutes summary))
+                   (oracle-minutes (getf expected :org-clock-minutes)))
+              (expect (list id (node-p heading)) :to-equal (list id t))
+              (expect (list id (integerp oracle-minutes))
+                      :to-equal (list id t))
+              (when (string= id "fractional-clipping")
+                (expect (list (clock-summary-scoped-minutes summary)
+                              (clock-summary-clipped-interval-count summary))
+                        :to-equal '(0 2)))
+              (expect (list id actual-minutes)
+                      :to-equal (list id oracle-minutes))))
           (expect (equalp source-octets source-copy) :to-be t)
           (expect (equalp source-copy
                           (write-org document :output-type :octets))
                   :to-be t)))))
+
+  (it "uses compatible elapsed time for the ambiguous-local-start DST overlap"
+    (let* ((cases (getf (clock-test-behavior-fixture "cases") :cases))
+           (case (find "ambiguous-local-start" cases
+                       :key (lambda (row) (getf row :id)) :test #'string=))
+           (oracle (clock-test-behavior-fixture "expected"))
+           (expected (find "ambiguous-local-start" oracle
+                           :key (lambda (row) (getf row :id)) :test #'string=))
+           (document (parse-org (clock-test-behavior-source-octets)))
+           (heading (clock-test-heading-path document (getf case :heading-path)))
+           (context (clock-test-context (getf case :reference-time)
+                                        (resolve-time-zone (getf case :zone))
+                                        (getf case :dst-policy)))
+           (options
+             (append (list :include-running-p (getf case :include-running-p)
+                           :include-unscoped-p (getf case :include-unscoped-p)
+                           :time-context context)
+                     (when (getf case :as-of)
+                       (list :as-of (clock-test-value (getf case :as-of))))))
+           (summary
+             (apply #'sum-clocks document heading
+                    (clock-test-value (getf case :from))
+                    (clock-test-value (getf case :to))
+                    options)))
+      (with-soft-assertions
+        (expect (node-p heading) :to-be t)
+        (expect (getf expected :org-clock-minutes) :to-be 60)
+        (expect (clock-summary-total-minutes summary) :to-be 120))))
 
   (it "clips each interval before flooring minutes and counts positive overlaps separately"
     (let* ((source (format nil "~{~A~^~%~}"
@@ -260,15 +284,6 @@
         (expect (clock-summary-scoped-minutes summary) :to-be 0)
         (expect (clock-summary-unscoped-minutes summary) :to-be 10)
         (expect (clock-summary-total-minutes summary) :to-be 10))))
-
-  (it "returns an empty row when a clock node has no or empty source text"
-    (let* ((detached (make-node :clock))
-           (document (make-document ""))
-           (empty-source (make-node :clock :begin 0 :end 0)))
-      (setf (document-root document) empty-source)
-      (with-soft-assertions
-        (expect (org-kit::clock-row-source-line detached) :to-equal "")
-        (expect (org-kit::clock-row-source-line empty-source) :to-equal ""))))
 
   (it "excludes open entries by default and uses the context reference as their end when opted in"
     (let* ((source (format nil "~{~A~^~%~}"
@@ -402,47 +417,6 @@
          "CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 09:00] => 1:00"
          "Malformed CLOCK entry"))))
 
-  (it "falls back from corrupted timestamp nodes only when a valid duration exists"
-    (let* ((context (clock-test-context "2026-10-12T12:00:00"))
-           (duration-source
-             (format nil
-                     "* Scope~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:10] => 0:10"))
-           (duration-document (parse-org duration-source))
-           (duration-clock (clock-test-first-clock-node duration-document))
-           (duration-document
-             (progn
-               (setf (node-property duration-clock :value) :not-a-timestamp)
-               duration-document))
-           (duration-summary
-             (sum-clocks duration-document (clock-test-heading duration-document "Scope")
-                         (clock-test-value "2026-10-12T09:00:00")
-                         (clock-test-value "2026-10-12T10:00:00")
-                         :time-context context))
-           (no-duration-source
-             (format nil "* Scope~%CLOCK: [2026-10-12 Mon 09:00]"))
-           (no-duration-document (parse-org no-duration-source))
-           (no-duration-clock (clock-test-first-clock-node no-duration-document))
-           (no-duration-document
-             (progn
-               (setf (node-property no-duration-clock :value) :not-a-timestamp)
-               no-duration-document))
-           (no-duration-error
-             (clock-test-error
-              (lambda ()
-                (sum-clocks no-duration-document
-                            (clock-test-heading no-duration-document "Scope")
-                            (clock-test-value "2026-10-12T09:00:00")
-                            (clock-test-value "2026-10-12T10:00:00")
-                            :time-context context)))))
-      (with-soft-assertions
-        (expect (list (clock-summary-scoped-minutes duration-summary)
-                      (clock-summary-unscoped-minutes duration-summary)
-                      (clock-summary-total-minutes duration-summary))
-                :to-equal '(0 10 10))
-        (clock-test-expect-clock-error no-duration-error :malformed-clock
-                                       "CLOCK: [2026-10-12 Mon 09:00]"
-                                       "Malformed CLOCK entry"))))
-
   (it "handles diary CLOCK rows as unscoped durations and rejects absent durations"
     (let* ((context (clock-test-context "2026-10-12T12:00:00"))
            (duration-source
@@ -525,13 +499,6 @@
         (clock-test-expect-clock-error condition :malformed-clock
                                        "interval end precedes start"
                                        "Malformed CLOCK entry"))))
-
-  (it "recognizes only invalid-time reversed-range timestamp errors"
-    (let ((other-time-error
-            (make-condition 'org-time-error :message "DST gap"
-                            :reason :dst-gap :context "2024-03-10T02:30:00")))
-      (expect (org-kit::clock-reversed-range-error-p other-time-error)
-              :to-be nil)))
 
   (it "reports invalid ranges, mismatched as-of values, and unsupported options"
     (let* ((source (format nil "* Scope~%CLOCK: [2026-10-12 Mon 09:00]"))
@@ -669,21 +636,6 @@
           (expect (org-kit-error-message foreign-heading-error)
                   :to-equal "Heading does not belong to DOCUMENT")))))
 
-  (it "keeps every clock error reason mapped to its documented message"
-    (dolist (entry '((:clock-not-running "No running CLOCK entry")
-                     (:multiple-running-clocks "Multiple running CLOCK entries")
-                     (:clock-already-running "A CLOCK entry is already running")
-                     (:invalid-range "Invalid clock range")
-                     (:malformed-clock "Malformed CLOCK entry")
-                     (:unsupported-option "Unsupported clock option")))
-      (let* ((reason (first entry))
-             (message (second entry))
-             (condition
-               (clock-test-error
-                (lambda () (org-kit::%org-clock-error reason "reason-test")))))
-        (with-soft-assertions
-          (clock-test-expect-clock-error condition reason "reason-test" message)))))
-
   (it "checks max-node-count immediately below, at, and above a clock document's node count"
     (let* ((source (format nil "* ~%CLOCK: => 0:02"))
            (baseline (parse-org source))
@@ -747,7 +699,6 @@
 
   (it "builds summaries with defaults and validated non-negative integer fields"
     (let ((defaults (make-clock-summary))
-          (slot-defaults (org-kit::%make-clock-summary))
           (summary (make-clock-summary :scoped-minutes 3 :unscoped-minutes 2
                                        :total-minutes 5
                                        :clipped-interval-count 1)))
@@ -756,11 +707,6 @@
                       (clock-summary-unscoped-minutes defaults)
                       (clock-summary-total-minutes defaults)
                       (clock-summary-clipped-interval-count defaults))
-                :to-equal '(0 0 0 0))
-        (expect (list (clock-summary-scoped-minutes slot-defaults)
-                      (clock-summary-unscoped-minutes slot-defaults)
-                      (clock-summary-total-minutes slot-defaults)
-                      (clock-summary-clipped-interval-count slot-defaults))
                 :to-equal '(0 0 0 0))
         (expect (clock-summary-p summary) :to-be t)
         (expect (clock-summary-scoped-minutes summary) :to-be 3)

@@ -80,12 +80,11 @@
 
 (defun clock-row-source-line (clock)
   (let* ((text (node-text clock))
-         (newline (and text (position #\Newline text)))
-         (line (and text (subseq text 0 (or newline (length text))))))
-    (when (and line (plusp (length line))
-               (char= (char line (1- (length line))) #\Return))
+         (newline (position #\Newline text))
+         (line (subseq text 0 (or newline (length text)))))
+    (when (char= (char line (1- (length line))) #\Return)
       (setf line (subseq line 0 (1- (length line)))))
-    (or line "")))
+    line))
 
 (defun clock-horizontal-space-p (character)
   (find character '(#\Space #\Tab)))
@@ -119,11 +118,8 @@
         (%org-clock-error :malformed-clock line))
       (+ (* 60 hours) minutes))))
 
-(defun clock-row-timestamp-view (clock line)
-  (let ((timestamp (node-property clock :value)))
-    (unless (and (node-p timestamp) (eq (node-type timestamp) :timestamp))
-      (%org-clock-error :malformed-clock line))
-    (timestamp-view timestamp)))
+(defun clock-row-timestamp-view (clock)
+  (timestamp-view (node-property clock :value)))
 
 (defun clock-reversed-range-error-p (condition)
   (and (eq (org-time-error-reason condition) :invalid-time)
@@ -145,7 +141,7 @@
     (cond
       (timestamp
        (handler-case
-           (let* ((view (clock-row-timestamp-view clock line))
+           (let* ((view (clock-row-timestamp-view clock))
                   (kind (org-timestamp-view-kind view))
                   (start (org-timestamp-view-start view))
                   (end (org-timestamp-view-end view)))
@@ -225,54 +221,54 @@ instant. Duration-only entries are included by default regardless of range."
       (error 'type-error :datum include-unscoped-p :expected-type 'boolean))
     (unless (org-time-context-p time-context)
       (error 'type-error :datum time-context :expected-type 'org-time-context))
-    (when as-of-present-p
-      (unless (org-time-value-p as-of)
-        (error 'type-error :datum as-of :expected-type 'org-time-value))
-      (unless (= (clock-context-instant-seconds as-of time-context)
-                 (cl-date-kit:instant-epoch-second
-                  (org-time-context-reference-instant time-context)))
-        (%org-clock-error :invalid-range "as-of differs from time-context")))
-    (let* ((from-seconds (clock-context-instant-seconds from time-context))
-           (to-seconds (clock-context-instant-seconds to time-context))
-           (as-of-seconds (cl-date-kit:instant-epoch-second
-                           (org-time-context-reference-instant time-context)))
-           (scoped-minutes 0)
-           (unscoped-minutes 0)
-           (clipped-interval-count 0))
-      (when (> from-seconds to-seconds)
-        (%org-clock-error :invalid-range "FROM follows TO"))
-      (labels ((add-interval (start-seconds end-seconds)
-                 (when (> start-seconds end-seconds)
-                   (%org-clock-error :malformed-clock "interval end precedes start"))
-                 (let ((clipped-start (max from-seconds start-seconds))
-                       (clipped-end (min to-seconds end-seconds)))
-                   (when (< clipped-start clipped-end)
-                     (incf clipped-interval-count)
-                     (incf scoped-minutes (floor (- clipped-end clipped-start) 60))))))
-        (map-nodes
-         (lambda (node)
-           (when (eq (node-type node) :clock)
-             (multiple-value-bind (kind start end duration)
-                 (clock-row-values node)
-               (case kind
-                 (:unscoped
-                  (when (< from-seconds to-seconds)
-                    (incf unscoped-minutes duration)))
-                 (:closed
-                  (add-interval (clock-context-instant-seconds start time-context)
-                                (clock-context-instant-seconds end time-context)))
-                 (:running
-                  (when include-running-p
-                    (let ((start-seconds
-                            (clock-context-instant-seconds start time-context)))
-                      (when (> start-seconds as-of-seconds)
-                        (%org-clock-error :invalid-range
-                                          (clock-row-source-line node)))
-                      (add-interval start-seconds as-of-seconds))))))))
-         heading))
-      (make-clock-summary
-       :scoped-minutes scoped-minutes
-       :unscoped-minutes unscoped-minutes
-       :total-minutes (+ scoped-minutes
-                         (if include-unscoped-p unscoped-minutes 0))
-       :clipped-interval-count clipped-interval-count))))
+    (let ((as-of-seconds
+            (cl-date-kit:instant-epoch-second
+             (org-time-context-reference-instant time-context))))
+      (when as-of-present-p
+        (unless (org-time-value-p as-of)
+          (error 'type-error :datum as-of :expected-type 'org-time-value))
+        (unless (= (clock-context-instant-seconds as-of time-context)
+                   as-of-seconds)
+          (%org-clock-error :invalid-range "as-of differs from time-context")))
+      (let* ((from-seconds (clock-context-instant-seconds from time-context))
+             (to-seconds (clock-context-instant-seconds to time-context))
+             (scoped-minutes 0)
+             (unscoped-minutes 0)
+             (clipped-interval-count 0))
+        (when (> from-seconds to-seconds)
+          (%org-clock-error :invalid-range "FROM follows TO"))
+        (labels ((add-interval (start-seconds end-seconds)
+                   (when (> start-seconds end-seconds)
+                     (%org-clock-error :malformed-clock "interval end precedes start"))
+                   (let ((clipped-start (max from-seconds start-seconds))
+                         (clipped-end (min to-seconds end-seconds)))
+                     (when (< clipped-start clipped-end)
+                       (incf clipped-interval-count)
+                       (incf scoped-minutes (floor (- clipped-end clipped-start) 60))))))
+          (map-nodes
+           (lambda (node)
+             (when (eq (node-type node) :clock)
+               (multiple-value-bind (kind start end duration)
+                   (clock-row-values node)
+                 (case kind
+                   (:unscoped
+                    (when (< from-seconds to-seconds)
+                      (incf unscoped-minutes duration)))
+                   (:closed
+                    (add-interval (clock-context-instant-seconds start time-context)
+                                  (clock-context-instant-seconds end time-context)))
+                   (:running
+                    (when include-running-p
+                      (let ((start-seconds
+                              (clock-context-instant-seconds start time-context)))
+                        (when (> start-seconds as-of-seconds)
+                          (%org-clock-error :invalid-range
+                                            (clock-row-source-line node)))
+                        (add-interval start-seconds as-of-seconds))))))))
+           heading))
+        (make-clock-summary
+         :scoped-minutes scoped-minutes
+         :unscoped-minutes unscoped-minutes
+         :total-minutes (+ scoped-minutes
+                           (if include-unscoped-p unscoped-minutes 0))
+         :clipped-interval-count clipped-interval-count)))))
