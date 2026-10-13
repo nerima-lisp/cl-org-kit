@@ -520,6 +520,19 @@
         (expect (fourth condition) :to-equal "table")
         (expect (document-text document) :to-equal source))))
 
+  (it "rejects malformed row references without mutating the document"
+    (let* ((source (format nil "| A |~%| x |~%#+TBLFM: @=1~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (condition
+             (table-edit-test-condition
+              (lambda () (table-insert-row document table 1)))))
+      (with-soft-assertions
+        (expect (first condition) :to-be :edit)
+        (expect (third condition) :to-be :uneditable-structure)
+        (expect (fourth condition) :to-equal "table")
+        (expect (document-text document) :to-equal source))))
+
   (it "rejects multiple attached TBLFM directives with a contract reason"
     (let* ((source (format nil
                            "| A |~%| x |~%#+TBLFM: $1=1~%#+TBLFM: $1=2~%"))
