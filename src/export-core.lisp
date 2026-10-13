@@ -166,9 +166,7 @@
 
 (defun export-safe-url-p (raw-destination expanded-destination)
   "Return true when an expanded destination uses an allowed scheme or is relative."
-  (and (stringp raw-destination)
-       (stringp expanded-destination)
-       (notany #'export-control-character-p raw-destination)
+  (and (notany #'export-control-character-p raw-destination)
        (notany #'export-control-character-p expanded-destination)
        (plusp (length expanded-destination))
        (not (export-whitespace-character-p (char expanded-destination 0)))
@@ -1188,8 +1186,6 @@
 
 (defun export-check-expansion-depth (depth limits)
   (check-limit limits :max-export-expansion-depth depth))
-
-(defgeneric export-render-preparation (preparation backend))
 
 (defmethod export-render-preparation ((preparation export-preparation) backend)
   (declare (ignore preparation))

@@ -352,6 +352,15 @@
      (document-root document))
     result))
 
+(defun export-html-test-node-of-type (document type)
+  (let ((result nil))
+    (map-nodes
+     (lambda (node)
+       (when (eq (node-type node) type)
+         (setf result node)))
+     (document-root document))
+    result))
+
 (defun export-html-test-assert-attribute-condition (document condition)
   (let ((node (export-html-test-attributed-node document)))
     (with-soft-assertions
@@ -535,36 +544,48 @@
         (expect (search "generated-reference-" (prin1-to-string normalized))
                 :not :to-be nil))))
 
-  (it "rejects unsafe schemes and accepts allowed explicit schemes case-insensitively"
-    (let ((cases
-            `(("relative/path" "relative/path" t)
-              ("#section" "#section" t)
-              ("/root/path" "/root/path" t)
-              ("HTTPS://example.test" "HTTPS://example.test" t)
-              ("MaIlTo:user@example.test" "MaIlTo:user@example.test" t)
-              ("javascript:alert(1)" "javascript:alert(1)" nil)
-              ("data:text/html,x" "data:text/html,x" nil)
-              ("file:secret" "file:secret" nil)
-              ("ftp://example.test" "ftp://example.test" nil)
-              (,(concatenate 'string " " "https://example.test")
-               ,(concatenate 'string " " "https://example.test") nil)
-              (,(concatenate 'string (string (code-char #xa0)) "https://example.test")
-               ,(concatenate 'string (string (code-char #xa0)) "https://example.test") nil)
-              ("http://example.test" "http://example.test" t))))
+  (it "validates links through export-org after public node updates"
+    (let* ((raw-control (format nil "https://example.test~C" (code-char 1)))
+           (expanded-control-type (format nil "https~C" (code-char 1)))
+           (leading-nbsp
+             (concatenate 'string (string (code-char #xa0))
+                          "https://example.test"))
+           (cases
+             `(("fuzzy" "relative/path" "relative/path" t)
+               ("fuzzy" "#section" "#section" t)
+               ("fuzzy" "/root/path" "/root/path" t)
+               ("https" "//example.test" "https://example.test" t)
+               ("HTTPS" "//example.test" "HTTPS://example.test" t)
+               ("MaIlTo" "user@example.test" "MaIlTo:user@example.test" t)
+               ("fuzzy" "javascript:alert(1)" "javascript:alert(1)" nil)
+               ("fuzzy" "data:text/html,x" "data:text/html,x" nil)
+               ("fuzzy" "file:secret" "file:secret" nil)
+               ("fuzzy" "ftp://example.test" "ftp://example.test" nil)
+               ("fuzzy" "proto2+test.x-y:payload"
+                "proto2+test.x-y:payload" nil)
+               ("fuzzy" "bad_scheme:payload" "bad_scheme:payload" t)
+               ("fuzzy" ":payload" ":payload" t)
+               ("fuzzy" "1scheme:payload" "1scheme:payload" t)
+               ("fuzzy" ,(concatenate 'string " " "https://example.test")
+                ,(concatenate 'string " " "https://example.test") nil)
+               ("fuzzy" ,leading-nbsp ,leading-nbsp nil)
+               ("fuzzy" "" "" nil)
+               ("fuzzy" ,raw-control ,raw-control nil)
+               (,expanded-control-type "example.test"
+                ,(concatenate 'string expanded-control-type ":example.test") nil)
+               ("fuzzy" "https:\\evil.example" "https:\\evil.example" nil)
+               ("fuzzy" "//evil.example" "//evil.example" nil)
+               (nil "relative/path" "relative/path" t))))
       (with-soft-assertions
         (dolist (case cases)
-          (expect (org-kit::export-safe-url-p (first case) (second case))
-                  :to-be (third case)))
-        (expect (org-kit::export-safe-url-p
-                 "https://example.test" (format nil "https://example.test~C"
-                                                  (code-char 1)))
-                :to-be nil)
-        (expect (org-kit::export-safe-url-p
-                 "https://example.test" "https:\\evil.example")
-                :to-be nil)
-        (expect (org-kit::export-safe-url-p
-                 "//evil.example" "//evil.example")
-                :to-be nil))))
+          (let* ((document (parse-org "[[relative/path]]"))
+                 (link (export-html-test-node-of-type document :link)))
+            (setf (node-property link :type) (first case)
+                  (node-property link :path) (second case))
+            (let ((href (format nil "href=\"~A\"" (third case)))
+                  (output (export-org document :html)))
+              (expect (not (null (search href output)))
+                      :to-be (fourth case))))))))
 
   (it "fails closed for unknown backends and escaping contexts"
     (let* ((backend-error
