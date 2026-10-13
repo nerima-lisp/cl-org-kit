@@ -412,8 +412,9 @@
                                                (table-calc-test-decimal "1.01"))
                 :to-be 1))))
 
-  (it "parses bounded signed decimal values for formula and numeric-key consumers"
-    (let* ((negative-zero (table-calc-test-decimal "-0.000e0"))
+  (it "parses bounded signed decimals with default and explicit limits"
+    (let* ((default-limits (org-kit::parse-safe-decimal "1"))
+           (negative-zero (table-calc-test-decimal "-0.000e0"))
            (normalized (table-calc-test-decimal "0012.300e1"))
            (precision-limit (make-limits :max-formula-precision 2))
            (exponent-limit (make-limits :max-formula-exponent 2))
@@ -426,6 +427,7 @@
                  (progn (table-calc-test-decimal "1e3" exponent-limit) nil)
                (org-resource-limit-error (condition) condition))))
       (with-soft-assertions
+        (expect (org-kit::safe-decimal-coefficient default-limits) :to-be 1)
         (expect (org-kit::safe-decimal-negative-zero-p negative-zero) :to-be t)
         (expect (org-kit::safe-decimal-coefficient normalized) :to-be 123)
         (expect (org-kit::safe-decimal-exponent normalized) :to-be 0)
