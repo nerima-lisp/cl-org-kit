@@ -64,29 +64,31 @@
 (defun export-backend-p (backend)
   (member backend '(:html :gfm :ascii) :test #'eq))
 
-(defun export-source-text (source)
-  (cond ((node-p source) (node-text source))
-        ((stringp source) source)
-        (t nil)))
-
 (defun export-bounded-source (source)
-  (let ((text (export-source-text source)))
+  (let* ((node (and (node-p source) source))
+         (document (and node (node-document node)))
+         (text (cond
+                 (node (and document (node-begin node) (node-end node)
+                            (document-text document)))
+                 ((stringp source) source)))
+         (start (if node (node-begin node) 0))
+         (end (if node (node-end node) (and text (length text)))))
     (when text
-      (with-output-to-string (output)
-        (loop for character across text
-              for index from 0
-              when (>= index *condition-text-limit*)
-                do (write-string "..." output)
-                   (loop-finish)
-              do (let ((code (char-code character)))
-                   (cond
+      (let ((stop (min end (+ start *condition-text-limit*))))
+        (with-output-to-string (output)
+          (loop for index from start below stop
+                for character = (char text index)
+                for code = (char-code character)
+                do (cond
                      ((char= character #\\) (write-string "\\\\" output))
                      ((char= character #\Newline) (write-string "\\n" output))
                      ((char= character #\Return) (write-string "\\r" output))
                      ((char= character #\Tab) (write-string "\\t" output))
                      ((or (< code 32) (<= 127 code 159))
                       (format output "\\x~2,'0X" code))
-                     (t (write-char character output)))))))))
+                     (t (write-char character output)))
+                finally (when (< stop end)
+                          (write-string "..." output))))))))
 
 (defun export-error (backend reason source message)
   (error 'org-export-error
@@ -276,9 +278,9 @@
                              "A stream is only valid with :STREAM output type"))
              t)
             (:stream
-             (unless (streamp stream)
+             (unless (and (streamp stream) (output-stream-p stream))
                (export-error backend :invalid-output nil
-                             "Stream output requires a stream"))
+                             "Stream output requires an output stream"))
              (multiple-value-bind (character-p character-known-p)
                  (subtypep (stream-element-type stream) 'character)
                (cond
@@ -299,7 +301,10 @@
                 (progn (write-sequence octets stream) stream)
                 octets)))
         (if (eq output-type :stream)
-            (progn (write-string text stream) stream)
+            (progn
+              (export-utf8-length text backend)
+              (write-string text stream)
+              stream)
             text))))
 
 (defun export-whitespace-p (character)

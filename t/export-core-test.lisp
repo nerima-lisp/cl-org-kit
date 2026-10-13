@@ -1308,6 +1308,12 @@
               (lambda ()
                 (org-kit::export-write-output "text" (make-limits) :stream
                                               :backend :html))))
+           (input-stream
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits) :stream :backend :html
+                 :stream (make-string-input-stream "text")))))
            (unsupported-stream
              (export-core-test-catch-error
               (lambda ()
@@ -1359,6 +1365,13 @@
                 (org-kit::export-write-output
                  "text" (make-limits :max-output-length 3) :stream
                  :backend :html :stream failed-character-stream))))
+           (failed-character-encoding-stream (make-string-output-stream))
+           (character-stream-encoding-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 surrogate (make-limits) :stream :backend :html
+                 :stream failed-character-encoding-stream))))
            (failed-octet-stream
              (make-instance 'export-core-test-binary-output-stream
                             :element-type '(unsigned-byte 8)))
@@ -1376,6 +1389,9 @@
                   :to-be :invalid-output))
         (expect (get-output-stream-string octets-mismatch-stream) :to-equal "")
         (expect (typep missing-stream 'org-export-error) :to-be t)
+        (expect (typep input-stream 'org-export-error) :to-be t)
+        (when (typep input-stream 'org-export-error)
+          (expect (org-export-error-reason input-stream) :to-be :invalid-output))
         (expect (typep unsupported-stream 'org-export-error) :to-be t)
         (expect (typep unknown-output 'org-export-error) :to-be t)
         (expect (eq character-result character-stream) :to-be t)
@@ -1397,6 +1413,13 @@
         (expect (typep character-limit-error 'org-resource-limit-error)
                 :to-be t)
         (expect (get-output-stream-string failed-character-stream) :to-equal "")
+        (expect (typep character-stream-encoding-error 'org-export-error)
+                :to-be t)
+        (when (typep character-stream-encoding-error 'org-export-error)
+          (expect (org-export-error-reason character-stream-encoding-error)
+                  :to-be :encoding))
+        (expect (get-output-stream-string failed-character-encoding-stream)
+                :to-equal "")
         (expect (typep stream-encoding-error 'org-export-error) :to-be t)
         (when (typep stream-encoding-error 'org-export-error)
           (expect (org-export-error-reason stream-encoding-error)
