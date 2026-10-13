@@ -1243,14 +1243,21 @@
         (expect (document-text large-delete-document)
                 :to-equal large-delete-source))))
 
-  (it "increments all-nine absolute references when inserting a column"
-    (let* ((source (format nil "| A |~%| x |~%#+TBLFM: $9=$9~%"))
+  (it "increments all-nine absolute references when moving a row upward"
+    (let* ((source
+             (with-output-to-string (stream)
+               (loop for index from 1 to 10
+                     do (format stream "| x~D |~%" index))
+               (format stream "#+TBLFM: @9$1=@9$1~%")))
            (expected
-             (format nil "|   | A |~%|   | x |~%#+TBLFM: $10=$10~%"))
+             (with-output-to-string (stream)
+               (loop for index from 1 to 8
+                     do (format stream "| x~D |~%" index))
+               (format stream "| x10 |~%| x9 |~%#+TBLFM: @10$1=@10$1~%")))
            (document (parse-org source))
            (table (table-edit-test-find-node
                    (document-root document) :table))
-           (result (table-insert-column document table 1)))
+           (result (table-move-row document table 10 9)))
       (with-soft-assertions
         (expect (document-text (edit-result-updated-document result))
                 :to-equal expected)
