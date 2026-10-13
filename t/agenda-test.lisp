@@ -1034,6 +1034,40 @@
       (with-soft-assertions
         (expect times :to-equal '("2025-03-30T04:30:00")))))
 
+  (it "applies strict DST gap and overlap policies to agenda repeaters"
+    (let* ((zone (resolve-time-zone "America/New_York"))
+           (gap-context
+             (make-time-context
+              :reference-time (make-org-time-value "2025-03-08T00:00:00")
+              :zone zone :dst-policy :strict))
+           (overlap-context
+             (make-time-context
+              :reference-time (make-org-time-value "2025-11-01T00:00:00")
+              :zone zone :dst-policy :strict))
+           (gap-error
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list (parse-org
+                               (format nil "* TODO Gap~%<2025-03-08 02:30 +1d>")))
+                        (make-org-time-value "2025-03-08")
+                        (make-org-time-value "2025-03-09")
+                        :time-context gap-context))))
+           (overlap-error
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list (parse-org
+                               (format nil "* TODO Overlap~%<2025-11-01 01:30 +1d>")))
+                        (make-org-time-value "2025-11-01")
+                        (make-org-time-value "2025-11-02")
+                        :time-context overlap-context)))))
+      (with-soft-assertions
+        (expect (typep gap-error 'org-time-error) :to-be t)
+        (when (typep gap-error 'org-time-error)
+          (expect (org-time-error-reason gap-error) :to-be :dst-gap))
+        (expect (typep overlap-error 'org-time-error) :to-be t)
+        (when (typep overlap-error 'org-time-error)
+          (expect (org-time-error-reason overlap-error) :to-be :dst-overlap)))))
+
   (it "uses negative hourly warning shifts and default agenda options"
     (let* ((document (parse-org
                       (format nil "* TODO Deadline~%DEADLINE: <2025-01-02 Thu -2h>")))
