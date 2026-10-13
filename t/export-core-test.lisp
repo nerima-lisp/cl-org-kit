@@ -23,17 +23,6 @@
   (handler-case (progn (funcall function) nil)
     (error (condition) condition)))
 
-(defun export-core-test-with-codec-condition (function-name function)
-  (let ((original (symbol-function function-name)))
-    (unwind-protect
-         (progn
-           (setf (symbol-function function-name)
-                 (lambda (&rest arguments)
-                   (declare (ignore arguments))
-                   (error 'cl-codec-kit:unsupported-encoding)))
-           (funcall function))
-      (setf (symbol-function function-name) original))))
-
 (defun export-core-test-preparation (source &rest arguments)
   (apply #'org-kit::export-prepare (parse-org source) :html arguments))
 
@@ -63,37 +52,6 @@
     (list (document-text document) (document-source-name document)
           (copy-tree (document-settings document)) (nreverse nodes))))
 
-(defun export-core-test-root-source-selection-document (with-results-p)
-  (let* ((source
-           (if with-results-p
-               (export-core-test-lines
-                "#+SELECT_TAGS: keep" "#+BEGIN_SRC text" "root-secret"
-                "#+END_SRC" "#+RESULTS:" ": root-result" "* Kept :keep:")
-               (export-core-test-lines
-                "#+SELECT_TAGS: keep" "#+BEGIN_SRC text" "root-secret"
-                "#+END_SRC" "* Kept :keep:")))
-         (document (parse-org source))
-         (root (document-root document))
-         (keyword nil)
-         (source-node nil)
-         (results-node nil)
-         (heading nil))
-    (map-nodes
-     (lambda (node)
-       (case (node-type node)
-         (:keyword (setf keyword node))
-         (:src-block (setf source-node node))
-         (:fixed-width (when (node-property node :RESULTS)
-                         (setf results-node node)))
-         (:headline (setf heading node))))
-     root)
-    (setf (node-children root)
-          (append (list keyword source-node)
-                  (when (and with-results-p results-node)
-                    (list results-node))
-                  (list heading)))
-    document))
-
 (defun export-core-test-source-nodes (preparation type)
   (mapcar #'org-kit::export-view-node
           (export-core-test-view-nodes preparation type)))
@@ -117,6 +75,9 @@
     (let ((cases '("footnotes-after-pruning.org"
                    "include-callback.org"
                    "literal-macro.org"
+                   "outputless-keywords.org"
+                   "standard-options.org"
+                   "tex-pruning.org"
                    "selection-pruning.org"
                    "selection-source-blocks.org"
                    "source-export-modes.org"
@@ -185,6 +146,93 @@
         (expect (getf metadata :date) :to-be nil)
         (expect (getf metadata :language) :to-equal "en")
         (expect (getf metadata :time-context) :to-be nil))))
+
+  (it "keeps an explicit empty metadata override distinct from NIL"
+    (let* ((context (make-export-context :title ""))
+           (preparation
+             (org-kit::export-prepare (parse-org "#+TITLE: Document title")
+                                      :html :context context)))
+      (with-soft-assertions
+        (expect (export-context-title context) :to-equal "")
+        (expect (getf (org-kit::export-preparation-metadata preparation) :title)
+                :to-equal ""))))
+
+  (it "accepts outputless keywords and ignores keywords in pruned subtrees"
+    (let* ((source (export-core-test-policy-fixture-source
+                    "outputless-keywords.org"))
+           (preparation (export-core-test-preparation source))
+           (paragraphs (export-core-test-view-nodes preparation :paragraph))
+           (paragraph-texts
+             (mapcar (lambda (view)
+                       (node-text (org-kit::export-view-node view)))
+                     paragraphs)))
+      (with-soft-assertions
+        (expect paragraphs :not :to-be nil)
+        (expect (some (lambda (text) (search "Visible text." text))
+                      paragraph-texts)
+                :to-be-truthy))))
+
+  (it "parses standard options across lines and applies TODO and archive pruning"
+    (let* ((source (export-core-test-policy-fixture-source "standard-options.org"))
+           (preparation (export-core-test-preparation source))
+           (options (org-kit::export-preparation-options preparation))
+           (headlines (export-core-test-view-nodes preparation :headline))
+           (paragraphs (export-core-test-view-nodes preparation :paragraph))
+           (paragraph-texts
+             (mapcar (lambda (view)
+                       (node-text (org-kit::export-view-node view)))
+                     paragraphs))
+           (task-headings-for-mode
+             (lambda (mode)
+               (let* ((task-source
+                        (format nil
+                                "#+OPTIONS: tasks:~A~%#+TODO: TODO | DONE~%* TODO Active~%* DONE Completed~%* Normal"
+                                mode))
+                      (task-preparation
+                        (export-core-test-preparation task-source)))
+                 (mapcar (lambda (view)
+                           (let ((node (org-kit::export-view-node view)))
+                             (list (node-property node :raw-value)
+                                   (node-property node :todo-keyword)
+                                   (node-property node :todo-type))))
+                         (export-core-test-view-nodes task-preparation :headline)))))
+           (tasks-nil (funcall task-headings-for-mode "nil"))
+           (tasks-todo (funcall task-headings-for-mode "todo"))
+           (tasks-done (funcall task-headings-for-mode "done")))
+      (with-soft-assertions
+        (expect (length options) :to-be 33)
+        (expect (cdr (assoc :toc options)) :to-be 7)
+        (expect (cdr (assoc :heading-depth options)) :to-be 7)
+        (expect (cdr (assoc :preserve-breaks options)) :to-be t)
+        (expect (mapcar (lambda (view)
+                          (let ((node (org-kit::export-view-node view)))
+                            (list (node-property node :raw-value)
+                                  (node-property node :todo-keyword)
+                                  (node-property node :todo-type))))
+                        headlines)
+                :to-equal '(("Active" "TODO" :todo)
+                            ("Normal" nil nil)
+                            ("Archived" nil nil)))
+        (expect (some (lambda (text) (search "Archived body." text))
+                      paragraph-texts)
+                :to-be nil)
+        (expect tasks-nil :to-equal '(("Normal" nil nil)))
+        (expect tasks-todo
+                :to-equal '(("Active" "TODO" :todo) ("Normal" nil nil)))
+        (expect tasks-done
+                :to-equal '(("Completed" "DONE" :done) ("Normal" nil nil))))))
+
+  (it "prunes parsed LaTeX nodes when tex is nil"
+    (let* ((preparation
+             (export-core-test-preparation
+              (export-core-test-policy-fixture-source "tex-pruning.org")))
+           (options (org-kit::export-preparation-options preparation)))
+      (with-soft-assertions
+        (expect (cdr (assoc :latex options)) :to-be nil)
+        (expect (export-core-test-view-nodes preparation :latex-fragment)
+                :to-be nil)
+        (expect (export-core-test-view-nodes preparation :latex-environment)
+                :to-be nil))))
 
   (it "accepts an explicit time context and rejects an invalid one"
     (let* ((time-context
@@ -288,21 +336,6 @@
                       source-views)
               :to-equal (list (format nil "kept-code~%")))))
 
-  (it "drops root source blocks and adjacent results while selecting headings"
-    (let* ((with-results
-             (org-kit::export-prepare
-              (export-core-test-root-source-selection-document t) :html))
-           (without-results
-             (org-kit::export-prepare
-              (export-core-test-root-source-selection-document nil) :html)))
-      (with-soft-assertions
-        (expect (export-core-test-view-nodes with-results :src-block) :to-be nil)
-        (expect (export-core-test-view-nodes with-results :fixed-width) :to-be nil)
-        (expect (export-core-test-view-nodes with-results :headline) :to-be-truthy)
-        (expect (export-core-test-view-nodes without-results :src-block) :to-be nil)
-        (expect (export-core-test-view-nodes without-results :headline)
-                :to-be-truthy))))
-
   (it "collects footnotes after pruning, deduplicates references, and rejects bad references"
     (let* ((source
              (export-core-test-lines
@@ -386,8 +419,7 @@
            (unsupported
              (export-core-test-catch-error
               (lambda ()
-                (org-kit::export-node-operation
-                 :diary-sexp :gfm (make-node :diary-sexp)))))
+                (export-core-test-preparation "%%(org-calendar-holiday)"))))
            (unknown-keyword
              (export-core-test-catch-error
               (lambda ()
@@ -408,37 +440,8 @@
           (expect (org-export-unsupported-syntax-feature unknown-keyword)
                   :to-be :unknown-keyword)))))
 
-  (it "covers export condition, mapping, and escaping boundaries"
-    (let* ((unknown-backend
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-node-operation :paragraph :unknown))))
-           (invalid-type
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-node-operation :unknown :html))))
-           (missing-mapping
-             (let ((org-kit::*export-node-operations*
-                     (remove :paragraph org-kit::*export-node-operations*
-                             :key #'first)))
-               (export-core-test-catch-error
-                (lambda ()
-                  (org-kit::export-node-operation
-                   :paragraph :html (make-node :paragraph))))))
-           (invalid-string
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-escape-context :html :text 42))))
-           (invalid-html-context
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-escape-context :html :code "x"))))
-           (invalid-gfm-context
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-escape-context :gfm :attribute "x"))))
-           (invalid-ascii-context
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-escape-context :ascii :code "x"))))
-           (unknown-escape-backend
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-escape-context :unknown :text "x"))))
-           (source
+  (it "bounds condition sources and escapes supported text contexts"
+    (let* ((source
              (coerce (list #\a (code-char 92) #\Newline #\Return #\Tab
                            (code-char 1) (code-char 128) (code-char #xe9))
                      'string))
@@ -453,14 +456,6 @@
                                      :initial-element #\x))
            (bounded (org-kit::export-bounded-source long-source)))
       (with-soft-assertions
-        (expect (typep unknown-backend 'org-export-error) :to-be t)
-        (expect (typep invalid-type 'type-error) :to-be t)
-        (expect (typep missing-mapping 'org-export-unsupported-syntax) :to-be t)
-        (expect (typep invalid-string 'type-error) :to-be t)
-        (expect (typep invalid-html-context 'type-error) :to-be t)
-        (expect (typep invalid-gfm-context 'type-error) :to-be t)
-        (expect (typep invalid-ascii-context 'type-error) :to-be t)
-        (expect (typep unknown-escape-backend 'org-export-error) :to-be t)
         (expect (org-kit::export-bounded-source source) :to-equal expected-source)
         (expect (length bounded) :to-be (+ org-kit::*condition-text-limit* 3))
         (expect (subseq bounded 0 org-kit::*condition-text-limit*)
@@ -535,12 +530,7 @@
              (multiple-value-list
               (org-kit::export-validate-url document
                                             (format nil "https://docs.example/~%x"))))
-           (invalid-document
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-validate-url nil "https://docs.example/"))))
-           (invalid-destination
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-validate-url document nil)))))
+           )
       (with-soft-assertions
         (expect (first safe-abbreviation) :to-be-truthy)
         (expect (second safe-abbreviation) :to-equal "https://docs.example/guide")
@@ -564,8 +554,6 @@
         (expect unsafe-protocol-relative :to-equal '(nil "//outside.example/"))
         (expect unsafe-backslash :to-equal '(nil "https:\\outside.example"))
         (expect (first unsafe-control) :to-be nil)
-        (expect (typep invalid-document 'type-error) :to-be t)
-        (expect (typep invalid-destination 'type-error) :to-be t)
         (expect (org-kit::export-escape-context :html :text "<&>\"")
                 :to-equal "&lt;&amp;&gt;\"")
         (expect (org-kit::export-escape-context :html :attribute "\"<&>")
@@ -594,28 +582,16 @@
                  (lambda () (export-core-test-preparation source))))
               '("#+OPTIONS: num:maybe"
                 "#+OPTIONS: toc:bad"
-                "#+OPTIONS: toc:7"
-                "#+OPTIONS: h:7"
                 "#+OPTIONS: h:x"
                 "#+OPTIONS: unknown:t"
                 "#+OPTIONS: toc"
                 "#+OPTIONS: toc:"
-                "#+OPTIONS: toc:t toc:nil")))
+                "#+OPTIONS: expand-links:t"
+                "#+OPTIONS: broken-links:mark"
+                "#+OPTIONS: tags:unknown")))
            (valid-tags
              (org-kit::export-parse-tag-list "ship-it_@#%" nil :html
                                              :select-tag-expression))
-           (unknown-option-value
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-option-value "unknown" "value" nil :html))))
-           (unlabeled-non-inline-footnote
-             (export-core-test-catch-error
-              (lambda ()
-                (org-kit::export-collect-footnotes
-                 (list (org-kit::%make-export-view
-                        :node (make-node :footnote-reference
-                                         :properties (list :type :standard))))
-                 :html))))
            (invalid-tags
              (export-core-test-catch-error
               (lambda ()
@@ -624,8 +600,7 @@
            (empty-macro-name
              (export-core-test-catch-error
               (lambda ()
-                (org-kit::export-macro-definition
-                 (list (make-node :keyword) "MACRO" "") :html))))
+                (export-core-test-preparation "#+MACRO:"))))
            (duplicate-title
              (export-core-test-catch-error
               (lambda ()
@@ -648,16 +623,6 @@
         (expect valid-tags :to-equal '("ship-it_@#%"))
         (expect (typep empty-macro-name 'org-export-unsupported-syntax)
                 :to-be t)
-        (expect (typep unknown-option-value 'org-export-unsupported-syntax)
-                :to-be t)
-        (expect (typep unlabeled-non-inline-footnote 'org-export-error)
-                :to-be t)
-        (when (typep unlabeled-non-inline-footnote 'org-export-error)
-          (expect (org-export-error-reason unlabeled-non-inline-footnote)
-                  :to-be :unresolved-footnote))
-        (when (typep unknown-option-value 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature unknown-option-value)
-                  :to-be :unknown-option))
         (expect (typep invalid-tags 'org-export-unsupported-syntax) :to-be t)
         (expect (every (lambda (condition)
                          (typep condition 'org-export-unsupported-syntax))
@@ -706,14 +671,25 @@
                  (export-core-test-lines
                   "#+MACRO: third $3"
                   "{{{third(value)}}}")))))
-           (short-dollar
-             (org-kit::export-macro-parameter-index "$" 0 nil :html))
-           (nondigit-parameter
-             (org-kit::export-macro-parameter-index "$x" 0 nil :html))
+           (short-dollar-preparation
+             (export-core-test-preparation
+              (export-core-test-lines "#+MACRO: short $" "{{{short}}}")))
+           (short-dollar-view
+             (first (export-core-test-view-nodes short-dollar-preparation :macro)))
+           (short-dollar (getf (org-kit::export-view-payload short-dollar-view)
+                               :expanded-text))
+           (nondigit-preparation
+             (export-core-test-preparation
+              (export-core-test-lines "#+MACRO: literal $x" "{{{literal}}}")))
+           (nondigit-view
+             (first (export-core-test-view-nodes nondigit-preparation :macro)))
+           (nondigit-parameter (getf (org-kit::export-view-payload nondigit-view)
+                                    :expanded-text))
            (multiple-digit-parameter
              (export-core-test-catch-error
               (lambda ()
-                (org-kit::export-macro-parameter-index "$12" 0 nil :html)))))
+                (export-core-test-preparation
+                 (export-core-test-lines "#+MACRO: many $12" "{{{many}}}"))))))
       (with-soft-assertions
         (expect (getf (org-kit::export-view-payload macro-view) :expanded-text)
                 :to-equal "Hello, World! again / World")
@@ -739,10 +715,13 @@
         (when (typep unsupported-parameter 'org-export-unsupported-syntax)
           (expect (org-export-unsupported-syntax-feature unsupported-parameter)
                   :to-be :unsupported-macro-parameter))
-        (expect short-dollar :to-be nil)
-        (expect nondigit-parameter :to-be nil)
+        (expect short-dollar :to-equal "$")
+        (expect nondigit-parameter :to-equal "$x")
         (expect (typep multiple-digit-parameter 'org-export-unsupported-syntax)
-                :to-be t))))
+                :to-be t)
+        (when (typep multiple-digit-parameter 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-feature multiple-digit-parameter)
+                  :to-be :unsupported-macro-parameter)))))
 
   (it "rejects long numeric options and macro parameters"
     (let* ((digits (make-string 4096 :initial-element #\9))
@@ -845,7 +824,9 @@
              (mapcar
               (lambda (value)
                 (export-core-test-catch-error
-                 (lambda () (org-kit::export-include-path value nil :html))))
+                 (lambda ()
+                   (export-core-test-preparation
+                    (format nil "#+INCLUDE: ~A" value)))))
               (list "" "part.org" "\"part.org" "part.org\"" "\"a\"b\""
                     (format nil "\"bad~%path\""))))
            (fragment-errors
@@ -885,50 +866,8 @@
         (expect parent-source :to-be nil)
         (expect (org-kit::export-preparation-p preparation) :to-be t))))
 
-  (it "copies mutable sequence source names for include resolvers"
-    (let* ((source-name
-             (make-array 2
-                         :initial-contents (list (list (copy-seq "main.org"))
-                                                 :hidden)
-                         :adjustable t :fill-pointer 1))
-           (document (parse-org "#+INCLUDE: \"part.org\""
-                                :source-name source-name))
-           (preparation
-             (org-kit::export-prepare
-              document :html
-              :include-resolver (lambda (path parent-source)
-                                  (declare (ignore path))
-                                  (setf (char (first (aref parent-source 0)) 0)
-                                        #\M)
-                                  "Included"))))
-      (with-soft-assertions
-        (expect (first (aref source-name 0)) :to-equal "main.org")
-        (expect (first (aref (document-source-name document) 0))
-                :to-equal "main.org")
-        (expect (org-kit::export-preparation-p preparation) :to-be t))))
-
-  (it "copies mutable list source names for include resolvers"
-    (let* ((source-name (list (copy-seq "main.org")))
-           (document (parse-org "#+INCLUDE: \"part.org\""
-                                :source-name source-name))
-           (preparation
-             (org-kit::export-prepare
-              document :html
-              :include-resolver (lambda (path parent-source)
-                                  (declare (ignore path))
-                                  (setf (char (car parent-source) 0) #\M)
-                                  "Included"))))
-      (with-soft-assertions
-        (expect source-name :to-equal '("main.org"))
-        (expect (document-source-name document) :to-equal '("main.org"))
-        (expect (org-kit::export-preparation-p preparation) :to-be t))))
-
-  (it "preserves shared structure in copied include source names"
-    (let* ((shared-text (copy-seq "main.org"))
-           (shared-cell (list :shared))
-           (source-name
-             (vector (list shared-text) (list shared-text)
-                     shared-cell shared-cell))
+  (it "copies string source names before passing them to include resolvers"
+    (let* ((source-name (copy-seq "main.org"))
            (document (parse-org "#+INCLUDE: \"part.org\""
                                 :source-name source-name))
            (parent-source nil)
@@ -938,37 +877,15 @@
               :include-resolver (lambda (path source)
                                   (declare (ignore path))
                                   (setf parent-source source
-                                        (char (car (aref source 0)) 0) #\M)
+                                        (char source 0) #\M)
                                   "Included"))))
       (with-soft-assertions
-        (expect (eq (car (aref parent-source 0))
-                    (car (aref parent-source 1)))
-                :to-be t)
-        (expect (eq (aref parent-source 2) (aref parent-source 3))
-                :to-be t)
-        (expect shared-text :to-equal "main.org")
+        (expect parent-source :to-equal "Main.org")
+        (expect source-name :to-equal "main.org")
+        (expect (document-source-name document) :to-equal "main.org")
         (expect (org-kit::export-preparation-p preparation) :to-be t))))
 
-  (it "copies circular include source names without changing the document"
-    (let* ((source-name (cons (copy-seq "main.org") nil))
-           (document (parse-org "#+INCLUDE: \"part.org\""
-                                :source-name source-name))
-           (parent-source nil))
-      (setf (cdr source-name) source-name)
-      (let ((preparation
-              (org-kit::export-prepare
-               document :html
-               :include-resolver (lambda (path source)
-                                   (declare (ignore path))
-                                   (setf parent-source source
-                                         (char (car source) 0) #\M)
-                                   "Included"))))
-        (with-soft-assertions
-          (expect (eq (cdr parent-source) parent-source) :to-be t)
-          (expect (char (car source-name) 0) :to-be #\m)
-          (expect (org-kit::export-preparation-p preparation) :to-be t)))))
-
-  (it "rejects mutable non-sequence source names before invoking include resolvers"
+  (it "rejects non-string source names before invoking include resolvers"
     (let* ((source-name (make-hash-table))
            (document (parse-org "#+INCLUDE: \"part.org\""
                                 :source-name source-name))
@@ -984,38 +901,66 @@
                                      "Included"))))))
       (with-soft-assertions
         (expect calls :to-be 0)
-        (expect (typep condition 'org-export-unsupported-syntax) :to-be t)
-        (when (typep condition 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature condition)
-                  :to-be :include-source-name)))))
+        (expect (typep condition 'type-error) :to-be t))))
 
-  (it "validates source block export argument forms"
-    (let* ((node-for (lambda (switches)
-                       (make-node :src-block :properties (list :switches switches))))
-           (unknown-argument
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-src-export-mode
-                          (funcall node-for ":var x=1") :html))))
-           (duplicate-argument
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-src-export-mode
-                          (funcall node-for ":exports code :exports results")
-                          :html))))
-           (missing-value
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-src-export-mode
-                          (funcall node-for ":exports") :html))))
-           (invalid-value
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-src-export-mode
-                          (funcall node-for ":exports never") :html)))))
+  (it "passes each nested include the path of its parent source"
+    (let* ((document (parse-org "#+INCLUDE: \"outer.org\""
+                                :source-name "main.org"))
+           (calls nil)
+           (preparation
+             (org-kit::export-prepare
+              document :html
+              :include-resolver
+              (lambda (path parent-source)
+                (push (list path parent-source) calls)
+                (if (string= path "outer.org")
+                    "#+INCLUDE: \"inner.org\""
+                    "Included")))))
       (with-soft-assertions
-        (expect (typep unknown-argument 'org-export-error) :to-be t)
-        (expect (typep duplicate-argument 'org-export-error) :to-be t)
-        (expect (typep missing-value 'org-export-error) :to-be t)
-        (expect (typep invalid-value 'org-export-unsupported-syntax) :to-be t)
-        (expect (org-kit::export-src-export-mode (funcall node-for "") :html)
-                :to-be :code))))
+        (expect (nreverse calls)
+                :to-equal '(("outer.org" "main.org")
+                            ("inner.org" "outer.org")))
+        (expect (org-kit::export-preparation-p preparation) :to-be t))))
+
+  (it "interprets only source block exports and validates their values"
+    (let* ((with-ignored-arguments
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+BEGIN_SRC text :results output :tangle file :var x=1 :exports both"
+               "body" "#+END_SRC" "#+RESULTS:" ": result")))
+           (with-ignored-view
+             (first (export-core-test-view-nodes with-ignored-arguments :src-block)))
+           (ignored-arguments
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+BEGIN_SRC text :results output :tangle file :var x=1"
+               "body" "#+END_SRC")))
+           (ignored-view
+             (first (export-core-test-view-nodes ignored-arguments :src-block)))
+           (invalid-headers
+             (mapcar
+              (lambda (header)
+                (export-core-test-catch-error
+                 (lambda ()
+                   (export-core-test-preparation
+                    (export-core-test-lines
+                     (concatenate 'string "#+BEGIN_SRC text " header)
+                     "body" "#+END_SRC")))))
+              '(":exports code :exports results" ":exports" ":exports never"))))
+      (with-soft-assertions
+        (expect (getf (org-kit::export-view-payload with-ignored-view) :exports)
+                :to-be :both)
+        (expect (getf (org-kit::export-view-payload with-ignored-view)
+                      :adjacent-results)
+                :to-be t)
+        (expect (getf (org-kit::export-view-payload ignored-view) :exports)
+                :to-be :code)
+        (expect (every (lambda (condition)
+                         (and (typep condition 'org-export-unsupported-syntax)
+                              (eq (org-export-unsupported-syntax-feature condition)
+                                  :src-header-argument)))
+                       invalid-headers)
+                :to-be t))))
 
   (it "prepares code and adjacent results according to every source export mode"
     (let* ((source
@@ -1099,7 +1044,7 @@
                         (lambda () (org-kit::export-prepare source :html)))
                        'org-export-error)
                 :to-be t)
-        (expect (export-core-test-document-snapshot source) :to-equal before)))))
+        (expect (export-core-test-document-snapshot source) :to-equal before))))
 
   (it "validates preparation inputs and requires a parsed document"
     (let* ((document (parse-org "Body"))
@@ -1129,49 +1074,33 @@
         (expect (typep invalid-raw-html 'type-error) :to-be t)
         (expect (typep unparsed 'org-export-error) :to-be t)
         (when (typep unparsed 'org-export-error)
-          (expect (org-export-error-reason unparsed) :to-be :invalid-output)))))
+          (expect (org-export-error-reason unparsed) :to-be :invalid-output))))))
 
 (describe "E1 export output validation"
   (it "validates output types and writes to character and octet streams"
-    (let* ((invalid-limits
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-open-output nil :string))))
-           (stream-on-string
+    (let* ((stream-on-string
              (export-core-test-catch-error
               (lambda ()
-                (org-kit::export-open-output
-                 (make-limits) :string :stream (make-string-output-stream)))))
+                (org-kit::export-write-output
+                 "text" (make-limits) :string :backend :html
+                 :stream (make-string-output-stream)))))
            (missing-stream
              (export-core-test-catch-error
-              (lambda () (org-kit::export-open-output (make-limits) :stream))))
+              (lambda ()
+                (org-kit::export-write-output "text" (make-limits) :stream
+                                              :backend :html))))
            (unsupported-stream
              (export-core-test-catch-error
               (lambda ()
-                (org-kit::export-open-output
-                 (make-limits) :stream
+                (org-kit::export-write-output
+                 "text" (make-limits) :stream :backend :html
                  :stream (make-instance 'export-core-test-binary-output-stream
                                         :element-type '(unsigned-byte 16))))))
            (unknown-output
              (export-core-test-catch-error
-              (lambda () (org-kit::export-open-output (make-limits) :unknown))))
-           (invalid-state
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-append-output nil "text"))))
-           (state (org-kit::export-open-output (make-limits) :string :backend :html))
-           (invalid-text
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-append-output state 42))))
-           (invalid-finish
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-finish-output nil))))
-           (invalid-write-text
-             (export-core-test-catch-error
               (lambda ()
-                (org-kit::export-write-output 42 (make-limits) :string
+                (org-kit::export-write-output "text" (make-limits) :unknown
                                               :backend :html))))
-           (invalid-write-limits
-             (export-core-test-catch-error
-              (lambda () (org-kit::export-write-output "x" nil :string))))
            (character-stream (make-string-output-stream))
            (character-result
              (org-kit::export-write-output "text" (make-limits) :stream
@@ -1182,35 +1111,59 @@
            (octet-result
              (org-kit::export-write-output "é" (make-limits) :stream
                                            :backend :html :stream octet-stream))
-           (invalid-utf8-length
-             (export-core-test-with-codec-condition
-              'cl-codec-kit:string-size-in-octets
+           (surrogate (string (code-char #xD800)))
+           (encoding-error
+             (export-core-test-catch-error
               (lambda ()
-                (export-core-test-catch-error
-                 (lambda () (org-kit::export-utf8-length "text" :html))))))
-           (invalid-utf8-encoding
-             (export-core-test-with-codec-condition
-              'cl-codec-kit:string-to-octets
+                (org-kit::export-write-output surrogate (make-limits) :octets
+                                              :backend :html))))
+           (encoding-before-octet-limit
+             (export-core-test-catch-error
               (lambda ()
-                (export-core-test-catch-error
-                 (lambda () (org-kit::export-utf8-octets "text" :html)))))))
+                (org-kit::export-write-output
+                 surrogate (make-limits :max-output-octets 0) :octets
+                 :backend :html))))
+           (failed-character-stream (make-string-output-stream))
+           (character-limit-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits :max-output-length 3) :stream
+                 :backend :html :stream failed-character-stream))))
+           (failed-octet-stream
+             (make-instance 'export-core-test-binary-output-stream
+                            :element-type '(unsigned-byte 8)))
+           (stream-encoding-error
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 surrogate (make-limits) :stream :backend :html
+                 :stream failed-octet-stream)))))
       (with-soft-assertions
-        (expect (typep invalid-limits 'type-error) :to-be t)
         (expect (typep stream-on-string 'org-export-error) :to-be t)
         (expect (typep missing-stream 'org-export-error) :to-be t)
         (expect (typep unsupported-stream 'org-export-error) :to-be t)
         (expect (typep unknown-output 'org-export-error) :to-be t)
-        (expect (typep invalid-state 'type-error) :to-be t)
-        (expect (typep invalid-text 'org-export-error) :to-be t)
-        (expect (typep invalid-finish 'type-error) :to-be t)
-        (expect (typep invalid-write-text 'org-export-error) :to-be t)
-        (expect (typep invalid-write-limits 'type-error) :to-be t)
         (expect (eq character-result character-stream) :to-be t)
         (expect (get-output-stream-string character-stream) :to-equal "text")
         (expect (eq octet-result octet-stream) :to-be t)
         (expect (export-core-test-stream-octets octet-stream) :to-equalp #(195 169))
-        (expect (typep invalid-utf8-length 'org-export-error) :to-be t)
-        (expect (typep invalid-utf8-encoding 'org-export-error) :to-be t)))))
+        (expect (typep encoding-error 'org-export-error) :to-be t)
+        (when (typep encoding-error 'org-export-error)
+          (expect (org-export-error-reason encoding-error) :to-be :encoding))
+        (expect (typep encoding-before-octet-limit 'org-export-error) :to-be t)
+        (when (typep encoding-before-octet-limit 'org-export-error)
+          (expect (org-export-error-reason encoding-before-octet-limit)
+                  :to-be :encoding))
+        (expect (typep character-limit-error 'org-resource-limit-error)
+                :to-be t)
+        (expect (get-output-stream-string failed-character-stream) :to-equal "")
+        (expect (typep stream-encoding-error 'org-export-error) :to-be t)
+        (when (typep stream-encoding-error 'org-export-error)
+          (expect (org-export-error-reason stream-encoding-error)
+                  :to-be :encoding))
+        (expect (export-core-test-stream-octets failed-octet-stream)
+                :to-equalp #())))))
 
 (describe "E1 export resource boundaries"
   (it "checks root nodes before processing export keywords"

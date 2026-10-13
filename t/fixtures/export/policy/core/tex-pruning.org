@@ -1,0 +1,6 @@
+#+OPTIONS: tex:nil
+Inline math \(x + y\).
+
+\begin{align}
+x &= y
+\end{align}

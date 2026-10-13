@@ -47,6 +47,15 @@ The oracle pins Emacs 31.1, Org 9.8.10, and ox-gfm 20231215.1901. The generator 
 arguments, including `:exports`. The source-block oracle therefore records Org's nil-mode output;
 the kit's explicit source export modes are covered separately by policy tests.
 
+Export policy fixtures also record deliberate differences from Org: duplicate TITLE, AUTHOR, DATE,
+LANGUAGE, SELECT_TAGS, EXCLUDE_TAGS, and MACRO declarations are rejected, and global keywords in
+included or macro-expanded fragments are rejected even where Org accepts them. Multiple
+`#+OPTIONS` lines are combined. E1 applies the `tasks` and `tex` options while pruning its view,
+including `tasks:nil`, `tasks:todo`, `tasks:done`, and `tex:nil`; these selection options are
+recognized here even though the export contract does not list them. The kit accepts only
+`expand-links:nil`, because enabling link expansion would read environment variables from file
+links. It accepts only `broken-links:nil` and keeps its fail-closed broken-link policy.
+
 The coverage check reads the generated trees and reports every `org-element` element and object
 type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
 type.

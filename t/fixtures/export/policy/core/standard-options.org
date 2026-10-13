@@ -1,0 +1,11 @@
+#+OPTIONS: ^:{} toc:2 num:nil todo:nil tags:nil H:7 \n:t
+#+OPTIONS: toc:7 timestamp:t arch:headline author:t expand-links:nil
+#+OPTIONS: broken-links:nil c:t creator:t date:t d:t email:t *:t e:t
+#+OPTIONS: ::t f:t inline:t tex:verbatim p:t pri:t prop:t ':t -:t
+#+OPTIONS: stat:t |:t tasks:todo title:t <:active
+
+* TODO Active
+* DONE Completed
+* Normal
+* Archived :ARCHIVE:
+  Archived body.

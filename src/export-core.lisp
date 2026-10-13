@@ -104,15 +104,8 @@
          :feature feature))
 
 (defun export-node-operation (type backend &optional source)
-  "Return the private operation for TYPE and BACKEND, or signal when unsupported."
-  (unless (export-backend-p backend)
-    (export-error backend :unknown-backend source "Unknown export backend"))
-  (unless (node-type-p type)
-    (error 'type-error :datum type :expected-type 'node-type))
+  "Return TYPE's BACKEND action; diary sexps signal unsupported syntax."
   (let ((entry (assoc type *export-node-operations*)))
-    (unless entry
-      (export-unsupported-syntax backend source 0 :unknown-node-type
-                                 "Node type has no export mapping"))
     (let ((operation
             (ecase backend
               (:html (second entry))
@@ -182,28 +175,17 @@
                :initial-element #\~))
 
 (defun export-escape-context (backend context string)
-  "Escape STRING for the named backend context without serializing a node."
-  (unless (stringp string)
-    (error 'type-error :datum string :expected-type 'string))
+  "Escape STRING using the backend rules for its text, label, attribute, destination, or code context."
   (case backend
     (:html (case context
              (:text (export-html-escape string nil))
-             (:attribute (export-html-escape string t))
-             (otherwise (error 'type-error :datum context
-                               :expected-type '(member :text :attribute)))))
+             (:attribute (export-html-escape string t))))
     (:gfm (case context
             ((:text :label) (export-gfm-escape-literal string))
             (:destination (export-gfm-destination string))
-            (:code (export-gfm-code-span string))
-            (otherwise (error 'type-error :datum context
-                              :expected-type '(member :text :label
-                                                      :destination :code)))))
+            (:code (export-gfm-code-span string))))
     (:ascii (case context
-              ((:text :literal) string)
-              (otherwise (error 'type-error :datum context
-                                :expected-type '(member :text :literal)))))
-    (otherwise
-     (export-error backend :unknown-backend string "Unknown export backend"))))
+              ((:text :literal) string)))))
 
 (defun export-control-character-p (character)
   (let ((code (char-code character)))
@@ -243,10 +225,6 @@
 
 (defun export-validate-url (document raw-destination)
   "Return whether RAW-DESTINATION is safe and its abbreviation-expanded value."
-  (unless (document-p document)
-    (error 'type-error :datum document :expected-type 'document))
-  (unless (stringp raw-destination)
-    (error 'type-error :datum raw-destination :expected-type 'string))
   (if (export-url-has-control-p raw-destination)
       (values nil raw-destination)
       (let* ((expanded (link-object-expand-abbreviation document raw-destination))
@@ -262,96 +240,67 @@
          expanded))))
 
 (defun export-utf8-length (text backend)
-  (handler-case
-      (cl-codec-kit:string-size-in-octets text :encoding :utf-8)
-    (cl-codec-kit:unsupported-encoding ()
-      (export-error backend :encoding text "Unable to measure UTF-8 export output"))))
+  (loop with total = 0
+        for character across text
+        for code = (char-code character)
+        for length = (cond ((<= code #x7f) 1)
+                           ((<= code #x7ff) 2)
+                           ((or (<= code #xd7ff)
+                                (<= #xe000 code #xffff))
+                            3)
+                           ((<= #x10000 code #x10ffff) 4))
+        do (unless length
+             (export-error backend :encoding text
+                           "Unable to measure UTF-8 export output"))
+           (incf total length)
+        finally (return total)))
 
 (defun export-utf8-octets (text backend)
   (handler-case
       (cl-codec-kit:string-to-octets text :encoding :utf-8)
-    (cl-codec-kit:unsupported-encoding ()
+    (cl-codec-kit:unencodable-character ()
       (export-error backend :encoding text "Unable to encode UTF-8 export output"))))
-
-(defun export-open-output (limits output-type &key stream backend)
-  (unless (limits-p limits)
-    (error 'type-error :datum limits :expected-type 'limits))
-  (let ((octet-output-p nil)
-        (buffer nil))
-    (case output-type
-      ((:string :octets)
-       (when stream
-         (export-error backend :invalid-output nil
-                       "A stream is only valid with :STREAM output type"))
-       (setf octet-output-p (eq output-type :octets)
-             buffer (make-string-output-stream)))
-      (:stream
-       (unless (streamp stream)
-         (export-error backend :invalid-output nil
-                       "Stream output requires a stream"))
-       (multiple-value-bind (character-p character-known-p)
-           (subtypep (stream-element-type stream) 'character)
-         (cond
-           ((and character-known-p character-p))
-           ((equal (stream-element-type stream) '(unsigned-byte 8))
-            (setf octet-output-p t))
-           (t
-            (export-error backend :invalid-output nil
-                          "Unsupported stream element type")))))
-      (otherwise
-       (export-error backend :invalid-output nil
-                     "Unsupported export output type")))
-    (%make-export-output-state :limits limits :backend backend
-                               :output-type output-type :stream stream
-                               :octet-output-p octet-output-p :buffer buffer)))
-
-(defun export-append-output (state text)
-  (unless (export-output-state-p state)
-    (error 'type-error :datum state :expected-type 'export-output-state))
-  (unless (stringp text)
-    (export-error (export-output-state-backend state) :invalid-output text
-                  "Export output must be a string"))
-  (let* ((limits (export-output-state-limits state))
-         (character-count (+ (export-output-state-character-count state)
-                             (length text)))
-         (octet-count (export-output-state-octet-count state)))
-    (check-limit limits :max-output-length character-count)
-    (when (export-output-state-octet-output-p state)
-      (incf octet-count
-            (export-utf8-length text (export-output-state-backend state)))
-      (check-limit limits :max-output-octets octet-count))
-    (setf (export-output-state-character-count state) character-count
-          (export-output-state-octet-count state) octet-count)
-    (if (eq (export-output-state-output-type state) :stream)
-        (if (export-output-state-octet-output-p state)
-            (write-sequence
-             (export-utf8-octets text (export-output-state-backend state))
-             (export-output-state-stream state))
-            (write-string text (export-output-state-stream state)))
-        (write-string text (export-output-state-buffer state)))
-    state))
-
-(defun export-finish-output (state)
-  (unless (export-output-state-p state)
-    (error 'type-error :datum state :expected-type 'export-output-state))
-  (case (export-output-state-output-type state)
-    (:string (get-output-stream-string (export-output-state-buffer state)))
-    (:octets
-     (export-utf8-octets
-      (get-output-stream-string (export-output-state-buffer state))
-      (export-output-state-backend state)))
-    (:stream (export-output-state-stream state))))
 
 (defun export-write-output (text limits output-type &key stream backend)
   "Apply output limits and return a string, UTF-8 octets, or the written stream."
-  (unless (stringp text)
-    (export-error backend :invalid-output text "Export output must be a string"))
-  (unless (limits-p limits)
-    (error 'type-error :datum limits :expected-type 'limits))
-  (let ((state (export-open-output limits output-type :stream stream
-                                  :backend backend)))
-    (export-append-output state text)
-    (export-finish-output state)))
+  (let ((octet-output-p
+          (case output-type
+            (:string
+             (when stream
+               (export-error backend :invalid-output nil
+                             "A stream is only valid with :STREAM output type"))
+             nil)
+            (:octets
+             (when stream
+               (export-error backend :invalid-output nil
+                             "A stream is only valid with :STREAM output type"))
+             t)
+            (:stream
+             (unless (streamp stream)
+               (export-error backend :invalid-output nil
+                             "Stream output requires a stream"))
+             (multiple-value-bind (character-p character-known-p)
+                 (subtypep (stream-element-type stream) 'character)
+               (cond
+                 ((and character-known-p character-p) nil)
+                 ((equal (stream-element-type stream) '(unsigned-byte 8)) t)
+                 (t
+                  (export-error backend :invalid-output nil
+                                "Unsupported stream element type")))))
+            (otherwise
+             (export-error backend :invalid-output nil
+                           "Unsupported export output type")))))
+    (check-limit limits :max-output-length (length text))
+    (if octet-output-p
+        (let ((octet-count (export-utf8-length text backend)))
+          (check-limit limits :max-output-octets octet-count)
+          (let ((octets (export-utf8-octets text backend)))
+            (if (eq output-type :stream)
+                (progn (write-sequence octets stream) stream)
+                octets)))
+        (if (eq output-type :stream)
+            (progn (write-string text stream) stream)
+            text))))
 
 (defun export-whitespace-p (character)
   (find character '(#\Space #\Tab #\Newline #\Return #\Page)))
@@ -409,66 +358,223 @@
                                    "Unsupported tag expression")))
     tags))
 
-(defun export-option-boolean (value source backend option-name)
+(defparameter *export-option-specifications*
+  '(("toc" :toc :toc)
+    ("h" :heading-depth :integer)
+    ("num" :num :boolean)
+    ("^" :^ :sub-superscript)
+    ("title" :title :boolean)
+    ("author" :author :boolean)
+    ("date" :date :boolean)
+    ("\\n" :preserve-breaks :boolean)
+    ("timestamp" :timestamp :boolean)
+    ("arch" :arch :archive-mode)
+    ("expand-links" :expand-links :disabled-only)
+    ("broken-links" :broken-links :disabled-only)
+    ("c" :clock :boolean)
+    ("creator" :creator :boolean)
+    ("d" :drawers :selection-list)
+    ("email" :email :boolean)
+    ("*" :emphasis :boolean)
+    ("e" :entities :boolean)
+    (":" :fixed-width :boolean)
+    ("f" :footnotes :boolean)
+    ("inline" :inline-tasks :boolean)
+    ("tex" :latex :latex-mode)
+    ("p" :planning :boolean)
+    ("pri" :priority :boolean)
+    ("prop" :properties :selection-list)
+    ("'" :smart-quotes :boolean)
+    ("-" :special-strings :boolean)
+    ("stat" :statistics-cookies :boolean)
+    ("|" :tables :boolean)
+    ("tags" :tags :tag-mode)
+    ("tasks" :tasks :tasks-mode)
+    ("<" :timestamp-range :timestamp-range)
+    ("todo" :todo :boolean)))
+
+(defun export-invalid-option (source backend message)
+  (export-unsupported-syntax backend source 0 :invalid-option message))
+
+(defun export-option-specification (key source backend)
+  (or (assoc key *export-option-specifications* :test #'string=)
+      (export-unsupported-syntax backend source 0 :unknown-option
+                                 "Unknown export option")))
+
+(defun export-option-boolean (value source backend)
   (cond ((string-equal value "t") t)
         ((string-equal value "nil") nil)
-        (t (export-unsupported-syntax backend source 0 :invalid-option
-                                      (format nil "Invalid ~A option value"
-                                              option-name)))))
+        (t (export-invalid-option source backend "Expected t or nil"))))
 
-(defun export-option-value (key value source backend)
-  (cond
-    ((string= key "toc")
-     (cond ((string-equal value "t") t)
-           ((string-equal value "nil") nil)
-           ((and (= (length value) 1)
-                 (find (char value 0) "123456"))
-            (digit-char-p (char value 0)))
-           (t (export-unsupported-syntax backend source 0 :invalid-option
-                                         "Invalid toc option value"))))
-    ((string= key "h")
-     (if (and (= (length value) 1)
-              (digit-char-p (char value 0))
-              (<= 1 (digit-char-p (char value 0)) 6))
-         (digit-char-p (char value 0))
-         (export-unsupported-syntax backend source 0 :invalid-option
-                                    "Heading depth must be from 1 to 6")))
-    ((member key '("num" "^" "title" "author" "date") :test #'string=)
-     (export-option-boolean value source backend key))
-    (t
-     (export-unsupported-syntax backend source 0 :unknown-option
-                                "Unknown export option"))))
+(defun export-option-integer (value source backend)
+  (unless (and (plusp (length value))
+               (every #'digit-char-p value))
+    (export-invalid-option source backend "Expected a nonnegative integer"))
+  (loop with number = 0
+        for character across value
+        for digit = (digit-char-p character)
+        do (when (> number (floor (- most-positive-fixnum digit) 10))
+             (export-invalid-option source backend
+                                    "Option integer exceeds the supported range"))
+           (setf number (+ (* number 10) digit))
+        finally (return number)))
 
-(defun export-option-key (key source backend)
-  (let ((entry (assoc key
-                      '(("toc" . :toc)
-                        ("h" . :heading-depth)
-                        ("num" . :num)
-                        ("^" . :^)
-                        ("title" . :title)
-                        ("author" . :author)
-                        ("date" . :date))
-                      :test #'string=)))
-    (if entry
-        (cdr entry)
-        (export-unsupported-syntax backend source 0 :unknown-option
-                                   "Unknown export option"))))
+(defun export-option-tokens (value source backend)
+  (let ((tokens nil)
+        (start nil)
+        (depth 0)
+        (quoted-p nil))
+    (loop for index from 0 to (length value)
+          for end-p = (= index (length value))
+          for character = (unless end-p (char value index))
+          do (cond
+               (end-p
+                (when (or quoted-p (/= depth 0))
+                  (export-invalid-option source backend
+                                         "Unclosed option value group"))
+                (when start
+                  (push (subseq value start index) tokens)))
+               ((char= character #\")
+                (unless start (setf start index))
+                (setf quoted-p (not quoted-p)))
+               (quoted-p nil)
+               ((char= character #\()
+                (unless start (setf start index))
+                (incf depth))
+               ((char= character #\))
+                (decf depth)
+                (when (minusp depth)
+                  (export-invalid-option source backend
+                                         "Unmatched option value group")))
+               ((and (zerop depth) (export-whitespace-p character))
+                (when start
+                  (push (subseq value start index) tokens)
+                  (setf start nil)))
+               (t (unless start (setf start index)))))
+    (nreverse tokens)))
+
+(defun export-option-list (value source backend)
+  (unless (and (>= (length value) 2)
+               (char= (char value 0) #\()
+               (char= (char value (1- (length value))) #\)))
+    (export-invalid-option source backend "Expected a parenthesized option list"))
+  (let ((inner (subseq value 1 (1- (length value))))
+        (items nil)
+        (position 0))
+    (loop while (< position (length inner))
+          do (if (export-whitespace-p (char inner position))
+                 (incf position)
+                 (let ((start position))
+                   (if (char= (char inner position) #\")
+                       (progn
+                         (incf position)
+                         (setf start position)
+                         (loop while (and (< position (length inner))
+                                          (not (char= (char inner position) #\")))
+                               do (incf position))
+                         (when (= position (length inner))
+                           (export-invalid-option source backend
+                                                  "Unclosed string in option list"))
+                         (push (subseq inner start position) items)
+                         (incf position)
+                         (unless (or (= position (length inner))
+                                     (export-whitespace-p (char inner position)))
+                           (export-invalid-option source backend
+                                                  "Malformed option list string")))
+                       (progn
+                         (loop while (and (< position (length inner))
+                                          (not (export-whitespace-p
+                                                (char inner position))))
+                               do (unless (or (alphanumericp (char inner position))
+                                              (find (char inner position) "-_@#%+.:/"))
+                                    (export-invalid-option
+                                     source backend "Malformed option list item"))
+                                  (incf position))
+                         (push (subseq inner start position) items))))))
+    (setf items (nreverse items))
+    (if (and items (string-equal (first items) "not"))
+        (cons :exclude (rest items))
+        (cons :include items))))
+
+(defun export-option-value (specification value source backend)
+  (let ((kind (third specification)))
+    (case kind
+      (:boolean (export-option-boolean value source backend))
+      (:integer (export-option-integer value source backend))
+      (:toc (cond ((string-equal value "t") t)
+                  ((string-equal value "nil") nil)
+                  (t (export-option-integer value source backend))))
+      (:sub-superscript
+       (cond ((string-equal value "t") t)
+             ((string-equal value "nil") nil)
+             ((string= value "{}") "{}")
+             (t (export-invalid-option source backend
+                                       "Expected t, nil, or {}"))))
+      (:disabled-only
+       (unless (string-equal value "nil")
+         (export-invalid-option source backend
+                                "This option only supports its fail-closed value"))
+       nil)
+      (:archive-mode
+       (cond ((string-equal value "nil") nil)
+             ((string-equal value "t") t)
+             ((string-equal value "headline") :headline)
+             (t (export-invalid-option source backend "Invalid arch option value"))))
+      (:latex-mode
+       (cond ((string-equal value "nil") nil)
+             ((string-equal value "t") t)
+             ((string-equal value "verbatim") :verbatim)
+             (t (export-invalid-option source backend "Invalid tex option value"))))
+      (:tag-mode
+       (cond ((string-equal value "nil") nil)
+             ((string-equal value "t") t)
+             ((string-equal value "not-in-toc") :not-in-toc)
+             (t (export-invalid-option source backend "Invalid tags option value"))))
+      (:timestamp-range
+       (let ((entry (assoc (string-downcase value)
+                           '(("nil" . nil) ("t" . t)
+                             ("active" . :active)
+                             ("active-exclude-diary" . :active-exclude-diary)
+                             ("inactive" . :inactive))
+                           :test #'string=)))
+         (if entry (cdr entry)
+             (export-invalid-option source backend
+                                    "Invalid timestamp range option value"))))
+      ((:selection-list :tasks-mode)
+       (cond ((string-equal value "t") t)
+             ((string-equal value "nil") nil)
+             ((and (eq kind :tasks-mode) (string-equal value "todo")) :todo)
+             ((and (eq kind :tasks-mode) (string-equal value "done")) :done)
+             ((and (eq kind :tasks-mode) (string-equal value "not"))
+              (export-invalid-option source backend "Invalid tasks option value"))
+             (t (export-option-list value source backend))))
+      (otherwise
+       (export-invalid-option source backend "Invalid option specification")))))
+
+(defun export-option-token-parts (token source backend)
+  (if (and (> (length token) 2)
+           (char= (char token 0) #\:)
+           (char= (char token 1) #\:))
+      (values ":" (subseq token 2))
+      (let ((colon (position #\: token)))
+        (unless (and colon (plusp colon) (< colon (1- (length token))))
+          (export-invalid-option source backend "Malformed export option"))
+        (values (string-downcase (subseq token 0 colon))
+                (subseq token (1+ colon))))))
 
 (defun export-parse-options (value source backend)
   (let ((options nil))
-    (dolist (token (export-split-words value))
-      (let ((colon (position #\: token)))
-        (unless (and colon (plusp colon) (< colon (1- (length token))))
-          (export-unsupported-syntax backend source 0 :invalid-option
-                                     "Malformed export option"))
-        (let* ((key (string-downcase (subseq token 0 colon)))
-               (option-key (export-option-key key source backend))
-               (option-value (export-option-value
-                              key (subseq token (1+ colon)) source backend)))
-          (when (assoc option-key options)
-            (export-unsupported-syntax backend source 0 :duplicate-option
-                                       "Duplicate export option"))
-          (push (cons option-key option-value) options))))
+    (dolist (token (export-option-tokens value source backend))
+      (multiple-value-bind (key option-value)
+          (export-option-token-parts token source backend)
+        (let* ((specification (export-option-specification key source backend))
+               (option-key (second specification))
+               (parsed-value
+                 (export-option-value specification option-value source backend))
+               (existing (assoc option-key options)))
+          (if existing
+              (setf (cdr existing) parsed-value)
+              (push (cons option-key parsed-value) options)))))
     (nreverse options)))
 
 (defun export-macro-definition (record backend)
@@ -519,10 +625,12 @@
         (declare (ignore source))
         (when present-p
           (setf (getf metadata (cdr specification)) value))))
-    (multiple-value-bind (value present-p source)
-        (export-single-keyword-value records "OPTIONS" backend)
-      (when present-p
-        (setf options (export-parse-options value source backend))))
+    (dolist (record (export-records-for-key records "OPTIONS"))
+      (dolist (option (export-parse-options (third record) (first record) backend))
+        (let ((existing (assoc (car option) options)))
+          (if existing
+              (setf (cdr existing) (cdr option))
+              (setf options (append options (list option)))))))
     (multiple-value-bind (value present-p source)
         (export-single-keyword-value records "SELECT_TAGS" backend)
       (when present-p
@@ -547,8 +655,7 @@
             (and select-tags
                  (or select-present-p
                      (export-document-has-tag-p document select-tags)))
-            select-tags exclude-tags (export-build-macro-table records backend)
-            records)))
+            select-tags exclude-tags (export-build-macro-table records backend))))
 
 (defun export-macro-parameter-index (template position source backend)
   (let ((digit-position (1+ position)))
@@ -610,43 +717,10 @@
                                  "Only a quoted literal include path is supported"))
     (subseq value 1 (1- (length value)))))
 
-(defun export-copy-source-name (source-name backend source)
-  (let ((copies (make-hash-table :test #'eq)))
-    (labels ((copy-value (value)
-               (cond
-                 ((stringp value)
-                  (or (gethash value copies)
-                      (setf (gethash value copies) (copy-seq value))))
-                 ((consp value)
-                  (or (gethash value copies)
-                      (let ((copy (cons nil nil)))
-                        (setf (gethash value copies) copy
-                              (car copy) (copy-value (car value))
-                              (cdr copy) (copy-value (cdr value)))
-                        copy)))
-                 ((vectorp value)
-                  (or (gethash value copies)
-                      (let ((copy
-                              (make-array
-                               (array-total-size value)
-                               :element-type (array-element-type value)
-                               :adjustable (adjustable-array-p value)
-                               :fill-pointer
-                               (when (array-has-fill-pointer-p value)
-                                 (fill-pointer value)))))
-                        (setf (gethash value copies) copy)
-                        (loop for index below (array-total-size value)
-                              do (setf (aref copy index)
-                                       (copy-value (aref value index))))
-                        copy)))
-                 ((or (null value) (symbolp value) (numberp value)
-                      (characterp value))
-                  value)
-                 (t
-                  (export-unsupported-syntax
-                   backend source 0 :include-source-name
-                   "Include source name contains an unsupported mutable value")))))
-      (copy-value source-name))))
+(defun export-copy-source-name (source-name)
+  (unless (or (null source-name) (stringp source-name))
+    (error 'type-error :datum source-name :expected-type '(or null string)))
+  (if source-name (copy-seq source-name) nil))
 
 (defun export-src-export-mode (node backend)
   (let ((tokens (export-split-words (or (node-property node :switches) "")))
@@ -654,22 +728,33 @@
         (mode-seen-p nil))
     (loop while tokens
           for token = (pop tokens)
-          do (unless (string-equal token ":exports")
-               (export-error backend :invalid-output node
-                             "Unsupported source block header argument"))
-             (when mode-seen-p
-               (export-error backend :invalid-output node
-                             "Duplicate :exports source block argument"))
-             (unless tokens
-               (export-error backend :invalid-output node
-                             "Missing :exports source block value"))
-             (let ((value (string-downcase (pop tokens))))
-               (unless (member value '("code" "results" "both" "none")
-                               :test #'string=)
-                 (export-unsupported-syntax backend node 0 :invalid-src-exports
-                                            "Unsupported :exports mode"))
-               (setf mode (intern (string-upcase value) :keyword)
-                     mode-seen-p t)))
+          do (cond
+               ((string-equal token ":exports")
+                (when mode-seen-p
+                  (export-unsupported-syntax
+                   backend node 0 :src-header-argument
+                   "Duplicate :exports source block argument"))
+                (unless tokens
+                  (export-unsupported-syntax
+                   backend node 0 :src-header-argument
+                   "Missing :exports source block value"))
+                (let ((value (string-downcase (pop tokens))))
+                  (setf mode
+                        (cond ((string= value "code") :code)
+                              ((string= value "results") :results)
+                              ((string= value "both") :both)
+                              ((string= value "none") :none)
+                              (t
+                               (export-unsupported-syntax
+                                backend node 0 :src-header-argument
+                                "Unsupported :exports mode")))
+                        mode-seen-p t)))
+               ((and (> (length token) 1)
+                     (char= (char token 0) #\:))
+                (when (and tokens
+                           (not (and (> (length (first tokens)) 1)
+                                     (char= (char (first tokens) 0) #\:))))
+                  (pop tokens)))))
     (if mode-seen-p mode :code)))
 
 (defun export-results-adjacent-p (source-node results-node)
@@ -718,20 +803,90 @@
     (let ((key (second record))
           (source (first record)))
       (cond
-        ((member key '("TITLE" "AUTHOR" "DATE" "LANGUAGE" "OPTIONS"
-                       "SELECT_TAGS" "EXCLUDE_TAGS" "MACRO" "ATTR_HTML")
+        ((or (member key '("TITLE" "AUTHOR" "DATE" "LANGUAGE" "OPTIONS"
+                           "SELECT_TAGS" "EXCLUDE_TAGS" "MACRO" "ATTR_HTML"
+                           "ARCHIVE" "COLUMNS" "PRIORITIES" "CONSTANTS"
+                           "EXPORT_FILE_NAME" "DESCRIPTION" "KEYWORDS"
+                           "SUBTITLE" "EMAIL" "CREATOR")
                  :test #'string=)
+             (reader-heading-setting-kind key))
          (when fragment-p
            (export-unsupported-syntax backend source 0 :fragment-keyword-scope
                                       "Global export keywords in fragments are unsupported")))
-        ((reader-heading-setting-kind key)
-         (when fragment-p
-           (export-unsupported-syntax backend source 0 :fragment-keyword-scope
-                                      "Document settings in fragments are unsupported")))
-        ((member key '("INCLUDE" "RESULTS") :test #'string=) nil)
+        ((member key '("INCLUDE" "RESULTS" "NAME" "CAPTION" "HEADER")
+                 :test #'string=)
+         nil)
         (t
          (export-unsupported-syntax backend source 0 :unknown-keyword
                                     "Unknown export keyword"))))))
+
+(defun export-option-selects-name-p (value name)
+  (if (eq (first value) :exclude)
+      (not (member name (rest value) :test #'string-equal))
+      (member name (rest value) :test #'string-equal)))
+
+(defun export-option-pruned-p (node options)
+  (let* ((type (node-type node))
+         (properties (assoc :properties options))
+         (drawers (assoc :drawers options)))
+    (or (and (eq type :clock) (assoc :clock options)
+             (not (cdr (assoc :clock options))))
+        (and (eq type :planning) (assoc :planning options)
+             (not (cdr (assoc :planning options))))
+        (and (eq type :statistics-cookie) (assoc :statistics-cookies options)
+             (not (cdr (assoc :statistics-cookies options))))
+        (and (eq type :inlinetask) (assoc :inline-tasks options)
+             (not (cdr (assoc :inline-tasks options))))
+        (and (member type '(:latex-environment :latex-fragment) :test #'eq)
+             (assoc :latex options)
+             (not (cdr (assoc :latex options))))
+        (and (member type '(:footnote-reference :footnote-definition) :test #'eq)
+             (assoc :footnotes options)
+             (not (cdr (assoc :footnotes options))))
+        (and (eq type :drawer) drawers
+             (not (let ((value (cdr drawers)))
+                    (or (eq value t)
+                        (and (consp value)
+                             (export-option-selects-name-p
+                              value (node-property node :drawer-name)))))))
+        (and (eq type :node-property) properties
+             (not (let ((value (cdr properties)))
+                    (or (eq value t)
+                        (and (consp value)
+                             (export-option-selects-name-p
+                              value (node-property node :key)))))))
+        (and (eq type :property-drawer) properties
+             (not (let ((value (cdr properties)))
+                    (or (eq value t)
+                        (and (consp value)
+                             (if (eq (first value) :exclude)
+                                 (some (lambda (child)
+                                         (not (member (node-property child :key)
+                                                      (rest value)
+                                                      :test #'string-equal)))
+                                       (node-children node))
+                                 (some (lambda (child)
+                                         (member (node-property child :key)
+                                                 (rest value)
+                                                 :test #'string-equal))
+                                       (node-children node)))))))))))
+
+(defun export-heading-pruned-p (node options)
+  (let ((archive (assoc :arch options))
+        (tasks (assoc :tasks options))
+        (todo-keyword (node-property node :todo-keyword))
+        (todo-type (node-property node :todo-type)))
+    (or (and archive
+             (node-property node :archivedp)
+             (null (cdr archive)))
+        (and tasks todo-keyword
+             (let ((selection (cdr tasks)))
+               (cond ((null selection) t)
+                     ((eq selection :todo) (eq todo-type :done))
+                     ((eq selection :done) (eq todo-type :todo))
+                     ((consp selection)
+                      (not (export-option-selects-name-p selection todo-keyword)))
+                     (t nil)))))))
 
 (defun export-prepare (document backend &key include-resolver allow-raw-html context)
   "Prepare a private export view without serializing or modifying DOCUMENT."
@@ -750,10 +905,9 @@
     (let ((expanded-node-count (export-node-count root))
           (expanded-character-count 0))
       (check-limit limits :max-export-expanded-nodes expanded-node-count)
-      (multiple-value-bind (metadata options select-active-p select-tags exclude-tags
-                            macros records)
+        (multiple-value-bind (metadata options select-active-p select-tags exclude-tags
+                              macros)
           (export-document-settings document backend context)
-        (export-validate-keywords records backend)
         (labels
             ((account-tree (tree-root)
                (map-nodes
@@ -798,8 +952,6 @@
                                 (error condition)))))
                       (fragment-root (document-root fragment)))
                  (account-tree fragment-root)
-                 (export-validate-keywords
-                  (export-keyword-records fragment) backend :fragment-p t)
                  (prepare-siblings (node-children fragment-root) fragment
                                    selected-scope depth active-includes
                                    active-macros t)))
@@ -818,8 +970,7 @@
                  (let* ((source-name (document-source-name source-document))
                         (text (funcall include-resolver
                                        (copy-seq path)
-                                       (export-copy-source-name source-name
-                                                                backend node))))
+                                       (export-copy-source-name source-name))))
                    (unless (stringp text)
                      (export-error backend :invalid-include-result node
                                    "Include resolver must return a string"))
@@ -869,10 +1020,23 @@
                     (prepare-include node source-document selected-scope depth
                                      active-includes active-macros))
                    ((eq type :keyword)
+                    (export-validate-keywords
+                     (list (list node
+                                 (string-upcase (or (node-property node :key) ""))
+                                 (or (node-property node :value) "")))
+                     backend :fragment-p fragment-p)
+                    (values nil nil))
+                   ((export-option-pruned-p node options)
+                    (values nil nil))
+                   ((and (member type '(:headline :inlinetask) :test #'eq)
+                         (export-heading-pruned-p node options))
                     (values nil nil))
                    ((member type '(:headline :inlinetask) :test #'eq)
                     (let* ((tags (effective-heading-tags source-document node))
-                           (excluded-p (export-tag-intersection-p tags exclude-tags)))
+                           (excluded-p (export-tag-intersection-p tags exclude-tags))
+                           (archive-headline-only-p
+                             (and (node-property node :archivedp)
+                                  (eq (cdr (assoc :arch options)) :headline))))
                       (if excluded-p
                           (values nil nil)
                           (let* ((selected-here-p
@@ -881,9 +1045,12 @@
                                  (nested-scope (or selected-scope selected-here-p)))
                             (multiple-value-bind
                                   (children selected-descendant-p)
-                                (prepare-siblings (node-children node) source-document
-                                                  nested-scope depth active-includes
-                                                  active-macros fragment-p)
+                                (if archive-headline-only-p
+                                    (values nil nil)
+                                    (prepare-siblings
+                                     (node-children node) source-document
+                                     nested-scope depth active-includes
+                                     active-macros fragment-p))
                               (if (or (not select-active-p) nested-scope
                                       selected-descendant-p)
                                   (values
@@ -924,11 +1091,7 @@
                        for node = (pop remaining)
                        do (cond
                             ((eq (node-type node) :src-block)
-                             (if (and select-active-p (not selected-scope))
-                                 (when (export-results-adjacent-p
-                                        node (first remaining))
-                                   (pop remaining))
-                                 (let* ((mode (export-src-export-mode node backend))
+                             (let* ((mode (export-src-export-mode node backend))
                                         (results-node (first remaining))
                                         (adjacent-p
                                           (export-results-adjacent-p
@@ -946,27 +1109,26 @@
                                              selected-descendant-p
                                              (or selected-descendant-p
                                                  descendant-p))))
-                                   (setf views
-                                         (nconc views
-                                                (list (%make-export-view
-                                                       :node node
-                                                       :children result-views
-                                                       :payload (list :exports mode
-                                                                      :adjacent-results
-                                                                      adjacent-p)
-                                                       :source-document
-                                                       source-document))))
+                                   (push (%make-export-view
+                                          :node node
+                                          :children result-views
+                                          :payload (list :exports mode
+                                                         :adjacent-results
+                                                         adjacent-p)
+                                          :source-document source-document)
+                                         views)
                                    (when adjacent-p
-                                     (pop remaining)))))
+                                     (pop remaining))))
                             (t
                              (multiple-value-bind (prepared descendant-p)
                                  (prepare-node node source-document selected-scope
                                                depth active-includes active-macros
                                                fragment-p)
-                               (setf views (nconc views prepared)
-                                     selected-descendant-p
+                               (dolist (view prepared)
+                                 (push view views))
+                               (setf selected-descendant-p
                                      (or selected-descendant-p descendant-p))))))
-                 (values views selected-descendant-p))))
+                 (values (nreverse views) selected-descendant-p))))
           (let* ((source-name (document-source-name document))
                  (active-includes (if (stringp source-name)
                                       (list source-name)
@@ -1004,12 +1166,9 @@
     (dolist (view flat-views)
       (let* ((node (export-view-node view))
              (label (and (eq (node-type node) :footnote-reference)
-                         (node-property node :label)))
-             (type (and (eq (node-type node) :footnote-reference)
-                        (node-property node :type))))
-        (when (and (eq (node-type node) :footnote-reference)
-                   (or label (not (eq type :inline))))
-          (unless (and label (gethash label definitions))
+                         (node-property node :label))))
+        (when label
+          (unless (gethash label definitions)
             (export-error backend :unresolved-footnote node
                           "Footnote reference has no selected definition"))
           (unless (gethash label numbers)

@@ -13,7 +13,7 @@
   (time-context nil :read-only t))
 
 (defun make-export-context (&key title author date language time-context)
-  "Return an immutable EXPORT-CONTEXT containing caller metadata overrides."
+  "Return immutable overrides; NIL means unspecified, while an empty string is explicit."
   (dolist (value (list title author date language))
     (unless (or (null value) (stringp value))
       (error 'type-error :datum value :expected-type '(or null string))))
@@ -65,15 +65,3 @@
   toc
   footnotes
   allow-raw-html)
-
-(defstruct (export-output-state (:constructor %make-export-output-state)
-                                (:conc-name export-output-state-)
-                                (:copier nil))
-  limits
-  backend
-  output-type
-  stream
-  octet-output-p
-  buffer
-  (character-count 0)
-  (octet-count 0))

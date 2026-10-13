@@ -1,0 +1,29 @@
+#+STARTUP: overview
+#+PROPERTY: header-args :eval never
+#+TODO: TODO(t) | DONE(d)
+#+SEQ_TODO: WAITING(w) | CANCELLED(c)
+#+TYP_TODO: PROJECT(p) | CLOSED(c)
+#+FILETAGS: :project:
+#+TAGS: @work
+#+CATEGORY: demo
+#+ARCHIVE: archive.org::
+#+COLUMNS: %40ITEM
+#+PRIORITIES: A C B
+#+LINK: bug https://issues.example/
+#+NAME: chart
+#+CAPTION: A caption
+#+HEADER: value
+#+RESULTS:
+#+CONSTANTS: pi=3.14
+#+EXPORT_FILE_NAME: export
+#+DESCRIPTION: description
+#+KEYWORDS: words
+#+SUBTITLE: subtitle
+#+EMAIL: author@example.test
+#+CREATOR: test
+Paragraph.
+
+* Omitted :noexport:
+#+UNKNOWN: hidden
+* Visible
+Visible text.
