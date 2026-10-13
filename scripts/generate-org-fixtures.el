@@ -687,6 +687,158 @@
     (princ (format "Generated %d G2 clocktable cases.\n" (length cases)))
     (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
 
+(defun org-fixture--h1-clock-validate-cases (cases)
+  (let ((ids (make-hash-table :test #'equal))
+        (known-keys '(:id :source :heading-path :at :end-at :zone
+                      :capture-document
+                      :clock-into-drawer :log-into-drawer))
+        (required-keys '(:id :source :heading-path :at :zone
+                         :clock-into-drawer :log-into-drawer)))
+    (dolist (case cases)
+      (unless (and (proper-list-p case) (eq (car-safe case) :id))
+        (error "Malformed H1 clock case: %S" case))
+      (let ((plist case)
+            (seen nil))
+        (while plist
+          (unless (and (consp plist)
+                       (consp (cdr plist))
+                       (memq (car plist) known-keys)
+                       (not (memq (car plist) seen)))
+            (error "Malformed H1 clock case property list: %S" case))
+          (push (car plist) seen)
+          (setq plist (cddr plist)))
+        (unless (cl-every (lambda (key) (memq key seen)) required-keys)
+          (error "Missing required H1 clock case property: %S" case))
+        (let ((id (plist-get case :id))
+              (path (plist-get case :heading-path))
+              (end-at-present-p (plist-member case :end-at))
+              (capture-document-present-p
+               (plist-member case :capture-document))
+              (capture-document (plist-get case :capture-document))
+              (clock-drawer (plist-get case :clock-into-drawer))
+              (log-drawer (plist-get case :log-into-drawer)))
+          (unless (and (stringp id)
+                       (not (gethash id ids))
+                       (equal (plist-get case :source) "h1-clock.org")
+                       (and (proper-list-p path) path (cl-every #'stringp path))
+                       (stringp (plist-get case :at))
+                       (stringp (plist-get case :zone))
+                       (or (null clock-drawer)
+                           (eq clock-drawer t)
+                           (stringp clock-drawer)
+                           (and (integerp clock-drawer)
+                                (>= clock-drawer 0)))
+                       (or (null log-drawer)
+                           (eq log-drawer t)
+                           (stringp log-drawer))
+                       (or (not capture-document-present-p)
+                           (memq capture-document '(nil t)))
+                       (or (not end-at-present-p)
+                           (stringp (plist-get case :end-at))))
+            (error "Invalid H1 clock case: %S" case))
+          (puthash id t ids))))
+    cases))
+
+(defun org-fixture--h1-clock-line (heading-position)
+  (let ((subtree-end (save-excursion
+                       (goto-char heading-position)
+                       (org-end-of-subtree t t)
+                       (point))))
+    (save-excursion
+      (goto-char heading-position)
+      (forward-line 1)
+      (when (re-search-forward "^[ \t]*CLOCK:.*$" subtree-end t)
+        (match-string-no-properties 0)))))
+
+(defun org-fixture--h1-clock-open-line ()
+  (save-excursion
+    (goto-char org-clock-marker)
+    (buffer-substring-no-properties (line-beginning-position)
+                                    (line-end-position))))
+
+(defun org-fixture--h1-clock-drawer-name ()
+  (save-excursion
+    (goto-char org-clock-marker)
+    (forward-line 0)
+    (forward-line -1)
+    (when (looking-at "^[ \t]*:\\([^:\n]+\\):[ \t]*$")
+      (match-string-no-properties 1))))
+
+(defun org-fixture--h1-clock-case (case corpus-directory)
+  (let* ((source-name (plist-get case :source))
+         (source (expand-file-name source-name corpus-directory))
+         (zone (plist-get case :zone))
+         (process-environment (copy-sequence process-environment))
+         (system-time-locale "C")
+         (org-clock-into-drawer (plist-get case :clock-into-drawer))
+         (org-log-into-drawer (plist-get case :log-into-drawer))
+         (org-clock-marker (make-marker))
+         (org-clock-hd-marker (make-marker))
+         (org-clock-clocked-in-display nil)
+         (org-clock-out-remove-zero-time-clocks nil)
+         (org-clock-idle-timer nil)
+         (org-clock-mode-line-timer nil)
+         (org-clock-auto-clockout-timer nil)
+         (org-clock-current-task nil)
+         org-clock-start-time
+         org-clock-out-time)
+    (unless (file-exists-p source)
+      (error "H1 clock corpus file does not exist: %s" source-name))
+    (setenv "TZ" zone)
+    (let* ((start-time
+            (org-fixture--g1-clock-parse-time (plist-get case :at)))
+           (end-time
+            (and (plist-member case :end-at)
+                 (org-fixture--g1-clock-parse-time (plist-get case :end-at)))))
+      (when (and end-time (> (float-time start-time) (float-time end-time)))
+        (error "H1 clock end precedes start for case %S" (plist-get case :id)))
+      (with-temp-buffer
+        (org-fixture--read-buffer source)
+        (let ((heading-position
+               (org-fixture--g1-clock-heading-position
+                (plist-get case :heading-path))))
+          (goto-char heading-position)
+          (org-clock-in nil start-time)
+          (let* ((drawer-name (org-fixture--h1-clock-drawer-name))
+                 (open-line (org-fixture--h1-clock-open-line))
+                 (source-after-in
+                  (and (plist-get case :capture-document)
+                       (buffer-substring-no-properties (point-min) (point-max)))))
+            (org-clock-out nil nil (or end-time start-time))
+            (list :id (plist-get case :id)
+                  :org-drawer-name drawer-name
+                  :org-open-line open-line
+                  :org-source-after-in source-after-in
+                  :org-closed-line
+                  (and end-time
+                       (org-fixture--h1-clock-line heading-position)))))))))
+
+(defun org-fixture-generate-h1-clock
+    (corpus-directory cases-file expected-file)
+  (unless (file-directory-p corpus-directory)
+    (error "H1 clock corpus directory does not exist: %s" corpus-directory))
+  (let* ((cases (org-fixture--h1-clock-validate-cases
+                 (org-fixture--g1-clock-read-cases cases-file)))
+         (results (mapcar (lambda (case)
+                            (org-fixture--h1-clock-case case corpus-directory))
+                          cases))
+         (content
+          (org-fixture--check-output
+           (concat
+            (format (concat
+                     "; Generated from org-clock-in and org-clock-out with Emacs %s and Org %s.\n"
+                     "; Case timestamps are explicit; TZ and locale are bound per oracle call.\n")
+                    emacs-version (org-version))
+            "("
+            (mapconcat #'org-fixture--cl-value results "\n ")
+            ")\n"))))
+    (make-directory (file-name-directory expected-file) t)
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region content nil expected-file nil 'silent))
+    (princ (format "Wrote %s\n" (file-name-nondirectory expected-file)))
+    (princ (format "Generated %d H1 clock cases.\n" (length cases)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
 (defun org-fixture-generate (corpus-directory expected-directory)
   "Generate one .sexp file per .org file under CORPUS-DIRECTORY."
   (unless (file-directory-p corpus-directory)
@@ -905,6 +1057,11 @@
        (expand-file-name (nth 1 arguments))
        (expand-file-name (nth 2 arguments))
        (expand-file-name (nth 3 arguments))))
+     ((and (= (length arguments) 4) (equal (car arguments) "--h1-clock"))
+      (org-fixture-generate-h1-clock
+       (expand-file-name (nth 1 arguments))
+       (expand-file-name (nth 2 arguments))
+       (expand-file-name (nth 3 arguments))))
      ((and (= (length arguments) 3) (equal (car arguments) "--check-types"))
       (org-fixture-check-types (expand-file-name (nth 1 arguments))
                                (expand-file-name (nth 2 arguments))))
@@ -924,6 +1081,7 @@
               "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --g2-clocktable CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --g1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --h1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))

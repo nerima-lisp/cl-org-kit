@@ -1,0 +1,22 @@
+* Default drawer
+* Setting name
+* Local property
+:PROPERTIES:
+:CLOCK_INTO_DRAWER: LOCAL
+:END:
+* Inherited property
+:PROPERTIES:
+:CLOCK_INTO_DRAWER: INHERITED
+:END:
+** Child
+* Log setting fallback
+:PROPERTIES:
+:CLOCK_INTO_DRAWER: t
+:END:
+* Closed interval
+* Insertion placement
+SCHEDULED: <2026-10-20 Tue>
+:PROPERTIES:
+:OWNER: Example
+:END:
+Body text remains outside the new drawer.
