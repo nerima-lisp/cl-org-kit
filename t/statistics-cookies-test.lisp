@@ -292,31 +292,6 @@
         (expect (eq (edit-result-updated-document result) document) :to-be nil)
         (expect (document-text document) :to-equal source))))
 
-  (it "updates and searches canonical cookie nodes inside vector values"
-    (let* ((document (parse-org (format nil "* Parent [0/0]~%")))
-           (cookie (first (statistics-cookies-test-nodes
-                           document :statistics-cookie)))
-           (original (vector :before cookie))
-           (canonical (org-kit::edit-canonical-value original))
-           (updated-and-found
-             (multiple-value-list
-              (org-kit::statistics-cookie-update-canonical-value
-               original canonical cookie "[2/3]")))
-           (updated (first updated-and-found))
-           (absent-original (vector :before))
-           (absent-canonical (org-kit::edit-canonical-value absent-original))
-           (absent-result
-             (multiple-value-list
-              (org-kit::statistics-cookie-update-canonical-value
-               absent-original absent-canonical cookie "[2/3]"))))
-      (with-soft-assertions
-        (expect (second updated-and-found) :to-be t)
-        (expect (getf (getf (aref updated 1) :properties) :value)
-                :to-equal "[2/3]")
-        (expect (node-property cookie :value) :to-equal "[0/0]")
-        (expect (second absent-result) :to-be nil)
-        (expect (first absent-result) :to-equalp absent-canonical))))
-
   (it "ignores statistics cookies outside the target heading title and body items"
     (let* ((source (format nil "* Parent~%Body [7/8]~%* Child [9/9]~%- [X] child [0/0]~%"))
            (document (parse-org source))

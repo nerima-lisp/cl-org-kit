@@ -202,18 +202,6 @@
          (return-from statistics-cookie-update-canonical-value
            (values canonical t))))
      (values canonical nil))
-    ((and (vectorp original) (not (stringp original)))
-     (loop for original-value across original
-           for index from 0
-           do (multiple-value-bind (updated found-p)
-                  (statistics-cookie-update-canonical-value
-                   original-value (aref canonical index) target value)
-                (when found-p
-                  (let ((copy (copy-seq canonical)))
-                    (setf (aref copy index) updated)
-                    (return-from statistics-cookie-update-canonical-value
-                      (values copy t))))))
-     (values canonical nil))
     (t (values canonical nil))))
 
 (defun statistics-cookie-update-title-raw-value (document expected heading updates)
