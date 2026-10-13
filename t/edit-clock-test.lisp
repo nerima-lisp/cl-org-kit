@@ -164,6 +164,40 @@
                 (expect (edit-span-end replacement-span) :to-equal clock-end)
                 (expect (document-text document) :to-equal source))))))))
 
+  (it "limits running clocks to the target heading when editing siblings"
+    (let* ((source
+             (format nil "* Task~%* Other~%CLOCK: [2026-10-14 Wed 09:00]~%"))
+           (document (parse-org source))
+           (task (edit-clock-test-heading document "Task"))
+           (context (edit-clock-test-context "2026-10-14T10:30:00"))
+           (other-row "CLOCK: [2026-10-14 Wed 09:00]")
+           (open-row "CLOCK: [2026-10-14 Wed 10:00]")
+           (closed-row
+             "CLOCK: [2026-10-14 Wed 10:00]--[2026-10-14 Wed 10:30] =>  0:30")
+           (expected-after-in
+             (format nil "* Task~%:LOGBOOK:~%~A~%:END:~%* Other~%~A~%"
+                     open-row other-row))
+           (expected-after-out
+             (format nil "* Task~%:LOGBOOK:~%~A~%:END:~%* Other~%~A~%"
+                     closed-row other-row)))
+      (multiple-value-bind (started start-line)
+          (clock-in document task :at (make-org-time-value "2026-10-14T10:00:00")
+                    :time-context context)
+        (let* ((open-document (edit-result-updated-document started))
+               (open-task (edit-clock-test-heading open-document "Task")))
+          (multiple-value-bind (closed closed-line)
+              (clock-out open-document open-task
+                         :at (make-org-time-value "2026-10-14T10:30:00")
+                         :time-context context)
+            (with-soft-assertions
+              (expect start-line :to-equal open-row)
+              (expect (document-text open-document) :to-equal expected-after-in)
+              (expect closed-line :to-equal closed-row)
+              (expect (document-text (edit-result-updated-document closed))
+                      :to-equal expected-after-out)
+              (expect (document-text open-document) :to-equal expected-after-in)
+              (expect (document-text document) :to-equal source)))))))
+
   (it "inserts after headings with empty, final-newline, and planning-only sections"
     (let* ((context (edit-clock-test-context "2026-10-14T09:05:00"))
            (line "CLOCK: [2026-10-14 Wed 09:05]")
