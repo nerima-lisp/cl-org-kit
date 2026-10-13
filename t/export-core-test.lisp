@@ -233,6 +233,7 @@
                ("toc:2 toc:7" :toc 7)
                ("h:0" :heading-depth 0)
                ("num:nil" :num nil)
+               ("num:t" :num t)
                ("^:t" :^ t)
                ("^:nil" :^ nil)
                ("^:{}" :^ "{}")
@@ -254,6 +255,7 @@
                ("<:inactive" :timestamp-range :inactive)
                ("c:nil" :clock nil)
                ("c:t" :clock t)
+               ("creator:nil" :creator nil)
                ("d:nil" :drawers nil)
                ("d:t" :drawers t)
                ("prop:nil" :properties nil)
@@ -562,6 +564,12 @@
                                :type)
                 :to-be :inline))))
 
+  (it "falls back to the source node start when template text is unavailable"
+    (let ((node (make-node :paragraph :begin 17 :end 24)))
+      (with-soft-assertions
+        (expect (org-kit::export-node-text-position node "missing") :to-be 17)
+        (expect (org-kit::export-node-text-position nil "missing") :to-be 0))))
+
   (it "signals public export conditions with their backend, reason, and source"
     (let ((unknown-backend
             (export-core-test-catch-error
@@ -632,6 +640,11 @@
            (long-source (make-string (1+ org-kit::*condition-text-limit*)
                                      :initial-element #\x))
            (bounded (org-kit::export-bounded-source long-source))
+           (missing-offset-source
+             (let ((document (make-document ""))
+                   (node (make-node :org-data)))
+               (setf (document-root document) node)
+               (org-kit::export-bounded-source node)))
            (long-node-condition
              (export-core-test-catch-error
               (lambda ()
@@ -642,6 +655,7 @@
                (org-export-unsupported-syntax-source long-node-condition))))
       (with-soft-assertions
         (expect (org-kit::export-bounded-source source) :to-equal expected-source)
+        (expect missing-offset-source :to-be nil)
         (expect (length bounded) :to-be (+ org-kit::*condition-text-limit* 3))
         (expect (subseq bounded 0 org-kit::*condition-text-limit*)
                 :to-equal (subseq long-source 0 org-kit::*condition-text-limit*))
@@ -664,6 +678,7 @@
                 (export-core-test-catch-error
                  (lambda () (export-core-test-preparation source))))
               '("#+OPTIONS: num:maybe"
+                "#+OPTIONS: creator:author"
                 "#+OPTIONS: toc:bad"
                 "#+OPTIONS: h:x"
                 "#+OPTIONS: unknown:t"
