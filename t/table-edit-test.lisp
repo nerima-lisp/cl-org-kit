@@ -690,7 +690,7 @@
                    :insert-row 1)
              (list :empty-assignments
                    (format nil "| A |~%| x |~%#+TBLFM: ::~%")
-                   :insert-row 1)
+                   :delete-row 1)
              (list :missing-row-target-coordinate
                    (format nil "| A |~%| x |~%#+TBLFM: @=1~%")
                    :delete-row 1)
