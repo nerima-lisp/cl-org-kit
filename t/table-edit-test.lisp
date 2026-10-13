@@ -1256,6 +1256,18 @@
                 :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
+  (it "preserves the first alignment cookie when rows disagree"
+    (let* ((source (format nil "| <r> |~%| <l> |~%"))
+           (expected (format nil "| <r> |~%|     |~%| <l> |~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node
+                   (document-root document) :table))
+           (result (table-insert-row document table 2)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
   (it "renders empty table columns and honors alignment and width cookies"
     (let* ((hline-source
              (format nil "| A |~%|---|~%| x |~%#+TBLFM: $1=1~%"))
