@@ -51,7 +51,8 @@
 
 (defun statistics-cookie-data-mode (tokens)
   (cond ((member "checkbox" tokens :test #'string=) :checkbox)
-        ((member "todo" tokens :test #'string=) :todo)))
+        ((member "todo" tokens :test #'string=) :todo)
+        ((member "recursive" tokens :test #'string=) :checkbox)))
 
 (defun statistics-cookie-title-nodes (heading)
   (let ((nodes nil))
@@ -75,7 +76,6 @@
              (recursive-p
                (if (eq mode :checkbox)
                    (and local-p
-                        (member "checkbox" tokens :test #'string=)
                         (member "recursive" tokens :test #'string=))
                    (or (member "recursive" tokens :test #'string=)
                        (multiple-value-bind

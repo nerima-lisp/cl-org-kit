@@ -1,0 +1,8 @@
+* Checklist [0/0]
+:PROPERTIES:
+:COOKIE_DATA: recursive
+:END:
+- [ ] Group [0/0]
+  - [X] Nested complete
+  - [ ] Nested open
+- [X] Direct complete
