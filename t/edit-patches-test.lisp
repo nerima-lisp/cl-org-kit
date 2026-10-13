@@ -753,6 +753,51 @@
         (expect (document-text document) :to-equal source)
         (expect (document-bom-p document) :to-be nil))))
 
+  (it "matches generic UTF-16 and UTF-32 edit boundaries to encoded output"
+    (loop for encoding in '(:utf-16 :utf-32)
+          for source = (format nil "* x~%")
+          for output = (format nil "* y~%")
+          for patches = (list (org-kit::edit-make-patch 2 3 "y"))
+          for expected = (org-kit::edit-canonical-document (parse-org output))
+          for encoded-output = (cl-codec-kit:string-to-octets
+                                output :encoding encoding)
+          for output-octets = (length encoded-output)
+          do (progn
+               (let* ((document
+                        (parse-org source :encoding encoding
+                                   :limits (make-limits
+                                            :max-output-octets output-octets)))
+                       (prospective-octets
+                         (org-kit::edit-prospective-output-octets
+                          document source patches))
+                       (result (org-kit::edit-apply-patches-result
+                                document patches :expected expected))
+                       (updated (edit-result-updated-document result)))
+                 (with-soft-assertions
+                   (expect (document-bom-p document) :to-be nil)
+                   (expect prospective-octets :to-be output-octets)
+                   (expect (write-org updated :output-type :octets)
+                           :to-equalp encoded-output)
+                   (expect (document-text updated) :to-equal output)))
+               (let ((limited-document
+                       (parse-org source :encoding encoding
+                                  :limits (make-limits
+                                           :max-output-octets
+                                           (1- output-octets)))))
+                 (signals org-resource-limit-error
+                   (handler-bind
+                       ((org-resource-limit-error
+                          (lambda (condition)
+                            (with-soft-assertions
+                              (expect (org-resource-limit-error-limit-name condition)
+                                      :to-be :max-output-octets)
+                              (expect (org-resource-limit-error-limit condition)
+                                      :to-be (1- output-octets))
+                              (expect (org-resource-limit-error-actual condition)
+                                      :to-be output-octets))))
+                     (org-kit::edit-apply-patches-result
+                      limited-document patches :expected expected)))))))
+
   (it "checks edited input length before reparsing for strings and encoded bytes"
     (let* ((source (format nil "* x~%"))
            (document
