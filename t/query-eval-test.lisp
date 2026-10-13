@@ -308,9 +308,33 @@
            (tomorrow
             (org-kit::query-parse-org-date-literal "<tomorrow>" reference))
            (expected
-            (org-kit::query-parse-org-date-literal "<2025-01-03 Fri>" nil)))
+            (org-kit::query-parse-org-date-literal "<2025-01-03 Fri>" nil))
+           (invalid-date-document
+             (parse-org
+              (format nil
+                      "* Invalid dates~%:PROPERTIES:~%:BAD-DATE: 2026-13-45~%:BAD-TIME: 2025-01-02 25:99~%:END:~%"))))
       (with-soft-assertions
         (expect (org-kit::query-date-compare tomorrow expected) :to-be 0)
+        (signals cl-date-kit:cl-date-kit-error
+          (org-kit::query-parse-absolute-org-date "2026-13-45"))
+        (signals cl-date-kit:cl-date-kit-error
+          (org-kit::query-parse-absolute-org-date "2025-01-02 25:99"))
+        (expect (org-kit::query-parse-org-date-literal
+                 "2026-13-45" nil nil nil t)
+                :to-be nil)
+        (expect (org-kit::query-parse-org-date-literal
+                 "2025-01-02 25:99" nil nil nil t)
+                :to-be nil)
+        (expect (query-eval-test-titles
+                 (org-kit:query-list
+                  invalid-date-document
+                  '(:property "BAD-DATE" := (:date "2025-01-02"))))
+                :to-equal nil)
+        (expect (query-eval-test-titles
+                 (org-kit:query-list
+                  invalid-date-document
+                  '(:property "BAD-TIME" := (:date "2025-01-02"))))
+                :to-equal nil)
         (signals org-query-error
           (org-kit::query-parse-org-date-literal "<2025-02-30>" reference))
         (signals org-query-error
