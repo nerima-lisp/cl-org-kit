@@ -430,6 +430,21 @@
           (expect (<= children-reads (* 8 node-count)) :to-be t)
           (expect (document-text document) :to-equal source)))))
 
+  (it "indexes nodes inside nested vector-valued properties"
+    (let* ((nested-node (make-node :plain-text :properties '(:value "nested")))
+           (original (make-node :headline
+                                :properties (list :test-metadata
+                                                  (vector (vector nested-node)))))
+           (canonical (org-kit::edit-canonical-node original))
+           (index (make-hash-table :test #'eq)))
+      (org-kit::statistics-cookie-index-canonical-nodes original canonical index)
+      (with-soft-assertions
+        (expect (gethash original index) :to-equalp canonical)
+        (expect (gethash nested-node index)
+                :to-equalp
+                (aref (aref (getf (getf canonical :properties) :test-metadata) 0) 0))
+        (expect (hash-table-count index) :to-equal 2))))
+
   (it "updates title cookies alongside other inline title objects"
     (let* ((source (format nil "* *Parent* [9/9]~%** TODO Child~%"))
            (expected (format nil "* *Parent* [0/1]~%** TODO Child~%"))
