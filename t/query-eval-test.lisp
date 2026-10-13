@@ -127,6 +127,11 @@
                (query-eval-test-run document '(:level := 3)))
               :to-equal '("Logical Three"))))
 
+  (it "rejects malformed canonical LEVEL predicates during evaluation"
+    (let ((document (parse-org "* Entry")))
+      (signals org-query-error
+        (query-eval-test-run document '(:level :matches 3)))))
+
   (it "resolves TODO keywords and inherited tag groups from document settings"
     (let* ((document
             (parse-org
