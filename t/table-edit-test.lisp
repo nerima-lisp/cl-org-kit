@@ -679,6 +679,55 @@
         (expect (document-text length-document) :to-equal source)
         (expect (document-text octet-document) :to-equal source))))
 
+  (it "checks output limits before rejecting malformed TBLFM references"
+    (let ((cases
+            (list
+             (list :trailing-column-marker
+                   (format nil "| A |~%| x |~%#+TBLFM: $~%")
+                   :insert-column 1)
+             (list :row-marker-without-column
+                   (format nil "| A |~%| x |~%#+TBLFM: @2~%")
+                   :insert-row 1)
+             (list :empty-assignments
+                   (format nil "| A |~%| x |~%#+TBLFM: ::~%")
+                   :insert-row 1)
+             (list :missing-row-target-coordinate
+                   (format nil "| A |~%| x |~%#+TBLFM: @=1~%")
+                   :delete-row 1)
+             (list :missing-column-target-coordinate
+                   (format nil "| A | B |~%| x | y |~%#+TBLFM: $=1~%")
+                   :delete-column 2)
+             (list :row-target-without-column
+                   (format nil "| A |~%| x |~%#+TBLFM: @2=1~%")
+                   :delete-row 2))))
+      (dolist (case cases)
+        (destructuring-bind (case-id source action index) case
+          (let* ((document
+                   (parse-org source
+                              :limits (make-limits :max-output-length 1)))
+                 (table (table-edit-test-find-node
+                         (document-root document) :table))
+                 (condition
+                   (table-edit-test-condition
+                    (lambda ()
+                      (ecase action
+                        (:insert-row
+                         (table-insert-row document table index))
+                        (:delete-row
+                         (table-delete-row document table index))
+                        (:insert-column
+                         (table-insert-column document table index))
+                        (:delete-column
+                         (table-delete-column document table index)))))))
+            (with-soft-assertions
+              (expect (list case-id (first condition) (third condition)
+                            (fourth condition))
+                      :to-equal
+                      (list case-id :limit :max-output-length 1))
+              (expect (second condition) :to-equal "Resource limit exceeded")
+              (expect (> (fifth condition) 1) :to-be t)
+              (expect (document-text document) :to-equal source)))))))
+
   (it "checks the output character lower bound before parsing TBLFM syntax"
     (let* ((source (format nil
                            "| A |~%| a longer value |~%#+TBLFM: $1=#.(progn 1)~%"))
