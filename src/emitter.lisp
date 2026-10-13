@@ -134,17 +134,19 @@
                               (emitter-format-affiliations node)
                               (emitter-render node)))))
 
-(defun emitter-add-todo-setting (key value)
-  (unless *emitter-todo-setting-seen*
-    (setf *emitter-todo-setting-seen* t))
-  (multiple-value-bind (declaration-kind)
-      (reader-heading-todo-declaration-info key nil nil)
-    (let ((keywords (reader-heading-todo-sequence value)))
-      (if (eq declaration-kind :typ-todo)
-          (setf *emitter-typed-todo-keywords*
-                (append *emitter-typed-todo-keywords* keywords))
-          (setf *emitter-ordinary-todo-keywords*
-                (append *emitter-ordinary-todo-keywords* keywords))))))
+(defun emitter-add-todo-setting (node key value)
+  (setf *emitter-todo-setting-seen* t)
+  (handler-case
+      (let ((declaration-kind
+              (reader-heading-todo-declaration-info key nil nil))
+            (keywords (reader-heading-todo-sequence value)))
+        (if (eq declaration-kind :typ-todo)
+            (setf *emitter-typed-todo-keywords*
+                  (append *emitter-typed-todo-keywords* keywords))
+            (setf *emitter-ordinary-todo-keywords*
+                  (append *emitter-ordinary-todo-keywords* keywords))))
+    (org-parse-error (condition)
+      (emitter-fail node "~A" (org-kit-error-message condition)))))
 
 (defun emitter-merge-todo-keywords (ordinary typed)
   (let ((keywords nil)
@@ -174,15 +176,19 @@
     (let ((key (node-property node :key))
           (value (node-property node :value)))
       (when (and (stringp key) (stringp value))
-        (case (reader-heading-setting-kind key)
-          (:todo (emitter-add-todo-setting key value))
-          (:startup
-           (loop for option in (reader-heading-words value)
-                 do (cond
-                      ((string-equal option "odd")
-                       (setf *emitter-odd-levels* t))
-                      ((string-equal option "oddeven")
-                       (setf *emitter-odd-levels* nil))))))))))
+        (let ((kind (reader-heading-setting-kind key)))
+          (case kind
+            (:todo (emitter-add-todo-setting node key value))
+            (:startup
+             (loop for option in (reader-heading-words value)
+                   do (cond
+                        ((string-equal option "odd")
+                         (setf *emitter-odd-levels* t))
+                        ((string-equal option "oddeven")
+                         (setf *emitter-odd-levels* nil))))))
+          (when (and (not kind)
+                     (org-setting-todo-declaration-prefix (string-upcase key)))
+            (emitter-add-todo-setting node key value))))))
 
 (defun emitter-raw-block-body (node value closer)
   (let ((body (emitter-normalize-newlines value)))

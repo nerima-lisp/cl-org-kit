@@ -536,6 +536,33 @@
             :to-equal '(("SHARED" . :todo) ("WAIT" . :todo)
                         ("TYPED" . :done))))
 
+  (it "reports malformed TODO settings as emitter errors"
+    (dolist (setting
+             '(("TODO[bad id]" "OPEN | CLOSED"
+                "Cannot emit keyword: Malformed TODO sequence ID in TODO[bad id]")
+               ("TODO[bad id" "OPEN | CLOSED"
+                "Cannot emit keyword: Malformed TODO sequence ID in TODO[bad id")
+               ("TODO[x]suffix" "OPEN | CLOSED"
+                "Cannot emit keyword: Malformed TODO sequence ID in TODO[x]suffix")
+               ("todo[x]suffix" "OPEN | CLOSED"
+                "Cannot emit keyword: Malformed TODO sequence ID in todo[x]suffix")
+               ("TODO" "(TODO) DONE"
+                "Cannot emit keyword: Invalid or empty TODO keyword in (TODO)")))
+      (destructuring-bind (key value expected-message) setting
+        (let* ((node
+                 (make-node :keyword
+                            :properties (list :key key :value value :options nil)))
+               (condition
+                 (handler-case
+                     (progn (emit-org node) nil)
+                   (org-kit-error (caught) caught))))
+          (with-soft-assertions
+            (expect (typep condition 'org-kit-error) :to-be t)
+            (expect (typep condition 'org-parse-error) :to-be nil)
+            (when (typep condition 'org-kit-error)
+              (expect (org-kit-error-message condition)
+                      :to-equal expected-message)))))))
+
   (it "preserves structured headline titles and document heading settings"
     (let* ((tree
              (make-node
