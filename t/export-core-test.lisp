@@ -996,7 +996,8 @@
                    (export-core-test-preparation
                     (format nil "#+INCLUDE: ~A" value)))))
               (list "" "part.org" "\"part.org" "part.org\"" "\"a\"b\""
-                    (format nil "\"bad~%path\""))))
+                    (format nil "\"bad~%path\"")
+                    (format nil "\"bad~Cpath\"" #\Tab))))
            (fragment-errors
              (mapcar
               (lambda (fragment)
@@ -1094,7 +1095,7 @@
     (let* ((with-ignored-arguments
              (export-core-test-preparation
               (export-core-test-lines
-               "#+BEGIN_SRC text :results output :tangle file :var x=1 :exports both"
+               "#+BEGIN_SRC text :results output :tangle file :var x=1 :other :exports both"
                "body" "#+END_SRC" "#+RESULTS:" ": result")))
            (with-ignored-view
              (first (export-core-test-view-nodes with-ignored-arguments :src-block)))
