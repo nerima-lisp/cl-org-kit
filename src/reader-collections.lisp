@@ -269,6 +269,7 @@
   (defun reader-table-el-line-p (context offset limit)
     (or (reader-table-el-border-line-p context offset limit)
         (reader-table-row-start context offset limit)
+        ;; TBLFM is allowed after table.el rows so it can attach to the table.
         (reader-table-formula-line-p context offset)))
 
   (defun reader-previous-line-start (context offset)
@@ -282,11 +283,20 @@
         (1+ (or previous-newline -1)))))
 
   (defun reader-table-el-follows-pipe-formula-p (context offset limit)
+    (let ((previous (reader-previous-line-start context offset))
+          (formula-seen-p nil))
+      (when previous
+        (loop while (and previous
+                         (reader-table-formula-line-p context previous))
+              do (setf formula-seen-p t
+                       previous (reader-previous-line-start context previous))))
+      (and formula-seen-p previous
+           (reader-table-row-start context previous limit))))
+
+  (defun reader-table-el-follows-pipe-p (context offset limit)
     (let ((previous (reader-previous-line-start context offset)))
-      (loop while (and previous
-                       (reader-table-formula-line-p context previous))
-            do (setf previous (reader-previous-line-start context previous)))
-      (and previous (reader-table-row-start context previous limit))))
+      (or (and previous (reader-table-row-start context previous limit))
+          (reader-table-el-follows-pipe-formula-p context offset limit))))
 
   (defun reader-parse-table-el (context start limit depth)
     (let ((position start)
@@ -323,7 +333,7 @@
       (when (and table-end
                  (not invalid-table-p)
                  (or table-row-seen-p
-                     (not (reader-table-el-follows-pipe-formula-p
+                     (not (reader-table-el-follows-pipe-p
                            context start limit))))
         (let ((properties
                 (list :type :table.el
