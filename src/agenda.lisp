@@ -221,16 +221,12 @@
    (org-time-context-reference-instant time-context)
    (org-time-zone-backend (org-time-context-zone time-context))))
 
-(defun agenda-headline-p (node)
-  "Return true when NODE is a headline supported by agenda query operations."
-  (and (node-p node) (eq (node-type node) :headline)))
-
 (defun agenda-headlines (document)
   "Return headline nodes from DOCUMENT in document order."
   (let ((headlines nil))
     (when (document-root document)
       (map-nodes (lambda (node)
-                   (when (agenda-headline-p node)
+                   (when (eq (node-type node) :headline)
                      (push node headlines)))
                  (document-root document)))
     (nreverse headlines)))
@@ -269,16 +265,15 @@
 (defun agenda-timestamp-nodes (document heading)
   "Return active-scan timestamp nodes owned by HEADING in document order."
   (let ((timestamps nil))
-    (when (document-root document)
-      (map-nodes (lambda (node)
-                   (when (and (eq (node-type node) :timestamp)
-                              (eq (query-nearest-headline node) heading)
-                              (not (loop for parent = (node-parent node)
-                                         then (node-parent parent)
-                                         while parent
-                                         thereis (eq (node-type parent) :planning))))
-                     (push node timestamps)))
-                 (document-root document)))
+    (map-nodes (lambda (node)
+                 (when (and (eq (node-type node) :timestamp)
+                            (eq (query-nearest-headline node) heading)
+                            (not (loop for parent = (node-parent node)
+                                       then (node-parent parent)
+                                       while parent
+                                       thereis (eq (node-type parent) :planning))))
+                   (push node timestamps)))
+               (document-root document))
     (nreverse timestamps)))
 
 (defun agenda-time-value-date (value)
@@ -533,7 +528,8 @@
 
 (defun agenda-call-with-planning-occurrences (view end-date time-context
                                              future-repeats state function)
-  "Call FUNCTION for a planning timestamp and its selected future repeats."
+  "Call FUNCTION for VIEW and selected future repeats. Repeats start strictly
+after the later of VIEW's date and the reference date."
   (let ((amount (org-timestamp-view-repeater-amount view))
         (unit (org-timestamp-view-repeater-unit view)))
     (funcall function view t view)
@@ -670,8 +666,6 @@
                                       planning)))
         (let ((repeat-date (agenda-view-end-date occurrence-view)))
           (when (and (not done-p)
-                     (> (agenda-date-ordinal repeat-date)
-                        (agenda-date-ordinal reference-date))
                      (agenda-date-in-range-p repeat-date start-date end-date))
             (agenda-add-heading-entry state heading-data :deadline repeat-date
                                       source-view :overdue nil planning))))))
@@ -715,9 +709,7 @@
                                         reference-date source-view nil
                                         (and delayed-p :delayed) planning)))
           (let ((repeat-date (agenda-view-start-date view)))
-            (when (and (> (agenda-date-ordinal repeat-date)
-                          (agenda-date-ordinal reference-date))
-                       (<= (agenda-date-ordinal visible-date)
+            (when (and (<= (agenda-date-ordinal visible-date)
                            (agenda-date-ordinal repeat-date))
                        (agenda-date-in-range-p repeat-date start-date end-date))
               (agenda-add-heading-entry state heading-data :scheduled

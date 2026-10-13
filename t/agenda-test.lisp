@@ -333,6 +333,102 @@
                        (agenda-test-context "2025-01-01T12:00:00+00:00")))))
         (expect (mapcar #'agenda-entry-kind entries) :to-equal '(:scheduled))))))
 
+  (it "ignores inactive planning timestamps"
+    (let* ((document
+             (parse-org
+              (format nil "* TODO Inactive planning~%SCHEDULED: <2025-01-01>~%[2025-01-01]")))
+           (planning nil)
+           (inactive nil))
+      (map-nodes (lambda (node)
+                   (case (node-type node)
+                     (:planning (setf planning node))
+                     (:timestamp
+                      (when (eq (org-timestamp-view-kind (timestamp-view node))
+                                :inactive)
+                        (setf inactive node)))))
+                 (document-root document))
+      (setf (node-property planning :scheduled) inactive)
+      (expect (agenda-result-entries
+               (agenda (list document) (make-org-time-value "2025-01-01")
+                       (make-org-time-value "2025-01-01")
+                       :time-context
+                       (agenda-test-context "2025-01-01T12:00:00+00:00")))
+              :to-equal nil)))
+
+  (it "covers deadline warning boundaries around the reference and range"
+    (labels ((rows (source reference start end &optional (warning-days 3))
+               (mapcar (lambda (entry)
+                         (list (org-time-value-iso8601
+                                (agenda-entry-date entry))
+                               (agenda-entry-warning-state entry)))
+                       (agenda-result-entries
+                        (agenda (list (parse-org source))
+                                (make-org-time-value start)
+                                (make-org-time-value end)
+                                :time-context (agenda-test-context reference)
+                                :warning-days warning-days)))))
+      (with-soft-assertions
+        (expect (rows (format nil "* TODO Deadline~%DEADLINE: <2025-01-10>")
+                      "2025-01-08T12:00:00+00:00" "2025-01-05" "2025-01-10")
+                :to-equal '(("2025-01-08" :prewarning) ("2025-01-10" :due)))
+        (expect (rows (format nil "* TODO Deadline~%DEADLINE: <2025-01-10>")
+                      "2025-01-08T12:00:00+00:00" "2025-01-09" "2025-01-10")
+                :to-equal '(("2025-01-10" :due)))
+        (expect (rows (format nil "* TODO Deadline~%DEADLINE: <2025-01-10>")
+                      "2025-01-05T12:00:00+00:00" "2025-01-05" "2025-01-10")
+                :to-equal '(("2025-01-10" :due)))
+        (expect (rows (format nil "* TODO Deadline~%DEADLINE: <2025-01-10>")
+                      "2025-01-05T12:00:00+00:00" "2025-01-05" "2025-01-10" 0)
+                :to-equal '(("2025-01-10" :due)))
+        (expect (rows (format nil "* TODO Deadline~%DEADLINE: <2025-01-10>")
+                      "2025-01-10T12:00:00+00:00" "2025-01-10" "2025-01-10")
+                :to-equal '(("2025-01-10" :due)))
+        (expect (rows (format nil "* DONE Deadline~%DEADLINE: <2025-01-10>")
+                      "2025-01-08T12:00:00+00:00" "2025-01-05" "2025-01-10")
+                :to-equal '(("2025-01-10" :due))))))
+
+  (it "limits repeating deadline and scheduled rows to their visible windows"
+    (let* ((context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (start (make-org-time-value "2025-01-04"))
+           (end (make-org-time-value "2025-01-05"))
+           (deadline-documents
+             (list (parse-org
+                    (format nil
+                            "* TODO Repeating deadline~%DEADLINE: <2025-01-01 ++1d>"))
+                   (parse-org
+                    (format nil
+                            "* DONE Repeating deadline~%DEADLINE: <2025-01-01 ++1d>"))))
+           (scheduled-documents
+             (list (parse-org
+                    (format nil
+                            "* TODO Visible repeat~%SCHEDULED: <2025-01-01 ++1d>"))
+                   (parse-org
+                    (format nil
+                            "* TODO Delayed repeat~%SCHEDULED: <2025-01-01 ++1d --3d>"))))
+           (deadline-entries
+             (agenda-result-entries
+              (agenda deadline-documents start start :time-context context)))
+           (scheduled-entries
+             (agenda-result-entries
+              (agenda scheduled-documents start end :time-context context))))
+      (with-soft-assertions
+        (expect (mapcar (lambda (entry)
+                          (list (agenda-entry-headline entry)
+                                (org-time-value-iso8601
+                                 (agenda-entry-date entry))
+                                (agenda-entry-warning-state entry)))
+                        deadline-entries)
+                :to-equal '(("Repeating deadline" "2025-01-04" :overdue)))
+        (expect (mapcar (lambda (entry)
+                          (list (agenda-entry-headline entry)
+                                (org-time-value-iso8601
+                                 (agenda-entry-date entry))))
+                        scheduled-entries)
+                :to-equal '(("Visible repeat" "2025-01-04")
+                            ("Delayed repeat" "2025-01-04")
+                            ("Visible repeat" "2025-01-05")
+                            ("Delayed repeat" "2025-01-05"))))))
+
 (describe "Agenda resource limits and errors"
   (it "enforces inclusive range and row limits below, at and above the ceiling"
     (let* ((context (agenda-test-context "2025-01-01T12:00:00+00:00"))
@@ -764,6 +860,9 @@
            (invalid-context
              (agenda-test-captured-error
               (lambda () (agenda nil date date))))
+           (invalid-date-type
+             (agenda-test-captured-error
+              (lambda () (agenda nil nil date :time-context context))))
            (invalid-date
              (agenda-test-captured-error
               (lambda () (agenda nil date-time date :time-context context)))))
@@ -782,6 +881,10 @@
           (expect (org-time-error-context invalid-context) :to-be nil)
           (expect (org-kit-error-message invalid-context)
                   :to-equal "Invalid date or time"))
+        (expect (typep invalid-date-type 'org-time-error) :to-be t)
+        (when (typep invalid-date-type 'org-time-error)
+          (expect (org-time-error-reason invalid-date-type) :to-be :invalid-time)
+          (expect (org-time-error-context invalid-date-type) :to-be nil))
         (expect (typep invalid-date 'org-time-error) :to-be t)
         (when (typep invalid-date 'org-time-error)
           (expect (org-time-error-reason invalid-date) :to-be :invalid-time)
@@ -815,13 +918,17 @@
     (let* ((start (make-org-time-value "2025-01-01"))
            (end (make-org-time-value "2025-01-02"))
            (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (unparsed (make-document ""))
            (result (agenda nil start end :time-context context))
+           (unparsed-result
+             (agenda (list unparsed) start end :time-context context))
            (todos (agenda-todo-list nil :time-context context)))
       (with-soft-assertions
         (expect (agenda-result-start-date result) :to-equal start)
         (expect (agenda-result-end-date result) :to-equal end)
         (expect (agenda-result-time-context result) :to-equal context)
         (expect (agenda-result-entries result) :to-equal '())
+        (expect (agenda-result-entries unparsed-result) :to-equal '())
         (expect (agenda-result-start-date todos) :to-be nil)
         (expect (agenda-result-end-date todos) :to-be nil)
         (expect (agenda-result-entries todos) :to-equal '())))))
