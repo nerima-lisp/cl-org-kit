@@ -84,6 +84,17 @@ keyword classifying the failure. The input is never modified."))
 FORMULA is a bounded, escaped excerpt, POSITION the 0-based character offset,
 and FEATURE the syntax class that was refused."))
 
+(define-condition org-table-error (org-kit-error)
+  ((target :initarg :target :initform nil)
+   (reason :initarg :reason :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ for target ~A~]"
+                     (org-kit-error-message condition)
+                     (org-table-error-reason condition)
+                     (org-table-error-target condition))))
+  (:documentation "Signalled when a table edit is unsupported. TARGET describes the
+addressed table and REASON classifies the table-specific failure."))
+
 (define-condition org-resource-limit-error (org-kit-error)
   ((limit-name :initarg :limit-name)
    (limit :initarg :limit)
@@ -152,6 +163,14 @@ otherwise a character index into the document text. NIL when unknown."
 (defun org-table-unsupported-syntax-feature (condition)
   "Return the keyword identifying the unsupported formula syntax, or NIL."
   (slot-value condition 'feature))
+
+(defun org-table-error-target (condition)
+  "Return the bounded description of the table addressed by this error, or NIL."
+  (slot-value condition 'target))
+
+(defun org-table-error-reason (condition)
+  "Return the keyword classifying why the table operation was refused, or NIL."
+  (slot-value condition 'reason))
 
 (defun org-resource-limit-error-limit-name (condition)
   "Return the MAKE-LIMITS keyword of the exceeded limit."

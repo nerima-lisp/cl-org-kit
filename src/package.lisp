@@ -14,6 +14,7 @@
    #:org-table-unsupported-syntax-formula
    #:org-table-unsupported-syntax-position
    #:org-table-unsupported-syntax-feature
+   #:org-table-error #:org-table-error-target #:org-table-error-reason
    #:org-resource-limit-error #:org-resource-limit-error-limit-name
    #:org-resource-limit-error-limit #:org-resource-limit-error-actual
    ;; Clock aggregation
@@ -62,6 +63,8 @@
    #:set-keyword-value #:remove-keyword
    ;; Format-preserving element edits
    #:replace-block-body #:set-checkbox-state
+   ;; Format-preserving table edits
+   #:table-align
    ;; Format-preserving subtree edits
    #:insert-subtree #:delete-subtree #:replace-subtree
    #:promote-subtree #:demote-subtree
