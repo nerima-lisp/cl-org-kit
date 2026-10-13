@@ -71,4 +71,88 @@ After pipe-title clocktable.
 #+END:
 
 日本語の後続本文を保持します。
+")
+ (:id "unencoded-padded-wide-sparse" :org-clocktable-body "| Headline     | Time       |   |       |
+|--------------+------------+---+-------|
+| *Total time* | *2d 16:00* |   |       |
+|--------------+------------+---+-------|
+| \\_  Pipe     | title      |   | 10:00 |
+| Plain title  | 0:01       |   |       |
+" :org-updated-document "#+BEGIN: clocktable :ignore t
+| Headline     | Time       |   |       |
+|--------------+------------+---+-------|
+| *Total time* | *2d 16:00* |   |       |
+|--------------+------------+---+-------|
+| \\_  Pipe     | title      |   | 10:00 |
+| Plain title  | 0:01       |   |       |
+#+END:
+")
+ (:id "alignment-right-cookie-headline" :org-clocktable-body "|     Headline | Time   |
+|--------------+--------|
+| *Total time* | *0:05* |
+|--------------+--------|
+|          <r> | 0:05   |
+" :org-updated-document "#+BEGIN: clocktable
+|     Headline | Time   |
+|--------------+--------|
+| *Total time* | *0:05* |
+|--------------+--------|
+|          <r> | 0:05   |
+#+END:
+")
+ (:id "width-cookie-headline" :org-clocktable-body "| Headline     | Time   |
+|--------------+--------|
+| *Total time* | *0:05* |
+|--------------+--------|
+| <5>          | 0:05   |
+" :org-updated-document "#+BEGIN: clocktable
+| Headline     | Time   |
+|--------------+--------|
+| *Total time* | *0:05* |
+|--------------+--------|
+| <5>          | 0:05   |
+#+END:
+")
+ (:id "indented-clocktable-body" :org-clocktable-body "| Headline     | Time   |
+|--------------+--------|
+| *Total time* | *0:05* |
+|--------------+--------|
+| Indented row | 0:05   |
+" :org-updated-document "Before
+
+#+BEGIN: clocktable
+| Headline     | Time   |
+|--------------+--------|
+| *Total time* | *0:05* |
+|--------------+--------|
+| Indented row | 0:05   |
+#+END:
+
+After
+")
+ (:id "time-cell-output-limit" :org-clocktable-body "| Headline     | Time        |
+|--------------+-------------|
+| *Total time* | *41d 16:00* |
+|--------------+-------------|
+| Long row     | 41d 16:00   |
+" :org-updated-document "#+BEGIN: clocktable
+| Headline     | Time        |
+|--------------+-------------|
+| *Total time* | *41d 16:00* |
+|--------------+-------------|
+| Long row     | 41d 16:00   |
+#+END:
+")
+ (:id "indent-output-limit" :org-clocktable-body "| Headline          | Time   |      |
+|-------------------+--------+------|
+| *Total time*      | *0:01* |      |
+|-------------------+--------+------|
+| \\_      Deep leaf |        | 0:01 |
+" :org-updated-document "#+BEGIN: clocktable
+| Headline          | Time   |      |
+|-------------------+--------+------|
+| *Total time*      | *0:01* |      |
+|-------------------+--------+------|
+| \\_      Deep leaf |        | 0:01 |
+#+END:
 ")))

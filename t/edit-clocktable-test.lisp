@@ -108,7 +108,7 @@
     (let* ((cases (getf (edit-clocktable-test-fixture "cases") :cases))
            (expected (getf (edit-clocktable-test-fixture "expected") :cases)))
       (with-soft-assertions
-        (expect (length cases) :to-be 4)
+        (expect (length cases) :to-be 10)
         (expect (length expected) :to-be (length cases))
         (dolist (case cases)
           (let* ((id (getf case :id))
@@ -128,7 +128,8 @@
                  (body (getf oracle :org-clocktable-body))
                  (span (first (edit-result-spans edit)))
                  (start (edit-span-start span))
-                 (end (edit-span-end span)))
+                 (end (edit-span-end span))
+                 (body-end (+ start (length body))))
             (expect (list id (not (null oracle))) :to-equal (list id t))
             (expect (list id (node-p target)) :to-equal (list id t))
             (expect (list id (edit-result-p edit)) :to-equal (list id t))
@@ -136,13 +137,16 @@
                     :to-equal (list id (getf oracle :org-updated-document)))
             (expect (list id (length (edit-result-spans edit)))
                     :to-equal (list id 1))
-            (expect (subseq updated-source start (+ start (length body)))
-                    :to-equal body)
+            (expect (list id (<= body-end (length updated-source)))
+                    :to-equal (list id t))
+            (when (<= body-end (length updated-source))
+              (expect (subseq updated-source start body-end)
+                      :to-equal body))
             (expect (subseq source 0 start)
                     :to-equal (subseq updated-source 0 start))
-            (expect (subseq source end)
-                    :to-equal
-                    (subseq updated-source (+ start (length body))))
+            (when (<= body-end (length updated-source))
+              (expect (subseq source end)
+                      :to-equal (subseq updated-source body-end)))
             (expect (document-text document) :to-equal source)
             (expect (write-org document :output-type :octets)
                     :to-equalp source-copy)
@@ -280,29 +284,126 @@
         (expect (write-org document :output-type :octets)
                 :to-equalp source-octets))))
 
-  (it "covers unencoded, padded, wide and sparse clocktable rows"
-    (let* ((source (format nil "#+BEGIN: clocktable :ignore t~%old body~%  #+END:  ~%"))
+  (it "matches the full Org body for unencoded, padded, wide and sparse rows"
+    (let* ((cases (getf (edit-clocktable-test-fixture "cases") :cases))
+           (expected (getf (edit-clocktable-test-fixture "expected") :cases))
+           (case (edit-clocktable-test-case cases "unencoded-padded-wide-sparse"))
+           (oracle (edit-clocktable-test-case
+                    expected "unencoded-padded-wide-sparse"))
+           (source-octets
+             (edit-clocktable-test-source-octets (getf case :source)))
+           (source (cl-codec-kit:octets-to-string
+                    source-octets :encoding :utf-8))
            (document (parse-org source))
            (target (edit-clocktable-test-dynamic-block document "clocktable"))
-           (range (edit-clocktable-test-range))
-           (result
-             (make-clocktable-result
-              :total-minutes 3840
-              :range range
-              :rows
-              (list (make-clocktable-row
-                     :level 2 :title "Pipe | title" :range range :minutes 600)
-                    (make-clocktable-row
-                     :level 1 :title "Plain title" :range range :minutes 1))))
+           (result (edit-clocktable-test-result case))
            (edit (write-clocktable document target result))
            (updated-source
-             (document-text (edit-result-updated-document edit))))
+             (document-text (edit-result-updated-document edit)))
+           (body (getf oracle :org-clocktable-body))
+           (span (first (edit-result-spans edit)))
+           (start (edit-span-start span)))
       (with-soft-assertions
         (expect (document-encoding document) :to-be nil)
-        (expect (search "64:00" updated-source) :to-be-truthy)
-        (expect (search "10:00" updated-source) :to-be-truthy)
-        (expect (search "Plain title" updated-source) :to-be-truthy)
-        (expect (search "#+END:  " updated-source) :to-be-truthy))))
+        (expect updated-source :to-equal (getf oracle :org-updated-document))
+        (expect (subseq updated-source start (+ start (length body)))
+                :to-equal body))))
+
+  (it "matches Org's alignment cookies and indented clocktable-body oracle"
+    (let* ((cases (getf (edit-clocktable-test-fixture "cases") :cases))
+           (expected (getf (edit-clocktable-test-fixture "expected") :cases)))
+      (dolist (id '("alignment-right-cookie-headline"
+                    "width-cookie-headline"
+                    "indented-clocktable-body"))
+        (let* ((case (edit-clocktable-test-case cases id))
+               (oracle (edit-clocktable-test-case expected id))
+               (source-octets
+                 (edit-clocktable-test-source-octets (getf case :source)))
+               (document (parse-org source-octets))
+               (source (document-text document))
+               (target
+                 (edit-clocktable-test-dynamic-block document "clocktable"))
+               (result (edit-clocktable-test-result case))
+               (edit (write-clocktable document target result))
+               (updated-source
+                 (document-text (edit-result-updated-document edit)))
+               (body (getf oracle :org-clocktable-body))
+               (start (edit-span-start (first (edit-result-spans edit)))))
+          (with-soft-assertions
+            (expect (list id updated-source)
+                    :to-equal (list id (getf oracle :org-updated-document)))
+            (expect (subseq updated-source start (+ start (length body)))
+                    :to-equal body)
+            (expect (document-text document) :to-equal source))))))
+
+  (it "rejects clock cells and row indentation above their output budgets"
+    (let* ((cases (getf (edit-clocktable-test-fixture "cases") :cases))
+           (expected (getf (edit-clocktable-test-fixture "expected") :cases))
+           (time-case (edit-clocktable-test-case cases "time-cell-output-limit"))
+           (time-oracle
+             (edit-clocktable-test-case expected "time-cell-output-limit"))
+           (time-body (getf time-oracle :org-clocktable-body))
+           (time-cell "*41d 16:00*")
+           (time-start (search time-cell time-body))
+           (time-limit (1- (length time-cell)))
+           (time-source-octets
+             (edit-clocktable-test-source-octets (getf time-case :source)))
+           (time-document
+             (parse-org time-source-octets
+                        :limits (make-limits :max-output-length time-limit)))
+           (time-target
+             (edit-clocktable-test-dynamic-block time-document "clocktable"))
+           (time-result (edit-clocktable-test-result time-case))
+           (time-source (document-text time-document))
+           (time-condition
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (write-clocktable time-document time-target time-result))))
+           (indent-case (edit-clocktable-test-case cases "indent-output-limit"))
+           (indent-oracle
+             (edit-clocktable-test-case expected "indent-output-limit"))
+           (indent-body (getf indent-oracle :org-clocktable-body))
+           (indent-text "\\_      ")
+           (indent-start (search indent-text indent-body))
+           (total-cell "*0:01*")
+           (total-start (search total-cell indent-body))
+           (indent-limit (1- (length indent-text)))
+           (indent-source-octets
+             (edit-clocktable-test-source-octets (getf indent-case :source)))
+           (indent-document
+             (parse-org indent-source-octets
+                        :limits (make-limits
+                                 :max-output-length indent-limit)))
+           (indent-target
+             (edit-clocktable-test-dynamic-block
+              indent-document "clocktable"))
+           (indent-result (edit-clocktable-test-result indent-case))
+           (indent-source (document-text indent-document))
+           (indent-condition
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (write-clocktable
+                 indent-document indent-target indent-result)))))
+      (with-soft-assertions
+        (expect time-start :to-be-truthy)
+        (expect (and time-start
+                     (subseq time-body time-start
+                             (+ time-start (length time-cell))))
+                :to-equal time-cell)
+        (edit-clocktable-test-expect-limit-error
+         time-condition :max-output-length time-limit (length time-cell))
+        (expect (document-text time-document) :to-equal time-source)
+        (expect (write-org time-document :output-type :octets)
+                :to-equalp time-source-octets)
+        (expect indent-start :to-be-truthy)
+        (expect total-start :to-be-truthy)
+        (expect (<= (length total-cell) indent-limit) :to-be t)
+        (edit-clocktable-test-expect-limit-error
+         indent-condition :max-output-length indent-limit
+         (length indent-text))
+        (expect (document-text indent-document) :to-equal indent-source)
+        (expect (write-org indent-document :output-type :octets)
+                :to-equalp indent-source-octets))))
 
   (it "preserves a UTF-8 BOM through a clocktable body edit"
     (let* ((source (format nil "#+BEGIN: clocktable~%stale~%#+END:~%"))

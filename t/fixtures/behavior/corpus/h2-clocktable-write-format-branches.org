@@ -1,0 +1,3 @@
+#+BEGIN: clocktable :ignore t
+old body
+#+END:

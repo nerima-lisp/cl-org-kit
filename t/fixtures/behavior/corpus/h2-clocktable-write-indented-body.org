@@ -1,0 +1,8 @@
+Before
+
+#+BEGIN: clocktable
+    stale body
+      second stale line
+#+END:
+
+After
