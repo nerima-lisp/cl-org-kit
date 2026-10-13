@@ -27,7 +27,7 @@
   (it "roots every condition at ORG-KIT-ERROR"
     (with-soft-assertions
       (dolist (type '(org-parse-error org-query-error org-edit-error
-                      org-resource-limit-error))
+                      org-table-error org-resource-limit-error))
         (expect (subtypep type 'org-kit-error) :to-be t))
       (expect (subtypep 'org-kit-error 'error) :to-be t)))
 
@@ -68,6 +68,16 @@
         (expect (org-edit-error-reason condition) :to-be :ambiguous)
         (expect (report (make-condition 'org-edit-error :message "Refused"))
                 :to-equal "Refused"))))
+
+  (it "reports a table calculation error"
+    (let ((condition (make-condition 'org-table-error :message "Invalid result"
+                                                       :target "$2" :reason :empty-range)))
+      (with-soft-assertions
+        (expect (report condition) :to-equal "Invalid result (empty-range) for target $2")
+        (expect (org-table-error-target condition) :to-equal "$2")
+        (expect (org-table-error-reason condition) :to-be :empty-range)
+        (expect (report (make-condition 'org-table-error :message "Invalid result"))
+                :to-equal "Invalid result"))))
 
   (it "reports a resource limit error"
     (let ((condition (make-condition 'org-resource-limit-error
