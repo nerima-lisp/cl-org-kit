@@ -843,11 +843,15 @@
   (it "trims list indentation and wraps paragraphs after tables"
     (let* ((indented-list
              (export-org (parse-org (format nil "-   *bold*~%")) :html))
+           (unterminated-list
+             (export-org (parse-org "- final") :html))
            (table-list
              (export-org
               (parse-org (format nil "- | cell |~%  paragraph~%")) :html)))
       (with-soft-assertions
         (expect (search "<li><b>bold</b></li>" indented-list)
+                :not :to-be nil)
+        (expect (search "<li>final</li>" unterminated-list)
                 :not :to-be nil)
         (expect (search "<table" table-list) :not :to-be nil)
         (expect (search "<p>
