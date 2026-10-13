@@ -570,8 +570,7 @@
 (defun export-html-trim-output-newline (state)
   (let* ((output (export-html-state-output state))
          (length (fill-pointer output)))
-    (when (and (plusp length)
-               (char= (char output (1- length)) #\Newline))
+    (when (char= (char output (1- length)) #\Newline)
       (decf (fill-pointer output)))))
 
 (defun export-html-copy-view-with-children (view children)
