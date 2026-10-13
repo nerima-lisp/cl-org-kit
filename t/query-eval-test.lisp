@@ -127,6 +127,12 @@
                (query-eval-test-run document '(:level := 3)))
               :to-equal '("Logical Three"))))
 
+  (it "evaluates a star-only heading that ends at end of input"
+    (let ((document (parse-org "**")))
+      (expect (query-eval-test-titles
+               (org-kit:query-list document '(:level := 2)))
+              :to-equal '(""))))
+
   (it "rejects malformed canonical LEVEL predicates during evaluation"
     (let ((document (parse-org "* Entry")))
       (signals org-query-error
@@ -686,8 +692,26 @@
       (expect (query-eval-test-titles
                (org-kit:query-list document '(:level := 1)))
               :to-equal nil)
+      (expect (length (org-kit:query-list
+                       document '(:property-missing "LEVEL")))
+              :to-be 1)
       (expect (length (org-kit:query-list document '(:property-missing "ITEM")))
               :to-be 1)))
+
+  (it "treats caller-created headlines without source stars as missing LEVEL"
+    (let* ((document (org-kit:make-document "Plain"))
+           (plain-headline
+             (org-kit:make-node :headline :begin 0
+                                :properties '(:raw-value "Plain")))
+           (eof-headline
+             (org-kit:make-node :headline :begin 5
+                                :properties '(:raw-value "EOF")))
+           (root (org-kit:make-node :org-data
+                                    :children (list plain-headline eof-headline))))
+      (setf (org-kit:document-root document) root)
+      (expect (query-eval-test-titles
+               (org-kit:query-list document '(:property-missing "LEVEL")))
+              :to-equal '("Plain" "EOF"))))
 
   (it "stringifies values returned by special-property providers"
     (let* ((document
