@@ -1277,6 +1277,61 @@
     (princ (format "Emacs %s; Org %s; ox-gfm %s\n"
                    emacs-version (org-version) org-fixture--ox-gfm-version))))
 
+(defun org-fixture--statistics-cookie-values ()
+  (let (values)
+    (save-excursion
+      (goto-char (point-min))
+      (while (re-search-forward "\\[[0-9]+\\(%\\|/[0-9]+\\)\\]" nil t)
+        (push (match-string-no-properties 0) values)))
+    (nreverse values)))
+
+(defun org-fixture-generate-statistics-cookies (source-directory expected-directory)
+  "Update the first statistics cookie in each source file with Org's API."
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "Statistics cookie fixtures require Emacs 31.1 and Org 9.8.10"))
+  (unless (file-directory-p source-directory)
+    (error "Source directory does not exist: %s" source-directory))
+  (let ((files (sort (directory-files-recursively source-directory "\\.org\\'")
+                     #'string<)))
+    (unless files (error "No .org files found under %s" source-directory))
+    (dolist (file files)
+      (let ((target-heading nil)
+            (values nil))
+        (let* ((relative (file-relative-name file source-directory))
+               (output (expand-file-name relative expected-directory))
+               (content
+                (with-temp-buffer
+                  (org-fixture--read-buffer file)
+                  (goto-char (point-min))
+                  (unless (looking-at "\\* ")
+                    (error "Statistics cookie fixture must start with a root heading: %s"
+                           relative))
+                  (let ((root-count 0))
+                    (while (re-search-forward "^\\* " nil t)
+                      (setq root-count (1+ root-count)))
+                    (unless (= root-count 1)
+                      (error "Expected one root heading in %s, found %d"
+                             relative root-count)))
+                  (goto-char (point-min))
+                  (unless (re-search-forward "\\[[0-9]+\\(%\\|/[0-9]+\\)\\]" nil t)
+                    (error "No statistics cookie found in %s" relative))
+                  (setq target-heading
+                        (save-excursion
+                          (org-back-to-heading t)
+                          (org-get-heading t t t t)))
+                  (org-update-statistics-cookies nil)
+                  (setq values (org-fixture--statistics-cookie-values))
+                  (buffer-string))))
+          (make-directory (file-name-directory output) t)
+          (let ((coding-system-for-write 'utf-8-unix))
+            (write-region content nil output nil 'silent))
+          (princ (format "Wrote %s at heading %S; statistics cookies %S\n"
+                         relative target-heading values)))))
+    (princ (format "Generated %d statistics cookie fixtures.\n"
+                   (length files)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
 (defun org-fixture--main ()
   (let ((arguments (if (equal (car command-line-args-left) "--")
                        (cdr command-line-args-left)
@@ -1314,6 +1369,11 @@
        (expand-file-name (nth 1 arguments))
        (expand-file-name (nth 2 arguments))
        (expand-file-name (nth 3 arguments))))
+     ((and (= (length arguments) 3)
+           (equal (car arguments) "--statistics-cookies"))
+      (org-fixture-generate-statistics-cookies
+       (expand-file-name (nth 1 arguments))
+       (expand-file-name (nth 2 arguments))))
      ((= (length arguments) 2)
       (org-fixture-generate (expand-file-name (nth 0 arguments))
                             (expand-file-name (nth 1 arguments))))
@@ -1326,6 +1386,7 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --export-oracle CORPUS-DIR MANIFEST EXPECTED-DIR\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --statistics-cookies SOURCE-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
 ;;; Behavior agenda oracle action

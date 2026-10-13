@@ -1,0 +1,7 @@
+* TODO Project [0/0]
+:PROPERTIES:
+:COOKIE_DATA: todo recursive
+:END:
+** DONE Direct complete [0/0]
+** TODO Direct open [0/0]
+*** DONE Nested complete [0/0]

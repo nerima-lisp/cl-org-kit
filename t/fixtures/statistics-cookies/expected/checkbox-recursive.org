@@ -1,0 +1,8 @@
+* Checklist [2/4]
+:PROPERTIES:
+:COOKIE_DATA: checkbox recursive
+:END:
+- [X] Direct complete
+- [ ] Direct open
+- [-] Direct partial
+  - [X] Nested complete

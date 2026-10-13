@@ -1,0 +1,6 @@
+* TODO Project [1/2] [50%]
+:PROPERTIES:
+:COOKIE_DATA: todo
+:END:
+** DONE One
+** TODO Two

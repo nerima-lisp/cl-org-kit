@@ -1,0 +1,8 @@
+* Outer
+:PROPERTIES:
+:COOKIE_DATA: checkbox recursive
+:END:
+** Inner [0/0]
+- [X] Direct complete
+- [ ] Direct open
+  - [X] Nested complete

@@ -67,6 +67,11 @@
    #:replace-block-body #:set-checkbox-state
    ;; Format-preserving table edits
    #:table-align
+   ;; Statistics cookies
+   #:statistics-cookie-update #:make-statistics-cookie-update
+   #:statistics-cookie-update-p #:statistics-cookie-update-node
+   #:statistics-cookie-update-old-value #:statistics-cookie-update-new-value
+   #:update-statistics-cookies
    ;; Format-preserving subtree edits
    #:insert-subtree #:delete-subtree #:replace-subtree
    #:promote-subtree #:demote-subtree

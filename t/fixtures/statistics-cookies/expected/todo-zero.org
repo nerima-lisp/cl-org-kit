@@ -1,0 +1,5 @@
+* TODO Empty [0%]
+:PROPERTIES:
+:COOKIE_DATA: todo
+:END:
+** Plain child
