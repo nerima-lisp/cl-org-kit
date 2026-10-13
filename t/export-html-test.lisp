@@ -452,6 +452,8 @@
     (dolist (source-text
              (list (format nil "#+ATTR_HTML: :width 12px~%[[file:image.png]]")
                    (format nil "#+ATTR_HTML: :title \"unfinished~%[[file:image.png]]")
+                   (format nil "#+ATTR_HTML: :width \"\"~%[[file:image.png]]")
+                   (format nil "#+ATTR_HTML: : image~%[[file:image.png]]")
                    (format nil "#+ATTR_HTML: :class one :class two~%[[file:image.png]]")
                    (format nil "#+ATTR_HTML: class value~%[[file:image.png]]")
                    (format nil "#+ATTR_HTML: :class~%[[file:image.png]]")))
@@ -579,6 +581,7 @@
                 ,(concatenate 'string expanded-control-type ":example.test") nil)
                ("fuzzy" "https:\\evil.example" "https:\\evil.example" nil)
                ("fuzzy" "//evil.example" "//evil.example" nil)
+               ("fuzzy" nil "" nil)
                (nil "relative/path" "relative/path" t))))
       (with-soft-assertions
         (dolist (case cases)
@@ -836,6 +839,19 @@
         (expect (search "nested child" output) :not :to-be nil)
         (expect (search "another nested child" output) :not :to-be nil))))
 
+  (it "trims list indentation and wraps paragraphs after tables"
+    (let* ((indented-list
+             (export-org (parse-org (format nil "-   *bold*~%")) :html))
+           (table-list
+             (export-org
+              (parse-org (format nil "- | cell |~%  paragraph~%")) :html)))
+      (with-soft-assertions
+        (expect (search "<li><b>bold</b></li>" indented-list)
+                :not :to-be nil)
+        (expect (search "<table" table-list) :not :to-be nil)
+        (expect (search "<p>
+paragraph" table-list) :not :to-be nil))))
+
   (it "separates paragraph text from a nested list child"
     (let* ((document
              (parse-org (format nil "- parent~%  - nested child~%")))
@@ -853,6 +869,51 @@
         (expect (search "<li>
 <ul class=\"org-ul\">" output) :not :to-be nil)
         (expect (search "nested child" output) :not :to-be nil))))
+
+  (it "groups resolved include siblings under imported headings"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Host~%#+INCLUDE: \"heading.org\"~%#+INCLUDE: \"tail.org\"~%")))
+           (output
+             (export-org
+              document :html
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (cond ((string= path "heading.org")
+                       (format nil
+                               "* Imported~%:PROPERTIES:~%:ID: imported~%:END:~%~%Body~%** Nested~%Nested body~%"))
+                      ((string= path "tail.org")
+                       (format nil "Included tail~%")))))))
+      (with-soft-assertions
+        (expect (search "Imported" output) :not :to-be nil)
+        (expect (search "Nested body" output) :not :to-be nil)
+        (expect (search "Included tail" output) :not :to-be nil))))
+
+  (it "renders empty literal objects, rule-only tables, and entities"
+    (let* ((literal (export-org (parse-org "==") :html))
+           (table (export-org (parse-org (format nil "|---|~%")) :html))
+           (entity (export-org (parse-org (format nil "\\vbar~%")) :html)))
+      (with-soft-assertions
+        (expect (search "<code></code>" literal) :not :to-be nil)
+        (expect (search "<table" table) :not :to-be nil)
+        (expect (search "<colgroup>" table) :to-be nil)
+        (expect (search "|" entity) :not :to-be nil))))
+
+  (it "respects author nil when the document has an author"
+    (let ((output
+            (export-org
+             (parse-org (format nil "#+AUTHOR: A~%#+OPTIONS: author:nil~%Body~%"))
+             :html)))
+      (expect (search "<meta name=\"author\"" output) :to-be nil)))
+
+  (it "skips empty and invalid target aliases after public node updates"
+    (dolist (alias (list "" nil))
+      (let* ((document (parse-org (format nil "<<target>>~%[[target]]~%")))
+             (target (export-html-test-node-of-type document :target)))
+        (setf (node-property target :value) alias)
+        (expect (typep (export-org document :html) 'string) :to-be t))))
 
   (it "does not mutate documents on successful or failed HTML export"
     (let* ((valid (parse-org
