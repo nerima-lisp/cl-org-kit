@@ -148,7 +148,7 @@
           (multiple-value-bind (closed closed-line)
               (clock-out open-document open-heading
                          :at (make-org-time-value "2026-10-14T10:37:00")
-                         :time-context context)
+                         :time-context context :drawer "LOGBOOK")
             (let* ((updated-document (edit-result-updated-document closed))
                    (replacement-span (first (edit-result-spans closed))))
               (with-soft-assertions
@@ -163,6 +163,145 @@
                 (expect (edit-span-start replacement-span) :to-equal clock-start)
                 (expect (edit-span-end replacement-span) :to-equal clock-end)
                 (expect (document-text document) :to-equal source))))))))
+
+  (it "inserts after headings with empty, final-newline, and planning-only sections"
+    (let* ((context (edit-clock-test-context "2026-10-14T09:05:00"))
+           (line "CLOCK: [2026-10-14 Wed 09:05]")
+           (cases
+             (list
+              (list "* Task"
+                    (format nil "* Task~%:LOGBOOK:~%~A~%:END:" line))
+              (list (format nil "* Task~%")
+                    (format nil "* Task~%:LOGBOOK:~%~A~%:END:~%" line))
+              (list (format nil "* Task~%SCHEDULED: <2026-10-14 Wed 08:00>~%")
+                    (format nil "* Task~%SCHEDULED: <2026-10-14 Wed 08:00>~%:LOGBOOK:~%~A~%:END:~%"
+                            line)))))
+      (dolist (case cases)
+        (let* ((source (first case))
+               (expected (second case))
+               (document (parse-org source))
+               (heading (edit-clock-test-single-heading document)))
+          (multiple-value-bind (result actual-line)
+              (clock-in document heading
+                        :at (make-org-time-value "2026-10-14T09:05:00")
+                        :time-context context)
+            (with-soft-assertions
+              (expect actual-line :to-equal line)
+              (expect (document-text (edit-result-updated-document result))
+                      :to-equal expected)
+              (expect (document-text document) :to-equal source)))))))
+
+  (it "uses LOGBOOK when CLOCK_INTO_DRAWER is t without a LOG_INTO_DRAWER setting"
+    (let* ((source
+             (format nil "#+PROPERTY: CLOCK_INTO_DRAWER t~%* Task~%:LOGBOOK:~%:END:~%"))
+           (document (parse-org source))
+           (heading (edit-clock-test-single-heading document))
+           (context (edit-clock-test-context "2026-10-14T09:05:00")))
+      (multiple-value-bind (result line)
+          (clock-in document heading
+                    :at (make-org-time-value "2026-10-14T09:05:00")
+                    :time-context context)
+        (with-soft-assertions
+          (expect line :to-equal "CLOCK: [2026-10-14 Wed 09:05]")
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal
+                  (format nil "#+PROPERTY: CLOCK_INTO_DRAWER t~%* Task~%:LOGBOOK:~%CLOCK: [2026-10-14 Wed 09:05]~%:END:~%"))
+          (expect (document-text document) :to-equal source)))))
+
+  (it "rejects invalid drawer types and names through the public clock-in API"
+    (let* ((source (format nil "* Task~%"))
+           (document (parse-org source))
+           (heading (edit-clock-test-single-heading document))
+           (context (edit-clock-test-context "2026-10-14T09:05:00")))
+      (dolist (case (list (list "" "drawer \"\"")
+                          (list "BAD:NAME" "drawer \"BAD:NAME\"")
+                          (list (format nil "BAD~%NAME") "drawer \"BAD\\nNAME\"")
+                          (list (format nil "BAD~CNAME" #\Return)
+                                "drawer \"BAD\\rNAME\"")
+                          (list "END" "drawer \"END\"")
+                          (list "PROPERTIES" "drawer \"PROPERTIES\"")))
+        (let ((drawer (first case))
+              (expected-context (second case)))
+          (let ((condition
+                  (edit-clock-test-error
+                   (lambda ()
+                     (clock-in document heading
+                               :at (make-org-time-value "2026-10-14T09:05:00")
+                               :time-context context :drawer drawer)))))
+            (edit-clock-test-assert-clock-error
+             condition :unsupported-option "Unsupported clock option"
+             expected-context))))
+      (let ((condition
+              (edit-clock-test-condition
+               (lambda ()
+                 (clock-in document heading
+                           :at (make-org-time-value "2026-10-14T09:05:00")
+                           :time-context context :drawer nil)))))
+        (expect (typep condition 'type-error) :to-be t)
+        (expect (document-text document) :to-equal source))))
+
+  (it "inserts into an empty existing drawer and finds its closing line"
+    (let* ((source
+             (format nil "#+PROPERTY: CLOCK_INTO_DRAWER t~%* Task~%:LOGBOOK:~%:END:~%"))
+           (document (parse-org source))
+           (heading (edit-clock-test-single-heading document))
+           (context (edit-clock-test-context "2026-10-14T09:05:00")))
+      (multiple-value-bind (result line)
+          (clock-in document heading
+                    :at (make-org-time-value "2026-10-14T09:05:00")
+                    :time-context context)
+        (with-soft-assertions
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal
+                  (format nil "#+PROPERTY: CLOCK_INTO_DRAWER t~%* Task~%:LOGBOOK:~%~A~%:END:~%" line))
+          (expect (document-text document) :to-equal source)))))
+
+  (it "closes a CRLF clock row without replacing its line ending"
+    (let* ((line "CLOCK: [2026-10-14 Wed 09:05]")
+           (source (format nil "* Task~C~%:LOGBOOK:~C~%~A~C~%:END:~%"
+                           #\Return #\Return line #\Return))
+           (expected
+             (format nil "* Task~C~%:LOGBOOK:~C~%CLOCK: [2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] =>  1:32~C~%:END:~%"
+                     #\Return #\Return #\Return))
+           (document (parse-org source))
+           (heading (edit-clock-test-single-heading document))
+           (context (edit-clock-test-context "2026-10-14T10:37:00"))
+           (clock-start (search line source))
+           (clock-end (+ clock-start (length line))))
+      (multiple-value-bind (result closed-line)
+          (clock-out document heading
+                     :at (make-org-time-value "2026-10-14T10:37:00")
+                     :time-context context)
+        (let ((updated (edit-result-updated-document result))
+              (span (first (edit-result-spans result))))
+          (with-soft-assertions
+            (expect closed-line :to-equal
+                    "CLOCK: [2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] =>  1:32")
+            (expect (document-text updated) :to-equal expected)
+            (expect (write-org updated :output-type :octets)
+                    :to-equalp (cl-codec-kit:string-to-octets expected
+                                                               :encoding :utf-8))
+            (expect (edit-span-start span) :to-equal clock-start)
+            (expect (edit-span-end span) :to-equal clock-end)
+            (expect (document-text document) :to-equal source))))))
+
+  (it "closes a final clock row without a trailing newline"
+    (let* ((source (format nil "* Task~%CLOCK: [2026-10-14 Wed 09:05]"))
+           (expected
+             (format nil "* Task~%CLOCK: [2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] =>  1:32"))
+           (document (parse-org source))
+           (heading (edit-clock-test-single-heading document))
+           (context (edit-clock-test-context "2026-10-14T10:37:00")))
+      (multiple-value-bind (result line)
+          (clock-out document heading
+                     :at (make-org-time-value "2026-10-14T10:37:00")
+                     :time-context context)
+        (with-soft-assertions
+          (expect line :to-equal
+                  "CLOCK: [2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] =>  1:32")
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal expected)
+          (expect (document-text document) :to-equal source)))))
 
   (it "lets an explicit drawer override a local property and appends to an existing drawer"
     (let* ((source (format nil "* Task~%:PROPERTIES:~%:CLOCK_INTO_DRAWER: LOCAL~%:END:~%Body~%"))
@@ -256,6 +395,18 @@
                                   :time-context context)))))
       (edit-clock-test-assert-clock-error missing :clock-not-running
                                           "No running CLOCK entry" nil)
+      (let* ((source
+               (format nil "* Task~%CLOCK: [2026-10-13 Tue 09:00]--[2026-10-13 Tue 09:15] =>  0:15~%"))
+             (document (parse-org source))
+             (heading (edit-clock-test-single-heading document))
+             (closed-only (edit-clock-test-error
+                           (lambda ()
+                             (clock-out document heading
+                                        :at (make-org-time-value "2026-10-14T10:00:00")
+                                        :time-context context)))))
+        (edit-clock-test-assert-clock-error closed-only :clock-not-running
+                                            "No running CLOCK entry" nil)
+        (expect (document-text document) :to-equal source))
       (let* ((one (parse-org
                    (format nil "* Task~%CLOCK: [2026-10-14 Wed 09:00]~%")))
              (one-heading (edit-clock-test-single-heading one))

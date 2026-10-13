@@ -37,8 +37,6 @@
                    weekday
                    (cl-date-kit:local-date-time-hour local)
                    (cl-date-kit:local-date-time-minute local))))
-    (unless weekday
-      (edit-clock-error :invalid-range (org-time-value-iso8601 at)))
     text))
 
 (defun edit-clock-drawer-name (document heading drawer drawer-supplied-p)
@@ -96,8 +94,7 @@
       ((null section) (edit-clock-heading-line-end document heading))
       ((find-if-not #'edit-clock-metadata-p children)
        (node-begin (find-if-not #'edit-clock-metadata-p children)))
-      (children (node-end (car (last children))))
-      (t (node-end section)))))
+      (t (node-end (car (last children)))))))
 
 (defun edit-clock-newline (document)
   (let* ((source (document-text document))
@@ -114,7 +111,6 @@
          (eof-p (= offset (length source)))
          (needs-leading-newline-p
            (and eof-p
-                (plusp offset)
                 (not (char= (char source (1- offset)) #\Newline))))
          (preserve-final-newline-p
            (and eof-p (document-final-newline-p document))))
@@ -140,12 +136,9 @@
   (let* ((source (document-text document))
          (start (node-begin drawer))
          (opening-end (position #\Newline source :start start)))
-    (or (and opening-end
-             (let ((close (search ":END:" source :start2 (1+ opening-end)
-                                  :end2 (node-end drawer)
-                                  :test #'char-equal)))
-               close))
-        (node-end drawer))))
+    (search ":END:" source :start2 (1+ opening-end)
+             :end2 (node-end drawer)
+             :test #'char-equal)))
 
 (defun edit-clock-drawer-clock-offset (document drawer)
   (or (node-contents-end drawer)
@@ -161,8 +154,6 @@
                                               drawer-name)))
                    (setf found node)))
                (document-root document))
-    (unless found
-      (error 'org-kit-error :message "Clock edit fragment did not parse"))
     (edit-canonical-node found)))
 
 (defun edit-clock-in-expected (document heading drawer row offset)
@@ -275,11 +266,11 @@ DRAWER overrides CLOCK_INTO_DRAWER; LOGBOOK is used when no setting applies."
     (edit-canonical-set-property expected path :status (getf properties :status))
     expected))
 
-(defun clock-out (document heading &key at time-context (drawer nil drawer-supplied-p))
+(defun clock-out (document heading &key at time-context drawer)
   "Close HEADING's single running CLOCK at AT and return values edit-result and its canonical row.
 TIME-CONTEXT is required and supplies the explicit zone and DST policy.
 DRAWER is accepted for API symmetry and does not move an existing CLOCK."
-  (declare (ignore drawer drawer-supplied-p))
+  (declare (ignore drawer))
   (clock-check-heading document heading)
   (edit-clock-context-value at time-context)
   (clock-check-document-node-count document)
