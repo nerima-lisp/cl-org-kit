@@ -928,7 +928,6 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
-(org-fixture--dispatch-main)
 ;;; Behavior agenda oracle action
 
 (defun org-fixture--agenda-read-case (file)
@@ -1284,5 +1283,6 @@
 
 (advice-add 'org-fixture--main :around #'org-fixture--agenda-main-around)
 
+(org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here
