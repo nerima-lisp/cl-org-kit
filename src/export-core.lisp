@@ -1004,17 +1004,6 @@
                                 active-includes active-macros fragment-p)
                (let ((type (node-type node)))
                  (cond
-                   ((and (eq type :keyword)
-                         (string= (node-property node :key) "INCLUDE"))
-                    (prepare-include node source-document selected-scope depth
-                                     active-includes active-macros))
-                   ((eq type :keyword)
-                    (export-validate-keywords
-                     (list (list node
-                                 (string-upcase (or (node-property node :key) ""))
-                                 (or (node-property node :value) "")))
-                     backend :fragment-p fragment-p)
-                    (values nil nil))
                    ((export-option-pruned-p node options)
                     (values nil nil))
                    ((and (member type '(:headline :inlinetask) :test #'eq)
@@ -1050,6 +1039,17 @@
                                    (or selected-here-p selected-descendant-p))
                                   (values nil nil)))))))
                    ((and select-active-p (not selected-scope))
+                    (values nil nil))
+                   ((and (eq type :keyword)
+                         (string= (node-property node :key) "INCLUDE"))
+                    (prepare-include node source-document selected-scope depth
+                                     active-includes active-macros))
+                   ((eq type :keyword)
+                    (export-validate-keywords
+                     (list (list node
+                                 (string-upcase (or (node-property node :key) ""))
+                                 (or (node-property node :value) "")))
+                     backend :fragment-p fragment-p)
                     (values nil nil))
                    ((eq type :macro)
                     (prepare-macro node source-document selected-scope depth

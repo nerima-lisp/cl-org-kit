@@ -456,6 +456,42 @@
         (expect (mapcar (lambda (entry) (getf entry :level)) toc)
                 :to-equal '(1 2 3 2)))))
 
+  (it "skips keyword validation and include resolution in unselected subtrees"
+    (let* ((source
+             (export-core-test-lines
+              "#+TITLE: Global title"
+              "#+SELECT_TAGS: keep"
+              "* Hidden :discard:"
+              "#+INCLUDE: \"hidden.org\""
+              "#+SETUPFILE: hidden.setup"
+              "* Kept :keep:"
+              "Visible"))
+           (resolver-calls 0)
+           (condition
+             (export-core-test-catch-error
+              (lambda ()
+                (export-core-test-preparation
+                 source :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   (incf resolver-calls)
+                   "Included text")))))
+           (preparation (and (null condition)
+                             (export-core-test-preparation source)))
+           (headings (and preparation
+                          (mapcar (lambda (view)
+                                    (node-property
+                                     (org-kit::export-view-node view) :raw-value))
+                                  (export-core-test-view-nodes
+                                   preparation :headline)))))
+      (with-soft-assertions
+        (expect condition :to-be nil)
+        (expect resolver-calls :to-be 0)
+        (when preparation
+          (expect (getf (org-kit::export-preparation-metadata preparation) :title)
+                  :to-equal "Global title")
+          (expect headings :to-equal '("Kept"))))))
+
   (it "keeps default selection and excludes noexport headings"
     (let* ((preparation
              (export-core-test-preparation
