@@ -719,7 +719,8 @@
               (log-drawer (plist-get case :log-into-drawer)))
           (unless (and (stringp id)
                        (not (gethash id ids))
-                       (equal (plist-get case :source) "h1-clock.org")
+                       (member (plist-get case :source)
+                               '("h1-clock.org" "h1-clock-threshold.org"))
                        (and (proper-list-p path) path (cl-every #'stringp path))
                        (stringp (plist-get case :at))
                        (stringp (plist-get case :zone))
@@ -757,12 +758,12 @@
                                     (line-end-position))))
 
 (defun org-fixture--h1-clock-drawer-name ()
-  (save-excursion
-    (goto-char org-clock-marker)
-    (forward-line 0)
-    (forward-line -1)
-    (when (looking-at "^[ \t]*:\\([^:\n]+\\):[ \t]*$")
-      (match-string-no-properties 1))))
+  (let* ((clock (save-excursion
+                  (goto-char org-clock-marker)
+                  (org-element-at-point)))
+         (drawer (and (org-element-type-p clock 'clock)
+                      (org-element-lineage clock '(drawer) t))))
+    (and drawer (org-element-property :drawer-name drawer))))
 
 (defun org-fixture--h1-clock-case (case corpus-directory)
   (let* ((source-name (plist-get case :source))

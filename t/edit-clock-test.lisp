@@ -59,6 +59,19 @@
       (expect (org-clock-error-reason condition) :to-equal reason)
       (expect (org-clock-error-context condition) :to-equal context))))
 
+(defun edit-clock-test-open-value (line)
+  (subseq line (position #\[ line)))
+
+(defun edit-clock-test-clock-line (timestamp)
+  (format nil "CLOCK: ~A" timestamp))
+
+(defun edit-clock-test-closed-value (line)
+  (let ((start (position #\[ line))
+        (arrow (search "=>" line)))
+    (format nil "~A => ~A"
+            (string-right-trim '(#\Space) (subseq line start arrow))
+            (string-trim '(#\Space) (subseq line (+ arrow 2))))))
+
 (defun edit-clock-test-single-heading (document)
   (edit-clock-test-heading document "Task"))
 
@@ -80,7 +93,9 @@
         (with-soft-assertions
           (expect (length cases) :to-be 7)
           (expect (length oracle) :to-be 7)
-          (expect line :to-equal (getf default-expected :org-open-line))
+          (expect line :to-equal
+                  (edit-clock-test-open-value
+                   (getf default-expected :org-open-line)))
           (expect (document-text source-document) :to-equal source)
           (expect (search (format nil ":LOGBOOK:~%CLOCK: [2026-10-14 Wed 09:05]~%:END:")
                           (document-text (edit-result-updated-document result)))
@@ -103,9 +118,12 @@
             (let ((updated-source
                     (document-text (edit-result-updated-document result))))
               (with-soft-assertions
-                (expect line :to-equal (getf expected :org-open-line))
+                (expect line :to-equal
+                        (edit-clock-test-open-value
+                         (getf expected :org-open-line)))
                 (expect (search (format nil ":~A:~%~A~%:END:"
-                                        (getf expected :org-drawer-name) line)
+                                        (getf expected :org-drawer-name)
+                                        (edit-clock-test-clock-line line))
                                 updated-source)
                         :to-be-truthy)
                 (expect (search ":GLOBAL:" updated-source) :to-be nil)
@@ -121,11 +139,13 @@
                       :at (make-org-time-value (getf case :at))
                       :time-context (edit-clock-test-context (getf case :at)))
           (with-soft-assertions
-            (expect line :to-equal (getf expected :org-open-line))
+            (expect line :to-equal
+                    (edit-clock-test-open-value
+                     (getf expected :org-open-line)))
             (expect (document-text (edit-result-updated-document result))
                     :to-equal (getf expected :org-source-after-in)))))))
 
-  (it "closes one existing row with Org's exact duration spacing and returns its line"
+  (it "closes one existing row and returns the canonical interval"
     (let* ((oracle (edit-clock-test-fixture "expected/h1-clock.sexp"))
            (closed-expected (edit-clock-test-find-case oracle "closed-line-format"))
            (source (format nil "* Task~%Body~%"))
@@ -142,8 +162,9 @@
         (let* ((open-document (edit-result-updated-document started))
                (open-heading (edit-clock-test-single-heading open-document))
                (open-source (document-text open-document))
-               (clock-start (search start-line open-source))
-               (clock-end (+ clock-start (length start-line)))
+               (clock-row (edit-clock-test-clock-line start-line))
+               (clock-start (search clock-row open-source))
+               (clock-end (+ clock-start (length clock-row)))
                (insertion-span (first (edit-result-spans started))))
           (multiple-value-bind (closed closed-line)
               (clock-out open-document open-heading
@@ -152,10 +173,12 @@
             (let* ((updated-document (edit-result-updated-document closed))
                    (replacement-span (first (edit-result-spans closed))))
               (with-soft-assertions
-                (expect start-line :to-equal "CLOCK: [2026-10-14 Wed 09:05]")
+                (expect start-line :to-equal "[2026-10-14 Wed 09:05]")
                 (expect (edit-span-start insertion-span) :to-equal insertion-offset)
                 (expect (edit-span-end insertion-span) :to-equal insertion-offset)
-                (expect closed-line :to-equal (getf closed-expected :org-closed-line))
+                (expect closed-line :to-equal
+                        (edit-clock-test-closed-value
+                         (getf closed-expected :org-closed-line)))
                 (expect (document-text updated-document) :to-equal expected-source)
                 (expect (write-org updated-document :output-type :octets)
                         :to-equalp (cl-codec-kit:string-to-octets expected-source
@@ -190,26 +213,66 @@
                          :at (make-org-time-value "2026-10-14T10:30:00")
                          :time-context context)
             (with-soft-assertions
-              (expect start-line :to-equal open-row)
+              (expect start-line :to-equal "[2026-10-14 Wed 10:00]")
               (expect (document-text open-document) :to-equal expected-after-in)
-              (expect closed-line :to-equal closed-row)
+              (expect closed-line :to-equal
+                      "[2026-10-14 Wed 10:00]--[2026-10-14 Wed 10:30] => 0:30")
               (expect (document-text (edit-result-updated-document closed))
                       :to-equal expected-after-out)
               (expect (document-text open-document) :to-equal expected-after-in)
               (expect (document-text document) :to-equal source)))))))
 
+  (it "limits running clocks to the target entry without child headings"
+    (let* ((child-line "CLOCK: [2026-10-14 Wed 09:00]")
+           (source (format nil "* Parent~%** Child~%~A~%" child-line))
+           (document (parse-org source))
+           (parent (edit-clock-test-heading document "Parent"))
+           (context (edit-clock-test-context "2026-10-14T10:00:00"))
+           (missing (edit-clock-test-error
+                     (lambda ()
+                       (clock-out document parent
+                                  :at (make-org-time-value "2026-10-14T10:00:00")
+                                  :time-context context)))))
+      (edit-clock-test-assert-clock-error missing :clock-not-running
+                                          "No running CLOCK entry" nil)
+      (multiple-value-bind (started start-value)
+          (clock-in document parent
+                    :at (make-org-time-value "2026-10-14T10:00:00")
+                    :time-context context)
+        (let* ((open-document (edit-result-updated-document started))
+               (open-parent (edit-clock-test-heading open-document "Parent"))
+               (expected-open
+                 (format nil "* Parent~%:LOGBOOK:~%CLOCK: [2026-10-14 Wed 10:00]~%:END:~%** Child~%~A~%"
+                         child-line)))
+          (multiple-value-bind (closed interval)
+              (clock-out open-document open-parent
+                         :at (make-org-time-value "2026-10-14T10:30:00")
+                         :time-context (edit-clock-test-context "2026-10-14T10:30:00"))
+            (with-soft-assertions
+              (expect start-value :to-equal "[2026-10-14 Wed 10:00]")
+              (expect (document-text open-document) :to-equal expected-open)
+              (expect interval :to-equal
+                      "[2026-10-14 Wed 10:00]--[2026-10-14 Wed 10:30] => 0:30")
+              (expect (document-text (edit-result-updated-document closed))
+                      :to-equal
+                      (format nil "* Parent~%:LOGBOOK:~%CLOCK: [2026-10-14 Wed 10:00]--[2026-10-14 Wed 10:30] =>  0:30~%:END:~%** Child~%~A~%"
+                              child-line))
+              (expect (document-text document) :to-equal source)))))))
+
   (it "inserts after headings with empty, final-newline, and planning-only sections"
     (let* ((context (edit-clock-test-context "2026-10-14T09:05:00"))
-           (line "CLOCK: [2026-10-14 Wed 09:05]")
+           (line "[2026-10-14 Wed 09:05]")
            (cases
              (list
               (list "* Task"
-                    (format nil "* Task~%:LOGBOOK:~%~A~%:END:" line))
+                    (format nil "* Task~%:LOGBOOK:~%~A~%:END:"
+                            (edit-clock-test-clock-line line)))
               (list (format nil "* Task~%")
-                    (format nil "* Task~%:LOGBOOK:~%~A~%:END:~%" line))
+                    (format nil "* Task~%:LOGBOOK:~%~A~%:END:~%"
+                            (edit-clock-test-clock-line line)))
               (list (format nil "* Task~%SCHEDULED: <2026-10-14 Wed 08:00>~%")
                     (format nil "* Task~%SCHEDULED: <2026-10-14 Wed 08:00>~%:LOGBOOK:~%~A~%:END:~%"
-                            line)))))
+                            (edit-clock-test-clock-line line))))))
       (dolist (case cases)
         (let* ((source (first case))
                (expected (second case))
@@ -220,7 +283,7 @@
                         :at (make-org-time-value "2026-10-14T09:05:00")
                         :time-context context)
             (with-soft-assertions
-              (expect actual-line :to-equal line)
+              (expect actual-line :to-equal "[2026-10-14 Wed 09:05]")
               (expect (document-text (edit-result-updated-document result))
                       :to-equal expected)
               (expect (document-text document) :to-equal source)))))))
@@ -236,7 +299,7 @@
                     :at (make-org-time-value "2026-10-14T09:05:00")
                     :time-context context)
         (with-soft-assertions
-          (expect line :to-equal "CLOCK: [2026-10-14 Wed 09:05]")
+          (expect line :to-equal "[2026-10-14 Wed 09:05]")
           (expect (document-text (edit-result-updated-document result))
                   :to-equal
                   (format nil "#+PROPERTY: CLOCK_INTO_DRAWER t~%* Task~%:LOGBOOK:~%CLOCK: [2026-10-14 Wed 09:05]~%:END:~%"))
@@ -287,7 +350,8 @@
         (with-soft-assertions
           (expect (document-text (edit-result-updated-document result))
                   :to-equal
-                  (format nil "#+PROPERTY: CLOCK_INTO_DRAWER t~%* Task~%:LOGBOOK:~%~A~%:END:~%" line))
+                  (format nil "#+PROPERTY: CLOCK_INTO_DRAWER t~%* Task~%:LOGBOOK:~%~A~%:END:~%"
+                          (edit-clock-test-clock-line line)))
           (expect (document-text document) :to-equal source)))))
 
   (it "closes a CRLF clock row without replacing its line ending"
@@ -309,8 +373,8 @@
         (let ((updated (edit-result-updated-document result))
               (span (first (edit-result-spans result))))
           (with-soft-assertions
-            (expect closed-line :to-equal
-                    "CLOCK: [2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] =>  1:32")
+              (expect closed-line :to-equal
+                    "[2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] => 1:32")
             (expect (document-text updated) :to-equal expected)
             (expect (write-org updated :output-type :octets)
                     :to-equalp (cl-codec-kit:string-to-octets expected
@@ -332,7 +396,7 @@
                      :time-context context)
         (with-soft-assertions
           (expect line :to-equal
-                  "CLOCK: [2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] =>  1:32")
+                  "[2026-10-14 Wed 09:05]--[2026-10-14 Wed 10:37] => 1:32")
           (expect (document-text (edit-result-updated-document result))
                   :to-equal expected)
           (expect (document-text document) :to-equal source)))))
@@ -347,7 +411,7 @@
                     :time-context context :drawer "explicit")
         (let ((edited (edit-result-updated-document result)))
           (with-soft-assertions
-            (expect line :to-equal "CLOCK: [2026-10-14 Wed 09:05]")
+            (expect line :to-equal "[2026-10-14 Wed 09:05]")
             (expect (search (format nil ":EXPLICIT:~%CLOCK:") (document-text edited))
                     :to-be-truthy)
             (expect (search ":CLOCK_INTO_DRAWER: LOCAL" (document-text edited))
@@ -364,7 +428,8 @@
                       :at (make-org-time-value "2026-10-14T09:05:00")
                       :time-context context)
           (with-soft-assertions
-            (expect (search (format nil "0:15~%~A~%:END:" line)
+            (expect (search (format nil "0:15~%~A~%:END:"
+                                    (edit-clock-test-clock-line line))
                             (document-text (edit-result-updated-document result)))
                     :to-be-truthy)
             (expect (document-text drawer-document) :to-equal drawer-source))))))
@@ -393,10 +458,80 @@
                         :time-context context)
             (with-soft-assertions
               (expect (search (format nil ":~A:~%~A~%:END:"
-                                      (getf expected :org-drawer-name) line)
+                                      (getf expected :org-drawer-name)
+                                      (edit-clock-test-clock-line line))
                               (document-text (edit-result-updated-document result)))
                       :to-be-truthy)
               (expect (document-text document) :to-equal source)))))))
+
+  (it "uses an integer CLOCK_INTO_DRAWER as a target-entry threshold"
+    (let* ((cases (getf (edit-clock-test-fixture
+                         "cases/h1-clock-threshold.sexp") :cases))
+           (oracle (edit-clock-test-fixture
+                    "expected/h1-clock-threshold.sexp"))
+           (source
+             (parse-org
+              (read-conformance-octets
+               (conformance-fixture-path
+                "behavior" "corpus/h1-clock-threshold.org"))))
+           (source-text (document-text source)))
+      (expect (length cases) :to-be 3)
+      (expect (length oracle) :to-be 3)
+      (dolist (case cases)
+        (let* ((expected (edit-clock-test-find-case oracle (getf case :id)))
+               (document (parse-org source-text))
+               (heading (edit-clock-test-heading-path
+                         document (getf case :heading-path)))
+               (at (getf case :at))
+               (context (edit-clock-test-context at)))
+          (multiple-value-bind (result timestamp)
+              (clock-in document heading
+                        :at (make-org-time-value at)
+                        :time-context context
+                        :drawer (getf case :clock-into-drawer))
+            (let ((updated-source
+                    (document-text (edit-result-updated-document result)))
+                  (line (getf expected :org-open-line))
+                  (drawer-name (getf expected :org-drawer-name)))
+              (with-soft-assertions
+                (expect timestamp :to-equal (edit-clock-test-open-value line))
+                (if drawer-name
+                    (expect (search (format nil ":~A:~%~A~%:END:"
+                                            drawer-name line)
+                                    updated-source)
+                            :to-be-truthy)
+                    (expect (search line updated-source) :to-be-truthy))
+                (when (string= (getf case :id)
+                               "child-clocks-do-not-count-for-parent")
+                  (expect (search (format nil "* Parent with child clocks~%~A~%** Child with clocks"
+                                          line)
+                                  updated-source)
+                          :to-be-truthy))
+                (expect (document-text document) :to-equal source-text))))))
+      (let* ((case (edit-clock-test-find-case cases "at-threshold-41-existing"))
+             (expected (edit-clock-test-find-case oracle "at-threshold-41-existing"))
+             (property-source
+               (format nil "#+PROPERTY: CLOCK_INTO_DRAWER 42~%~A" source-text))
+             (document (parse-org property-source))
+             (heading (edit-clock-test-heading-path
+                       document (getf case :heading-path)))
+             (at (getf case :at))
+             (context (edit-clock-test-context at)))
+        (multiple-value-bind (result timestamp)
+            (clock-in document heading :at (make-org-time-value at)
+                      :time-context context)
+          (with-soft-assertions
+            (expect timestamp :to-equal
+                    (edit-clock-test-open-value
+                     (getf expected :org-open-line)))
+            (expect (search (format nil ":LOGBOOK:~%~A~%:END:"
+                                    (getf expected :org-open-line))
+                            (document-text (edit-result-updated-document result)))
+                    :to-be-truthy)
+            (expect (search ":42:" (document-text
+                                     (edit-result-updated-document result)))
+                    :to-be nil)
+            (expect (document-text document) :to-equal property-source))))))
 
   (it "preserves CRLF source bytes outside the inserted drawer"
     (let* ((source (format nil "* Task~C~%Body~C~%" #\Return #\Return))
