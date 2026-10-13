@@ -270,6 +270,11 @@
         (setf (symbol-function 'org-kit::query-match-current-reference-time)
               original))))
 
+  (it "builds a local date-time from the current decoded time"
+    (expect (cl-date-kit:local-date-time-p
+             (org-kit::query-match-current-reference-time))
+            :to-be t))
+
   (it "requires a date-time reference for match evaluation"
     (let ((document (parse-org "* TODO Task")))
       (signals type-error
