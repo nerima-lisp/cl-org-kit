@@ -124,40 +124,45 @@
             (org-resource-limit-error-actual condition)))))
 
 (describe "Org table row and column editing"
-  (it "matches each Org source-after and unified-diff fixture"
-    (let ((descriptors (table-edit-test-descriptors)))
+  (it "keeps the Org edit fixture set complete"
+    (expect (length (table-edit-test-descriptors)) :to-be 27))
+
+  (it-each ((0) (1) (2) (3) (4) (5) (6) (7) (8) (9)
+            (10) (11) (12) (13) (14) (15) (16) (17) (18) (19)
+            (20) (21) (22) (23) (24) (25) (26))
+      "matches Org source-after and unified-diff fixture ~D"
+      (descriptor-index)
+    (let* ((descriptor (nth descriptor-index (table-edit-test-descriptors)))
+           (id (getf descriptor :id))
+           (source (table-edit-test-read
+                    (format nil "corpus/edit/~A" (getf descriptor :source))))
+           (expected (table-edit-test-oracle-output id :source-after))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (table-start (node-begin table))
+           (table-end (node-end table))
+           (result (table-edit-test-apply document table descriptor))
+           (updated (edit-result-updated-document result))
+           (actual (document-text updated))
+           (diff (table-edit-test-oracle-diff descriptor actual))
+           (updated-table (table-edit-test-find-node
+                          (document-root updated) :table)))
       (with-soft-assertions
-        (expect (length descriptors) :to-be 27)
-        (dolist (descriptor descriptors)
-          (let* ((id (getf descriptor :id))
-                 (source (table-edit-test-read
-                          (format nil "corpus/edit/~A" (getf descriptor :source))))
-                 (expected (table-edit-test-oracle-output id :source-after))
-                 (document (parse-org source))
-                 (table (table-edit-test-find-node (document-root document) :table))
-                 (table-start (node-begin table))
-                 (table-end (node-end table))
-                 (result (table-edit-test-apply document table descriptor))
-                 (updated (edit-result-updated-document result))
-                 (actual (document-text updated))
-                 (diff (table-edit-test-oracle-diff descriptor actual))
-                 (updated-table (table-edit-test-find-node
-                                 (document-root updated) :table)))
-            (expect (list id (edit-result-p result)) :to-equal (list id t))
-            (expect (list id actual) :to-equal (list id expected))
-            (expect (list id (document-text document)) :to-equal (list id source))
-            (expect (list id diff)
-                    :to-equal (list id (table-edit-test-oracle-output id :diff)))
-            (expect (list id
-                          (every (lambda (span)
-                                   (and (<= table-start (edit-span-start span))
-                                        (<= (edit-span-end span) table-end)))
-                                 (edit-result-spans result)))
-                    :to-equal (list id t))
-            (expect (list id
-                          (table-edit-test-check-outside
-                           source updated table updated-table))
-                    :to-equal (list id t)))))))
+        (expect (list id (edit-result-p result)) :to-equal (list id t))
+        (expect (list id actual) :to-equal (list id expected))
+        (expect (list id (document-text document)) :to-equal (list id source))
+        (expect (list id diff)
+                :to-equal (list id (table-edit-test-oracle-output id :diff)))
+        (expect (list id
+                      (every (lambda (span)
+                               (and (<= table-start (edit-span-start span))
+                                    (<= (edit-span-end span) table-end)))
+                             (edit-result-spans result)))
+                :to-equal (list id t))
+        (expect (list id
+                      (table-edit-test-check-outside
+                       source updated table updated-table))
+                :to-equal (list id t)))))
 
   (it "preserves UTF-8 BOM, CRLF, and source bytes outside the edited table"
     (let* ((crlf (concatenate 'string (string #\Return) (string #\Newline)))
