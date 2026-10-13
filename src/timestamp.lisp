@@ -63,16 +63,26 @@ date-less range endpoints also return NIL."
                           :hour-end
                           :minute-end)))
 
+(defun %timestamp-adjustment-valid-p (kind amount unit mode)
+  (and (integerp amount)
+       (plusp amount)
+       (case kind
+         (:repeater
+          (and (member unit '(:hour :day :week :month :year))
+               (member mode '(:cumulate :catch-up :restart))))
+         (:warning
+          (and (member unit '(:hour :day :week :month :year))
+               (member mode '(:all :first)))))))
+
 (defun %timestamp-interval (amount unit allow-hours)
-  (when (and (integerp amount) (plusp amount))
-    (case unit
-      (:hour
-       (when allow-hours
-         (cl-date-kit:duration-of-hours amount)))
-      (:day (cl-date-kit:make-period :days amount))
-      (:week (cl-date-kit:period-of-weeks amount))
-      (:month (cl-date-kit:make-period :months amount))
-      (:year (cl-date-kit:make-period :years amount)))))
+  (case unit
+    (:hour
+     (when allow-hours
+       (cl-date-kit:duration-of-hours amount)))
+    (:day (cl-date-kit:make-period :days amount))
+    (:week (cl-date-kit:period-of-weeks amount))
+    (:month (cl-date-kit:make-period :months amount))
+    (:year (cl-date-kit:make-period :years amount))))
 
 (defun timestamp-repeater (node)
   "Return NODE's repeater interval and mode as two values.
@@ -81,13 +91,11 @@ The first value is a cl-date-kit duration for hours or period for days, weeks,
 months, and years. The second is :CUMULATE, :CATCH-UP, or :RESTART. Return two
 NIL values when NODE has no complete, valid repeater."
   (%require-timestamp-node node)
-  (let* ((mode (node-property node :repeater-type))
-         (interval
-          (%timestamp-interval (node-property node :repeater-value)
-                               (node-property node :repeater-unit)
-                               t)))
-    (if (and interval (member mode '(:cumulate :catch-up :restart)))
-        (values interval mode)
+  (let ((amount (node-property node :repeater-value))
+        (unit (node-property node :repeater-unit))
+        (mode (node-property node :repeater-type)))
+    (if (%timestamp-adjustment-valid-p :repeater amount unit mode)
+        (values (%timestamp-interval amount unit t) mode)
         (values nil nil))))
 
 (defun timestamp-warning-delay (node)
@@ -97,11 +105,10 @@ The first value is a cl-date-kit period for days, weeks, months, or years. The
 second is :ALL or :FIRST. Return two NIL values when no complete, valid warning
 delay is present."
   (%require-timestamp-node node)
-  (let* ((mode (node-property node :warning-type))
-         (delay
-          (%timestamp-interval (node-property node :warning-value)
-                               (node-property node :warning-unit)
-                               nil)))
-    (if (and delay (member mode '(:all :first)))
-        (values delay mode)
+  (let ((amount (node-property node :warning-value))
+        (unit (node-property node :warning-unit))
+        (mode (node-property node :warning-type)))
+    (if (%timestamp-adjustment-valid-p :warning amount unit mode)
+        (let ((delay (%timestamp-interval amount unit nil)))
+          (if delay (values delay mode) (values nil nil)))
         (values nil nil))))

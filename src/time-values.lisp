@@ -4,7 +4,7 @@
 (defstruct (org-time-value (:constructor %make-org-time-value)
                            (:conc-name %org-time-value-)
                            (:copier nil)
-                           (:predicate %org-time-value-p))
+                           (:predicate org-time-value-p))
   "An ORG-KIT-owned date or date-time parsed from a strict ISO-8601 string."
   (kind nil :read-only t)
   (iso8601 nil :read-only t)
@@ -15,10 +15,6 @@
   (minute nil :read-only t)
   (second nil :read-only t)
   (offset-minutes nil :read-only t))
-
-(defun org-time-value-p (object)
-  "Return true when OBJECT is an ORG-KIT time value."
-  (%org-time-value-p object))
 
 (defun %time-value-adapt (value)
   (cond
@@ -72,6 +68,11 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
 
 (defun %org-time-error (reason &optional context)
   (error 'org-time-error
+         :message (ecase reason
+                    (:invalid-time "Invalid date or time")
+                    (:unknown-zone "Unknown time zone")
+                    (:dst-gap "Nonexistent local time")
+                    (:dst-overlap "Ambiguous local time"))
          :reason reason
          :context (and context
                        (bounded-text (if (stringp context)
@@ -206,25 +207,13 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
     (cl-date-kit:make-local-date-time date time)))
 
 (defstruct (org-time-zone (:constructor %make-org-time-zone)
-                          (:conc-name %org-time-zone-)
+                          (:conc-name org-time-zone-)
                           (:copier nil)
-                          (:predicate %org-time-zone-p))
+                          (:predicate org-time-zone-p))
   "An explicit fixed-offset or named time zone owned by ORG-KIT."
   (name nil :read-only t)
   (offset-minutes nil :read-only t)
   (backend nil :read-only t))
-
-(defun org-time-zone-p (object)
-  "Return true when OBJECT is an ORG-KIT time zone."
-  (%org-time-zone-p object))
-
-(defun org-time-zone-name (zone)
-  "Return ZONE's stable name, including the formatted offset for fixed zones."
-  (%org-time-zone-name zone))
-
-(defun org-time-zone-offset-minutes (zone)
-  "Return ZONE's fixed offset in minutes, or NIL for a named time zone."
-  (%org-time-zone-offset-minutes zone))
 
 (defun %fixed-time-zone-name (offset-minutes)
   (if (zerop offset-minutes)
@@ -251,52 +240,37 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
     (cl-date-kit:time-zone-not-found () (%org-time-error :unknown-zone name))))
 
 (defstruct (org-time-context (:constructor %make-org-time-context)
-                             (:conc-name %org-time-context-)
+                             (:conc-name org-time-context-)
                              (:copier nil)
-                             (:predicate %org-time-context-p))
+                             (:predicate org-time-context-p))
   "Explicit reference time, zone, and daylight-saving policy for time work."
   (reference-time nil :read-only t)
   (zone nil :read-only t)
   (dst-policy :compatible :read-only t)
   (reference-instant nil :read-only t))
 
-(defun org-time-context-p (object)
-  "Return true when OBJECT is an ORG-KIT time context."
-  (%org-time-context-p object))
-
-(defun org-time-context-reference-time (context)
-  "Return CONTEXT's explicit ORG-KIT reference time."
-  (%org-time-context-reference-time context))
-
-(defun org-time-context-zone (context)
-  "Return CONTEXT's explicit ORG-KIT time zone."
-  (%org-time-context-zone context))
-
-(defun org-time-context-dst-policy (context)
-  "Return CONTEXT's daylight-saving disambiguation policy."
-  (%org-time-context-dst-policy context))
-
-(defun %time-context-backend-zone (context)
-  (%org-time-zone-backend (org-time-context-zone context)))
-
-(defun %time-value-to-instant (value context)
-  "Resolve VALUE to an instant using CONTEXT's explicit zone and DST policy."
-  (check-type value org-time-value)
-  (check-type context org-time-context)
-  (let* ((local (%time-value-local-date-time value))
-         (backend (%time-context-backend-zone context))
+(defun %time-value-to-instant (value zone dst-policy)
+  "Resolve VALUE to an instant using ZONE and DST-POLICY."
+  (let* ((backend (org-time-zone-backend zone))
          (offset-minutes (org-time-value-offset-minutes value)))
     (handler-case
-        (if offset-minutes
-            (cl-date-kit:zoned-date-time-to-instant
-             (cl-date-kit:zoned-date-time-of-strict
-              local
-              (cl-date-kit:zone-offset-of-total-seconds (* 60 offset-minutes))
-              backend))
-            (cl-date-kit:zoned-date-time-to-instant
-             (cl-date-kit:zoned-date-time-of-local
-              local backend
-              :disambiguation (org-time-context-dst-policy context))))
+        (cl-date-kit:zoned-date-time-to-instant
+         (if (eq (org-time-value-kind value) :date)
+             (cl-date-kit:local-date-at-start-of-day-in-zone
+              (cl-date-kit:make-local-date
+               (org-time-value-year value)
+               (org-time-value-month value)
+               (org-time-value-day value))
+              backend
+              :disambiguation :compatible)
+             (let ((local (%time-value-local-date-time value)))
+               (if offset-minutes
+                   (cl-date-kit:zoned-date-time-of-strict
+                    local
+                    (cl-date-kit:zone-offset-of-total-seconds (* 60 offset-minutes))
+                    backend)
+                   (cl-date-kit:zoned-date-time-of-local
+                    local backend :disambiguation dst-policy)))))
       (cl-date-kit:nonexistent-local-time ()
         (%org-time-error :dst-gap (org-time-value-iso8601 value)))
       (cl-date-kit:ambiguous-local-time ()
@@ -305,50 +279,30 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
         (%org-time-error :invalid-time (org-time-value-iso8601 value))))))
 
 (defun make-time-context (&key reference-time zone (dst-policy :compatible))
-  "Make a validated time context from an explicit reference time and zone."
+  "Make a validated time context from an explicit reference time and zone.
+Date-only references remain civil dates; their start of day resolves with
+:COMPATIBLE even when DST-POLICY is :STRICT, because the date has no wall-clock
+time to reject."
   (unless (org-time-value-p reference-time)
     (%org-time-error :invalid-time reference-time))
   (unless (org-time-zone-p zone)
     (%org-time-error :invalid-time zone))
   (unless (member dst-policy '(:compatible :earlier :later :strict))
     (%org-time-error :invalid-time dst-policy))
-  (let* ((context (%make-org-time-context :reference-time reference-time
-                                          :zone zone
-                                          :dst-policy dst-policy))
-         (instant (%time-value-to-instant reference-time context)))
+  (let ((instant (%time-value-to-instant reference-time zone dst-policy)))
     (%make-org-time-context :reference-time reference-time
                             :zone zone :dst-policy dst-policy
                             :reference-instant instant)))
 
 (defstruct (org-time-range (:constructor %make-org-time-range)
-                           (:conc-name %org-time-range-)
+                           (:conc-name org-time-range-)
                            (:copier nil)
-                           (:predicate %org-time-range-p))
+                           (:predicate org-time-range-p))
   "An ordered interval of ORG-KIT time values with explicit endpoint inclusion."
   (start nil :read-only t)
   (end nil :read-only t)
   (include-start-p nil :read-only t)
   (include-end-p nil :read-only t))
-
-(defun org-time-range-p (object)
-  "Return true when OBJECT is an ORG-KIT time range."
-  (%org-time-range-p object))
-
-(defun org-time-range-start (range)
-  "Return RANGE's first ORG-KIT time value."
-  (%org-time-range-start range))
-
-(defun org-time-range-end (range)
-  "Return RANGE's final ORG-KIT time value."
-  (%org-time-range-end range))
-
-(defun org-time-range-include-start-p (range)
-  "Return true when RANGE includes its start value."
-  (%org-time-range-include-start-p range))
-
-(defun org-time-range-include-end-p (range)
-  "Return true when RANGE includes its end value."
-  (%org-time-range-include-end-p range))
 
 (defun %time-value-order-key (value)
   (+ (* 86400
@@ -422,13 +376,15 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
   (nth-value 1 (%time-interval-components interval)))
 
 (defun org-time-interval-unit (interval)
-  "Return the unit encoded by a legacy interval. PERIOD stores weeks as days, so use timestamp-view when original week units matter."
+  "Return the unit encoded by a legacy interval.
+PERIOD stores weeks as days, so use TIMESTAMP-VIEW when original week units
+matter."
   (nth-value 2 (%time-interval-components interval)))
 
 (defstruct (org-timestamp-view (:constructor %make-org-timestamp-view)
-                               (:conc-name %org-timestamp-view-)
+                               (:conc-name org-timestamp-view-)
                                (:copier nil)
-                               (:predicate %org-timestamp-view-p))
+                               (:predicate org-timestamp-view-p))
   "ORG-KIT's normalized view of a source timestamp node."
   (kind nil :read-only t)
   (start nil :read-only t)
@@ -442,67 +398,63 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
   (warning-unit nil :read-only t)
   (warning-mode nil :read-only t))
 
-(defun org-timestamp-view-p (object)
-  "Return true when OBJECT is an ORG-KIT timestamp view."
-  (%org-timestamp-view-p object))
+(eval-when (:load-toplevel :execute)
+  (setf (documentation 'org-time-value-p 'function)
+        "Return true only for ORG-KIT-owned time values."
+        (documentation 'org-time-zone-p 'function)
+        "Return true for an ORG-KIT fixed-offset or named time zone."
+        (documentation 'org-time-zone-name 'function)
+        "Return the stable zone name or canonical UTC offset."
+        (documentation 'org-time-zone-offset-minutes 'function)
+        "Return the fixed UTC offset in minutes; named zones have none."
+        (documentation 'org-time-context-p 'function)
+        "Return true for an ORG-KIT time context."
+        (documentation 'org-time-context-reference-time 'function)
+        "Return the explicit calendar value used as CONTEXT's reference."
+        (documentation 'org-time-context-zone 'function)
+        "Return the explicit zone used to resolve CONTEXT's local times."
+        (documentation 'org-time-context-dst-policy 'function)
+        "Return the policy CONTEXT uses to resolve gaps and overlaps."
+        (documentation 'org-time-context-reference-instant 'function)
+        "Return the absolute instant selected for CONTEXT's reference time."
+        (documentation 'org-time-range-p 'function)
+        "Return true for an ORG-KIT time range."
+        (documentation 'org-time-range-start 'function)
+        "Return the first value in RANGE."
+        (documentation 'org-time-range-end 'function)
+        "Return the final value in RANGE."
+        (documentation 'org-time-range-include-start-p 'function)
+        "Return true when RANGE includes its first endpoint."
+        (documentation 'org-time-range-include-end-p 'function)
+        "Return true when RANGE includes its final endpoint."
+        (documentation 'org-timestamp-view-p 'function)
+        "Return true for a normalized ORG-KIT timestamp view."
+        (documentation 'org-timestamp-view-kind 'function)
+        "Return the source timestamp kind represented by VIEW."
+        (documentation 'org-timestamp-view-start 'function)
+        "Return VIEW's start value, or NIL when it has no concrete endpoint."
+        (documentation 'org-timestamp-view-end 'function)
+        "Return VIEW's end value, or NIL when it is not a range."
+        (documentation 'org-timestamp-view-start-inclusive-p 'function)
+        "Return whether VIEW includes its range start."
+        (documentation 'org-timestamp-view-end-inclusive-p 'function)
+        "Return whether VIEW includes its range end."
+        (documentation 'org-timestamp-view-repeater-amount 'function)
+        "Return the positive repeat amount, or NIL when VIEW has no repeater."
+        (documentation 'org-timestamp-view-repeater-unit 'function)
+        "Return the source unit for VIEW's repeater, or NIL when absent."
+        (documentation 'org-timestamp-view-repeater-mode 'function)
+        "Return VIEW's repeater mode, or NIL when it has no repeater."
+        (documentation 'org-timestamp-view-warning-amount 'function)
+        "Return the positive warning amount, or NIL when VIEW has no warning."
+        (documentation 'org-timestamp-view-warning-unit 'function)
+        "Return the source unit for VIEW's warning, or NIL when absent."
+        (documentation 'org-timestamp-view-warning-mode 'function)
+        "Return VIEW's warning mode, or NIL when it has no warning."))
 
-(defun org-timestamp-view-kind (view)
-  "Return VIEW's source timestamp kind, such as :ACTIVE-RANGE or :DIARY."
-  (%org-timestamp-view-kind view))
-
-(defun org-timestamp-view-start (view)
-  "Return VIEW's ORG-KIT start value, or NIL for a diary timestamp."
-  (%org-timestamp-view-start view))
-
-(defun org-timestamp-view-end (view)
-  "Return VIEW's ORG-KIT end value, or NIL when VIEW is not a range."
-  (%org-timestamp-view-end view))
-
-(defun org-timestamp-view-start-inclusive-p (view)
-  "Return whether VIEW includes its range start endpoint."
-  (%org-timestamp-view-start-inclusive-p view))
-
-(defun org-timestamp-view-end-inclusive-p (view)
-  "Return whether VIEW includes its range end endpoint."
-  (%org-timestamp-view-end-inclusive-p view))
-
-(defun org-timestamp-view-repeater-amount (view)
-  "Return VIEW's positive repeater amount, or NIL when it has no repeater."
-  (%org-timestamp-view-repeater-amount view))
-
-(defun org-timestamp-view-repeater-unit (view)
-  "Return VIEW's repeater unit, or NIL when it has no repeater."
-  (%org-timestamp-view-repeater-unit view))
-
-(defun org-timestamp-view-repeater-mode (view)
-  "Return VIEW's repeater mode, or NIL when it has no repeater."
-  (%org-timestamp-view-repeater-mode view))
-
-(defun org-timestamp-view-warning-amount (view)
-  "Return VIEW's positive warning amount, or NIL when it has no warning."
-  (%org-timestamp-view-warning-amount view))
-
-(defun org-timestamp-view-warning-unit (view)
-  "Return VIEW's warning unit, or NIL when it has no warning."
-  (%org-timestamp-view-warning-unit view))
-
-(defun org-timestamp-view-warning-mode (view)
-  "Return VIEW's warning mode, or NIL when it has no warning."
-  (%org-timestamp-view-warning-mode view))
-
-(defun %time-valid-repeater-p (amount unit mode)
-  (and (integerp amount) (plusp amount)
-       (member unit '(:hour :day :week :month :year))
-       (member mode '(:cumulate :catch-up :restart))))
-
-(defun %time-valid-warning-p (amount unit mode)
-  (and (integerp amount) (plusp amount)
-       (member unit '(:day :week :month :year))
-       (member mode '(:all :first))))
-
-(defun %time-optional-triplet-valid-p (amount unit mode validator)
+(defun %time-optional-triplet-valid-p (amount unit mode kind)
   (or (and (null amount) (null unit) (null mode))
-      (funcall validator amount unit mode)))
+      (%timestamp-adjustment-valid-p kind amount unit mode)))
 
 (defun make-org-timestamp-view (&key kind start end start-inclusive-p end-inclusive-p
                                      repeater-amount repeater-unit repeater-mode
@@ -515,10 +467,10 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
   (unless (or (null end) (org-time-value-p end))
     (%org-time-error :invalid-time end))
   (unless (%time-optional-triplet-valid-p repeater-amount repeater-unit repeater-mode
-                                          #'%time-valid-repeater-p)
+                                          :repeater)
     (%org-time-error :invalid-time "invalid repeater fields"))
   (unless (%time-optional-triplet-valid-p warning-amount warning-unit warning-mode
-                                          #'%time-valid-warning-p)
+                                          :warning)
     (%org-time-error :invalid-time "invalid warning fields"))
   (case kind
     (:diary
@@ -549,18 +501,16 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
          (mode-key (if (eq kind :repeater) :repeater-type :warning-type))
          (amount (node-property node amount-key))
          (unit (node-property node unit-key))
-         (mode (node-property node mode-key))
-         (valid-p (if (eq kind :repeater)
-                      #'%time-valid-repeater-p
-                      #'%time-valid-warning-p)))
-    (if (and (null amount) (null unit) (null mode))
-        (values nil nil nil)
-        (if (funcall valid-p amount unit mode)
-            (values amount unit mode)
-            (%org-time-error :invalid-time (format nil "invalid ~A fields" kind))))))
+         (mode (node-property node mode-key)))
+    (unless (%time-optional-triplet-valid-p amount unit mode kind)
+      (%org-time-error :invalid-time (format nil "invalid ~A fields" kind)))
+    (if amount
+        (values amount unit mode)
+        (values nil nil nil))))
 
 (defun timestamp-view (node)
-  "Return NODE as an ORG-KIT view, preserving diary suffixes and validating concrete timestamps."
+  "Return NODE as an ORG-KIT view, preserving diary suffixes and validating concrete timestamps.
+For ranges, signal ORG-TIME-ERROR when the end precedes the start."
   (%require-timestamp-node node)
   (let ((kind (node-property node :type)))
     (cond

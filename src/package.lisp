@@ -65,7 +65,7 @@
    #:org-time-zone-name #:org-time-zone-offset-minutes
    #:org-time-context #:make-time-context #:org-time-context-p
    #:org-time-context-reference-time #:org-time-context-zone
-   #:org-time-context-dst-policy
+   #:org-time-context-dst-policy #:org-time-context-reference-instant
    #:org-time-range #:make-time-range #:org-time-range-p
    #:org-time-range-start #:org-time-range-end
    #:org-time-range-include-start-p #:org-time-range-include-end-p

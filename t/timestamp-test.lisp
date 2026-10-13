@@ -17,7 +17,7 @@
 
 (defun timestamp-context-epoch-second (context)
   (cl-date-kit:instant-epoch-second
-   (org-kit::%org-time-context-reference-instant context)))
+   (org-kit:org-time-context-reference-instant context)))
 
 (defun timestamp-expected-epoch-second (text)
   (cl-date-kit:instant-epoch-second (cl-date-kit:parse-instant text)))
@@ -237,6 +237,9 @@
              (lambda () (org-kit:make-fixed-time-zone 841)))))
       (with-soft-assertions
         (expect (org-kit:org-time-error-reason invalid-value) :to-be :invalid-time)
+        (expect (org-kit:org-kit-error-message invalid-value)
+                :to-equal
+                "Invalid date or time")
         (expect (org-kit:org-time-error-reason full-width-date) :to-be :invalid-time)
         (expect (org-kit:org-time-error-reason invalid-zone) :to-be :invalid-time)
         (expect (org-kit:org-time-zone-offset-minutes
@@ -272,6 +275,19 @@
                 "2026-10-12T10:30:00")
         (expect (org-kit:org-timestamp-view-start-inclusive-p range-view) :to-be t)
         (expect (org-kit:org-timestamp-view-end-inclusive-p range-view) :to-be t))))
+
+  (it "rejects timestamp views whose date or time range runs backwards"
+    (let* ((date-range (timestamp-node-from-org
+                        "<2024-01-05 Fri>--<2024-01-03 Wed>"))
+           (time-range (timestamp-node-from-org
+                        "<2024-01-05 Fri 11:00-10:00>"))
+           (date-error (timestamp-time-error
+                        (lambda () (org-kit:timestamp-view date-range))))
+           (time-error (timestamp-time-error
+                        (lambda () (org-kit:timestamp-view time-range)))))
+      (with-soft-assertions
+        (expect (org-kit:org-time-error-reason date-error) :to-be :invalid-time)
+        (expect (org-kit:org-time-error-reason time-error) :to-be :invalid-time))))
 
   (it "exposes repeater and warning amount, source unit, and mode"
     (let* ((node (timestamp-node-from-org "<2026-10-12 Mon ++2d --3w>"))
@@ -337,6 +353,17 @@
                       :to-be
                       (if (eq unit :week) (* amount 7) amount))
               (expect mode :to-be :all)))))))
+
+  (it "accepts hour warning units in timestamp views"
+    (let* ((node (timestamp-node-from-org "<2024-01-05 Fri 10:00 -1h>"))
+           (view (org-kit:timestamp-view node)))
+      (with-soft-assertions
+        (expect (org-kit:node-property node :warning-unit) :to-be :hour)
+        (expect (list (org-kit:org-timestamp-view-warning-amount view)
+                      (org-kit:org-timestamp-view-warning-unit view)
+                      (org-kit:org-timestamp-view-warning-mode view))
+                :to-equal
+                '(1 :hour :all)))))
 
   (it "returns diary absence distinctly from an invalid concrete timestamp"
     (let* ((diary (org-kit:timestamp-view
@@ -456,6 +483,28 @@
                 "America/New_York")
         (expect (org-kit:org-time-context-dst-policy named-context) :to-be :later))))
 
+  (it "resolves date-only references at the first valid local time"
+    (dolist (case '(("2018-11-04" "America/Sao_Paulo" "2018-11-04T03:00:00Z")
+                    ("2024-03-10" "America/Havana" "2024-03-10T05:00:00Z")))
+      (destructuring-bind (date zone-name expected-instant)
+          case
+        (let* ((reference (org-kit:make-org-time-value date))
+               (context (org-kit:make-time-context
+                         :reference-time reference
+                         :zone (org-kit:resolve-time-zone zone-name)
+                         :dst-policy :strict)))
+          (with-soft-assertions
+            (expect (org-kit:org-time-value-kind
+                     (org-kit:org-time-context-reference-time context))
+                    :to-be
+                    :date)
+            (expect (timestamp-context-epoch-second context)
+                    :to-be
+                    (timestamp-expected-epoch-second expected-instant))
+            (expect (org-kit:org-time-context-dst-policy context)
+                    :to-be
+                    :strict))))))
+
   (it "reports unknown zones and rejects offsets that conflict with an explicit zone"
     (let ((unknown (timestamp-time-error
                     (lambda () (org-kit:resolve-time-zone "Not/A_Real_Zone"))))
@@ -472,6 +521,9 @@
                         :zone (org-kit:resolve-time-zone "America/New_York"))))))
       (with-soft-assertions
         (expect (org-kit:org-time-error-reason unknown) :to-be :unknown-zone)
+        (expect (org-kit:org-kit-error-message unknown)
+                :to-equal
+                "Unknown time zone")
         (expect (org-kit:org-time-error-reason missing-zone) :to-be :invalid-time)
         (expect (org-kit:org-time-error-reason mismatch) :to-be :invalid-time))))
 
@@ -502,7 +554,13 @@
                                                         :dst-policy :strict)))))
       (with-soft-assertions
         (expect (org-kit:org-time-error-reason gap-error) :to-be :dst-gap)
+        (expect (org-kit:org-kit-error-message gap-error)
+                :to-equal
+                "Nonexistent local time")
         (expect (org-kit:org-time-error-reason overlap-error) :to-be :dst-overlap)
+        (expect (org-kit:org-kit-error-message overlap-error)
+                :to-equal
+                "Ambiguous local time")
         (expect (mapcar #'timestamp-context-epoch-second
                         (list gap-compatible gap-earlier gap-later))
                 :to-equal
@@ -785,7 +843,7 @@
                 (org-kit:timestamp-view
                  (timestamp-node :type :active
                                  :year-start 2026 :month-start 10 :day-start 12
-                                 :warning-type :all :warning-value 2 :warning-unit :hour))))))
+                                 :warning-type :all :warning-value 2 :warning-unit :century))))))
       (with-soft-assertions
         (expect (org-kit:org-timestamp-view-p view) :to-be t)
         (expect (org-kit:org-timestamp-view-start view) :to-be start)
