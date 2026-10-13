@@ -555,6 +555,7 @@
                           "https://example.test"))
            (cases
              `(("fuzzy" "relative/path" "relative/path" t)
+               ("fuzzy" "x" "x" t)
                ("fuzzy" "#section" "#section" t)
                ("fuzzy" "/root/path" "/root/path" t)
                ("https" "//example.test" "https://example.test" t)

@@ -735,9 +735,6 @@
          (end (and results-node (node-begin results-node))))
     (and results-node
          (node-property results-node :RESULTS)
-         (stringp text)
-         (integerp start)
-         (integerp end)
          (<= 0 start end (length text))
          (every #'export-whitespace-character-p (subseq text start end)))))
 
