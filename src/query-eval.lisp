@@ -7,6 +7,7 @@
   reference-time
   limits
   regex-cache
+  heading-indices
   tag-groups
   depth)
 
@@ -956,6 +957,14 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
          (query-compare-values operator expected actual
                                (query-evaluation-state-reference-time state)))))
 
+(defun query-predicate-contains-path-p (predicate)
+  (case (first predicate)
+    (:path t)
+    ((:and :or)
+     (some #'query-predicate-contains-path-p (rest predicate)))
+    (:not (query-predicate-contains-path-p (second predicate)))
+    (otherwise nil)))
+
 (defun query-evaluate-predicate (predicate candidate state)
   (let* ((depth (query-check-predicate state))
          (operator (car predicate))
@@ -974,8 +983,11 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
         ((eq operator :type)
          (eq (node-type candidate) (second predicate)))
         ((eq operator :path)
-         (query-path-matches-p (second predicate) (node-heading-path candidate)
-                               (query-evaluation-state-limits state)))
+         (query-path-matches-p
+          (second predicate)
+          (node-heading-path-with-indices
+           candidate (query-evaluation-state-heading-indices state))
+          (query-evaluation-state-limits state)))
         ((eq operator :todo-present)
          (and headline
               (query-todo-present-p headline
@@ -1011,12 +1023,16 @@ this function never reads the current time."
                  :reference-time reference-time
                  :limits limits
                  :regex-cache (make-hash-table :test #'equal)
+                 :heading-indices nil
                  :depth 0))
          (scope (query-ir-scope query-ir))
          (predicate (query-ir-predicate query-ir))
          (results '()))
     (query-validate-predicate-tree predicate limits)
     (when root
+      (when (query-predicate-contains-path-p predicate)
+        (setf (query-evaluation-state-heading-indices state)
+              (query-heading-sibling-indices root)))
       (map-nodes
        (lambda (candidate)
          (when (and (not (eq (node-type candidate) :org-data))

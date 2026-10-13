@@ -155,27 +155,25 @@ regex matching."
         when (eq (node-type current) :headline)
           return current))
 
-(defun query-heading-sibling-index (headline)
-  (let* ((root (node-root headline))
-         (parent-headline (query-nearest-parent-headline headline))
-         (title (node-property headline :raw-value ""))
-         (index nil)
-         (ordinal 0))
+(defun query-heading-sibling-indices (root)
+  (let ((indices (make-hash-table :test #'eq))
+        (counts-by-parent (make-hash-table :test #'eq)))
     (map-nodes
      (lambda (candidate)
-       (when (and (eq (node-type candidate) :headline)
-                  (eq (query-nearest-parent-headline candidate) parent-headline)
-                  (equal (node-property candidate :raw-value "") title))
-         (incf ordinal)
-         (when (eq candidate headline)
-           (setf index ordinal))))
+       (when (eq (node-type candidate) :headline)
+         (let* ((parent (query-nearest-parent-headline candidate))
+                (counts
+                  (or (gethash parent counts-by-parent)
+                      (setf (gethash parent counts-by-parent)
+                            (make-hash-table :test #'equal))))
+                (title (node-property candidate :raw-value ""))
+                (index (1+ (gethash title counts 0))))
+           (setf (gethash title counts) index
+                 (gethash candidate indices) index))))
      root)
-    (or index 1)))
+    indices))
 
-(defun node-heading-path (node)
-  "Return NODE's headline ancestors from the root as title/index plists.
-Each segment is (:TITLE raw-value :INDEX sibling-ordinal); a headline includes
-itself, while a non-headline node includes only its headline ancestors."
+(defun node-heading-path-with-indices (node indices)
   (let ((headlines '()))
     (loop for current = (if (eq (node-type node) :headline)
                             node
@@ -186,5 +184,12 @@ itself, while a non-headline node includes only its headline ancestors."
             do (push current headlines))
     (mapcar (lambda (headline)
               (list :title (node-property headline :raw-value "")
-                    :index (query-heading-sibling-index headline)))
+                    :index (gethash headline indices 1)))
             headlines)))
+
+(defun node-heading-path (node)
+  "Return NODE's headline ancestors from the root as title/index plists.
+Each segment is (:TITLE raw-value :INDEX sibling-ordinal); a headline includes
+itself, while a non-headline node includes only its headline ancestors."
+  (node-heading-path-with-indices
+   node (query-heading-sibling-indices (node-root node))))

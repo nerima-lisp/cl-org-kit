@@ -64,6 +64,24 @@
                 document '(:path ("Root" (:name "Repeat" 2)))))
               :to-equal '("Repeat"))))
 
+  (it "builds heading sibling indices once for a path query"
+    (let* ((document
+             (parse-org (format nil "* Root~%** Repeat~%** Repeat~%* Other~%** Repeat")))
+           (original (symbol-function 'org-kit::query-heading-sibling-indices))
+           (calls 0))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::query-heading-sibling-indices)
+                   (lambda (root)
+                     (incf calls)
+                     (funcall original root)))
+             (expect (query-eval-test-titles
+                      (org-kit:query-list document '(:path (:** "Repeat"))))
+                     :to-equal '("Repeat" "Repeat" "Repeat"))
+             (expect calls :to-be 1))
+        (setf (symbol-function 'org-kit::query-heading-sibling-indices)
+              original))))
+
   (it "rejects malformed and over-deep untrusted query structures"
     (let ((document (parse-org "* One")))
       (with-soft-assertions
