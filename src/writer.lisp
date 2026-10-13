@@ -35,19 +35,42 @@
         (concatenate 'string (string (code-char #xFEFF)) text)
         text)))
 
+(defun reader-document-octet-count (document)
+  (let* ((encoding (or (document-encoding document) :utf-8))
+         (text (document-text document))
+         (encoded-length
+           (handler-case
+               (cl-codec-kit:string-size-in-octets text :encoding encoding)
+             (cl-codec-kit:unsupported-encoding ()
+               (error 'org-kit-error
+                      :message (format nil "Unsupported encoding ~A"
+                                       (bounded-text (prin1-to-string encoding))))))))
+    (+ encoded-length
+       (if (and (document-bom-p document)
+                (not (reader-generic-bom-encoding-p encoding)))
+           (length (reader-output-bom encoding))
+           0))))
+
 (defun write-org (document &key stream (output-type :string) (limits (make-limits)))
   "Write DOCUMENT as source text or octets, or to a character/octet STREAM.
 OUTPUT-TYPE is :STRING, :OCTETS or :STREAM. The original newline spelling and
-final-newline state are preserved. LIMITS bounds the character output length."
-  (let ((text (reader-document-output-text document)))
-    (check-limit limits :max-output-length (length text))
-    (ecase output-type
-      (:string text)
-      (:octets (reader-document-octets document))
-      (:stream
-       (unless stream
-         (error 'type-error :datum stream :expected-type 'stream))
-       (if (subtypep (stream-element-type stream) 'character)
-           (write-string text stream)
-           (write-sequence (reader-document-octets document) stream))
-       stream))))
+final-newline state are preserved. LIMITS bounds character length and encoded
+octet output."
+  (check-limit limits :max-output-length
+               (+ (length (document-text document))
+                  (if (document-bom-p document) 1 0)))
+  (ecase output-type
+    (:string (reader-document-output-text document))
+    (:octets
+     (check-limit limits :max-output-octets (reader-document-octet-count document))
+     (reader-document-octets document))
+    (:stream
+     (unless stream
+       (error 'type-error :datum stream :expected-type 'stream))
+     (if (subtypep (stream-element-type stream) 'character)
+         (write-string (reader-document-output-text document) stream)
+         (progn
+           (check-limit limits :max-output-octets
+                        (reader-document-octet-count document))
+           (write-sequence (reader-document-octets document) stream)))
+     stream)))
