@@ -9,12 +9,6 @@
   canonical
   key)
 
-(defun table-sort-signal-error (target reason message)
-  (error 'org-table-error
-         :message message
-         :target (edit-target-description target)
-         :reason reason))
-
 (defun table-sort-check-output-limits (document source)
   (let* ((limits (document-limits document))
          (output-length (edit-prospective-output-length document source nil)))
@@ -74,8 +68,8 @@
       (:numeric
        (when (plusp (length value))
          (or (parse-safe-decimal value :limits limits)
-             (table-sort-signal-error target :invalid-number
-                                      "Table cell is not a valid decimal number")))))))
+             (table-align-signal-error target :invalid-number
+                                       "Table cell is not a valid decimal number")))))))
 
 (defun table-sort-entry-before-p (left right order type)
   (let ((left-key (table-sort-entry-key left))
@@ -141,42 +135,42 @@
   (let* ((table (edit-resolve-node document target '(:table)))
          (source (document-text document)))
     (when (eq (node-property table :type) :table.el)
-      (table-sort-signal-error target :unsupported-table-type
-                               "Table.el tables cannot be sorted"))
+      (table-align-signal-error target :unsupported-table-type
+                                "Table.el tables cannot be sorted"))
     (unless (member order '(:ascending :descending))
-      (table-sort-signal-error target :invalid-value
-                               "Table sort order must be ascending or descending"))
+      (table-align-signal-error target :invalid-value
+                                "Table sort order must be ascending or descending"))
     (unless (member type '(:lexical :numeric))
-      (table-sort-signal-error target :invalid-value
-                               "Table sort type must be lexical or numeric"))
+      (table-align-signal-error target :invalid-value
+                                "Table sort type must be lexical or numeric"))
     (table-sort-check-output-limits document source)
     (multiple-value-bind (row-count rule-count width row-section-count)
         (table-sort-table-metadata table)
       (when (zerop row-count)
-        (table-sort-signal-error target :invalid-range
-                                 "Table has no standard rows to sort"))
+        (table-align-signal-error target :invalid-range
+                                  "Table has no standard rows to sort"))
       (unless (and (integerp column) (<= 1 column width))
-        (table-sort-signal-error target :invalid-index
-                                 "Table sort column is outside the table width"))
+        (table-align-signal-error target :invalid-index
+                                  "Table sort column is outside the table width"))
       (when (and (or (null start) (null end))
                  (or (> row-section-count 1)
                      (and (or start end) (plusp rule-count))))
-        (table-sort-signal-error target :ambiguous-range
-                                 "A row range is required for a table with sections"))
+        (table-align-signal-error target :ambiguous-range
+                                  "A row range is required for a table with sections"))
       (let ((range-start (or start 1))
             (range-end (or end row-count)))
         (unless (and (integerp range-start) (<= 1 range-start row-count)
                      (integerp range-end) (<= 1 range-end row-count))
-          (table-sort-signal-error target :invalid-index
-                                   "Table sort row is outside the table"))
+          (table-align-signal-error target :invalid-index
+                                    "Table sort row is outside the table"))
         (when (> range-start range-end)
-          (table-sort-signal-error target :invalid-range
-                                   "Table sort start must not follow its end"))
+          (table-align-signal-error target :invalid-range
+                                    "Table sort start must not follow its end"))
         (multiple-value-bind (first-section last-section)
             (table-sort-range-sections table range-start range-end)
           (unless (eql first-section last-section)
-            (table-sort-signal-error target :invalid-range
-                                     "Table sort range crosses a section boundary"))
+            (table-align-signal-error target :invalid-range
+                                      "Table sort range crosses a section boundary"))
           (let* ((limits (document-limits document))
                  (table-path (edit-node-path document table target))
                  (expected (edit-canonical-copy
