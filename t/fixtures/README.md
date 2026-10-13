@@ -80,3 +80,21 @@ such as `:raw-link` and `:raw-value`. File-context `:path` is omitted except on 
 Plain, angle, bracket, and radio links all use `:link` nodes. Their `:type`, `:path`, and `:format`
 properties distinguish the forms. The generator explicitly loads `org-inlinetask` and uses its
 default minimum level 15 so the level-14/level-15 boundary is stable.
+
+## Statistics cookie fixtures
+
+`statistics-cookies/source/` contains inputs for Org's statistics-cookie update API, and
+`statistics-cookies/expected/` contains the resulting text. Regenerate the oracle outputs with:
+
+```sh
+emacs --batch -Q --script scripts/generate-org-fixtures.el \
+  --statistics-cookies t/fixtures/statistics-cookies/source \
+  t/fixtures/statistics-cookies/expected
+```
+
+The `todo-inline-task-open` and `todo-inline-task-done` outputs are Org 9.8.10 oracle fixtures:
+inline-task TODO states do not contribute to the parent heading's TODO count. The
+`todo-inline-task-before-children-policy` expected file is a kit policy fixture. Org 9.8.10
+produces `[0/1]` when an inline task precedes regular child headings, while the kit intentionally
+counts those regular children consistently and expects `[1/2]`. Keep this policy expectation
+`[1/2]`; do not regenerate it from Org.

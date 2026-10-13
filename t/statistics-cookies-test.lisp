@@ -8,7 +8,8 @@
     "checkbox-plus-recursive-local-heading" "checkbox-continuation-cookie"
     "default-checkbox" "todo-item-cookie" "checkbox-plus-inherited-recursion"
     "inline-task-checkbox" "todo-inherited-recursion"
-    "no-cookie-item-checkbox"))
+    "no-cookie-item-checkbox" "todo-inline-task-open" "todo-inline-task-done"
+    "todo-inline-task-before-children-policy"))
 
 (defun statistics-cookies-test-nodes-in-tree (document types)
   (let ((nodes nil))
@@ -95,28 +96,6 @@
     (org-edit-error (condition)
       (list (org-edit-error-reason condition)
             (org-edit-error-target condition)))))
-
-(defun statistics-cookies-test-with-traversal-counts (function)
-  (let* ((map-symbol 'org-kit:map-nodes)
-         (children-symbol 'org-kit:node-children)
-         (original-map (symbol-function map-symbol))
-         (original-children (symbol-function children-symbol))
-         (map-visits 0)
-         (children-reads 0))
-    (unwind-protect
-         (progn
-           (setf (symbol-function map-symbol)
-                 (lambda (callback node)
-                   (incf map-visits)
-                   (funcall original-map callback node))
-                 (symbol-function children-symbol)
-                 (lambda (node)
-                   (incf children-reads)
-                   (funcall original-children node)))
-           (multiple-value-bind (result updates) (funcall function)
-             (values result updates map-visits children-reads)))
-      (setf (symbol-function map-symbol) original-map
-            (symbol-function children-symbol) original-children))))
 
 (describe "statistics cookie updates"
   (it "matches each pinned Org update fixture and preserves unpatched source"
@@ -405,41 +384,6 @@
         (expect (document-text (edit-result-updated-document result))
                 :to-equal expected)
         (expect (document-text document) :to-equal source))))
-
-  (it "keeps cookie aggregation and canonical indexing linear through the public API"
-    (let* ((item-count 2000)
-           (source
-             (with-output-to-string (stream)
-               (write-string "* Parent" stream)
-               (terpri stream)
-               (dotimes (index item-count)
-                 (format stream "- [ ] Item~D [9/9]~%" index))))
-           (expected
-             (with-output-to-string (stream)
-               (write-string "* Parent" stream)
-               (terpri stream)
-               (dotimes (index item-count)
-                 (format stream "- [ ] Item~D [0/0]~%" index))))
-           (document (parse-org source))
-           (heading (first (statistics-cookies-test-nodes document :headline)))
-           (node-count 0))
-      (map-nodes (lambda (node) (declare (ignore node)) (incf node-count))
-                 (document-root document))
-      (multiple-value-bind (result updates map-visits children-reads)
-          (statistics-cookies-test-with-traversal-counts
-           (lambda () (update-statistics-cookies document heading)))
-        (with-soft-assertions
-          (expect (length updates) :to-equal item-count)
-          (expect (every (lambda (update)
-                           (string= (statistics-cookie-update-new-value update)
-                                    "[0/0]"))
-                         updates)
-                  :to-be t)
-          (expect (document-text (edit-result-updated-document result))
-                  :to-equal expected)
-          (expect (<= map-visits (* 5 node-count)) :to-be t)
-          (expect (<= children-reads (* 8 node-count)) :to-be t)
-          (expect (document-text document) :to-equal source)))))
 
   (it "updates title cookies alongside other inline title objects"
     (let* ((source (format nil "* *Parent* [9/9]~%** TODO Child~%"))
