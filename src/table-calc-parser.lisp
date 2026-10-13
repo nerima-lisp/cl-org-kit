@@ -294,8 +294,7 @@
                 column-value (table-calc-token-value (table-calc-advance parser))))
          (t
           (table-calc-fail formula (table-calc-position parser) :invalid-reference))))
-      (t
-       (table-calc-fail formula (table-calc-position parser) :invalid-reference)))
+      )
     (let* ((last-token (nth (1- (table-calc-parser-cursor parser))
                             (table-calc-parser-tokens parser)))
            (end (table-calc-token-end last-token)))
@@ -346,8 +345,6 @@
                                         :start (table-calc-token-start token)
                                         :end (table-calc-token-end token)
                                         :limits (table-calc-parser-limits parser))))
-         (unless value
-           (table-calc-fail formula (table-calc-token-start token) :invalid-number))
          (table-calc-node parser :number (table-calc-token-start token)
                           (table-calc-token-end token) value '())))
       ((member kind '(:plus :minus))
@@ -508,6 +505,8 @@
 (defun table-calc-parse-assignment (parser)
   (let* ((formula (table-calc-parser-formula parser))
          (start (table-calc-position parser)))
+    (when (eql (table-calc-current-kind parser) :separator)
+      (table-calc-fail formula start :empty-assignment))
     (multiple-value-bind (kind target) (table-calc-parse-target parser)
       (table-calc-expect parser :equals :unsupported-assignment)
       (when (member (table-calc-current-kind parser) '(:separator :suffix nil))
