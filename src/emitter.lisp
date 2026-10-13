@@ -147,16 +147,21 @@
                 (append *emitter-ordinary-todo-keywords* keywords))))))
 
 (defun emitter-merge-todo-keywords (ordinary typed)
-  (let ((keywords nil))
+  (let ((keywords nil)
+        (by-name (make-hash-table :test #'equal)))
     (dolist (entry ordinary)
-      (unless (assoc (car entry) keywords :test #'string=)
-        (setf keywords (append keywords (list entry)))))
+      (unless (gethash (car entry) by-name)
+        (let ((merged-entry (cons (car entry) (cdr entry))))
+          (setf (gethash (car entry) by-name) merged-entry)
+          (push merged-entry keywords))))
     (dolist (entry typed)
-      (let ((existing (assoc (car entry) keywords :test #'string=)))
+      (let ((existing (gethash (car entry) by-name)))
         (if existing
             (setf (cdr existing) (cdr entry))
-            (setf keywords (append keywords (list entry))))))
-    keywords))
+            (let ((merged-entry (cons (car entry) (cdr entry))))
+              (setf (gethash (car entry) by-name) merged-entry)
+              (push merged-entry keywords)))))
+    (nreverse keywords)))
 
 (defun emitter-finalize-todo-settings ()
   (when *emitter-todo-setting-seen*
