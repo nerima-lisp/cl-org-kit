@@ -1,0 +1,36 @@
+#+TODO: TODO | DONE
+
+* TODO Task [0/1]
+SCHEDULED: <2026-10-14 Wed>
+:PROPERTIES:
+:CUSTOM_ID: retained
+:OTHER: filtered
+:END:
+:LOGBOOK:
+CLOCK: [2026-10-14 Wed 09:00]--[2026-10-14 Wed 09:30] => 0:30
+:END:
+:NOTES:
+Drawer text.
+:END:
+Task text with a footnote [fn:detail].
+Progress [1/2].
+
+*************** TODO Inline task
+Inline task text.
+*************** END
+
+* DONE Completed
+Completed text.
+
+* Normal
+Normal text.
+
+[fn:detail] Footnote definition.
+
+: Fixed-width text.
+
+Inline math \(x + y\).
+
+\begin{align}
+x &= y
+\end{align}

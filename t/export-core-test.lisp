@@ -32,6 +32,11 @@
     "cl-org-kit"
     (concatenate 'string "t/fixtures/export/policy/core/" name))))
 
+(defun export-core-test-preparation-with-options (options)
+  (export-core-test-preparation
+   (format nil "#+OPTIONS: ~A~%~A" options
+           (export-core-test-policy-fixture-source "options-pruning.org"))))
+
 (defun export-core-test-limits (name value)
   (apply #'make-limits (list name value)))
 
@@ -75,6 +80,7 @@
     (let ((cases '("footnotes-after-pruning.org"
                    "include-callback.org"
                    "literal-macro.org"
+                   "options-pruning.org"
                    "outputless-keywords.org"
                    "standard-options.org"
                    "tex-pruning.org"
@@ -233,6 +239,152 @@
                 :to-be nil)
         (expect (export-core-test-view-nodes preparation :latex-environment)
                 :to-be nil))))
+
+  (it "parses standard option values and preserves fixed-width content in the view"
+    (let* ((cases
+             '(("toc:nil" :toc nil)
+               ("toc:t" :toc t)
+               ("toc:2 toc:7" :toc 7)
+               ("h:0" :heading-depth 0)
+               ("num:nil" :num nil)
+               ("^:t" :^ t)
+               ("^:nil" :^ nil)
+               ("^:{}" :^ "{}")
+               ("::t" :fixed-width t)
+               ("::nil" :fixed-width nil)
+               ("arch:nil" :arch nil)
+               ("arch:t" :arch t)
+               ("arch:headline" :arch :headline)
+               ("tex:nil" :latex nil)
+               ("tex:t" :latex t)
+               ("tex:verbatim" :latex :verbatim)
+               ("tags:nil" :tags nil)
+               ("tags:t" :tags t)
+               ("tags:not-in-toc" :tags :not-in-toc)
+               ("<:nil" :timestamp-range nil)
+               ("<:t" :timestamp-range t)
+               ("<:active" :timestamp-range :active)
+               ("<:active-exclude-diary" :timestamp-range :active-exclude-diary)
+               ("<:inactive" :timestamp-range :inactive)
+               ("c:nil" :clock nil)
+               ("c:t" :clock t)
+               ("d:nil" :drawers nil)
+               ("d:t" :drawers t)
+               ("prop:nil" :properties nil)
+               ("prop:t" :properties t)
+               ("tasks:nil" :tasks nil)
+               ("tasks:t" :tasks t)
+               ("tasks:todo" :tasks :todo)
+               ("tasks:done" :tasks :done)
+               ("todo:nil" :todo nil)
+               ("todo:t" :todo t)))
+           (actual
+             (mapcar
+              (lambda (case)
+                (let* ((preparation
+                         (export-core-test-preparation-with-options (first case)))
+                       (option (assoc (second case)
+                                      (org-kit::export-preparation-options
+                                       preparation))))
+                  (list (first case) (cdr option))))
+              cases))
+           (expected
+             (mapcar (lambda (case) (list (first case) (third case))) cases))
+           (fixed-width-disabled
+             (export-core-test-preparation-with-options "::nil")))
+      (with-soft-assertions
+        (expect actual :to-equal expected)
+        (expect (export-core-test-view-nodes fixed-width-disabled :fixed-width)
+                :to-be-truthy))))
+
+  (it "applies included and excluded option lists to parsed drawers and properties"
+    (let* ((included
+             (export-core-test-preparation-with-options
+              "d:(\"LOGBOOK\") prop:(\"CUSTOM_ID\" \"UNUSED ITEM\")"))
+           (included-options (org-kit::export-preparation-options included))
+           (included-drawers
+             (mapcar (lambda (view)
+                       (node-property (org-kit::export-view-node view) :drawer-name))
+                     (export-core-test-view-nodes included :drawer)))
+           (included-property-drawers
+             (export-core-test-view-nodes included :property-drawer))
+           (excluded
+             (export-core-test-preparation-with-options
+              "d:(not LOGBOOK) prop:(not CUSTOM_ID)"))
+           (excluded-drawers
+             (mapcar (lambda (view)
+                       (node-property (org-kit::export-view-node view) :drawer-name))
+                     (export-core-test-view-nodes excluded :drawer)))
+           (excluded-property-drawers
+             (export-core-test-view-nodes excluded :property-drawer))
+           (no-matching-property
+             (export-core-test-preparation-with-options "prop:(UNUSED ITEM)"))
+           (all-excluded-properties
+             (export-core-test-preparation-with-options
+              "prop:(not CUSTOM_ID OTHER)")))
+      (with-soft-assertions
+        (expect (cdr (assoc :drawers included-options))
+                :to-equal '(:include "LOGBOOK"))
+        (expect (cdr (assoc :properties included-options))
+                :to-equal '(:include "CUSTOM_ID" "UNUSED ITEM"))
+        (expect included-drawers :to-equal '("LOGBOOK"))
+        (expect (length included-property-drawers) :to-equal 1)
+        (expect excluded-drawers :to-equal '("NOTES"))
+        (expect (length excluded-property-drawers) :to-equal 1)
+        (expect (export-core-test-view-nodes no-matching-property :property-drawer)
+                :to-be nil)
+        (expect (export-core-test-view-nodes all-excluded-properties :property-drawer)
+                :to-be nil))))
+
+  (it "prunes parsed clocks planning cookies inline tasks footnotes and selected properties"
+    (let* ((source (export-core-test-policy-fixture-source "options-pruning.org"))
+           (preparation-for
+             (lambda (options)
+               (export-core-test-preparation
+                (format nil "#+OPTIONS: ~A~%~A" options source))))
+           (visible (funcall preparation-for
+                             "c:t p:t stat:t inline:t tex:t f:t d:t prop:t"))
+           (pruned (funcall preparation-for
+                            "c:nil p:nil stat:nil inline:nil tex:nil f:nil d:(LOGBOOK) prop:nil"))
+           (visible-drawers
+             (mapcar (lambda (view)
+                       (node-property (org-kit::export-view-node view) :drawer-name))
+                     (export-core-test-view-nodes visible :drawer)))
+           (pruned-drawers
+             (mapcar (lambda (view)
+                       (node-property (org-kit::export-view-node view) :drawer-name))
+                     (export-core-test-view-nodes pruned :drawer))))
+      (with-soft-assertions
+        (dolist (type '(:clock :planning :statistics-cookie :inlinetask
+                        :latex-fragment :latex-environment :footnote-reference
+                        :footnote-definition :property-drawer))
+          (expect (export-core-test-view-nodes visible type) :to-be-truthy)
+          (expect (export-core-test-view-nodes pruned type) :to-be nil))
+        (expect (member "LOGBOOK" visible-drawers :test #'string=) :to-be-truthy)
+        (expect (member "NOTES" visible-drawers :test #'string=) :to-be-truthy)
+        (expect pruned-drawers :to-equal '("LOGBOOK")))))
+
+  (it "applies included and excluded TODO list modes to parsed headings"
+    (let* ((headings-for
+             (lambda (options)
+               (let ((preparation
+                       (export-core-test-preparation-with-options options)))
+                 (mapcar
+                  (lambda (view)
+                    (let ((node (org-kit::export-view-node view)))
+                      (list (node-property node :raw-value)
+                            (node-property node :todo-keyword)
+                            (node-property node :todo-type))))
+                  (export-core-test-view-nodes preparation :headline)))))
+           (todo-included (funcall headings-for "tasks:(TODO)"))
+           (todo-excluded (funcall headings-for "tasks:(not TODO)")))
+      (with-soft-assertions
+        (expect todo-included
+                :to-equal '(("Task [0/1]" "TODO" :todo)
+                            ("Normal" nil nil)))
+        (expect todo-excluded
+                :to-equal '(("Completed" "DONE" :done)
+                            ("Normal" nil nil))))))
 
   (it "accepts an explicit time context and rejects an invalid one"
     (let* ((time-context
@@ -583,9 +735,23 @@
               '("#+OPTIONS: num:maybe"
                 "#+OPTIONS: toc:bad"
                 "#+OPTIONS: h:x"
+                "#+OPTIONS: h:-1"
                 "#+OPTIONS: unknown:t"
                 "#+OPTIONS: toc"
                 "#+OPTIONS: toc:"
+                "#+OPTIONS: ^:maybe"
+                "#+OPTIONS: arch:maybe"
+                "#+OPTIONS: tex:maybe"
+                "#+OPTIONS: tags:maybe"
+                "#+OPTIONS: <:unknown"
+                "#+OPTIONS: c:maybe"
+                "#+OPTIONS: tasks:not"
+                "#+OPTIONS: d:LOGBOOK"
+                "#+OPTIONS: d:(LOGBOOK"
+                "#+OPTIONS: d:)"
+                "#+OPTIONS: d:(bad!)"
+                "#+OPTIONS: d:(\"LOGBOOK\"after)"
+                "#+OPTIONS: d:(\"LOGBOOK)"
                 "#+OPTIONS: expand-links:t"
                 "#+OPTIONS: broken-links:mark"
                 "#+OPTIONS: tags:unknown")))
@@ -1084,6 +1250,13 @@
                 (org-kit::export-write-output
                  "text" (make-limits) :string :backend :html
                  :stream (make-string-output-stream)))))
+           (octets-mismatch-stream (make-string-output-stream))
+           (octets-with-stream
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-write-output
+                 "text" (make-limits) :octets :backend :html
+                 :stream octets-mismatch-stream))))
            (missing-stream
              (export-core-test-catch-error
               (lambda ()
@@ -1111,7 +1284,17 @@
            (octet-result
              (org-kit::export-write-output "é" (make-limits) :stream
                                            :backend :html :stream octet-stream))
+           (mixed-utf8-text
+             (concatenate 'string "A" "é" (string (code-char #x20ac))
+                          (string (code-char #x1f600))))
+           (mixed-utf8-octets
+             (org-kit::export-write-output
+              mixed-utf8-text (make-limits :max-output-octets 10) :octets
+              :backend :html))
            (surrogate (string (code-char #xD800)))
+           (codec-encoding-error
+             (export-core-test-catch-error
+              (lambda () (org-kit::export-utf8-octets surrogate :html))))
            (encoding-error
              (export-core-test-catch-error
               (lambda ()
@@ -1141,6 +1324,11 @@
                  :stream failed-octet-stream)))))
       (with-soft-assertions
         (expect (typep stream-on-string 'org-export-error) :to-be t)
+        (expect (typep octets-with-stream 'org-export-error) :to-be t)
+        (when (typep octets-with-stream 'org-export-error)
+          (expect (org-export-error-reason octets-with-stream)
+                  :to-be :invalid-output))
+        (expect (get-output-stream-string octets-mismatch-stream) :to-equal "")
         (expect (typep missing-stream 'org-export-error) :to-be t)
         (expect (typep unsupported-stream 'org-export-error) :to-be t)
         (expect (typep unknown-output 'org-export-error) :to-be t)
@@ -1148,6 +1336,11 @@
         (expect (get-output-stream-string character-stream) :to-equal "text")
         (expect (eq octet-result octet-stream) :to-be t)
         (expect (export-core-test-stream-octets octet-stream) :to-equalp #(195 169))
+        (expect mixed-utf8-octets
+                :to-equalp #(65 195 169 226 130 172 240 159 152 128))
+        (expect (typep codec-encoding-error 'org-export-error) :to-be t)
+        (when (typep codec-encoding-error 'org-export-error)
+          (expect (org-export-error-reason codec-encoding-error) :to-be :encoding))
         (expect (typep encoding-error 'org-export-error) :to-be t)
         (when (typep encoding-error 'org-export-error)
           (expect (org-export-error-reason encoding-error) :to-be :encoding))
