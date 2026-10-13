@@ -1,40 +1,20 @@
 ;;;; src/edit-clocktable.lisp
 (in-package #:org-kit)
 
-(defun edit-clocktable-end-marker-p (source start end)
-  (let ((trimmed-start start)
-        (trimmed-end end))
-    (loop while (and (< trimmed-start trimmed-end)
-                     (find (char source trimmed-start) '(#\Space #\Tab)))
-          do (incf trimmed-start))
-    (loop while (and (> trimmed-end trimmed-start)
-                     (find (char source (1- trimmed-end))
-                           '(#\Space #\Tab #\Return)))
-          do (decf trimmed-end))
-    (and (= (- trimmed-end trimmed-start) 6)
-         (string-equal source "#+END:" :start1 trimmed-start :end1 trimmed-end))))
-
 (defun edit-clocktable-body-span (document block target)
   (let* ((source (document-text document))
          (start (node-begin block))
          (limit (node-end block))
+         (context (%make-reader-context :text source))
          (opening-newline (position #\Newline source :start start :end limit)))
     (unless opening-newline
       (edit-signal-error target :uneditable-structure
                          "Dynamic block opener has no body boundary"))
     (let ((body-start (1+ opening-newline)))
-      (let ((end
-              (loop with line-start = body-start
-                    for newline = (position #\Newline source
-                                            :start line-start :end limit)
-                    for line-end = (or newline limit)
-                    when (edit-clocktable-end-marker-p
-                          source line-start line-end)
-                      return line-start
-                    when (null newline)
-                      return nil
-                    do (setf line-start (1+ newline)))))
-        (unless end
+      (multiple-value-bind (end after-line)
+          (reader-blocks-find-close context body-start limit "#+END:")
+        (declare (ignore after-line))
+        (when (= end limit)
           (edit-signal-error target :uneditable-structure
                              "Dynamic block has no #+END line"))
         (values body-start end)))))
@@ -170,170 +150,11 @@
         do (setf columns (max columns row-columns))
         finally (return columns)))
 
-(defun edit-clocktable-update-widths (widths cells)
-  (loop for cell across cells
-        for column from 0
-        do (setf (aref widths column)
-                 (max (aref widths column) (table-string-width cell))))
-  widths)
-
 (defun edit-clocktable-fixed-cells (column-count first second)
   (let ((cells (make-array column-count :initial-element "")))
     (setf (aref cells 0) first
           (aref cells 1) second)
     cells))
-
-(defun edit-clocktable-widths (result rows column-count time-columns)
-  (let* ((widths (make-array column-count :initial-element 1))
-         (total-time
-           (concatenate 'string
-                        "*"
-                        (edit-clocktable-time-text
-                         (clocktable-result-total-minutes result))
-                        "*")))
-    (edit-clocktable-update-widths
-     widths (edit-clocktable-fixed-cells column-count "Headline" "Time"))
-    (edit-clocktable-update-widths
-     widths (edit-clocktable-fixed-cells column-count "*Total time*" total-time))
-    (dolist (row rows)
-      (edit-clocktable-update-widths
-       widths
-       (edit-clocktable-data-cells
-        row (edit-clocktable-headline row)
-        (edit-clocktable-time-text (clocktable-row-minutes row))
-        time-columns)))
-    widths))
-
-(defun edit-clocktable-cell-char-length (value width)
-  (+ 2 (length value)
-     (max 0 (- width (table-string-width value)))))
-
-(defun edit-clocktable-row-char-length (cells widths)
-  (+ 1 (length widths)
-     (loop for cell across cells
-           for column from 0
-           sum (edit-clocktable-cell-char-length cell (aref widths column)))
-     (loop for column from (length cells) below (length widths)
-           sum (edit-clocktable-cell-char-length "" (aref widths column)))))
-
-(defun edit-clocktable-rule-char-length (widths)
-  (+ 2 (1- (length widths))
-     (loop for width across widths
-           sum (table-hline-formatted-segment-length width))))
-
-(defun edit-clocktable-row-octets (cells widths encoding preamble-length
-                                   space-octets pipe-octets)
-  (+ (* (1+ (length widths)) pipe-octets)
-     (loop for cell across cells
-           for column from 0
-           for padding = (max 0 (- (aref widths column)
-                                   (table-string-width cell)))
-           sum (+ (* 2 space-octets)
-                  (edit-clocktable-encoded-size cell encoding preamble-length)
-                  (* padding space-octets)))
-     (loop for column from (length cells) below (length widths)
-           sum (+ (* 2 space-octets)
-                  (* (aref widths column) space-octets)))))
-
-(defun edit-clocktable-rule-octets (widths pipe-octets plus-octets hyphen-octets)
-  (+ (* 2 pipe-octets)
-     (* (1- (length widths)) plus-octets)
-     (loop for width across widths
-           sum (* (table-hline-formatted-segment-length width)
-                  hyphen-octets))))
-
-(defun edit-clocktable-body-metrics (result rows widths time-columns newline
-                                    encoding)
-  (let* ((preamble-length
-           (if (reader-generic-bom-encoding-p encoding)
-               (edit-encoded-range-octets "" 0 0 encoding)
-               0))
-         (space-octets
-           (edit-clocktable-encoded-size " " encoding preamble-length))
-         (pipe-octets
-           (edit-clocktable-encoded-size "|" encoding preamble-length))
-         (plus-octets
-           (edit-clocktable-encoded-size "+" encoding preamble-length))
-         (hyphen-octets
-           (edit-clocktable-encoded-size "-" encoding preamble-length))
-         (newline-octets
-           (edit-clocktable-encoded-size newline encoding preamble-length))
-         (header (edit-clocktable-fixed-cells
-                  (length widths) "Headline" "Time"))
-         (total (edit-clocktable-fixed-cells
-                 (length widths) "*Total time*"
-                 (concatenate 'string
-                              "*"
-                              (edit-clocktable-time-text
-                               (clocktable-result-total-minutes result))
-                              "*")))
-         (characters 0)
-         (octets 0))
-    (labels ((add-row (cells)
-               (incf characters
-                     (+ (edit-clocktable-row-char-length cells widths)
-                        (length newline)))
-               (incf octets
-                     (+ (edit-clocktable-row-octets
-                         cells widths encoding preamble-length
-                         space-octets pipe-octets)
-                        newline-octets)))
-             (add-rule ()
-               (incf characters
-                     (+ (edit-clocktable-rule-char-length widths)
-                        (length newline)))
-               (incf octets
-                     (+ (edit-clocktable-rule-octets
-                         widths pipe-octets plus-octets hyphen-octets)
-                        newline-octets))))
-      (add-row header)
-      (add-rule)
-      (add-row total)
-      (when rows
-        (add-rule)
-        (dolist (row rows)
-          (add-row
-           (edit-clocktable-data-cells
-            row (edit-clocktable-headline row)
-            (edit-clocktable-time-text (clocktable-row-minutes row))
-            time-columns))))
-      (values characters octets))))
-
-(defun edit-clocktable-source-base-octets (document start end encoding)
-  (let* ((source (document-text document))
-         (generic-preamble-p (reader-generic-bom-encoding-p encoding))
-         (preamble-length
-           (if generic-preamble-p
-               (edit-encoded-range-octets "" 0 0 encoding)
-               0)))
-    (+ (- (edit-encoded-range-octets source 0 start encoding)
-          preamble-length)
-       (- (edit-encoded-range-octets source end (length source) encoding)
-          preamble-length)
-       preamble-length
-       (if (and (document-bom-p document) (not generic-preamble-p))
-           (length (reader-output-bom encoding))
-           0))))
-
-(defun edit-clocktable-check-output-limits (document start end body-characters
-                                             body-octets)
-  (let* ((source (document-text document))
-         (encoding (or (document-encoding document) :utf-8))
-         (limits (document-limits document))
-         (output-length
-           (+ (- (length source) (- end start))
-              body-characters
-              (if (edit-output-bom-p document) 1 0)))
-         (output-octets
-           (+ (edit-clocktable-source-base-octets
-               document start end encoding)
-              body-octets)))
-    (check-limit limits :max-output-length output-length)
-    (unless (document-encoding document)
-      (check-limit limits :max-input-length output-length))
-    (when (document-encoding document)
-      (check-limit limits :max-input-length output-octets))
-    (check-limit limits :max-output-octets output-octets)))
 
 (defun edit-clocktable-write-row (stream cells newline)
   (write-char #\| stream)
@@ -435,33 +256,25 @@
                  (edit-clocktable-table-columns rows time-columns)))
           (edit-clocktable-check-node-budget
            document block rows column-count)
-          (let ((widths (edit-clocktable-widths
-                         clocktable-result rows column-count time-columns)))
-            (multiple-value-bind (body-characters body-octets)
-                (edit-clocktable-body-metrics
-                 clocktable-result rows widths time-columns newline
-                 (or (document-encoding document) :utf-8))
-              (edit-clocktable-check-output-limits
-               document start end body-characters body-octets)
-              (let* ((raw-body (edit-clocktable-body-text
-                                clocktable-result rows time-columns
-                                column-count newline))
-                     (temporary (parse-org raw-body
-                                           :limits (document-limits document)
-                                           :settings (document-settings document)))
-                     (table (edit-clocktable-find-table temporary))
-                     (aligned-result (table-align temporary table))
-                     (aligned-document
-                       (edit-result-updated-document aligned-result))
-                     (aligned-table
-                       (edit-clocktable-find-table aligned-document))
-                     (replacement (document-text aligned-document))
-                     (expected (edit-canonical-copy
-                                (edit-canonical-document document))))
-                (edit-canonical-set-children
-                 expected (edit-node-path document block dynamic-block)
-                 (list (edit-canonical-node aligned-table)))
-                (edit-apply-patches-result
-                 document
-                 (list (edit-make-patch start end replacement dynamic-block))
-                 :target block :expected expected)))))))))
+          (let* ((raw-body (edit-clocktable-body-text
+                            clocktable-result rows time-columns
+                            column-count newline))
+                 (temporary (parse-org raw-body
+                                       :limits (document-limits document)
+                                       :settings (document-settings document)))
+                 (table (edit-clocktable-find-table temporary))
+                 (aligned-result (table-align temporary table))
+                 (aligned-document
+                   (edit-result-updated-document aligned-result))
+                 (aligned-table
+                   (edit-clocktable-find-table aligned-document))
+                 (replacement (document-text aligned-document))
+                 (expected (edit-canonical-copy
+                            (edit-canonical-document document))))
+            (edit-canonical-set-children
+             expected (edit-node-path document block dynamic-block)
+             (list (edit-canonical-node aligned-table)))
+            (edit-apply-patches-result
+             document
+             (list (edit-make-patch start end replacement dynamic-block))
+             :target block :expected expected)))))))
