@@ -12,6 +12,10 @@
    #:org-edit-error #:org-edit-error-target #:org-edit-error-reason
    #:org-resource-limit-error #:org-resource-limit-error-limit-name
    #:org-resource-limit-error-limit #:org-resource-limit-error-actual
+   ;; Edit results
+   #:edit-span #:make-edit-span #:edit-span-p #:edit-span-start #:edit-span-end
+   #:edit-result #:make-edit-result #:edit-result-p
+   #:edit-result-updated-document #:edit-result-spans
    ;; Resource limits
    #:limits #:make-limits #:limits-p #:limit-value
    ;; Documents

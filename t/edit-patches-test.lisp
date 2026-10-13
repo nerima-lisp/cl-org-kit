@@ -15,7 +15,7 @@
           finally (return (nreverse patches)))))
 
 (defun edit-test-unpatched-ranges-match-p (source output patches)
-  "Return true when every source gap is byte-for-byte represented in OUTPUT."
+  "Return true when every source gap is character-for-character represented in OUTPUT."
   (let ((source-cursor 0)
         (output-cursor 0))
     (dolist (patch patches)
@@ -41,6 +41,20 @@
   "Return the first headline in DOCUMENT."
   (find :headline (node-children (document-root document)) :key #'node-type))
 
+(defun edit-test-span-ranges (spans)
+  "Return the source coordinate pairs in SPANS."
+  (mapcar (lambda (span)
+            (list (edit-span-start span) (edit-span-end span)))
+          spans))
+
+(defun edit-test-expect-error-slots (condition target reason message)
+  "Assert the public class, target, reason, and message of an edit failure."
+  (with-soft-assertions
+    (expect (typep condition 'org-edit-error) :to-be t)
+    (expect (org-edit-error-target condition) :to-equal target)
+    (expect (org-edit-error-reason condition) :to-be reason)
+    (expect (org-kit-error-message condition) :to-equal message)))
+
 (describe "edit patches"
   (it "splices sorted patches and leaves every uncovered source range unchanged"
     (let* ((source "abcdefghi")
@@ -59,6 +73,354 @@
       (expect (org-kit::edit-splice-source
                source (org-kit::edit-normalize-patches patches))
               :to-equal "0y23456x9")))
+
+  (it "constructs edit spans and results with their public readers"
+    (let* ((document (parse-org "text"))
+           (span (make-edit-span 1 3))
+           (result (make-edit-result :updated-document document
+                                     :spans (list span))))
+      (with-soft-assertions
+        (expect (edit-span-p span) :to-be t)
+        (expect (edit-span-start span) :to-be 1)
+        (expect (edit-span-end span) :to-be 3)
+        (expect (edit-result-p result) :to-be t)
+        (expect (edit-result-updated-document result) :to-be document)
+        (expect (edit-result-spans result) :to-equal (list span)))))
+
+  (it "keeps the low-level patch API document-returning"
+    (let* ((source (format nil "* old~%"))
+           (output (format nil "* new~%"))
+           (document (parse-org source))
+           (expected (org-kit::edit-canonical-document (parse-org output)))
+           (result
+             (org-kit::edit-apply-patches
+              document (list (org-kit::edit-make-patch 2 5 "new"))
+              :expected expected)))
+      (with-soft-assertions
+        (expect (document-p result) :to-be t)
+        (expect (edit-result-p result) :to-be nil)
+        (expect (document-text result) :to-equal output)
+        (expect (document-text document) :to-equal source))))
+
+  (it "applies empty-range insertions and empty-text deletions"
+    (let* ((source (format nil "* old~%"))
+           (document (parse-org source))
+           (inserted-text (format nil "* TODO old~%"))
+           (inserted-expected (org-kit::edit-canonical-document
+                               (parse-org inserted-text)))
+           (inserted
+             (org-kit::edit-apply-patches-result
+              document (list (org-kit::edit-make-patch 2 2 "TODO "))
+              :expected inserted-expected))
+           (deleted-expected (org-kit::edit-canonical-document
+                              (parse-org source)))
+           (deleted
+             (org-kit::edit-apply-patches-result
+              (edit-result-updated-document inserted)
+              (list (org-kit::edit-make-patch 2 7 ""))
+              :expected deleted-expected)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document inserted))
+                :to-equal inserted-text)
+        (expect (edit-test-span-ranges (edit-result-spans inserted))
+                :to-equal '((2 2)))
+        (expect (document-text (edit-result-updated-document deleted))
+                :to-equal source)
+        (expect (edit-test-span-ranges (edit-result-spans deleted))
+                :to-equal '((2 7)))
+        (expect (document-text document) :to-equal source))))
+
+  (it "returns sorted original-coordinate spans for multiple patches"
+    (let* ((source (format nil "* old~%plain tail~%"))
+           (document (parse-org source))
+           (plain-start (search "plain" source))
+           (patches (list (org-kit::edit-make-patch
+                           plain-start (+ plain-start 5) "rough")
+                          (org-kit::edit-make-patch 2 5 "new")))
+           (expected-text (format nil "* new~%rough tail~%"))
+           (expected (org-kit::edit-canonical-document
+                      (parse-org expected-text)))
+           (result (org-kit::edit-apply-patches-result
+                    document patches :expected expected))
+           (normalized (org-kit::edit-normalize-patches patches)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected-text)
+        (expect (edit-test-span-ranges (edit-result-spans result))
+                :to-equal (list (list 2 5)
+                                (list plain-start (+ plain-start 5))))
+        (expect (edit-test-unpatched-ranges-match-p
+                 source expected-text normalized)
+                :to-be t)
+        (expect (document-text document) :to-equal source))))
+
+  (it "orders a same-offset insertion before a non-empty replacement"
+    (let* ((source (format nil "* old~%"))
+           (document (parse-org source))
+           (expected-text (format nil "* TODO new~%"))
+           (expected (org-kit::edit-canonical-document
+                      (parse-org expected-text)))
+           (patches (list (org-kit::edit-make-patch 2 5 "new")
+                          (org-kit::edit-make-patch 2 2 "TODO ")))
+           (result (org-kit::edit-apply-patches-result
+                    document patches :expected expected))
+           (normalized (org-kit::edit-normalize-patches patches)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected-text)
+        (expect (edit-test-span-ranges (edit-result-spans result))
+                :to-equal '((2 2) (2 5)))
+        (expect (edit-test-unpatched-ranges-match-p
+                 source expected-text normalized)
+                :to-be t)
+        (expect (document-text document) :to-equal source))))
+
+  (it "rejects two insertions at the same source offset"
+    (let* ((source (format nil "* old~%"))
+           (document (parse-org source))
+           (patches (list (org-kit::edit-make-patch 2 2 "TODO ")
+                          (org-kit::edit-make-patch 2 2 "WAITING "))))
+      (handler-case
+          (progn
+            (org-kit::edit-apply-patches-result
+             document patches :target "duplicate insert")
+            (expect nil :to-be t))
+        (org-edit-error (condition)
+          (edit-test-expect-error-slots
+           condition "duplicate insert" :overlapping-patches
+           "Edit patches overlap")))
+      (expect (document-text document) :to-equal source)))
+
+  (it "checks the prospective output limit before source splicing"
+    (let* ((limits (make-limits :max-output-length 6))
+           (source (format nil "* x~%"))
+           (document (parse-org source :limits limits))
+           (patches (list (org-kit::edit-make-patch 2 3 "long")))
+           (original-splicer (symbol-function 'org-kit::edit-splice-source))
+           (splice-called nil))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::edit-splice-source)
+                   (lambda (&rest arguments)
+                     (declare (ignore arguments))
+                     (setf splice-called t)
+                     (error "Source splice ran before the limit check")))
+             (handler-case
+                 (progn
+                   (org-kit::edit-apply-patches-result
+                    document patches
+                    :expected (org-kit::edit-canonical-document document))
+                   (expect nil :to-be t))
+               (org-resource-limit-error (condition)
+                 (with-soft-assertions
+                   (expect (org-kit-error-message condition)
+                           :to-equal "Resource limit exceeded")
+                   (expect (org-resource-limit-error-limit-name condition)
+                           :to-be :max-output-length)
+                   (expect (org-resource-limit-error-limit condition) :to-be 6)
+                   (expect (org-resource-limit-error-actual condition)
+                           :to-be 7)))))
+        (setf (symbol-function 'org-kit::edit-splice-source) original-splicer))
+      (with-soft-assertions
+        (expect splice-called :to-be nil)
+        (expect (document-text document) :to-equal source))))
+
+  (it "accepts output just below and exactly at the configured character limit"
+    (let* ((source (format nil "* x~%"))
+           (output (format nil "* x!~%"))
+           (output-length (length output))
+           (patches (list (org-kit::edit-make-patch 2 3 "x!"))))
+      (dolist (case (list (list (1+ output-length) :below-limit)
+                          (list output-length :at-limit)))
+        (destructuring-bind (limit boundary) case
+          (let* ((limits (make-limits :max-output-length limit))
+                 (document (parse-org source :limits limits))
+                 (expected
+                   (org-kit::edit-canonical-document (parse-org output)))
+                 (result
+                   (org-kit::edit-apply-patches-result
+                    document patches :expected expected)))
+            (with-soft-assertions
+              (expect (if (eq boundary :below-limit)
+                          (< output-length limit)
+                          (= output-length limit))
+                      :to-be t)
+              (expect (document-text
+                       (org-kit:edit-result-updated-document result))
+                      :to-equal output)))))))
+
+  (it "includes a retained BOM in the output character limit"
+    (let* ((source (format nil "* x~%"))
+           (input (concatenate 'string (string (code-char #xFEFF)) source))
+           (limits (make-limits :max-output-length (length source)))
+           (document (parse-org input :limits limits))
+           (output (format nil "* x!~%"))
+           (expected (org-kit::edit-canonical-document (parse-org output))))
+      (handler-case
+          (progn
+            (org-kit::edit-apply-patches-result
+             document (list (org-kit::edit-make-patch 2 3 "x!"))
+             :expected expected)
+            (expect nil :to-be t))
+        (org-resource-limit-error (condition)
+          (with-soft-assertions
+            (expect (org-kit-error-message condition)
+                    :to-equal "Resource limit exceeded")
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-output-length)
+            (expect (org-resource-limit-error-limit condition)
+                    :to-be (length source))
+            (expect (org-resource-limit-error-actual condition)
+                    :to-be (1+ (length output))))))
+      (expect (document-bom-p document) :to-be t)
+      (expect (document-text document) :to-equal source)))
+
+  (it "rejects overlapping patches without changing the input document"
+    (let* ((source (format nil "* old~%"))
+           (document (parse-org source))
+           (patches (list (org-kit::edit-make-patch 2 5 "new")
+                          (org-kit::edit-make-patch 4 6 "x"))))
+      (handler-case
+          (progn
+            (org-kit::edit-apply-patches-result
+             document patches :target "overlap")
+            (expect nil :to-be t))
+        (org-edit-error (condition)
+          (edit-test-expect-error-slots
+           condition "overlap" :overlapping-patches "Edit patches overlap")))
+      (expect (document-text document) :to-equal source)))
+
+  (it "rejects malformed patch lists and ranges as invalid values"
+    (let* ((document (parse-org "text"))
+           (source (document-text document))
+           (valid (org-kit::edit-make-patch 0 1 "T"))
+           (circular (list valid)))
+      (setf (cdr circular) circular)
+      (dolist (case (list (list (cons valid :tail)
+                                "Edit patches must be a proper list")
+                          (list circular "Edit patches must be a proper list")
+                          (list (list :not-a-patch)
+                                "Edit patch has an invalid range or replacement")
+                          (list (list (org-kit::%make-edit-patch :bad 1 "x"))
+                                "Edit patch has an invalid range or replacement")
+                          (list (list (org-kit::%make-edit-patch 0 :bad "x"))
+                                "Edit patch has an invalid range or replacement")
+                          (list (list (org-kit::edit-make-patch -1 0 "x"))
+                                "Edit patch has an invalid range or replacement")
+                          (list (list (org-kit::edit-make-patch 2 1 "x"))
+                                "Edit patch has an invalid range or replacement")
+                          (list (list (org-kit::edit-make-patch 0 5 "x"))
+                                "Edit patch has an invalid range or replacement")
+                          (list (list (org-kit::%make-edit-patch 0 1 nil))
+                                "Edit patch has an invalid range or replacement")))
+        (destructuring-bind (patches message) case
+          (handler-case
+              (progn
+                (org-kit::edit-apply-patches-result
+                 document patches :target "invalid patch"
+                 :expected (org-kit::edit-canonical-document document))
+                (expect nil :to-be t))
+            (org-edit-error (condition)
+              (edit-test-expect-error-slots
+               condition "invalid patch" :invalid-value message)))))
+      (expect (document-text document) :to-equal source)))
+
+  (it "maps reparse failures and preserves resource errors without mutation"
+    (let* ((source (format nil "* old~%"))
+           (document (parse-org source))
+           (expected (org-kit::edit-canonical-document document))
+           (original-parser (symbol-function 'org-kit:parse-org)))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit:parse-org)
+                   (lambda (&rest arguments)
+                     (declare (ignore arguments))
+                     (error 'org-parse-error :message "forced parse failure")))
+             (handler-case
+                 (progn
+                   (org-kit::edit-apply-patches-result
+                    document (list (org-kit::edit-make-patch 2 5 "new"))
+                    :target "parse target" :expected expected)
+                   (expect nil :to-be t))
+               (org-edit-error (condition)
+                 (edit-test-expect-error-slots
+                  condition "parse target" :validation-parse-failed
+                  "Edited document failed validation parsing"))))
+        (setf (symbol-function 'org-kit:parse-org) original-parser))
+      (expect (document-text document) :to-equal source))
+    (let* ((limits (make-limits :max-heading-depth 1))
+           (source (format nil "* old~%"))
+           (document (parse-org source :limits limits))
+           (insert-offset (length source)))
+      (handler-case
+          (progn
+            (org-kit::edit-apply-patches-result
+             document
+             (list (org-kit::edit-make-patch insert-offset insert-offset
+                                             (format nil "** child~%")))
+             :expected (org-kit::edit-canonical-document document))
+            (expect nil :to-be t))
+        (org-resource-limit-error (condition)
+          (with-soft-assertions
+            (expect (org-kit-error-message condition)
+                    :to-equal "Resource limit exceeded")
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-heading-depth)
+            (expect (org-resource-limit-error-limit condition) :to-be 1)
+            (expect (org-resource-limit-error-actual condition) :to-be 2))))
+      (expect (document-text document) :to-equal source)))
+
+  (it "keeps canonical mismatches and multi-document transactions all-or-nothing"
+    (let* ((source-one (format nil "* one~%"))
+           (source-two (format nil "* two~%"))
+           (document-one (parse-org source-one))
+           (document-two (parse-org source-two))
+           (patch-one (list (org-kit::edit-make-patch 2 5 "ONE")))
+           (patch-two (list (org-kit::edit-make-patch 2 5 "TWO")))
+           (expected-one (org-kit::edit-canonical-document
+                          (parse-org (format nil "* ONE~%"))))
+           (expected-two (org-kit::edit-canonical-document
+                          (parse-org (format nil "* TWO~%"))))
+           (successful
+             (org-kit::edit-apply-patches-transaction
+              (list (list document-one patch-one :expected expected-one)
+                    (list document-two patch-two :expected expected-two)))))
+      (with-soft-assertions
+        (expect (length successful) :to-be 2)
+        (expect (document-text
+                 (edit-result-updated-document (first successful)))
+                :to-equal (format nil "* ONE~%"))
+        (expect (document-text
+                 (edit-result-updated-document (second successful)))
+                :to-equal (format nil "* TWO~%"))
+        (expect (document-text document-one) :to-equal source-one)
+        (expect (document-text document-two) :to-equal source-two)))
+    (let* ((source-one (format nil "* one~%"))
+           (source-two (format nil "* two~%"))
+           (document-one (parse-org source-one))
+           (document-two (parse-org source-two))
+           (patch-one (list (org-kit::edit-make-patch 2 5 "ONE")))
+           (patch-two (list (org-kit::edit-make-patch 2 5 "TWO")))
+           (expected-one (org-kit::edit-canonical-document
+                          (parse-org (format nil "* ONE~%"))))
+           (not-two (org-kit::edit-canonical-document document-two))
+           (transaction-result :no-result))
+      (handler-case
+          (progn
+            (setf transaction-result
+                  (org-kit::edit-apply-patches-transaction
+                   (list (list document-one patch-one :expected expected-one)
+                         (list document-two patch-two :target "second"
+                               :expected not-two))))
+            (expect nil :to-be t))
+        (org-edit-error (condition)
+          (edit-test-expect-error-slots
+           condition "second" :unexpected-diff
+           "Edited document contains an unexpected semantic change")))
+      (with-soft-assertions
+        (expect transaction-result :to-be :no-result)
+        (expect (document-text document-one) :to-equal source-one)
+        (expect (document-text document-two) :to-equal source-two))))
 
   (it "builds canonical trees without source-only ranges and supports expected property edits"
     (let* ((document (parse-org (format nil "* old~%")))
@@ -258,6 +620,8 @@
             (expect nil :to-be t))
         (org-resource-limit-error (condition)
           (with-soft-assertions
+            (expect (org-kit-error-message condition)
+                    :to-equal "Resource limit exceeded")
             (expect (org-resource-limit-error-limit-name condition)
                     :to-be :max-output-length)
             (expect (org-resource-limit-error-limit condition) :to-be 4)
@@ -266,8 +630,14 @@
   (it "refuses edited text that cannot be encoded using the original encoding"
     (let* ((document (parse-org (octets #x2A #x20 #x78 #x0A) :encoding :latin-1))
            (headline (edit-test-headline document)))
-      (signals org-kit-error
-        (replace-heading-title document headline "日"))
+      (handler-case
+          (progn
+            (replace-heading-title document headline "日")
+            (expect nil :to-be t))
+        (org-edit-error ()
+          (expect nil :to-be t))
+        (org-kit-error ()
+          (expect t :to-be t)))
       (expect (document-text document) :to-equal (format nil "* x~%"))))
 
   (it "bounds and escapes invalid target descriptions through the public edit API"
