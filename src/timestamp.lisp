@@ -103,7 +103,8 @@ NIL values when NODE has no complete, valid repeater."
 
 The first value is a cl-date-kit period for days, weeks, months, or years. The
 second is :ALL or :FIRST. Return two NIL values when no complete, valid warning
-delay is present."
+delay is present. Hour warnings return two NIL values here; use TIMESTAMP-VIEW
+to read them."
   (%require-timestamp-node node)
   (let ((amount (node-property node :warning-value))
         (unit (node-property node :warning-unit))
