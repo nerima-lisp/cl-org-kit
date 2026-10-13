@@ -248,6 +248,17 @@
                 :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
+  (it "excludes nested TODO descendants from direct counts"
+    (let* ((source (format nil "* Parent [0/0]~%** TODO Direct~%*** TODO Nested~%"))
+           (expected (format nil "* Parent [0/1]~%** TODO Direct~%*** TODO Nested~%"))
+           (document (parse-org source))
+           (heading (first (statistics-cookies-test-nodes document :headline)))
+           (result (update-statistics-cookies document heading)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
   (it "inherits TODO COOKIE_DATA for child headings but scopes checkbox recursion locally"
     (let* ((todo-source
              (format nil
