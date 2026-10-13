@@ -46,9 +46,6 @@
 (defun %org-clock-error (reason &optional context)
   (error 'org-clock-error
          :message (ecase reason
-                    (:clock-not-running "No running CLOCK entry")
-                    (:multiple-running-clocks "Multiple running CLOCK entries")
-                    (:clock-already-running "A CLOCK entry is already running")
                     (:invalid-range "Invalid clock range")
                     (:malformed-clock "Malformed CLOCK entry")
                     (:unsupported-option "Unsupported clock option"))
@@ -153,11 +150,6 @@
                      (values :closed start end duration)
                      (values :running start nil nil))
                  (clock-row-unscoped-duration line duration)))
-         (org-clock-error (condition)
-           (if (and duration
-                    (eq (org-clock-error-reason condition) :malformed-clock))
-               (clock-row-unscoped-duration line duration)
-               (error condition)))
          (org-time-error (condition)
            (if (and duration
                     (eq (org-time-error-reason condition) :invalid-time)
