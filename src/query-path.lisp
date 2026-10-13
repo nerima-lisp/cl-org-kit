@@ -598,8 +598,8 @@
 
 (defun query-path-check-predicate-depth (predicate limits)
   (let ((pending (list (list predicate 1))))
-    (loop while pending
-          for (node depth) = (pop pending)
+    (loop for (node depth) = (pop pending)
+          while node
           do (check-limit limits :max-element-depth depth)
              (case (first node)
                ((:and :or)
