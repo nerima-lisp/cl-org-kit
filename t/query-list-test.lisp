@@ -322,4 +322,11 @@
     (let ((document (query-list-test-document)))
       (signals org-query-error
         (org-kit::query-list
-         document '(:planning :scheduled :>= (:date "<today>")))))))
+         document '(:planning :scheduled :>= (:date "<today>"))))))
+
+  (it "rejects invalid reference-time values"
+    (let ((document (query-list-test-document)))
+      (signals type-error
+        (org-kit::query-list
+         document '(:planning :scheduled :>= (:date "<today>"))
+         :reference-time "today")))))

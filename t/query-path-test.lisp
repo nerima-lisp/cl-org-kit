@@ -394,4 +394,11 @@
     (let ((document (query-path-test-document)))
       (signals org-query-error
         (org-kit:query-path
-         document "Root/**?{planning.DEADLINE<=date(\"<today>\")}")))))
+         document "Root/**?{planning.DEADLINE<=date(\"<today>\")}"))))
+
+  (it "rejects invalid reference-time values"
+    (let ((document (query-path-test-document)))
+      (signals type-error
+        (org-kit:query-path
+         document "Root/**?{planning.DEADLINE<=date(\"<today>\")}"
+         :reference-time "today")))))

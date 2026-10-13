@@ -389,7 +389,7 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
            (handler-case
                (or (query-org-relative-date body reference-time)
                    (query-parse-absolute-org-date body))
-             (error () nil))))
+             (cl-date-kit:cl-date-kit-error () nil))))
     (cond
       (value value)
       (silent-p nil)

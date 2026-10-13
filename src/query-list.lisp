@@ -236,6 +236,7 @@ FORM is a proper, unevaluated list expression. SCOPE is :HEADLINES or :NODES;
 CONTEXT configures shared property, tag, provider, and regex semantics.
 REFERENCE-TIME is required when FORM contains a relative date literal."
   (check-type document document)
+  (check-type reference-time (or null cl-date-kit:local-date-time))
   (unless (member scope '(:headlines :nodes) :test #'eq)
     (error 'type-error :datum scope :expected-type '(member :headlines :nodes)))
   (when (and context (not (query-context-p context)))

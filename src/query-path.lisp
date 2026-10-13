@@ -617,6 +617,7 @@ SCOPE is :HEADLINES or :NODES; CONTEXT configures shared query semantics.
 REFERENCE-TIME is required when the filter contains a relative date literal."
   (check-type document document)
   (check-type path-filter string)
+  (check-type reference-time (or null cl-date-kit:local-date-time))
   (unless (member scope '(:headlines :nodes) :test #'eq)
     (error 'type-error :datum scope :expected-type '(member :headlines :nodes)))
   (when (and context (not (query-context-p context)))

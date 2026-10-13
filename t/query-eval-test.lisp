@@ -316,7 +316,25 @@
         (signals org-query-error
           (org-kit::query-parse-org-date-literal "<2025-01-02 nonsense>" reference))
         (signals org-query-error
-          (org-kit::query-parse-org-date-literal "<today>" nil))))))
+          (org-kit::query-parse-org-date-literal "<today>" nil)))))
+
+  (it "preserves resource errors from date parsing"
+    (let ((original (symbol-function 'org-kit::query-org-relative-date)))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::query-org-relative-date)
+                   (lambda (body reference-time)
+                     (declare (ignore body reference-time))
+                     (error 'org-resource-limit-error
+                            :message "date query exceeded a resource limit"
+                            :limit-name :max-node-count
+                            :limit 1
+                            :actual 2)))
+             (signals org-resource-limit-error
+               (org-kit::query-parse-org-date-literal
+                "<today>" nil)))
+        (setf (symbol-function 'org-kit::query-org-relative-date)
+              original)))))
 
 (describe "public query evaluation edge coverage"
   (it "evaluates boolean, wildcard, node-scope, and existence queries"
