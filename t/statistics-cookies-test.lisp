@@ -5,7 +5,7 @@
   '("todo-direct" "todo-recursive" "checkbox-direct" "checkbox-recursive"
     "checkbox-recursive-only" "checkbox-noninherit" "todo-zero" "percent-floor"
     "multiple-cookies" "todo-plus-recursive"
-    "checkbox-plus-recursive-local-heading"))
+    "checkbox-plus-recursive-local-heading" "checkbox-continuation-cookie"))
 
 (defun statistics-cookies-test-nodes-in-tree (document types)
   (let ((nodes nil))

@@ -1,0 +1,10 @@
+* Checklist
+:PROPERTIES:
+:COOKIE_DATA: checkbox
+:END:
+- [ ] Parent [1/2]
+
+  Continuation paragraph [1/2]
+
+  - [X] Nested complete
+  - [ ] Nested open
