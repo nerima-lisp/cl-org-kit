@@ -102,6 +102,20 @@
         (expect (document-text result) :to-equal output)
         (expect (document-text document) :to-equal source))))
 
+  (it "returns an empty edit result for a single-document empty patch set"
+    (let* ((source (format nil "* unchanged~%"))
+           (document (parse-org source))
+           (expected (org-kit::edit-canonical-document document))
+           (result (org-kit::edit-apply-patches-result
+                    document nil :expected expected)))
+      (with-soft-assertions
+        (expect (document-p (edit-result-updated-document result)) :to-be t)
+        (expect (eq (edit-result-updated-document result) document) :to-be nil)
+        (expect (edit-result-spans result) :to-equal nil)
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal source)
+        (expect (document-text document) :to-equal source))))
+
   (it "applies empty-range insertions and empty-text deletions"
     (let* ((source (format nil "* old~%"))
            (document (parse-org source))
@@ -626,6 +640,221 @@
                     :to-be :max-output-length)
             (expect (org-resource-limit-error-limit condition) :to-be 4)
             (expect (org-resource-limit-error-actual condition) :to-be 7))))))
+
+  (it "checks prospective output octets at the exact encoded and BOM boundaries"
+    (let* ((source (format nil "* x~%"))
+           (output (format nil "* あ~%"))
+           (patches (list (org-kit::edit-make-patch 2 3 "あ")))
+           (expected (org-kit::edit-canonical-document (parse-org output))))
+      (dolist (limit '(5 6 7))
+        (let ((document
+                (parse-org source
+                           :limits (make-limits :max-output-octets limit))))
+          (if (< limit 6)
+              (handler-case
+                  (progn
+                    (org-kit::edit-apply-patches-result
+                     document patches :expected expected)
+                    (expect nil :to-be t))
+                (org-resource-limit-error (condition)
+                  (with-soft-assertions
+                    (expect (org-kit-error-message condition)
+                            :to-equal "Resource limit exceeded")
+                    (expect (org-resource-limit-error-limit-name condition)
+                            :to-be :max-output-octets)
+                    (expect (org-resource-limit-error-limit condition) :to-be 5)
+                    (expect (org-resource-limit-error-actual condition)
+                            :to-be 6))))
+              (let ((result (org-kit::edit-apply-patches-result
+                             document patches :expected expected)))
+                (with-soft-assertions
+                  (expect (document-text
+                           (edit-result-updated-document result))
+                          :to-equal output)
+                  (expect (write-org (edit-result-updated-document result)
+                                     :output-type :octets)
+                          :to-equalp (octets #x2A #x20 #xE3 #x81 #x82 #x0A))
+                  (expect (document-text document) :to-equal source))))
+            (expect (document-text document) :to-equal source)))
+    (let* ((source (format nil "* x~%"))
+           (input (concatenate 'string (string (code-char #xFEFF)) source))
+           (document
+             (parse-org input :encoding :utf-8
+                        :limits (make-limits :max-output-octets 6)))
+           (patches (list (org-kit::edit-make-patch 2 3 "y")))
+           (expected (org-kit::edit-canonical-document
+                      (parse-org (format nil "* y~%")))))
+      (handler-case
+          (progn
+            (org-kit::edit-apply-patches-result document patches :expected expected)
+            (expect nil :to-be t))
+        (org-resource-limit-error (condition)
+          (with-soft-assertions
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-output-octets)
+            (expect (org-resource-limit-error-limit condition) :to-be 6)
+            (expect (org-resource-limit-error-actual condition) :to-be 7))))
+      (expect (document-text document) :to-equal source)
+      (expect (document-bom-p document) :to-be t))))
+
+  (it "counts a generated generic UTF-16 preamble in output limits"
+    (let* ((source (format nil "* x~%"))
+           (input-octets (octets #x00 #x2A #x00 #x20 #x00 #x78 #x00 #x0A))
+           (patches (list (org-kit::edit-make-patch 2 3 "y")))
+           (expected (org-kit::edit-canonical-document
+                      (parse-org (format nil "* y~%")))))
+      (let ((document
+              (parse-org input-octets :encoding :utf-16
+                         :limits (make-limits :max-output-octets 9
+                                              :max-output-length 5))))
+        (handler-case
+            (progn
+              (org-kit::edit-apply-patches-result document patches
+                                                  :expected expected)
+              (expect nil :to-be t))
+          (org-resource-limit-error (condition)
+            (with-soft-assertions
+              (expect (org-resource-limit-error-limit-name condition)
+                      :to-be :max-output-octets)
+              (expect (org-resource-limit-error-limit condition) :to-be 9)
+              (expect (org-resource-limit-error-actual condition) :to-be 10))))
+        (expect (document-text document) :to-equal source)
+        (expect (document-bom-p document) :to-be nil))
+      (let ((document
+              (parse-org input-octets :encoding :utf-16
+                         :limits (make-limits :max-output-octets 10
+                                              :max-output-length 5))))
+        (let* ((result (org-kit::edit-apply-patches-result
+                        document patches :expected expected))
+               (updated (edit-result-updated-document result)))
+          (with-soft-assertions
+            (expect (document-text updated) :to-equal (format nil "* y~%"))
+            (expect (document-bom-p updated) :to-be t)
+            (expect (write-org updated :output-type :octets)
+                    :to-equalp (octets #xFE #xFF #x00 #x2A #x00 #x20
+                                       #x00 #x79 #x00 #x0A))
+            (expect (document-text document) :to-equal source)
+            (expect (document-bom-p document) :to-be nil))))
+      (let ((document
+              (parse-org input-octets :encoding :utf-16
+                         :limits (make-limits :max-output-octets 10
+                                              :max-output-length 4))))
+        (handler-case
+            (progn
+              (org-kit::edit-apply-patches-result document patches
+                                                  :expected expected)
+              (expect nil :to-be t))
+          (org-resource-limit-error (condition)
+            (with-soft-assertions
+              (expect (org-resource-limit-error-limit-name condition)
+                      :to-be :max-output-length)
+              (expect (org-resource-limit-error-limit condition) :to-be 4)
+              (expect (org-resource-limit-error-actual condition) :to-be 5))))
+        (expect (document-text document) :to-equal source)
+        (expect (document-bom-p document) :to-be nil))))
+
+  (it "checks edited input length before reparsing for strings and encoded bytes"
+    (let* ((source (format nil "* x~%"))
+           (document
+             (parse-org source :limits (make-limits :max-input-length 4)))
+           (patches (list (org-kit::edit-make-patch 2 3 "long")))
+           (expected
+             (org-kit::edit-canonical-document
+              (parse-org (format nil "* long~%")))))
+      (handler-case
+          (progn
+            (org-kit::edit-apply-patches-result document patches :expected expected)
+            (expect nil :to-be t))
+        (org-resource-limit-error (condition)
+          (with-soft-assertions
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-input-length)
+            (expect (org-resource-limit-error-limit condition) :to-be 4)
+            (expect (org-resource-limit-error-actual condition) :to-be 7))))
+      (expect (document-text document) :to-equal source))
+    (let* ((source (format nil "* x~%"))
+           (document
+             (parse-org (octets #x2A #x20 #x78 #x0A)
+                        :encoding :utf-8
+                        :limits (make-limits :max-input-length 5)))
+           (patches (list (org-kit::edit-make-patch 2 3 "あ")))
+           (expected
+             (org-kit::edit-canonical-document
+              (parse-org (format nil "* あ~%")))))
+      (handler-case
+          (progn
+            (org-kit::edit-apply-patches-result document patches :expected expected)
+            (expect nil :to-be t))
+        (org-resource-limit-error (condition)
+          (with-soft-assertions
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-input-length)
+            (expect (org-resource-limit-error-limit condition) :to-be 5)
+            (expect (org-resource-limit-error-actual condition) :to-be 6))))
+      (expect (document-text document) :to-equal source)))
+
+  (it "uses the minimum output-octet budget for a multi-document transaction"
+    (let* ((source-one (format nil "* a~%"))
+           (source-two (format nil "* b~%"))
+           (document-one
+             (parse-org source-one
+                        :limits (make-limits :max-output-octets 8)))
+           (document-two
+             (parse-org source-two
+                        :limits (make-limits :max-output-octets 6)))
+           (patch-one (list (org-kit::edit-make-patch 2 3 "A")))
+           (patch-two (list (org-kit::edit-make-patch 2 3 "B")))
+           (expected-one
+             (org-kit::edit-canonical-document (parse-org (format nil "* A~%"))))
+           (expected-two
+             (org-kit::edit-canonical-document (parse-org (format nil "* B~%"))))
+           (transaction-result :no-result))
+      (handler-case
+          (progn
+            (setf transaction-result
+                  (org-kit::edit-apply-patches-transaction
+                   (list (list document-one patch-one :expected expected-one)
+                         (list document-two patch-two :expected expected-two))))
+            (expect nil :to-be t))
+        (org-resource-limit-error (condition)
+          (with-soft-assertions
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-output-octets)
+            (expect (org-resource-limit-error-limit condition) :to-be 6)
+            (expect (org-resource-limit-error-actual condition) :to-be 8))))
+      (with-soft-assertions
+        (expect transaction-result :to-be :no-result)
+        (expect (document-text document-one) :to-equal source-one)
+        (expect (document-text document-two) :to-equal source-two)))
+    (let* ((limits-one (make-limits :max-output-octets 8))
+           (limits-two (make-limits :max-output-octets 9))
+           (document-one (parse-org (format nil "* a~%") :limits limits-one))
+           (document-two (parse-org (format nil "* b~%") :limits limits-two))
+           (expected-one
+             (org-kit::edit-canonical-document (parse-org (format nil "* A~%"))))
+           (expected-two
+             (org-kit::edit-canonical-document (parse-org (format nil "* B~%"))))
+           (result
+             (org-kit::edit-apply-patches-transaction
+              (list (list document-one
+                          (list (org-kit::edit-make-patch 2 3 "A"))
+                          :expected expected-one)
+                    (list document-two
+                          (list (org-kit::edit-make-patch 2 3 "B"))
+                          :expected expected-two)))))
+      (with-soft-assertions
+        (expect (length result) :to-be 2)
+        (expect (document-text
+                 (edit-result-updated-document (first result)))
+                :to-equal (format nil "* A~%"))
+        (expect (document-text
+                 (edit-result-updated-document (second result)))
+                :to-equal (format nil "* B~%"))
+        (expect (document-text document-one) :to-equal (format nil "* a~%"))
+        (expect (document-text document-two) :to-equal (format nil "* b~%")))))
+
+  (it "uses the default output budget for an empty transaction"
+    (expect (org-kit::edit-apply-patches-transaction nil) :to-equal nil))
 
   (it "refuses edited text that cannot be encoded using the original encoding"
     (let* ((document (parse-org (octets #x2A #x20 #x78 #x0A) :encoding :latin-1))

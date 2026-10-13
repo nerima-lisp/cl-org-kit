@@ -58,6 +58,17 @@
   end
   replacement)
 
+(defstruct (edit-prepared-patches
+            (:constructor %make-edit-prepared-patches
+                (document source patches target expected output-octets))
+            (:copier nil))
+  document
+  source
+  patches
+  target
+  expected
+  output-octets)
+
 (defun edit-target-description (target)
   "Return a bounded, escaped description suitable for an edit condition."
   (let* ((description
@@ -138,15 +149,20 @@
                                   "Edit patches overlap"))
     normalized))
 
+(defun edit-output-bom-p (document)
+  (or (document-bom-p document)
+      (and (document-encoding document)
+           (reader-generic-bom-encoding-p (document-encoding document)))))
+
 (defun edit-prospective-output-length (document source patches)
-  "Return the output character count implied by PATCHES, including a retained BOM."
+  "Return the output character count implied by PATCHES, including its BOM."
   (+ (loop with length = (length source)
            for patch in patches
            do (incf length
                     (- (length (edit-patch-replacement patch))
                        (- (edit-patch-end patch) (edit-patch-start patch))))
            finally (return length))
-     (if (document-bom-p document) 1 0)))
+     (if (edit-output-bom-p document) 1 0)))
 
 (defun edit-splice-source (source patches)
   "Apply already sorted, non-overlapping PATCHES to SOURCE."
@@ -279,24 +295,71 @@
           (replace result octets :start1 (length bom))
           result))))
 
-(defun edit-encoded-source (text encoding bom-p)
-  "Encode TEXT in ENCODING and restore its original BOM state."
-  (handler-case
-      (let ((octets (cl-codec-kit:string-to-octets text :encoding encoding)))
-        (if bom-p
-            (edit-prepend-bom octets encoding)
-            octets))
+(defun edit-with-encoding-error-mapping (encoding thunk)
+  "Call THUNK and map codec failures to the established edit encoding error."
+  (handler-case (funcall thunk)
     (cl-codec-kit:cl-codec-kit-error ()
       (error 'org-kit-error
              :message (format nil "Edited text cannot be represented in ~A"
                               (bounded-text (princ-to-string encoding)))))))
+
+(defun edit-encoded-range-octets (string start end encoding)
+  "Count the octets for STRING[START,END) in ENCODING."
+  (edit-with-encoding-error-mapping
+   encoding
+   (lambda ()
+     (cl-codec-kit:string-size-in-octets string :start start :end end
+                                         :encoding encoding))))
+
+(defun edit-prospective-output-octets (document source patches)
+  "Count the encoded output implied by PATCHES without splicing SOURCE."
+  (let* ((encoding (or (document-encoding document) :utf-8))
+         (generic-preamble-p (reader-generic-bom-encoding-p encoding))
+         (preamble-length (if generic-preamble-p
+                              (edit-encoded-range-octets "" 0 0 encoding)
+                              0))
+         (body-octets 0))
+    (loop with cursor = 0
+          for patch in patches
+          for start = (edit-patch-start patch)
+          for end = (edit-patch-end patch)
+          for replacement = (edit-patch-replacement patch)
+          do (incf body-octets
+                   (- (edit-encoded-range-octets source cursor start encoding)
+                      preamble-length))
+             (incf body-octets
+                   (- (edit-encoded-range-octets replacement 0
+                                                  (length replacement) encoding)
+                      preamble-length))
+             (setf cursor end)
+          finally
+             (incf body-octets
+                   (- (edit-encoded-range-octets source cursor (length source)
+                                                  encoding)
+                      preamble-length)))
+    (+ body-octets
+       preamble-length
+       (if (and (document-bom-p document) (not generic-preamble-p))
+           (length (reader-output-bom encoding))
+           0))))
+
+(defun edit-encoded-source (text encoding bom-p)
+  "Encode TEXT in ENCODING and restore its original BOM state."
+  (let ((octets
+          (edit-with-encoding-error-mapping
+           encoding
+           (lambda ()
+             (cl-codec-kit:string-to-octets text :encoding encoding)))))
+    (if bom-p
+        (edit-prepend-bom octets encoding)
+        octets)))
 
 (defun edit-reparse-source (document text target)
   "Parse TEXT as a new document while preserving DOCUMENT's input metadata."
   (let* ((encoding (document-encoding document))
          (bom-p (document-bom-p document))
          (limits (document-limits document))
-         (output-length (+ (length text) (if bom-p 1 0))))
+         (output-length (+ (length text) (if (edit-output-bom-p document) 1 0))))
     (check-limit limits :max-output-length output-length)
     (handler-case
         (parse-org
@@ -330,31 +393,71 @@
                     always (edit-canonical-equal-p left-item right-item))))
         (t (equalp left right))))
 
+(defun edit-prepare-patches (document patches &key target expected)
+  "Validate PATCHES and check per-document size limits before source splicing."
+  (let* ((source (document-text document))
+         (normalized (edit-validate-patches source patches target))
+         (limits (document-limits document))
+         (output-length (edit-prospective-output-length document source normalized)))
+    (check-limit limits :max-output-length output-length)
+    (unless (document-encoding document)
+      (check-limit limits :max-input-length output-length))
+    (let ((output-octets
+            (edit-prospective-output-octets document source normalized)))
+      (when (document-encoding document)
+        (check-limit limits :max-input-length output-octets))
+      (check-limit limits :max-output-octets output-octets)
+      (%make-edit-prepared-patches document source normalized target expected
+                                   output-octets))))
+
+(defun edit-finish-prepared-patches (prepared)
+  "Splice, reparse, and validate a prepared patch operation."
+  (let* ((document (edit-prepared-patches-document prepared))
+         (patches (edit-prepared-patches-patches prepared))
+         (target (edit-prepared-patches-target prepared))
+         (new-source (edit-splice-source
+                      (edit-prepared-patches-source prepared) patches))
+         (new-document (edit-reparse-source document new-source target)))
+    (unless (edit-canonical-equal-p
+             (edit-prepared-patches-expected prepared)
+             (edit-canonical-document new-document))
+      (edit-signal-error target :unexpected-diff
+                         "Edited document contains an unexpected semantic change"))
+    (%make-edit-result
+     new-document
+     (mapcar (lambda (patch)
+               (make-edit-span (edit-patch-start patch)
+                               (edit-patch-end patch)))
+             patches))))
+
 (defun edit-apply-patches-result (document patches &key target expected)
   "Apply PATCHES and return the reparsed document with original-source spans."
-  (let* ((source (document-text document))
-         (normalized (edit-validate-patches source patches target)))
-    (check-limit (document-limits document) :max-output-length
-                 (edit-prospective-output-length document source normalized))
-    (let* ((new-source (edit-splice-source source normalized))
-           (new-document (edit-reparse-source document new-source target)))
-      (unless (edit-canonical-equal-p expected (edit-canonical-document new-document))
-        (edit-signal-error target :unexpected-diff
-                           "Edited document contains an unexpected semantic change"))
-      (%make-edit-result
-       new-document
-       (mapcar (lambda (patch)
-                 (make-edit-span (edit-patch-start patch)
-                                 (edit-patch-end patch)))
-               normalized)))))
+  (edit-finish-prepared-patches
+   (edit-prepare-patches document patches :target target :expected expected)))
 
 (defun edit-apply-patches-transaction (operations)
   "Return edit results only after every independent document edit succeeds.
 
 Each operation is the argument list accepted by EDIT-APPLY-PATCHES-RESULT."
-  (mapcar (lambda (arguments)
-            (apply #'edit-apply-patches-result arguments))
-          operations))
+  (let* ((prepared
+           (mapcar (lambda (arguments)
+                     (apply #'edit-prepare-patches arguments))
+                   operations))
+         (output-octets
+           (reduce #'+ prepared :key #'edit-prepared-patches-output-octets
+                   :initial-value 0))
+         (limits (mapcar (lambda (operation)
+                           (document-limits
+                            (edit-prepared-patches-document operation)))
+                         prepared))
+         (limit (minimum-limit-value limits :max-output-octets)))
+    (when (> output-octets limit)
+      (error 'org-resource-limit-error
+             :message "Resource limit exceeded"
+             :limit-name :max-output-octets
+             :limit limit
+             :actual output-octets))
+    (mapcar #'edit-finish-prepared-patches prepared)))
 
 (defun edit-apply-patches (document patches &key target expected)
   "Splice PATCHES into DOCUMENT, reparse, and require EXPECTED canonical data.
