@@ -794,9 +794,9 @@
                               (expect (org-resource-limit-error-limit condition)
                                       :to-be (1- output-octets))
                               (expect (org-resource-limit-error-actual condition)
-                                      :to-be output-octets))))
+                                      :to-be output-octets)))))
                      (org-kit::edit-apply-patches-result
-                      limited-document patches :expected expected))))))))
+                      limited-document patches :expected expected)))))))
 
   (it "checks edited input length before reparsing for strings and encoded bytes"
     (let* ((source (format nil "* x~%"))
