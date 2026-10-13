@@ -17,7 +17,7 @@
   source assignments)
 
 (defstruct (table-calc-parser (:constructor %make-table-calc-parser))
-  formula tokens (cursor 0) limits (nesting 0))
+  formula tokens cursor limits nesting)
 
 (defstruct (safe-decimal (:constructor %make-safe-decimal))
   coefficient exponent negative-zero-p)
@@ -331,8 +331,7 @@
     (:plus #\+)
     (:minus #\-)
     (:divide #\/)
-    (:multiply #\*)
-    (otherwise nil)))
+    (:multiply #\*)))
 
 (defun table-calc-parse-prefix (parser)
   (let* ((formula (table-calc-parser-formula parser))
@@ -526,11 +525,9 @@
                     (table-calc-parser-tokens parser))))))))
 
 (defun table-calc-parse-formula (formula &optional (limits (make-limits)))
-  (unless (stringp formula)
-    (error 'type-error :datum formula :expected-type 'string))
   (let* ((tokens (table-calc-tokenize formula limits))
          (parser (%make-table-calc-parser :formula formula :tokens tokens
-                                          :limits limits))
+                                          :cursor 0 :limits limits :nesting 0))
          (assignments '()))
     (unless tokens
       (table-calc-fail formula 0 :empty-formula))
@@ -571,13 +568,6 @@
 
 (defun parse-safe-decimal (text &key (start 0) (end (length text))
                                      (limits (make-limits)))
-  (unless (stringp text)
-    (error 'type-error :datum text :expected-type 'string))
-  (unless (and (integerp start) (integerp end)
-               (<= 0 start end (length text)))
-    (error 'type-error :datum (list start end) :expected-type '(cons integer integer)))
-  (unless (limits-p limits)
-    (error 'type-error :datum limits :expected-type 'limits))
   (let ((position start)
         (negative nil)
         (whole-digits 0)
