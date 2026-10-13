@@ -582,6 +582,7 @@
                ("fuzzy" "https:\\evil.example" "https:\\evil.example" nil)
                ("fuzzy" "//evil.example" "//evil.example" nil)
                ("fuzzy" nil "" nil)
+               ("file" nil "" nil)
                (nil "relative/path" "relative/path" t))))
       (with-soft-assertions
         (dolist (case cases)
