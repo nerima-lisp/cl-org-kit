@@ -1405,6 +1405,41 @@
                 :to-equalp #())))))
 
 (describe "E1 export resource boundaries"
+  (it "bounds preparation depth across included fragments"
+    (let* ((fragments
+             (loop for index from 1 to 32
+                   collect
+                   (with-output-to-string (output)
+                     (loop for level from 1 to 12
+                           do (format output "~A Heading ~D~%Content ~D~%"
+                                      (make-string level :initial-element #\*)
+                                      level level))
+                     (format output "#+INCLUDE: \"part-~D.org\""
+                             (1+ index)))))
+           (document
+             (parse-org "#+INCLUDE: \"part-1.org\""
+                        :source-name "main.org"
+                        :limits (make-limits :max-element-depth 128)))
+           (condition
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-prepare
+                 document :html
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore parent-source))
+                   (let* ((number (parse-integer path :start 5
+                                                 :end (- (length path) 4)))
+                          (fragment (nth (1- number) fragments)))
+                     fragment)))))))
+      (expect (typep condition 'org-resource-limit-error) :to-be t)
+      (when (typep condition 'org-resource-limit-error)
+        (expect (org-resource-limit-error-limit-name condition)
+                :to-be :max-element-depth)
+        (expect (org-resource-limit-error-limit condition) :to-be 128)
+        (expect (> (org-resource-limit-error-actual condition) 128) :to-be t))
+      (expect (typep condition 'storage-condition) :to-be nil)))
+
   (it "checks root nodes before processing export keywords"
     (let* ((document
              (parse-org "#+UNSUPPORTED: value"

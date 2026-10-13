@@ -912,7 +912,7 @@
                  (setf expanded-character-count actual)))
              (account-expanded-text (text)
                (account-expanded-length (length text)))
-             (parse-fragment (text source-name selected-scope depth
+             (parse-fragment (text source-name selected-scope depth element-depth
                                    active-includes active-macros)
                (let* ((remaining-nodes
                         (- (limit-value limits :max-export-expanded-nodes)
@@ -942,9 +942,9 @@
                       (fragment-root (document-root fragment)))
                  (account-tree fragment-root)
                  (prepare-siblings (node-children fragment-root) fragment
-                                   selected-scope depth active-includes
-                                   active-macros t)))
-             (prepare-include (node source-document selected-scope depth
+                                   selected-scope depth element-depth
+                                   active-includes active-macros t)))
+             (prepare-include (node source-document selected-scope depth element-depth
                                    active-includes active-macros)
                (let* ((path (export-include-path
                              (node-property node :value) node backend))
@@ -964,9 +964,9 @@
                      (export-error backend :invalid-include-result node
                                    "Include resolver must return a string"))
                    (account-expanded-text text)
-                   (parse-fragment text path selected-scope next-depth
+                   (parse-fragment text path selected-scope next-depth element-depth
                                    (cons path active-includes) active-macros))))
-             (prepare-macro (node source-document selected-scope depth
+             (prepare-macro (node source-document selected-scope depth element-depth
                                  active-includes active-macros)
                (let* ((key (string-downcase (node-property node :key)))
                       (definition (gethash key macros))
@@ -992,7 +992,8 @@
                             (parse-fragment
                              text
                              (document-source-name source-document)
-                             selected-scope next-depth active-includes
+                             selected-scope next-depth (1+ element-depth)
+                             active-includes
                              (cons key active-macros))))
                      (values
                       (list (%make-export-view
@@ -1000,8 +1001,9 @@
                              :payload (list :expanded-text text)
                              :source-document source-document))
                       nil)))))
-             (prepare-node (node source-document selected-scope depth
+             (prepare-node (node source-document selected-scope depth element-depth
                                 active-includes active-macros fragment-p)
+               (check-limit limits :max-element-depth element-depth)
                (let ((type (node-type node)))
                  (cond
                    ((export-option-pruned-p node options)
@@ -1027,7 +1029,8 @@
                                     (values nil nil)
                                     (prepare-siblings
                                      (node-children node) source-document
-                                     nested-scope depth active-includes
+                                     nested-scope depth (1+ element-depth)
+                                     active-includes
                                      active-macros fragment-p))
                               (if (or (not select-active-p) nested-scope
                                       selected-descendant-p)
@@ -1043,6 +1046,7 @@
                    ((and (eq type :keyword)
                          (string= (node-property node :key) "INCLUDE"))
                     (prepare-include node source-document selected-scope depth
+                                     element-depth
                                      active-includes active-macros))
                    ((eq type :keyword)
                     (export-validate-keywords
@@ -1053,6 +1057,7 @@
                     (values nil nil))
                    ((eq type :macro)
                     (prepare-macro node source-document selected-scope depth
+                                   element-depth
                                    active-includes active-macros))
                    ((eq type :diary-sexp)
                     (export-node-operation type backend node))
@@ -1063,7 +1068,8 @@
                                (nth-value
                                 0 (prepare-siblings
                                    (node-children node) source-document
-                                   selected-scope depth active-includes
+                                   selected-scope depth (1+ element-depth)
+                                   active-includes
                                    active-macros fragment-p)))))
                       (values
                        (list (%make-export-view
@@ -1072,7 +1078,8 @@
                               :source-document source-document))
                        nil))))))
              (prepare-siblings (nodes source-document selected-scope depth
-                                      active-includes active-macros fragment-p)
+                                      element-depth active-includes active-macros
+                                      fragment-p)
                (let ((remaining nodes)
                      (views nil)
                      (selected-descendant-p nil))
@@ -1092,6 +1099,7 @@
                                      (multiple-value-bind (prepared descendant-p)
                                          (prepare-node results-node source-document
                                                        selected-scope depth
+                                                       element-depth
                                                        active-includes active-macros
                                                        fragment-p)
                                        (setf result-views prepared
@@ -1111,7 +1119,8 @@
                             (t
                              (multiple-value-bind (prepared descendant-p)
                                  (prepare-node node source-document selected-scope
-                                               depth active-includes active-macros
+                                               depth element-depth
+                                               active-includes active-macros
                                                fragment-p)
                                (dolist (view prepared)
                                  (push view views))
@@ -1124,7 +1133,8 @@
                                       nil))
                  (root-views
                    (prepare-siblings (node-children root) document
-                                     (not select-active-p) 0 active-includes nil nil)))
+                                     (not select-active-p) 0 1
+                                     active-includes nil nil)))
             (%make-export-preparation
              :document document :backend backend :metadata metadata :options options
              :root-views root-views :toc (export-collect-toc root-views options)
