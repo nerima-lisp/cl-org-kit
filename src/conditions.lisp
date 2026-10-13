@@ -151,10 +151,29 @@ otherwise a character index into the document text. NIL when unknown."
   (:documentation "Signalled when an Org date, time, zone, or range is invalid.
 REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
 
+(define-condition org-clock-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ near \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-clock-error-reason condition)
+                     (org-clock-error-context condition))))
+  (:documentation "Signalled when a CLOCK entry or clock summary request is invalid.
+REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
+
 (defun org-time-error-reason (condition)
   "Return the keyword classifying the time failure CONDITION reports."
   (slot-value condition 'reason))
 
 (defun org-time-error-context (condition)
   "Return the bounded, escaped time or zone excerpt, or NIL."
+  (slot-value condition 'context))
+
+(defun org-clock-error-reason (condition)
+  "Return the keyword classifying why the clock operation failed."
+  (slot-value condition 'reason))
+
+(defun org-clock-error-context (condition)
+  "Return the bounded, escaped CLOCK line or option excerpt, or NIL."
   (slot-value condition 'context))

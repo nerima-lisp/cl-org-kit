@@ -1,0 +1,32 @@
+* Closed clipping and overlap
+CLOCK: [2026-10-12 Mon 08:50]--[2026-10-12 Mon 09:20] =>  0:30
+CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:45] =>  1:15
+CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 10:50] =>  0:50
+CLOCK: [2026-10-12 Mon 12:00]--[2026-10-12 Mon 12:20] =>  0:20
+** Nested clock
+CLOCK: [2026-10-12 Mon 10:50]--[2026-10-12 Mon 11:10] =>  0:20
+
+* Fractional clipping
+CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:01] =>  0:01
+CLOCK: [2026-10-12 Mon 09:01]--[2026-10-12 Mon 09:02] =>  0:01
+
+* Fractional clipping to one minute
+CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:02] =>  0:02
+
+* Unscoped duration
+CLOCK: =>  1:15
+
+* Running clock default exclusion
+CLOCK: [2026-10-12 Mon 09:00]
+
+* Running clock opt-in
+CLOCK: [2026-10-12 Mon 09:00]
+
+* Spring-forward clock
+CLOCK: [2026-03-08 Sun 01:30]--[2026-03-08 Sun 03:30] =>  2:00
+
+* Nonexistent local start
+CLOCK: [2026-03-08 Sun 02:30]--[2026-03-08 Sun 03:30] =>  1:00
+
+* Ambiguous local start
+CLOCK: [2026-11-01 Sun 01:30]--[2026-11-01 Sun 02:30] =>  1:00

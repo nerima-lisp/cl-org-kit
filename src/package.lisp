@@ -12,6 +12,12 @@
    #:org-edit-error #:org-edit-error-target #:org-edit-error-reason
    #:org-resource-limit-error #:org-resource-limit-error-limit-name
    #:org-resource-limit-error-limit #:org-resource-limit-error-actual
+   ;; Clock aggregation
+   #:org-clock-error #:org-clock-error-reason #:org-clock-error-context
+   #:clock-summary #:make-clock-summary #:clock-summary-p
+   #:clock-summary-scoped-minutes #:clock-summary-unscoped-minutes
+   #:clock-summary-total-minutes #:clock-summary-clipped-interval-count
+   #:sum-clocks
    ;; Edit results
    #:edit-span #:make-edit-span #:edit-span-p #:edit-span-start #:edit-span-end
    #:edit-result #:make-edit-result #:edit-result-p

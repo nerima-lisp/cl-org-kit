@@ -2,6 +2,7 @@
 
 (require 'org)
 (require 'org-element)
+(require 'org-clock)
 (require 'org-inlinetask)
 (require 'cl-lib)
 (require 'subr-x)
@@ -305,6 +306,219 @@
       (error "Generated output unexpectedly contains the current home directory")))
   text)
 
+(defun org-fixture--g1-clock-parse-time (text)
+  (unless (and (stringp text)
+               (string-match
+                "\\`\\([0-9]\\{4\\}\\)-\\([0-9]\\{2\\}\\)-\\([0-9]\\{2\\}\\)T\\([0-9]\\{2\\}\\):\\([0-9]\\{2\\}\\):\\([0-9]\\{2\\}\\)\\'"
+                text))
+    (error "Invalid G1 clock fixture datetime: %S" text))
+  (let ((year (string-to-number (match-string 1 text)))
+        (month (string-to-number (match-string 2 text)))
+        (day (string-to-number (match-string 3 text)))
+        (hour (string-to-number (match-string 4 text)))
+        (minute (string-to-number (match-string 5 text)))
+        (second (string-to-number (match-string 6 text))))
+    (unless (and (<= 1 month 12)
+                 (<= 1 day 31)
+                 (<= 0 hour 23)
+                 (<= 0 minute 59)
+                 (<= 0 second 59))
+      (error "Out-of-range G1 clock fixture datetime: %S" text))
+    (encode-time (list second minute hour day month year))))
+
+(defun org-fixture--g1-clock-read-cases (file)
+  (with-temp-buffer
+    (let ((coding-system-for-read 'utf-8-unix)
+          (read-eval nil))
+      (insert-file-contents file)
+      (goto-char (point-min))
+      (let ((data (read (current-buffer))))
+        (skip-chars-forward " \t\n\r")
+        (unless (and (eobp)
+                     (listp data)
+                     (eq (car-safe data) :cases)
+                     (= (length data) 2)
+                     (proper-list-p (cadr data))
+                     (cadr data))
+          (error "Expected one non-empty (:cases ...) declaration in %s" file))
+        (cadr data)))))
+
+(defun org-fixture--g1-clock-validate-cases (cases)
+  (let ((ids (make-hash-table :test #'equal))
+        (known-keys '(:id :action :source :heading-path :from :to
+                      :reference-time :zone :dst-policy :include-running-p
+                      :include-unscoped-p :active-clock-start :as-of))
+        (required-keys '(:id :action :source :heading-path :from :to
+                         :reference-time :zone :dst-policy :include-running-p
+                         :include-unscoped-p)))
+    (dolist (case cases)
+      (unless (and (proper-list-p case) (eq (car-safe case) :id))
+        (error "Malformed G1 clock case: %S" case))
+      (let ((plist case)
+            (seen nil))
+        (while plist
+          (unless (and (consp plist)
+                       (consp (cdr plist))
+                       (memq (car plist) known-keys)
+                       (not (memq (car plist) seen)))
+            (error "Malformed G1 clock case property list: %S" case))
+          (push (car plist) seen)
+          (setq plist (cddr plist)))
+        (unless (cl-every (lambda (key) (memq key seen)) required-keys)
+          (error "Missing required G1 clock case property: %S" case))
+        (let ((id (plist-get case :id))
+              (path (plist-get case :heading-path))
+              (include-running (plist-get case :include-running-p))
+              (has-active-start (plist-member case :active-clock-start))
+              (has-as-of (plist-member case :as-of)))
+          (unless (and (stringp id)
+                       (not (gethash id ids))
+                       (eq (plist-get case :action) :sum-clocks)
+                       (equal (plist-get case :source) "g1-clock.org")
+                       (and (proper-list-p path) path (cl-every #'stringp path))
+                       (stringp (plist-get case :from))
+                       (stringp (plist-get case :to))
+                       (stringp (plist-get case :reference-time))
+                       (stringp (plist-get case :zone))
+                       (memq (plist-get case :dst-policy)
+                             '(:compatible :earlier :later :strict))
+                       (memq include-running '(nil t))
+                       (memq (plist-get case :include-unscoped-p) '(nil t))
+                       (eq (and has-active-start t) (and has-as-of t))
+                       (or (not include-running) has-active-start))
+            (error "Invalid G1 clock case: %S" case))
+          (when has-active-start
+            (unless (and (stringp (plist-get case :active-clock-start))
+                         (stringp (plist-get case :as-of)))
+              (error "Invalid running-clock fields in G1 clock case: %S" case)))
+          (puthash id t ids))))
+    cases))
+
+(defun org-fixture--g1-clock-heading-position (path)
+  (let ((current-path nil)
+        found)
+    (save-excursion
+      (goto-char (point-min))
+      (while (and (not found)
+                  (re-search-forward "^\\(\\*+\\)[ \t]+.*$" nil t))
+        (let* ((position (match-beginning 0))
+               (level (length (match-string 1)))
+               (title (save-excursion
+                        (goto-char position)
+                        (org-get-heading t t t t))))
+          (setq current-path
+                (append (cl-subseq current-path 0
+                                   (min (1- level) (length current-path)))
+                        (list title)))
+          (when (equal current-path path)
+            (setq found position)))))
+    (or found (error "G1 clock heading path not found: %S" path))))
+
+(defun org-fixture--g1-clock-open-position (heading-position start-time)
+  (let ((line (format "CLOCK: [%s]"
+                      (format-time-string "%Y-%m-%d %a %H:%M" start-time)))
+        (subtree-end (save-excursion
+                       (goto-char heading-position)
+                       (org-end-of-subtree t t)
+                       (point))))
+    (save-excursion
+      (goto-char heading-position)
+      (forward-line 1)
+      (unless (re-search-forward
+               (concat "^[ \t]*" (regexp-quote line) "[ \t]*$")
+               subtree-end t)
+        (error "G1 active clock line missing under heading at %d" heading-position))
+      (line-beginning-position))))
+
+(defun org-fixture--g1-clock-case-minutes (case corpus-directory)
+  (let* ((plist case)
+         (zone (plist-get plist :zone))
+         (source (expand-file-name (plist-get plist :source) corpus-directory))
+         (process-environment (copy-sequence process-environment))
+         (system-time-locale "C")
+         (org-clock-report-include-clocking-task
+          (plist-get plist :include-running-p))
+         (org-clock-marker (make-marker))
+         (org-clock-hd-marker (make-marker))
+         org-clock-start-time)
+    (unless (file-exists-p source)
+      (error "G1 clock corpus file does not exist: %s" (plist-get plist :source)))
+    (setenv "TZ" zone)
+    (let* ((from (float-time
+                  (org-fixture--g1-clock-parse-time (plist-get plist :from))))
+           (to (float-time
+                (org-fixture--g1-clock-parse-time (plist-get plist :to))))
+           (reference-time
+            (org-fixture--g1-clock-parse-time (plist-get plist :reference-time)))
+           (as-of (if (plist-member plist :as-of)
+                      (org-fixture--g1-clock-parse-time (plist-get plist :as-of))
+                    reference-time))
+           (active-start (and (plist-member plist :active-clock-start)
+                              (org-fixture--g1-clock-parse-time
+                               (plist-get plist :active-clock-start)))))
+      (when (> from to)
+        (error "G1 clock range ends before it starts: %S" (plist-get plist :id)))
+      (unless (= (float-time reference-time) (float-time as-of))
+        (error "G1 active clock as-of differs from reference-time: %S"
+               (plist-get plist :id)))
+      (setq org-clock-start-time active-start)
+      (with-temp-buffer
+        (org-fixture--read-buffer source)
+        (let* ((heading-position
+                (org-fixture--g1-clock-heading-position
+                 (plist-get plist :heading-path)))
+               (active-position
+                (and active-start
+                     (org-fixture--g1-clock-open-position heading-position active-start))))
+          (when active-position
+            (set-marker org-clock-marker active-position (current-buffer))
+            (set-marker org-clock-hd-marker heading-position (current-buffer)))
+          (goto-char heading-position)
+          (org-narrow-to-subtree)
+          (cl-letf (((symbol-function 'current-time) (lambda () as-of))
+                    ((symbol-function 'current-time-string)
+                     (lambda (&optional time)
+                       (format-time-string "%a %b %e %T %Y" (or time as-of))))
+                    ;; Emacs 31's time-since can consult the system clock directly.
+                    ((symbol-function 'time-since)
+                     (lambda (time) (time-subtract as-of time))))
+            (org-clock-sum from to))
+          (unless (integerp org-clock-file-total-minutes)
+            (error "Org did not return an integer clock total for %S"
+                   (plist-get plist :id)))
+          org-clock-file-total-minutes)))))
+
+(defun org-fixture-generate-g1-clock
+    (corpus-directory cases-file expected-file)
+  (unless (file-directory-p corpus-directory)
+    (error "Corpus directory does not exist: %s" corpus-directory))
+  (let* ((cases (org-fixture--g1-clock-validate-cases
+                 (org-fixture--g1-clock-read-cases cases-file)))
+         (results
+          (mapcar (lambda (case)
+                    (list :id (plist-get case :id)
+                          :org-clock-minutes
+                          (org-fixture--g1-clock-case-minutes case corpus-directory)))
+                  cases))
+         (content
+          (org-fixture--check-output
+           (concat
+            (format (concat
+                     "; Generated from org-clock-sum with Emacs %s and Org %s.\n"
+                     "; Source encoding: UTF-8. Case zones are bound as TZ per oracle call.\n"
+                     "; Running-clock as-of and current-time are fixed by each case.\n"
+                     "; DST gap/overlap values record Org's local-time behavior; :dst-policy is case input.\n")
+                    emacs-version (org-version))
+            "("
+            (mapconcat #'org-fixture--cl-value results "\n ")
+            ")\n"))))
+    (make-directory (file-name-directory expected-file) t)
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region content nil expected-file nil 'silent))
+    (princ (format "Wrote %s\n" (file-name-nondirectory expected-file)))
+    (princ (format "Generated %d G1 clock cases.\n" (length cases)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
 (defun org-fixture-generate (corpus-directory expected-directory)
   "Generate one .sexp file per .org file under CORPUS-DIRECTORY."
   (unless (file-directory-p corpus-directory)
@@ -330,6 +544,11 @@
                      command-line-args-left)))
     (setq command-line-args-left nil)
     (cond
+     ((and (= (length arguments) 4) (equal (car arguments) "--g1-clock"))
+      (org-fixture-generate-g1-clock
+       (expand-file-name (nth 1 arguments))
+       (expand-file-name (nth 2 arguments))
+       (expand-file-name (nth 3 arguments))))
      ((and (= (length arguments) 3) (equal (car arguments) "--check-types"))
       (org-fixture-check-types (expand-file-name (nth 1 arguments))
                                (expand-file-name (nth 2 arguments))))
@@ -344,6 +563,7 @@
      (t
       (error (concat
               "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el CORPUS-DIR EXPECTED-DIR\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --g1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
