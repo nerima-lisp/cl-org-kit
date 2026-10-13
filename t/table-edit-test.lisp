@@ -1157,7 +1157,31 @@
            (zero-document (parse-org zero-source))
            (zero-table
              (table-edit-test-find-node (document-root zero-document) :table))
-           (zero-result (table-delete-row zero-document zero-table 1)))
+           (zero-result (table-delete-row zero-document zero-table 1))
+           (large-digits
+             (concatenate 'string "1" (make-string 39 :initial-element #\0)))
+           (large-incremented-digits
+             (concatenate 'string "1" (make-string 38 :initial-element #\0)
+                          "1"))
+           (large-ones (make-string 39 :initial-element #\9))
+           (large-increment-source
+             (format nil "| A |~%| x |~%#+TBLFM: @~A$1=@~A$1~%"
+                     large-digits large-digits))
+           (large-increment-document (parse-org large-increment-source))
+           (large-increment-table
+             (table-edit-test-find-node
+              (document-root large-increment-document) :table))
+           (large-increment-result
+             (table-insert-row large-increment-document large-increment-table 1))
+           (large-delete-source
+             (format nil "| A | B |~%| x | y |~%#+TBLFM: $~A=$~A~%"
+                     large-digits large-digits))
+           (large-delete-document (parse-org large-delete-source))
+           (large-delete-table
+             (table-edit-test-find-node
+              (document-root large-delete-document) :table))
+           (large-delete-result
+             (table-delete-column large-delete-document large-delete-table 1)))
       (with-soft-assertions
         (expect (document-text
                  (edit-result-updated-document increment-result))
@@ -1173,7 +1197,83 @@
                  (edit-result-updated-document zero-result))
                 :to-equal
                 (format nil "| y |~%#+TBLFM: @000$1=@000$1~%"))
+        (expect (document-text
+                 (edit-result-updated-document large-increment-result))
+                :to-equal
+                (format nil "|   |~%| A |~%| x |~%#+TBLFM: @~A$1=@~A$1~%"
+                        large-incremented-digits large-incremented-digits))
+        (expect (document-text
+                 (edit-result-updated-document large-delete-result))
+                :to-equal
+                (format nil "| B |~%| y |~%#+TBLFM: $~A=$~A~%"
+                        large-ones large-ones))
         (expect (document-text index-ten-document) :to-equal index-ten-source)
         (expect (document-text delete-document) :to-equal delete-source)
-        (expect (document-text zero-document) :to-equal zero-source))))
+        (expect (document-text zero-document) :to-equal zero-source)
+        (expect (document-text large-increment-document)
+                :to-equal large-increment-source)
+        (expect (document-text large-delete-document)
+                :to-equal large-delete-source))))
+
+  (it "renders empty table columns and honors alignment and width cookies"
+    (let* ((hline-source
+             (format nil "| A |~%|---|~%| x |~%#+TBLFM: $1=1~%"))
+           (hline-document (parse-org hline-source))
+           (hline-table
+             (table-edit-test-find-node (document-root hline-document) :table))
+           (hline-result (table-delete-column hline-document hline-table 1))
+           (sibling-source (format nil "| only |~%After~%"))
+           (sibling-document (parse-org sibling-source))
+           (sibling-table
+             (table-edit-test-find-node
+              (document-root sibling-document) :table))
+           (sibling-result
+             (table-delete-row sibling-document sibling-table 1))
+           (alignment-source (format nil "| <r> | <c> |~%| x | y |~%"))
+           (alignment-document (parse-org alignment-source))
+           (alignment-table
+             (table-edit-test-find-node
+              (document-root alignment-document) :table))
+           (alignment-result
+             (table-insert-row alignment-document alignment-table 2))
+           (width-source (format nil "| <10> |~%| x |~%"))
+           (width-document (parse-org width-source))
+           (width-table
+             (table-edit-test-find-node (document-root width-document) :table))
+           (width-result (table-insert-row width-document width-table 2)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document hline-result))
+                :to-equal (format nil "||~%||~%||~%#+TBLFM: ~%"))
+        (expect (document-text (edit-result-updated-document sibling-result))
+                :to-equal (format nil "After~%"))
+        (expect (document-text
+                 (edit-result-updated-document alignment-result))
+                :to-equal
+                (format nil
+                        "| <r> | <c> |~%|     |     |~%|   x |  y  |~%"))
+        (expect (document-text (edit-result-updated-document width-result))
+                :to-equal (format nil "| <10> |~%|      |~%| x    |~%"))
+        (expect (document-text hline-document) :to-equal hline-source)
+        (expect (document-text sibling-document) :to-equal sibling-source)
+        (expect (document-text alignment-document) :to-equal alignment-source)
+        (expect (document-text width-document) :to-equal width-source))))
+
+  (it "accounts for generic UTF-16 BOMs when sizing edited table output"
+    (let* ((source (format nil "| A |~%| x |~%"))
+           (expected (format nil "| A |~%|   |~%| x |~%"))
+           (input-octets
+             (cl-codec-kit:string-to-octets source :encoding :utf-16))
+           (expected-octets
+             (cl-codec-kit:string-to-octets expected :encoding :utf-16))
+           (document (parse-org input-octets :encoding :utf-16))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (result (table-insert-row document table 2))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-bom-p document) :to-be t)
+        (expect (document-encoding document) :to-be :utf-16)
+        (expect (document-text updated) :to-equal expected)
+        (expect (write-org updated :output-type :octets)
+                :to-equalp expected-octets)
+        (expect (document-text document) :to-equal source))))
 )

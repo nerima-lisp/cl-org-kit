@@ -330,6 +330,16 @@
                   row))
             models)))
 
+(defun table-edit-zero-width-column-delete-models (models)
+  (mapcar (lambda (row)
+            (if (eq (%table-edit-row-kind row) :rule)
+                (%make-table-edit-row
+                 :kind :standard :values nil :cells nil
+                 :section (%table-edit-row-section row)
+                 :terminal-bar-p (%table-edit-row-terminal-bar-p row))
+                row))
+          models))
+
 (defun table-edit-coordinate-map (value operation)
   (let ((kind (getf operation :kind))
         (index (getf operation :index))
@@ -644,16 +654,11 @@
           (write-char #\| stream)
           (cond
             ((eq (%table-edit-row-kind row) :rule)
-             (if (zerop column-count)
-                 (progn
-                   (write-string (table-hline-segment 1) stream)
-                   (when terminal-p (write-char #\| stream)))
-                 (progn
-                   (loop for width across widths
-                         for index from 0
-                         do (when (plusp index) (write-char #\+ stream))
-                            (write-string (table-hline-segment width) stream))
-                   (when terminal-p (write-char #\| stream)))))
+             (loop for width across widths
+                   for index from 0
+                   do (when (plusp index) (write-char #\+ stream))
+                      (write-string (table-hline-segment width) stream)
+                   finally (when terminal-p (write-char #\| stream))))
             ((zerop column-count)
              (write-char #\| stream))
             (t
@@ -672,13 +677,10 @@
       (let ((column-count (length widths)))
         (+ prefix-length 1
            (if (eq (%table-edit-row-kind row) :rule)
-               (if (zerop column-count)
-                   (+ (table-hline-formatted-segment-length 1)
-                      (if terminal-p 1 0))
-                   (+ (loop for width across widths
-                            sum (table-hline-formatted-segment-length width))
-                      (1- column-count)
-                      (if terminal-p 1 0)))
+               (+ (loop for width across widths
+                        sum (table-hline-formatted-segment-length width))
+                  (1- column-count)
+                  (if terminal-p 1 0))
                (if (zerop column-count)
                    1
                    (+ (loop for value in (%table-edit-row-values row)
@@ -716,19 +718,15 @@
         (column-count (length widths)))
     (incf total (table-edit-ascii-octets 1 #\| encoding preamble))
     (if (eq (%table-edit-row-kind row) :rule)
-        (if (zerop column-count)
-            (incf total (table-edit-ascii-octets
-                         (table-hline-formatted-segment-length 1) #\- encoding
-                         preamble))
-            (loop for width across widths
-                  for index from 0
-                  do (when (plusp index)
-                       (incf total (table-edit-ascii-octets 1 #\+ encoding
-                                                            preamble)))
-                     (incf total
-                           (table-edit-ascii-octets
-                            (table-hline-formatted-segment-length width)
-                            #\- encoding preamble))))
+        (loop for width across widths
+              for index from 0
+              do (when (plusp index)
+                   (incf total (table-edit-ascii-octets 1 #\+ encoding
+                                                        preamble)))
+                 (incf total
+                       (table-edit-ascii-octets
+                        (table-hline-formatted-segment-length width)
+                        #\- encoding preamble)))
         (if (zerop column-count)
             (incf total (table-edit-ascii-octets 1 #\| encoding preamble))
             (loop for value in (%table-edit-row-values row)
@@ -1439,7 +1437,7 @@
             (table-edit-column-name-survives-delete-p
              table "INVALID" (getf operation :index))))
     (multiple-value-bind (widths alignments)
-        (table-edit-row-width-layout normalized-models width document)
+        (table-edit-row-width-layout normalized-models width)
       (let ((row-output-length
               (table-edit-output-rows-length
                normalized-models (length prefix) widths newline-length
@@ -1483,28 +1481,18 @@
             (edit-apply-patches-result document (nreverse patches)
                                        :target table :expected expected))))))))
 
-(defun table-edit-row-width-layout (models width document)
+(defun table-edit-row-width-layout (models width)
   (let ((widths (make-array width :initial-element 1))
-        (hints (make-array width :initial-element 0))
-        (alignments (make-array width :initial-element nil))
-        (maximum-width (1+ (limit-value (document-limits document)
-                                        :max-output-length))))
+        (alignments (make-array width :initial-element nil)))
     (dolist (row models)
       (when (eq (%table-edit-row-kind row) :standard)
         (loop for value in (%table-edit-row-values row)
               for column from 0
               do (setf (aref widths column)
                        (max (aref widths column) (table-string-width value)))
-                 (let ((alignment (table-cell-alignment-cookie value))
-                       (hint (table-cell-width-cookie value maximum-width)))
+                 (let ((alignment (table-cell-alignment-cookie value)))
                    (when (and alignment (null (aref alignments column)))
-                     (setf (aref alignments column) alignment))
-                   (when hint
-                     (setf (aref hints column)
-                           (max (aref hints column) hint)))))))
-    (loop for column below width
-          do (setf (aref widths column)
-                   (max (aref widths column) (aref hints column))))
+                     (setf (aref alignments column) alignment))))))
     (values widths
             (map 'vector (lambda (alignment) (or alignment :left)) alignments))))
 
@@ -1591,9 +1579,14 @@
                                  (if (eq action :delete-column)
                                      (1- width)
                                      width)))
-                  (new-models
+                  (transformed-models
                     (table-edit-transform-column-rows
-                     models edit-kind index from to column-values)))
+                     models edit-kind index from to column-values))
+                  (new-models
+                    (if (and (eq action :delete-column) (zerop new-width))
+                        (table-edit-zero-width-column-delete-models
+                         transformed-models)
+                        transformed-models)))
              (setf (getf operation :index) index
                    (getf operation :from) from
                    (getf operation :to) to)
