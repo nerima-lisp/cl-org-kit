@@ -1,4 +1,6 @@
 #+TODO: TODO | DONE
+#+NAME: option-pruning
+#+CAPTION: Option pruning fixture
 
 * TODO Task [0/1]
 SCHEDULED: <2026-10-14 Wed>

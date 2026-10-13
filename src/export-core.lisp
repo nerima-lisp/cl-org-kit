@@ -472,9 +472,6 @@
                          (loop while (and (< position (length inner))
                                           (not (char= (char inner position) #\")))
                                do (incf position))
-                         (when (= position (length inner))
-                           (export-invalid-option source backend
-                                                  "Unclosed string in option list"))
                          (push (subseq inner start position) items)
                          (incf position)
                          (unless (or (= position (length inner))
@@ -498,7 +495,7 @@
 
 (defun export-option-value (specification value source backend)
   (let ((kind (third specification)))
-    (case kind
+    (ecase kind
       (:boolean (export-option-boolean value source backend))
       (:integer (export-option-integer value source backend))
       (:toc (cond ((string-equal value "t") t)
@@ -548,8 +545,7 @@
              ((and (eq kind :tasks-mode) (string-equal value "not"))
               (export-invalid-option source backend "Invalid tasks option value"))
              (t (export-option-list value source backend))))
-      (otherwise
-       (export-invalid-option source backend "Invalid option specification")))))
+      )))
 
 (defun export-option-token-parts (token source backend)
   (if (and (> (length token) 2)
@@ -849,12 +845,6 @@
                         (and (consp value)
                              (export-option-selects-name-p
                               value (node-property node :drawer-name)))))))
-        (and (eq type :node-property) properties
-             (not (let ((value (cdr properties)))
-                    (or (eq value t)
-                        (and (consp value)
-                             (export-option-selects-name-p
-                              value (node-property node :key)))))))
         (and (eq type :property-drawer) properties
              (not (let ((value (cdr properties)))
                     (or (eq value t)

@@ -739,6 +739,8 @@
                 "#+OPTIONS: unknown:t"
                 "#+OPTIONS: toc"
                 "#+OPTIONS: toc:"
+                "#+OPTIONS: \"bad\""
+                "#+OPTIONS: (TODO)"
                 "#+OPTIONS: ^:maybe"
                 "#+OPTIONS: arch:maybe"
                 "#+OPTIONS: tex:maybe"
