@@ -202,7 +202,7 @@
           (list (emitter-object-test-node :plain-text '(:value "3")))))
    (cons :table-cell
          (emitter-object-test-node
-          :table-cell '(:value nil)
+          :table-cell '(:value "cell *bold*")
           (list (emitter-object-test-node :plain-text '(:value "cell "))
                 (emitter-object-test-node
                  :bold nil
@@ -651,7 +651,19 @@
      :statistics-cookie '(:value "[40%]" :type :percent)))
 
   (it "rejects table cells and targets with unrepresentable contents"
-    (emitter-object-test-rejects-output :table-cell '(:value "value"))
+    (expect (emitter-object-test-output :table-cell '(:value "raw source value"))
+            :to-equal "")
+    (emitter-object-test-rejects-output :table-cell '(:value 42))
+    (expect (emitter-object-test-output
+             :table-cell '(:value "raw timestamp <2026-10-12 Mon>")
+             (list (emitter-object-test-node
+                    :plain-text '(:value "raw timestamp "))
+                   (emitter-object-test-node
+                    :timestamp
+                    '(:type :active
+                      :year-start 2026 :month-start 10 :day-start 12
+                      :year-end 2026 :month-end 10 :day-end 12))))
+            :to-equal "raw timestamp <2026-10-12>")
     (dolist (value (list "a|b" (format nil "a~%b")
                          (format nil "a~Cb" #\Return) " leading" "trailing "))
       (emitter-object-test-rejects-output

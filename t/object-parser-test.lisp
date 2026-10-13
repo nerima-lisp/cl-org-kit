@@ -656,7 +656,7 @@
                            689
                            671
                            687
-                           '(:value nil)
+                           '(:value "Cell with *bold*")
                            :table-row
                            #\|)
                     (check 422

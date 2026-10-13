@@ -101,8 +101,17 @@
   (expect (list fixture (node-type node))
           :to-equal (list fixture (first expected)))
   (loop for (key value) on (second expected) by #'cddr
-        do (assert-conformance-value
-            (conformance-node-property node key) value fixture))
+        do (let ((actual (conformance-node-property node key)))
+             (if (and (eq (node-type node) :table-cell)
+                      (eq key :value)
+                      (null value))
+                 (expect (list fixture actual)
+                         :to-equal
+                         (list fixture
+                               (subseq (document-text (node-document node))
+                                       (node-contents-begin node)
+                                       (node-contents-end node))))
+                 (assert-conformance-value actual value fixture))))
   (let ((children (node-children node))
         (expected-children (cddr expected)))
     (expect (list fixture (length children))
@@ -139,4 +148,13 @@
         (expect comparison-count :to-be 18)
         (expect round-trip-count :to-be 18))
       (format t "conformance fixtures: read=~D compared=~D octet-round-trips=~D~%"
-              read-count comparison-count round-trip-count))))
+              read-count comparison-count round-trip-count)))
+
+  (it "keeps table formula properties and emitted directives in source order"
+    (let* ((source (format nil "| x |~%#+TBLFM: $1=$1+1~%#+TBLFM: $1=$1-1~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (table (first (node-children section))))
+      (expect (node-property table :tblfm)
+              :to-equal '("$1=$1+1" "$1=$1-1"))
+      (expect (write-org document) :to-equal source))))

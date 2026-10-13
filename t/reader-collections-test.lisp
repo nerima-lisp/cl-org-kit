@@ -66,7 +66,7 @@
         (expect (length rows) :to-be 4)
         (expect (list (node-begin first-row) (node-end first-row))
                 :to-equal (list 0 first-row-end))
-        (expect (node-property (first first-cells) :value) :to-be nil)
+        (expect (node-property (first first-cells) :value) :to-equal "Name")
         (expect (list (node-contents-begin (first first-cells))
                       (node-contents-end (first first-cells)))
                 :to-equal (list name-start (+ name-start (length "Name"))))
@@ -78,6 +78,8 @@
         (expect (node-property rule-row :type) :to-be :rule)
         (expect (node-contents-begin rule-row) :to-be nil)
         (expect (length empty-cells) :to-be 2)
+        (expect (mapcar (lambda (cell) (node-property cell :value)) empty-cells)
+                :to-equal '("" ""))
         (expect (collection-node-content document (first empty-cells)) :to-equal "")
         (expect (collection-node-content document (second empty-cells)) :to-equal "")
         (expect (collection-node-content document final-cell)
@@ -119,7 +121,7 @@
            (second-end (1+ (position #\Newline source :start second-start))))
       (with-soft-assertions
         (expect (node-property table :tblfm)
-                :to-equal '("$1=$1-1" "$1=$1+1"))
+                :to-equal '("$1=$1+1" "$1=$1-1"))
         (expect (node-property table :reader-tblfm-ranges)
                 :to-equal (list (cons first-start first-end)
                                 (cons second-start second-end)))
@@ -153,6 +155,34 @@
         (expect (node-property table :type) :to-be :org)
         (expect (node-property table :tblfm) :to-be nil))))
 
+  (it "matches Org's classification when a table.el border follows an attached formula"
+    (let* ((source (format nil "+--+~%|a |~%#+TBLFM: x~%+--+~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (elements (node-children section))
+           (table (second elements))
+           (pipe-start (search "|a |" source)))
+      (with-soft-assertions
+        (expect (mapcar #'node-type elements)
+                :to-equal '(:paragraph :table :paragraph))
+        (expect (node-property table :type) :to-be :org)
+        (expect (node-property table :tblfm) :to-equal '("x"))
+        (expect (node-begin table) :to-be pipe-start)
+        (expect (node-text table) :to-equal (format nil "|a |~%#+TBLFM: x~%"))
+        (expect (node-text (first elements)) :to-equal (format nil "+--+~%"))
+        (expect (node-text (third elements)) :to-equal (format nil "+--+~%"))))
+    (let* ((source (format nil "+--+~%|a |~%+--+~%#+TBLFM: x~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (elements (node-children section))
+           (table (first elements)))
+      (with-soft-assertions
+        (expect (length elements) :to-be 1)
+        (expect (node-property table :type) :to-be :table.el)
+        (expect (node-property table :value)
+                :to-equal (format nil "+--+~%|a |~%+--+~%"))
+        (expect (node-property table :tblfm) :to-equal '("x")))))
+
   (it "keeps table.el tables opaque"
     (let* ((source (format nil "+---+---+~%| one | two |~%+---+---+~%"))
            (document (parse-org source))
@@ -167,22 +197,35 @@
         (expect (node-children table) :to-equal '()))))
 
   (it "keeps table.el separators and formulas opaque and source-positioned"
-    (let* ((source (format nil "+---+---+~%| one | two |~%+===+===+~%| three | four |~%+---+---+~%#+TBLFM: $1=$2~%"))
+    (let* ((source (format nil "+---+---+~%| one | two |~%+===+===+~%| three | four |~%+---+---+~%#+TBLFM: $1=$2~%#+TBLFM: $2=$1~%"))
            (document (parse-org source))
            (section (first (node-children (document-root document))))
            (table (first (node-children section)))
            (directive-start (search "#+TBLFM: $1=$2" source))
-           (table-value (subseq source 0 directive-start))
+           (second-directive-start (search "#+TBLFM: $2=$1" source))
+           (first-directive-end
+             (1+ (position #\Newline source :start directive-start)))
            (directive-end (length source)))
       (with-soft-assertions
         (expect (node-type table) :to-be :table)
         (expect (node-property table :type) :to-be :table.el)
-        (expect (node-property table :value) :to-equal table-value)
-        (expect (node-property table :tblfm) :to-equal '("$1=$2"))
+        (expect (node-property table :value)
+                :to-equal (subseq source 0 directive-start))
+        (expect (node-property table :tblfm) :to-equal '("$1=$2" "$2=$1"))
         (expect (node-property table :reader-tblfm-ranges)
-                :to-equal (list (cons directive-start directive-end)))
+                :to-equal (list (cons directive-start first-directive-end)
+                                (cons second-directive-start directive-end)))
         (expect (node-end table) :to-be directive-end)
         (expect (node-children table) :to-equal '()))))
+
+  (it "emits table.el from retained source because value and formula properties are informational"
+    (let* ((source (format nil "+---+~%| x |~%+---+~%#+TBLFM: $1=$1+1~%"))
+           (document (parse-org source))
+           (section (first (node-children (document-root document))))
+           (table (first (node-children section))))
+      (setf (node-property table :value) "edited value"
+            (node-property table :tblfm) '("$1=$1+99"))
+      (expect (emit-org table) :to-equal source)))
   (it "classifies independent list kinds and checkbox states"
     (let* ((ordered-document (parse-org (format nil "1) [@4]~%")))
            (ordered-list

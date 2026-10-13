@@ -239,7 +239,7 @@
                         (node-contents-end cell)
                         (node-properties cell))
                   :to-equal
-                  '(8 2 6 (:value nil)))
+                  '(8 2 6 (:value "Cell")))
                  (expect
                   (other-test-match cell-source
                                     1

@@ -57,6 +57,9 @@
                          (and (eq (node-type node) :table)
                               (eq (node-property node :type) :table.el)
                               (eq key :value))
+                         ;; Cell :value preserves source spelling; children drive canonical emission.
+                         (and (eq (node-type node) :table-cell)
+                              (eq key :value))
                          (and (eq (node-type node) :headline)
                               (eq key :raw-value)))
                 append (list key (emitter-test-value-projection value)))
@@ -181,6 +184,19 @@
         (with-soft-assertions
           (expect output :to-equal source)
           (expect actual :to-equal expected)))))
+
+  (it "emits table-cell children when their raw value contains timestamp weekday text"
+    (let* ((source (format nil "| timestamp <2026-10-12 Mon> |~%"))
+           (document (parse-org source))
+           (root (document-root document))
+           (section (first (node-children root)))
+           (table (first (node-children section)))
+           (row (first (node-children table)))
+           (cell (first (node-children row)))
+           (output (emit-org root)))
+      (expect (node-property cell :value)
+              :to-equal "timestamp <2026-10-12 Mon>")
+      (expect output :to-equal (format nil "|timestamp <2026-10-12>|~%"))))
 
   (it "round trips table.el formulas from the opaque source"
     (let* ((source (format nil "+---+~%| x |~%+---+~%#+TBLFM: $1=$1~%"))

@@ -251,36 +251,84 @@
         (let ((after-line (min limit (reader-next-line context offset))))
           (values value (cons offset after-line) after-line)))))
 
+  (defun reader-collect-table-formulas (context start limit)
+    (let ((position start)
+          (formulas nil)
+          (ranges nil))
+      (loop while (< position limit)
+            do (multiple-value-bind (formula span after-line)
+                   (reader-table-formula-details context position limit)
+                 (unless span
+                   (return))
+                 (push formula formulas)
+                 (push span ranges)
+                 (setf position after-line)))
+      (values (nreverse formulas) (nreverse ranges) position)))
+
   (defun reader-table-el-line-p (context offset limit)
     (or (reader-table-el-border-line-p context offset limit)
         (reader-table-row-start context offset limit)
         (reader-table-formula-line-p context offset)))
 
+  (defun reader-previous-line-start (context offset)
+    (when (plusp offset)
+      (let* ((text (reader-context-text context))
+             (line-end (if (char= (char text (1- offset)) #\Newline)
+                           (1- offset)
+                           offset))
+             (previous-newline
+               (position #\Newline text :end line-end :from-end t)))
+        (1+ (or previous-newline -1)))))
+
+  (defun reader-table-el-follows-pipe-formula-p (context offset limit)
+    (let ((previous (reader-previous-line-start context offset)))
+      (loop while (and previous
+                       (reader-table-formula-line-p context previous))
+            do (setf previous (reader-previous-line-start context previous)))
+      (and previous (reader-table-row-start context previous limit))))
+
   (defun reader-parse-table-el (context start limit depth)
     (let ((position start)
           (table-end nil)
           (table-value-end nil)
+          (table-row-seen-p nil)
+          (formula-seen-p nil)
+          (invalid-table-p nil)
           (tblfm nil)
           (tblfm-ranges nil))
       (loop while (and (< position limit)
+                       (not invalid-table-p)
                        (reader-table-el-line-p context position limit))
-            do (multiple-value-bind (formula span after-line)
-                   (reader-table-formula-details context position limit)
-                 (if span
-                     (setf tblfm (cons formula tblfm)
-                           tblfm-ranges (cons span tblfm-ranges)
-                           table-end after-line
-                           position after-line)
-                     (setf table-end (min limit
-                                          (reader-next-line context position))
-                           table-value-end table-end
-                           position table-end))))
-      (when table-end
+            do (multiple-value-bind (formulas ranges after-formulas)
+                   (reader-collect-table-formulas context position limit)
+                 (if (< position after-formulas)
+                     (progn
+                       (setf formula-seen-p t)
+                       (dolist (formula formulas)
+                         (push formula tblfm))
+                       (dolist (range ranges)
+                         (push range tblfm-ranges))
+                       (setf table-end after-formulas
+                             position after-formulas))
+                     (if formula-seen-p
+                         (setf invalid-table-p t)
+                         (progn
+                           (when (reader-table-row-start context position limit)
+                             (setf table-row-seen-p t))
+                           (setf table-end (min limit
+                                                (reader-next-line context position))
+                                 table-value-end table-end
+                                 position table-end))))))
+      (when (and table-end
+                 (not invalid-table-p)
+                 (or table-row-seen-p
+                     (not (reader-table-el-follows-pipe-formula-p
+                           context start limit))))
         (let ((properties
                 (list :type :table.el
                       :value (subseq (reader-context-text context)
                                      start table-value-end)
-                      :tblfm tblfm)))
+                      :tblfm (nreverse tblfm))))
           (when tblfm-ranges
             (setf (getf properties :reader-tblfm-ranges)
                   (nreverse tblfm-ranges)))
@@ -317,7 +365,11 @@
     (make-reader-node context :table-cell
                       :begin start :end end
                       :contents-begin content-start :contents-end content-end
-                      :post-affiliated start :properties '(:value nil) :depth depth))
+                      :post-affiliated start
+                      :properties (list :value
+                                        (subseq (reader-context-text context)
+                                                content-start content-end))
+                      :depth depth))
 
   (defun reader-table-cell-bounds (text start end)
     (let ((content-start start)
@@ -395,19 +447,17 @@
     (when rows
       (let ((tblfm nil)
             (tblfm-ranges nil))
-        (loop while (< position limit)
-              do (multiple-value-bind (formula span after-line)
-                     (reader-table-formula-details context position limit)
-                   (unless span
-                     (return))
-                   (push formula tblfm)
-                   (push span tblfm-ranges)
-                   (setf position after-line
-                         table-end after-line)))
+        (multiple-value-bind (formulas ranges after-formulas)
+            (reader-collect-table-formulas context position limit)
+          (when (< position after-formulas)
+            (setf tblfm formulas
+                  tblfm-ranges ranges
+                  position after-formulas
+                  table-end after-formulas)))
         (let ((properties (list :type :org :tblfm tblfm)))
           (when tblfm-ranges
             (setf (getf properties :reader-tblfm-ranges)
-                  (nreverse tblfm-ranges)))
+                  tblfm-ranges))
           (values (make-reader-node context :table
                                     :begin start :end table-end
                                     :contents-begin start

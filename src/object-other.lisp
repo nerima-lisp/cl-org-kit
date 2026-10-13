@@ -1170,7 +1170,8 @@
                             :contents-end
                             contents-end
                             :properties
-                            (list :value nil))))))
+                            (list :value
+                                  (subseq text contents-begin contents-end)))))))
 
 (defun try-parse-other-object (document start end container-type)
   "Recognize one non-link, non-markup object at START, within END."

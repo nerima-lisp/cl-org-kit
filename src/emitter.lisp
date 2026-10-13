@@ -550,7 +550,7 @@
              'string
              (emitter-element-sequence children)
              (with-output-to-string (stream)
-               (dolist (formula (reverse formulas))
+               (dolist (formula formulas)
                  (format stream "#+TBLFM: ~A~%"
                          (emitter-trimmed-line-value
                           node formula "table formula")))))))
@@ -1017,7 +1017,9 @@
 (defun emit-org (node &key (limits (make-limits)))
   "Return canonical Org text for NODE without performing stream or encoding I/O.
 Signal ORG-KIT-ERROR when the tree has no lossless Org representation and
-ORG-RESOURCE-LIMIT-ERROR when the serialized text exceeds MAX-OUTPUT-LENGTH."
+ORG-RESOURCE-LIMIT-ERROR when the serialized text exceeds MAX-OUTPUT-LENGTH.
+TABLE.EL nodes are opaque and emit their retained source; their :VALUE and
+:TBLFM properties are informational and do not control serialization."
   (check-type node node)
   (check-type limits limits)
   (let* ((*emitter-node-count* 0)
