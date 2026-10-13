@@ -118,6 +118,15 @@
         (signals org-query-error
           (org-kit:query-list document '(:level := 3 :extra t))))))
 
+  (it "applies heading-depth limits to logical levels during queries"
+    (let ((document
+            (parse-org
+             (format nil "#+STARTUP: odd~%* Root~%**** Logical Three")
+             :limits (make-limits :max-heading-depth 3))))
+      (expect (query-eval-test-titles
+               (query-eval-test-run document '(:level := 3)))
+              :to-equal '("Logical Three"))))
+
   (it "resolves TODO keywords and inherited tag groups from document settings"
     (let* ((document
             (parse-org

@@ -774,10 +774,11 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
           (loop while (and (< position (length text))
                            (char= (char text position) #\*))
                 do (incf star-count)
-                   (check-limit limits :max-heading-depth star-count)
                    (incf position))
           (when (plusp star-count)
-            (logical-heading-level document star-count)))))))
+            (let ((level (logical-heading-level document star-count)))
+              (check-limit limits :max-heading-depth level)
+              level)))))))
 
 (defun query-special-property-value (document headline name context state)
   (cond
