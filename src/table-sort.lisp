@@ -69,10 +69,10 @@
 
 (defun table-sort-key (row column type limits target)
   (let ((value (table-sort-cell-value row column)))
-    (when (plusp (length value))
-      (case type
-        (:lexical value)
-        (:numeric
+    (case type
+      (:lexical value)
+      (:numeric
+       (when (plusp (length value))
          (or (parse-safe-decimal value :limits limits)
              (table-sort-signal-error target :invalid-number
                                       "Table cell is not a valid decimal number")))))))

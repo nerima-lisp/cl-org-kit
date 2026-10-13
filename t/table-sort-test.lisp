@@ -122,6 +122,10 @@
     (with-soft-assertions
       (dolist (case '(("lexical-stable.org" 1 :ascending :lexical 2 6)
                      ("lexical-descending.org" 1 :descending :lexical 2 6)
+                     ("lexical-empty-ascending.org"
+                      1 :ascending :lexical nil nil)
+                     ("lexical-empty-descending.org"
+                      1 :descending :lexical nil nil)
                      ("numeric-valid-stable.org" 1 :ascending :numeric 2 6)
                      ("numeric-valid-descending.org" 1 :descending :numeric 2 6)
                      ("selected-range.org" 1 :ascending :lexical 3 4)
