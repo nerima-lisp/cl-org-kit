@@ -299,8 +299,7 @@
                         column-value (table-calc-reference-integer parser token)
                         column-start (table-calc-token-start token)
                         column-end (table-calc-token-end token))))
-               ((and (not (eql row-kind :relative))
-                     (eql (table-calc-current-kind parser) :identifier))
+               ((eql (table-calc-current-kind parser) :identifier)
                 (let ((token (table-calc-advance parser)))
                   (setf column-kind :name
                         column-value (table-calc-token-value token)

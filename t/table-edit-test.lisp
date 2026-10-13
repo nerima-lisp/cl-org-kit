@@ -203,6 +203,20 @@
         (expect (document-text after-delete) :to-equal after-delete-source)
         (expect (document-text document) :to-equal source))))
 
+  (it "preserves invalid-row formula targets while remapping later assignments"
+    (let* ((source (format nil
+                           "| A | B |~%|---+---|~%| x | y |~%| z | w |~%#+TBLFM: @INVALID$1=3::@2$2=@2$1~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (result (table-insert-row document table 2))
+           (updated (document-text (edit-result-updated-document result))))
+      (with-soft-assertions
+        (expect (edit-result-p result) :to-be t)
+        (expect updated :to-equal
+                (format nil
+                        "| A | B |~%|---+---|~%|   |   |~%| x | y |~%| z | w |~%#+TBLFM: @INVALID$1=3::@3$2=@3$1~%"))
+        (expect (document-text document) :to-equal source))))
+
   (it "keeps row-qualified deleted-column references parseable across later edits"
     (let* ((source (format nil
                            "| A | B |~%| x | y |~%| p | q |~%#+TBLFM: $1=@3$2~%"))
