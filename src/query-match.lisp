@@ -444,7 +444,8 @@
      (cl-date-kit:make-local-time hour minute second))))
 
 (defun query-match-at (document match reference-time &key context)
-  "Return headlines matching Org MATCH using the supplied REFERENCE-TIME."
+  "Return headlines matching Org MATCH using REFERENCE-TIME.
+REFERENCE-TIME must be a cl-date-kit:LOCAL-DATE-TIME."
   (check-type document document)
   (check-type match string)
   (check-type reference-time cl-date-kit:local-date-time)

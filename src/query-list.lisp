@@ -234,7 +234,8 @@
   "Evaluate structured FORM against DOCUMENT and return matching nodes.
 FORM is a proper, unevaluated list expression. SCOPE is :HEADLINES or :NODES;
 CONTEXT configures shared property, tag, provider, and regex semantics.
-REFERENCE-TIME is required when FORM contains a relative date literal."
+REFERENCE-TIME may be NIL, a cl-date-kit:LOCAL-DATE, or a
+cl-date-kit:LOCAL-DATE-TIME; relative values require one."
   (check-type document document)
   (check-type reference-time (or null cl-date-kit:local-date
                                  cl-date-kit:local-date-time))

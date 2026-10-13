@@ -614,7 +614,8 @@
   "Evaluate PATH-FILTER against DOCUMENT and return matching nodes.
 PATH-FILTER is a root-based headline selector with an optional boolean filter.
 SCOPE is :HEADLINES or :NODES; CONTEXT configures shared query semantics.
-REFERENCE-TIME is required when the filter contains a relative date literal."
+REFERENCE-TIME may be NIL, a cl-date-kit:LOCAL-DATE, or a
+cl-date-kit:LOCAL-DATE-TIME; relative values require one."
   (check-type document document)
   (check-type path-filter string)
   (check-type reference-time (or null cl-date-kit:local-date
