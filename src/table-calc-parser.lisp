@@ -508,8 +508,6 @@
 (defun table-calc-parse-assignment (parser)
   (let* ((formula (table-calc-parser-formula parser))
          (start (table-calc-position parser)))
-    (unless (table-calc-current-token parser)
-      (table-calc-fail formula start :empty-assignment))
     (multiple-value-bind (kind target) (table-calc-parse-target parser)
       (table-calc-expect parser :equals :unsupported-assignment)
       (when (member (table-calc-current-kind parser) '(:separator :suffix nil))

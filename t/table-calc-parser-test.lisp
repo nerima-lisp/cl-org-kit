@@ -6,6 +6,10 @@
       (progn (org-kit::table-calc-parse-formula formula limits) nil)
     (error (condition) condition)))
 
+(defun table-calc-test-captured-error (thunk)
+  (handler-case (progn (funcall thunk) nil)
+    (error (condition) condition)))
+
 (defun table-calc-test-assignment-expression (formula)
   (org-kit::table-calc-assignment-expression
    (first (org-kit::table-calc-program-assignments
@@ -60,6 +64,8 @@
            (unary-root (table-calc-test-assignment-expression "$1=2*-3"))
            (negative-subtraction (table-calc-test-assignment-expression "$1=2--3"))
            (grouped-root (table-calc-test-assignment-expression "$1=+(1.25E+2)"))
+           (spaced-root (table-calc-test-assignment-expression
+                         (format nil "$1 ~C= ~C~C1" #\Tab #\Return #\Newline)))
            (decimal (org-kit::table-calc-expression-value
                      (first (org-kit::table-calc-expression-children grouped-root)))))
       (with-soft-assertions
@@ -86,6 +92,7 @@
         (expect (org-kit::table-calc-expression-start grouped-root) :to-be 3)
         (expect (org-kit::table-calc-expression-end grouped-root) :to-be 13)
         (expect (org-kit::safe-decimal-rational decimal) :to-be 125)
+        (expect (org-kit::table-calc-expression-kind spaced-root) :to-be :number)
         (expect (org-kit::safe-decimal-exponent
                  (org-kit::table-calc-expression-value
                   (table-calc-test-assignment-expression "$1=1e-3")))
@@ -109,6 +116,8 @@
            (last-reference
              (org-kit::table-calc-expression-value
               (second (org-kit::table-calc-expression-children relative-and-last))))
+           (underscore-name (table-calc-test-assignment-expression "$1=$_name"))
+           (punctuated-name (table-calc-test-assignment-expression "$1=$col-2"))
            (range-children (org-kit::table-calc-expression-children range))
            (range-start (org-kit::table-calc-expression-value (first range-children)))
            (range-end (org-kit::table-calc-expression-value (second range-children))))
@@ -133,6 +142,12 @@
         (expect (org-kit::table-calc-reference-column-value
                  (org-kit::table-calc-expression-value named))
                 :to-equal "name")
+        (expect (org-kit::table-calc-reference-column-value
+                 (org-kit::table-calc-expression-value underscore-name))
+                :to-equal "_name")
+        (expect (org-kit::table-calc-reference-column-value
+                 (org-kit::table-calc-expression-value punctuated-name))
+                :to-equal "col-2")
         (expect (org-kit::table-calc-reference-row-kind relative-reference)
                 :to-be :relative)
         (expect (org-kit::table-calc-reference-row-value relative-reference)
@@ -168,6 +183,31 @@
         (expect (org-kit::table-calc-reference-start reference) :to-be 5)
         (expect (org-kit::table-calc-reference-end reference) :to-be 7))))
 
+  (it "normalizes zero-padded references and bounds oversized reference integers"
+    (let* ((overlong-digits
+             (make-string (1+ (length (write-to-string most-positive-fixnum)))
+                          :initial-element #\9))
+           (zero-reference
+             (org-kit::table-calc-assignment-target
+              (first (org-kit::table-calc-program-assignments
+                      (org-kit::table-calc-parse-formula "@000$1=1")))))
+           (overlong-row
+             (org-kit::table-calc-assignment-target
+              (first (org-kit::table-calc-program-assignments
+                      (org-kit::table-calc-parse-formula
+                       (format nil "@~A$1=1" overlong-digits))))))
+           (overlong-column
+             (org-kit::table-calc-expression-value
+              (table-calc-test-assignment-expression
+               (format nil "$1=@+1$-~A" overlong-digits))))
+           (zero-value (org-kit::table-calc-reference-row-value zero-reference))
+           (row-value (org-kit::table-calc-reference-row-value overlong-row)))
+      (with-soft-assertions
+        (expect zero-value :to-be 0)
+        (expect row-value :to-be :too-large)
+        (expect (org-kit::table-calc-reference-column-value overlong-column)
+                :to-be :too-large))))
+
   (it "records each assignment as a half-open source span"
     (let* ((assignments (org-kit::table-calc-program-assignments
                          (org-kit::table-calc-parse-formula "$1=1::$1=2")))
@@ -201,7 +241,10 @@
   (it "rejects Lisp and reader syntax, unlisted functions, malformed references, and extra features"
     (let ((cases
             (list (list "'(+ 1 2)" 0 :quoted-lisp)
+                  (list "`(+ 1 2)" 0 :quoted-lisp)
+                  (list "#" 0 :reader-dispatch)
                   (list "#.(error \"run\")" 0 :reader-eval)
+                  (list "#x" 0 :reader-dispatch)
                   (list "#1=(x)" 0 :reader-dispatch)
                   (list "@2$1=1;L" 7 :lisp-mode)
                   (list "@2$1=1;D" 7 :unsupported-mode)
@@ -213,13 +256,26 @@
                   (list "x=1" 0 :unsupported-assignment)
                   (list "$1=foo" 3 :unknown-symbol)
                   (list "@2$=1" 3 :invalid-reference)
+                  (list "$=1" 1 :invalid-reference)
+                  (list "$1=@+" 5 :invalid-reference)
+                  (list "$1=@x$1" 4 :invalid-reference)
+                  (list "@1.5$1=1" 1 :invalid-reference)
                   (list "$1=@>$" 6 :invalid-reference)
+                  (list "@+1$-1=1" 0 :unsupported-formula-target)
                   (list "@2$1=$1..1" 9 :invalid-range)
                   (list "$1=.5" 3 :unsupported-character)
+                  (list "$1=1+." 5 :unsupported-character)
                   (list "$1=5." 5 :invalid-number)
+                  (list "$1=1e" 5 :invalid-number)
+                  (list "$1=)" 3 :expected-expression)
+                  (list "$1=1 2" 5 :trailing-syntax)
                   (list "$1=1,5" 4 :unsupported-character)
                   (list "$1=1^2" 4 :unsupported-character)
                   (list "$1=1;Q" 5 :unsupported-mode)
+                  (list "$1=1;EX" 6 :unsupported-mode)
+                  (list "$1=1;%.f" 5 :unsupported-format)
+                  (list "$1=1;%.02f" 5 :unsupported-format)
+                  (list "$1=1;%.123f" 5 :unsupported-format)
                   (list "$1=1;%.13f" 5 :unsupported-format)
                   (list "@2$1=" 5 :empty-expression)
                   (list "$1=1::" 6 :empty-assignment)
@@ -280,7 +336,9 @@
               suffix-token-limit))
            (depth-condition (table-calc-test-condition "$1=-1" depth-one))
            (precision-condition (table-calc-test-condition "$1=1.23" precision-two))
-           (exponent-condition (table-calc-test-condition "$1=1e3" exponent-two)))
+           (exponent-condition (table-calc-test-condition "$1=1e3" exponent-two))
+           (saturated-exponent-condition
+             (table-calc-test-condition "$1=1e999999" exponent-two)))
       (with-soft-assertions
         (expect (length (org-kit::table-calc-program-assignments
                          (org-kit::table-calc-parse-formula "$1=1" token-exact)))
@@ -322,7 +380,100 @@
         (expect (table-calc-test-condition "$1=1e1" exponent-two) :to-be nil)
         (expect (org-resource-limit-error-limit-name exponent-condition)
                 :to-be :max-formula-exponent)
-        (expect (org-resource-limit-error-actual exponent-condition) :to-be 3))))
+        (expect (org-resource-limit-error-actual exponent-condition) :to-be 3)
+        (expect (org-resource-limit-error-actual saturated-exponent-condition)
+                :to-be 3))))
+
+  (it "validates parser and decimal helper input types and ranges"
+    (let* ((formula-type-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::table-calc-parse-formula 1))))
+           (text-type-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::parse-safe-decimal nil :start 0 :end 0))))
+           (start-type-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::parse-safe-decimal "1" :start 0.5 :end 1))))
+           (end-type-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::parse-safe-decimal "1" :start 0 :end 0.5))))
+           (range-type-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::parse-safe-decimal "1" :start 1 :end 0))))
+           (bounds-type-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::parse-safe-decimal "1" :start 0 :end 2))))
+           (limits-type-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::parse-safe-decimal "1" :limits nil))))
+           (default-decimal (org-kit::parse-safe-decimal "1")))
+      (with-soft-assertions
+        (expect (typep formula-type-error 'type-error) :to-be t)
+        (expect (typep text-type-error 'type-error) :to-be t)
+        (expect (typep start-type-error 'type-error) :to-be t)
+        (expect (typep end-type-error 'type-error) :to-be t)
+        (expect (typep range-type-error 'type-error) :to-be t)
+        (expect (typep bounds-type-error 'type-error) :to-be t)
+        (expect (typep limits-type-error 'type-error) :to-be t)
+        (expect (org-kit::safe-decimal-coefficient default-decimal) :to-be 1))))
+
+  (it "covers internal grammar guards and decimal comparison paths"
+    (let* ((limits (make-limits))
+           (invalid-reference-parser
+             (org-kit::%make-table-calc-parser
+              :formula "1" :tokens (org-kit::table-calc-tokenize "1" limits)
+              :limits limits))
+           (invalid-number-parser
+             (org-kit::%make-table-calc-parser
+              :formula "."
+              :tokens (list (org-kit::%make-table-calc-token
+                             :kind :number :start 0 :end 1))
+              :limits limits))
+           (reference-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::table-calc-parse-reference
+                          invalid-reference-parser))))
+           (number-error
+             (table-calc-test-captured-error
+              (lambda () (org-kit::table-calc-parse-prefix invalid-number-parser))))
+           (reference-limit (write-to-string most-positive-fixnum))
+           (reference-over-limit (write-to-string (1+ most-positive-fixnum)))
+           (reference-at-limit
+             (org-kit::table-calc-parse-formula
+              (format nil "@~A$1=1" reference-limit)))
+           (reference-over
+             (org-kit::table-calc-parse-formula
+              (format nil "@~A$1=1" reference-over-limit)))
+           (zero (table-calc-test-decimal "-0"))
+           (positive-exponent (table-calc-test-decimal "1e2"))
+           (negative-exponent (table-calc-test-decimal "1e-2")))
+      (with-soft-assertions
+        (expect (typep reference-error 'org-table-unsupported-syntax) :to-be t)
+        (when (typep reference-error 'org-table-unsupported-syntax)
+          (expect (org-table-unsupported-syntax-feature reference-error)
+                  :to-be :invalid-reference))
+        (expect (typep number-error 'org-table-unsupported-syntax) :to-be t)
+        (when (typep number-error 'org-table-unsupported-syntax)
+          (expect (org-table-unsupported-syntax-feature number-error)
+                  :to-be :invalid-number))
+        (expect (org-kit::table-calc-expression-operator :unknown) :to-be nil)
+        (expect (org-kit::table-calc-reference-row-value
+                 (org-kit::table-calc-assignment-target
+                  (first (org-kit::table-calc-program-assignments reference-at-limit))))
+                :to-be most-positive-fixnum)
+        (expect (org-kit::table-calc-reference-row-value
+                 (org-kit::table-calc-assignment-target
+                  (first (org-kit::table-calc-program-assignments reference-over))))
+                :to-be :too-large)
+        (expect (org-kit::safe-decimal-rational zero) :to-be 0)
+        (expect (org-kit::safe-decimal-rational positive-exponent) :to-be 100)
+        (expect (org-kit::safe-decimal-rational negative-exponent) :to-be 1/100)
+        (expect (org-kit::safe-decimal-compare (table-calc-test-decimal "2")
+                                               (table-calc-test-decimal "10"))
+                :to-be -1)
+        (expect (org-kit::safe-decimal-compare (table-calc-test-decimal "1.02")
+                                               (table-calc-test-decimal "1.01"))
+                :to-be 1))))
 
   (it "parses bounded signed decimal values for formula and numeric-key consumers"
     (let* ((negative-zero (table-calc-test-decimal "-0.000e0"))
@@ -351,8 +502,43 @@
         (expect (org-resource-limit-error-limit-name exponent-condition)
                 :to-be :max-formula-exponent)
         (expect (org-resource-limit-error-actual exponent-condition) :to-be 3)
-        (dolist (invalid '("" ".5" "5." "1e" "1e+" "1,5" "1x" "++1"))
+        (dolist (invalid '("" ".5" "5." "1e" "1e+" "1.2.3" "1,5" "1x" "++1"))
           (expect (table-calc-test-decimal invalid) :to-be nil)))))
+
+  (it "compares safe decimals across signs, magnitudes, and equal values"
+    (let* ((zero (table-calc-test-decimal "0"))
+           (positive (table-calc-test-decimal "+1"))
+           (negative (table-calc-test-decimal "-1"))
+           (small-positive (table-calc-test-decimal "1.01"))
+           (large-positive (table-calc-test-decimal "1.02"))
+           (same-positive (table-calc-test-decimal "1.010")))
+      (with-soft-assertions
+        (expect (org-kit::safe-decimal-rational positive) :to-be 1)
+        (expect (org-kit::safe-decimal-compare zero zero) :to-be 0)
+        (expect (org-kit::safe-decimal-compare zero negative) :to-be 1)
+        (expect (org-kit::safe-decimal-compare positive zero) :to-be 1)
+        (expect (org-kit::safe-decimal-compare negative positive) :to-be -1)
+        (expect (org-kit::safe-decimal-compare positive negative) :to-be 1)
+        (expect (org-kit::safe-decimal-compare (table-calc-test-decimal "10")
+                                               (table-calc-test-decimal "2"))
+                :to-be 1)
+        (expect (org-kit::safe-decimal-compare small-positive large-positive)
+                :to-be -1)
+        (expect (org-kit::safe-decimal-compare small-positive same-positive)
+                :to-be 0)
+        (expect (org-kit::safe-decimal-compare (table-calc-test-decimal "1.0")
+                                               (table-calc-test-decimal "1.01"))
+                :to-be -1)
+        (expect (org-kit::safe-decimal-compare (table-calc-test-decimal "1.01")
+                                               (table-calc-test-decimal "1.0"))
+                :to-be 1)
+        (expect (org-kit::safe-decimal-compare (table-calc-test-decimal "-10")
+                                               (table-calc-test-decimal "-2"))
+                :to-be -1))))
+
+  (it "rejects malformed internal format precision shapes"
+    (dolist (format '("plain" "%x12f" "%.a2f" "%.12x" "%.123f"))
+      (expect (org-kit::table-calc-format-precision format) :to-be nil)))
 
   (it "matches the committed Emacs oracle corpus without reading fixture forms"
     (let* ((corpus-formulas
