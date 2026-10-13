@@ -83,13 +83,18 @@
       (expect (org-resource-limit-error-limit condition) :to-be limit)
       (expect (org-resource-limit-error-actual condition) :to-be actual))))
 
-(defun table-calc-eval-test-oracle-vector-rows (name cells)
+(defun table-calc-eval-test-oracle-rows-at
+    (name base-row base-column last-row cells)
   (let ((rows (table-calc-test-oracle-rows name)))
     (expect (> (length rows) 0) :to-be t)
     (dolist (row rows)
       (expect (table-calc-eval-test-evaluate
-               (car row) :base-row 1 :base-column 2 :last-row 3 :cells cells)
+               (car row) :base-row base-row :base-column base-column
+               :last-row last-row :cells cells)
               :to-equal (cdr row)))))
+
+(defun table-calc-eval-test-oracle-vector-rows (name cells)
+  (table-calc-eval-test-oracle-rows-at name 1 2 3 cells))
 
 (describe "table formula numeric evaluation"
   (it "evaluates arithmetic ASTs to the fixed Org oracle values"
@@ -149,6 +154,25 @@
     (table-calc-eval-test-oracle-vector-rows
      "t4b/vector-n-nonnumeric.tsv"
      (table-calc-eval-test-cell-map '(1 1 "1") '(2 1 "missing") '(3 1 "5"))))
+
+  (it "matches Org for rectangular vector ranges"
+    (table-calc-eval-test-oracle-rows-at
+     "t4b/vector-rectangle.tsv" 5 4 5
+     (table-calc-eval-test-cell-map
+      '(2 1 "1") '(2 2 "2") '(2 3 "3")
+      '(3 1 "4") '(3 2 "5") '(3 3 "6")
+      '(4 1 "7") '(4 2 "8") '(4 3 "9"))))
+
+  (it "matches Org EN handling of nonnumeric vector cells"
+    (table-calc-eval-test-oracle-vector-rows
+     "t4b/vector-en-nonnumeric.tsv"
+     (table-calc-eval-test-cell-map
+      '(1 1 "1") '(2 1 "missing") '(3 1 "5"))))
+
+  (it "pins the decimal text returned by a scalar reference"
+    (table-calc-eval-test-oracle-rows-at
+     "t4b/reference-format.tsv" 1 2 1
+     (table-calc-eval-test-cell-map '(1 1 "1.2300"))))
 
   (it "applies N to blank vector slots as zero while retaining their count"
     (let ((cells (table-calc-eval-test-cell-map '(1 1 ""))))
