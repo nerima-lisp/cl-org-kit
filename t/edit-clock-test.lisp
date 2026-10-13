@@ -500,7 +500,12 @@
                                             drawer-name line)
                                     updated-source)
                             :to-be-truthy)
-                    (expect (search line updated-source) :to-be-truthy))
+                    (progn
+                      (expect (search line updated-source) :to-be-truthy)
+                      (when (string= (getf case :id)
+                                     "below-threshold-40-existing")
+                        (expect (search ":LOGBOOK:" updated-source)
+                                :to-be nil))))
                 (when (string= (getf case :id)
                                "child-clocks-do-not-count-for-parent")
                   (expect (search (format nil "* Parent with child clocks~%~A~%** Child with clocks"
@@ -532,6 +537,26 @@
                                      (edit-result-updated-document result)))
                     :to-be nil)
             (expect (document-text document) :to-equal property-source))))))
+
+  (it "rejects a non-string CLOCK_INTO_DRAWER setting through clock-in"
+    (let* ((source (format nil "* Task~%"))
+           (document
+             (parse-org source
+                        :settings '(:property-settings
+                                    (("CLOCK_INTO_DRAWER" . :not-a-drawer)))))
+           (heading (edit-clock-test-single-heading document))
+           (context (edit-clock-test-context "2026-10-14T09:05:00"))
+           (condition
+             (edit-clock-test-condition
+              (lambda ()
+                (clock-in document heading
+                          :at (make-org-time-value "2026-10-14T09:05:00")
+                          :time-context context)))))
+      (with-soft-assertions
+        (expect (typep condition 'type-error) :to-be t)
+        (when (typep condition 'type-error)
+          (expect (type-error-datum condition) :to-be :not-a-drawer))
+        (expect (document-text document) :to-equal source))))
 
   (it "preserves CRLF source bytes outside the inserted drawer"
     (let* ((source (format nil "* Task~C~%Body~C~%" #\Return #\Return))
