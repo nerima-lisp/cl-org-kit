@@ -31,11 +31,17 @@
                      segment))))
     (nreverse (remove-duplicates nodes :test #'eq))))
 
+(defun statistics-cookies-test-owner-heading (node)
+  (loop for parent = (node-parent node) then (node-parent parent)
+        while parent
+        when (member (node-type parent) '(:headline :inlinetask) :test #'eq)
+          return parent))
+
 (defun statistics-cookies-test-heading (document)
   (find-if
    (lambda (heading)
      (some (lambda (cookie)
-             (eq (org-kit::statistics-cookie-owner-heading cookie) heading))
+             (eq (statistics-cookies-test-owner-heading cookie) heading))
            (statistics-cookies-test-nodes document :statistics-cookie)))
    (statistics-cookies-test-nodes document :headline)))
 
@@ -131,13 +137,36 @@
                    (expect (stringp (statistics-cookie-update-old-value update)) :to-be t)
                    (expect (stringp (statistics-cookie-update-new-value update)) :to-be t))))))
 
-  (it "tokenizes COOKIE_DATA on horizontal whitespace and handles an empty value"
-    (with-soft-assertions
-      (expect (org-kit::statistics-cookie-data-tokens
-               (format nil " todo~Ccheckbox recursive " #\Tab))
-              :to-equal '("todo" "checkbox" "recursive"))
-      (expect (org-kit::statistics-cookie-data-tokens "") :to-equal nil)
-      (expect (org-kit::statistics-cookie-data-tokens nil) :to-equal nil)))
+  (it "uses tab-separated COOKIE_DATA tokens and defaults for an empty value"
+    (let* ((tab-source
+             (format nil
+                     "* Parent [0/0]~%:PROPERTIES:~%:COOKIE_DATA: todo~Crecursive~%:END:~%** TODO Direct~%*** DONE Nested~%"
+                     #\Tab))
+           (tab-expected
+             (format nil
+                     "* Parent [1/2]~%:PROPERTIES:~%:COOKIE_DATA: todo~Crecursive~%:END:~%** TODO Direct~%*** DONE Nested~%"
+                     #\Tab))
+           (empty-source
+             (format nil
+                     "* Parent [0/0]~%:PROPERTIES:~%:COOKIE_DATA: ~%:END:~%** TODO Direct~%*** DONE Nested~%"))
+           (empty-expected
+             (format nil
+                     "* Parent [0/1]~%:PROPERTIES:~%:COOKIE_DATA: ~%:END:~%** TODO Direct~%*** DONE Nested~%"))
+           (tab-document (parse-org tab-source))
+           (empty-document (parse-org empty-source))
+           (tab-result
+             (update-statistics-cookies
+              tab-document (statistics-cookies-test-heading tab-document)))
+           (empty-result
+             (update-statistics-cookies
+              empty-document (statistics-cookies-test-heading empty-document))))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document tab-result))
+                :to-equal tab-expected)
+        (expect (document-text (edit-result-updated-document empty-result))
+                :to-equal empty-expected)
+        (expect (document-text tab-document) :to-equal tab-source)
+        (expect (document-text empty-document) :to-equal empty-source))))
 
   (it "defaults to direct TODO statistics, uses COOKIE_DATA for recursion, and ignores the legacy setting"
     (let* ((source (format nil "* Parent [0/0]~%** TODO Direct~%*** DONE Nested~%"))
@@ -296,49 +325,26 @@
     (let* ((source (format nil "* Parent~%Body [7/8]~%* Child [9/9]~%- [X] child [0/0]~%"))
            (document (parse-org source))
            (heading (first (statistics-cookies-test-nodes document :headline)))
-           (child-cookie
-             (find-if (lambda (cookie)
-                        (not (eq (org-kit::statistics-cookie-owner-heading cookie)
-                                 heading)))
-                      (statistics-cookies-test-nodes document :statistics-cookie)))
-           (body-cookie
-             (find-if (lambda (cookie)
-                        (and (eq (org-kit::statistics-cookie-owner-heading cookie)
-                                 heading)
-                             (null (org-kit::statistics-cookie-owner-item cookie))
-                             (not (org-kit::statistics-cookie-title-node-p heading cookie))))
-                      (statistics-cookies-test-nodes document :statistics-cookie)))
-           (body-context
-             (multiple-value-list
-              (org-kit::statistics-cookie-context document heading body-cookie)))
            (result-and-updates (multiple-value-list
                                 (update-statistics-cookies document heading)))
            (result (first result-and-updates)))
       (with-soft-assertions
-        (expect (first body-context) :to-be nil)
-        (expect (org-kit::statistics-cookie-in-scope-p
-                 heading child-cookie
-                 (org-kit::statistics-cookie-title-nodes heading))
-                :to-be nil)
         (expect (edit-result-spans result) :to-equal nil)
         (expect (second result-and-updates) :to-equal nil)
         (expect (document-text (edit-result-updated-document result))
                 :to-equal source)
         (expect (document-text document) :to-equal source))))
 
-  (it "finds title cookies alongside other inline title objects"
-    (let* ((document (parse-org (format nil "* *Parent* [9/9]~%** TODO Child~%")))
-           (heading (statistics-cookies-test-heading document))
-           (title-nodes (org-kit::statistics-cookie-title-nodes heading))
-           (cookie (find-if (lambda (node)
-                              (eq (node-type node) :statistics-cookie))
-                            title-nodes)))
+  (it "updates title cookies alongside other inline title objects"
+    (let* ((source (format nil "* *Parent* [9/9]~%** TODO Child~%"))
+           (expected (format nil "* *Parent* [0/1]~%** TODO Child~%"))
+           (document (parse-org source))
+           (heading (first (statistics-cookies-test-nodes document :headline)))
+           (result (update-statistics-cookies document heading)))
       (with-soft-assertions
-        (expect (some (lambda (node)
-                        (not (eq (node-type node) :statistics-cookie)))
-                      title-nodes)
-                :to-be t)
-        (expect (org-kit::statistics-cookie-nodes heading) :to-equal (list cookie)))))
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
 
   (it "respects exact output limits and signals before returning a partial result"
     (let* ((source (format nil "* Parent [9/9]~%** TODO Child~%"))
