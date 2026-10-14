@@ -1,0 +1,10 @@
+# T5a fixture metadata: Org recalculation oracle
+# Generator mode: org-table-recalculate
+# Backend: none
+# Encoding: UTF-8
+# Reference time: 2000-01-01T00:00:00Z (fixed; unused)
+# Zone/DST policy: UTC; DST not applicable
+| name | value |
+|------+-------|
+|   item |     2 |
+#+TBLFM: @2$1=99::$1=$2+10

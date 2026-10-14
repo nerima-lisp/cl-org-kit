@@ -1,0 +1,5 @@
+# T5a policy fixture: cyclic field formula dependencies are rejected
+| first | second |
+|-------+--------|
+| 2     | 3      |
+#+TBLFM: @2$1=@2$2::@2$2=@2$1

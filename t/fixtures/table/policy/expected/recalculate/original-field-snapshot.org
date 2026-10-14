@@ -1,0 +1,5 @@
+# T5a policy fixture: field formulas read the original table snapshot
+| first | second | third |
+|-------+--------+-------|
+| 99     | 22      | 4     |
+#+TBLFM: @2$1=99::@2$2=@2$1+20

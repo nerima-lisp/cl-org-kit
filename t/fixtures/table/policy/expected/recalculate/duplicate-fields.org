@@ -1,0 +1,5 @@
+# T5a policy fixture: duplicate same-kind field targets are rejected
+| first | second |
+|-------+--------|
+| 2     | 3      |
+#+TBLFM: @2$1=3::@2$1=4

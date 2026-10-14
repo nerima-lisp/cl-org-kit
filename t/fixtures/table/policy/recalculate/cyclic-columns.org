@@ -1,0 +1,5 @@
+# T5a policy fixture: formula dependency cycles are rejected
+| first | second |
+|-------+--------|
+| 2     | 3      |
+#+TBLFM: $1=$2::$2=$1

@@ -1,0 +1,6 @@
+# T5a policy fixture: multiple TBLFM directives are rejected
+| first | second |
+|-------+--------|
+| 2     | 3      |
+#+TBLFM: $1=$2+1
+#+TBLFM: $2=$1+1

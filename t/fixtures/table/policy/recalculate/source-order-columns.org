@@ -1,0 +1,5 @@
+# T5a policy fixture: source-order column updates are visible to later formulas
+| first | second | third |
+|-------+--------+-------|
+| 2     | 3      | 4     |
+#+TBLFM: $2=$3*10::$1=$2+10

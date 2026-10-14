@@ -1084,6 +1084,59 @@
               "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
               "--table-align CORPUS-DIR EXPECTED-DIR")))))
 
+;;; T5a table recalculation fixtures
+
+(defconst org-fixture--table-recalculate-required-metadata
+  '("T5a fixture metadata: Org recalculation oracle"
+    "Generator mode: org-table-recalculate"
+    "Backend: none"
+    "Encoding: UTF-8"
+    "Reference time: 2000-01-01T00:00:00Z (fixed; unused)"
+    "Zone/DST policy: UTC; DST not applicable"))
+
+(defconst org-fixture--table-recalculate-formulas
+  '("@2$1=99::$1=$2+10"))
+
+(defun org-fixture--table-recalculate-render-file (file)
+  (with-temp-buffer
+    (org-fixture--read-buffer file)
+    (let ((source (buffer-string)))
+      (dolist (metadata org-fixture--table-recalculate-required-metadata)
+        (unless (string-match-p (regexp-quote metadata) source)
+          (error "Missing T5a fixture metadata %S in %s" metadata file))))
+    (let* ((tables (org-element-map (org-element-parse-buffer) 'table #'identity))
+           (directive-count (org-fixture--table-calc-directive-count file))
+           (formulas (mapcar #'org-fixture--table-calc-formula tables)))
+      (unless (and (= (length tables) 1) (= directive-count 1))
+        (error "Each T5a oracle fixture must contain one table and one TBLFM"))
+      (dolist (formula formulas)
+        (unless (member formula org-fixture--table-recalculate-formulas)
+          (error "Formula is outside the T5a oracle allowlist")))
+      (org-table-recalculate-buffer-tables)
+      (org-fixture--check-output (buffer-string)))))
+
+(defun org-fixture-generate-table-recalculate (corpus-directory expected-directory)
+  "Generate org-table-recalculate source fixtures for CORPUS-DIRECTORY."
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "T5a oracle requires Emacs 31.1 and Org 9.8.10; found %s and %s"
+           emacs-version (org-version)))
+  (unless (file-directory-p corpus-directory)
+    (error "Corpus directory does not exist: %s" corpus-directory))
+  (let ((files (sort (directory-files-recursively corpus-directory "\\.org\\'")
+                     #'string<)))
+    (unless files (error "No T5a recalculation oracle files found"))
+    (dolist (file files)
+      (let* ((relative (file-relative-name file corpus-directory))
+             (output (expand-file-name relative expected-directory))
+             (content (org-fixture--table-recalculate-render-file file)))
+        (make-directory (file-name-directory output) t)
+        (let ((coding-system-for-write 'utf-8-unix))
+          (write-region content nil output nil 'silent))
+        (princ (format "Wrote T5a recalculation fixture %s\n" relative))))
+    (princ (format "Generated %d T5a recalculation fixtures.\n" (length files)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
 (defun org-fixture--dispatch-main ()
   (if (equal (car command-line-args-left) "--table-align")
       (org-fixture--table-align-main)
@@ -1402,6 +1455,9 @@
      ((and (= (length arguments) 3) (equal (car arguments) "--table-calc"))
       (org-fixture-generate-table-calc (expand-file-name (nth 1 arguments))
                                        (expand-file-name (nth 2 arguments))))
+     ((and (= (length arguments) 3) (equal (car arguments) "--table-recalculate"))
+      (org-fixture-generate-table-recalculate (expand-file-name (nth 1 arguments))
+                                              (expand-file-name (nth 2 arguments))))
      ((and (= (length arguments) 4) (equal (car arguments) "--export-oracle"))
       (org-fixture-generate-export-oracle
        (expand-file-name (nth 1 arguments))
@@ -1423,6 +1479,7 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --h1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-recalculate CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --export-oracle CORPUS-DIR MANIFEST EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --statistics-cookies SOURCE-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
