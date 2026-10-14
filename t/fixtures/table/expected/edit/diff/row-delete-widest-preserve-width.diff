@@ -1,0 +1,8 @@
+--- corpus/widest-row.org
++++ source-after/row-delete-widest-preserve-width.org
+@@ -7,5 +7,4 @@
+ | key                | value        |
+ |--------------------+--------------|
+ | x                  | y            |
+-| exceptionally-wide | longer-value |
+ | medium             | z            |

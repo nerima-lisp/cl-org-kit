@@ -1,0 +1,14 @@
+--- corpus/invalid-name.org
++++ source-after/column-delete-invalid-name.org
+@@ -4,7 +4,7 @@
+ # Encoding: UTF-8
+ # Reference time: 2000-01-01T00:00:00Z (fixed; unused)
+ # Zone/DST policy: UTC; DST not applicable
+-| ! | old | INVALID |
+-|---+-----+---------|
+-| 5 | 2 | 30 |
+-#+TBLFM: @2$1=@2$2+@2$3
++| ! | INVALID |
++|---+---------|
++| 5 |      30 |
++#+TBLFM: @2$1=@2$INVALID+@2$2

@@ -58,4 +58,16 @@
  (:id "row-delete-sole" :source "sole-row.org"
   :action :delete-row :index 1)
  (:id "column-delete-sole" :source "sole-column.org"
-  :action :delete-column :index 1))
+  :action :delete-column :index 1)
+ (:id "row-move-reverse-range" :source "range-formulas.org"
+  :action :move-row :from 2 :to 4)
+ (:id "row-delete-invalid-range" :source "range-formulas.org"
+  :action :delete-row :index 2)
+ (:id "row-move-special-references" :source "special-references.org"
+  :action :move-row :from 2 :to 3)
+ (:id "row-insert-hline-range" :source "hline-range.org"
+  :action :insert-row :index 3 :values nil)
+ (:id "column-delete-invalid-name" :source "invalid-name.org"
+  :action :delete-column :index 2)
+ (:id "row-delete-widest-preserve-width" :source "widest-row.org"
+  :action :delete-row :index 3))

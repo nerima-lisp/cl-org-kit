@@ -1,0 +1,13 @@
+--- corpus/range-formulas.org
++++ source-after/row-move-reverse-range.org
+@@ -5,8 +5,8 @@
+ # Reference time: 2000-01-01T00:00:00Z (fixed; unused)
+ # Zone/DST policy: UTC; DST not applicable
+ | 0  | zero   |
+-| 10 | ten    |
+ | 20 | twenty |
+ | 30 | thirty |
++| 10 | ten    |
+ | 40 | forty  |
+-#+TBLFM: @1$2=vsum(@2$1..@4$1)
++#+TBLFM: @1$2=vsum(@4$1..@3$1)

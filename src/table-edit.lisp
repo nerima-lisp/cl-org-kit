@@ -411,10 +411,7 @@
            (unless (eql mapped value)
              (list start end
                    (if (eq mapped :invalid)
-                       (if (and (eq axis :column)
-                                (getf operation :invalid-name-survives-p))
-                           "0"
-                           "INVALID")
+                       "INVALID"
                        (write-to-string mapped :base 10 :radix nil))))))
         (t
          (let ((mapped
@@ -1117,7 +1114,7 @@
            0))))
 
 (defun table-edit-formula-remap-coordinate-delta
-    (formula start end axis operation encoding digit-octets)
+    (formula start end operation encoding digit-octets)
   (let* ((old-length (- end start))
          (kind (getf operation :kind))
          (mapped-length nil)
@@ -1126,12 +1123,7 @@
       (:delete
        (case (table-edit-formula-span-compare-integer
               formula start end (getf operation :index))
-         (:equal
-          (setf sentinel
-                (if (and (eq axis :column)
-                         (getf operation :invalid-name-survives-p))
-                    :zero
-                    :invalid)))
+         (:equal (setf sentinel :invalid))
          (:greater
           (setf mapped-length
                 (table-edit-formula-span-decrement-length
@@ -1161,7 +1153,7 @@
                       (table-edit-formula-span-increment-length
                        formula start end)))))))))
     (let ((characters
-            (cond (sentinel (- (if (eq sentinel :zero) 1 7) old-length))
+            (cond (sentinel (- 7 old-length))
                   (mapped-length (- mapped-length old-length))
                   (t 0))))
       (values

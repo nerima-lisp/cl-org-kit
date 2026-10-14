@@ -1,0 +1,12 @@
+--- corpus/special-references.org
++++ source-after/row-move-special-references.org
+@@ -6,7 +6,7 @@
+ # Zone/DST policy: UTC; DST not applicable
+ | ! | id | amount | note |
+ |---+----+--------+------|
+-| a | 1 | 10 | x |
+ | b | 2 | 20 | y |
++| a | 1 | 10 | x |
+ | c | 3 | 30 | z |
+-#+TBLFM: @>$amount=$amount+@2$4::@<$amount=$amount+@2$3
++#+TBLFM: @>$amount=$amount+@3$4::@<$amount=$amount+@3$3

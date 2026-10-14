@@ -131,11 +131,12 @@
 
 (describe "Org table row and column editing"
   (it "keeps the Org edit fixture set complete"
-    (expect (length (table-edit-test-descriptors)) :to-be 27))
+    (expect (length (table-edit-test-descriptors)) :to-be 33))
 
   (it-each ((0) (1) (2) (3) (4) (5) (6) (7) (8) (9)
             (10) (11) (12) (13) (14) (15) (16) (17) (18) (19)
-            (20) (21) (22) (23) (24) (25) (26))
+            (20) (21) (22) (23) (24) (25) (26) (27) (28) (29)
+            (30) (31) (32))
       "matches Org source-after and unified-diff fixture ~D"
       (descriptor-index)
     (let* ((descriptor (nth descriptor-index (table-edit-test-descriptors)))
@@ -252,6 +253,72 @@
         (expect formula :to-equal "$1=@4$INVALID")
         (expect (document-text document) :to-equal source))))
 
+  (it "remaps both endpoints of formula ranges across row edits"
+    (let* ((source
+             (format nil
+                     "| Item |~%| alpha |~%| beta |~%| gamma |~%| delta |~%#+TBLFM: @5$1=vsum(@2$1..@4$1)~%"))
+           (move-document (parse-org source))
+           (move-table
+             (table-edit-test-find-node (document-root move-document) :table))
+           (move-result (table-move-row move-document move-table 2 4))
+           (move-updated (edit-result-updated-document move-result))
+           (move-formula
+             (first (node-property
+                     (table-edit-test-find-node
+                      (document-root move-updated) :table)
+                     :tblfm)))
+           (delete-document (parse-org source))
+           (delete-table
+             (table-edit-test-find-node
+              (document-root delete-document) :table))
+           (delete-result (table-delete-row delete-document delete-table 2))
+           (delete-updated (edit-result-updated-document delete-result))
+           (delete-formula
+             (first (node-property
+                     (table-edit-test-find-node
+                      (document-root delete-updated) :table)
+                     :tblfm))))
+      (with-soft-assertions
+        (expect move-formula :to-equal
+                "@5$1=vsum(@4$1..@3$1)")
+        (expect delete-formula :to-equal
+                "@4$1=vsum(@INVALID$1..@3$1)")
+        (expect (document-text move-document) :to-equal source)
+        (expect (document-text delete-document) :to-equal source))))
+
+  (it "preserves dynamic and named formula references while shifting numeric rows"
+    (let* ((source
+             (format nil
+                     "| amount | result |~%| 10 | old |~%| 20 | old |~%| 30 | old |~%#+TBLFM: @2$2=@>$amount+@4$1~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (result (table-insert-row document table 2))
+           (updated (edit-result-updated-document result))
+           (formula
+             (first (node-property
+                     (table-edit-test-find-node
+                      (document-root updated) :table)
+                     :tblfm))))
+      (with-soft-assertions
+        (expect formula :to-equal "@3$2=@>$amount+@5$1")
+        (expect (document-text document) :to-equal source))))
+
+  (it "preserves hline-anchor formulas when inserting within their range"
+    (let* ((source
+             (format nil
+                     "| before | 1 |~%|---+---|~%| first | 10 |~%| second | 20 |~%|---+---|~%| total | 0 |~%#+TBLFM: @<$2=@>$2::@>$2=vsum(@I$2..@II$2)~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (result (table-insert-row document table 3))
+           (updated (edit-result-updated-document result))
+           (updated-table
+             (table-edit-test-find-node (document-root updated) :table)))
+      (with-soft-assertions
+        (expect (edit-result-p result) :to-be t)
+        (expect (first (node-property updated-table :tblfm))
+                :to-equal "@<$2=@>$2::@>$2=vsum(@I$2..@II$2)")
+        (expect (document-text document) :to-equal source))))
+
   (it "keeps INVALID and invalid as distinct named columns during edits"
     (let* ((source (format nil
                            "| INVALID | invalid | Result |~%| upper | lower | old |~%#+TBLFM: $3=$INVALID+$invalid~%"))
@@ -271,31 +338,20 @@
                 :to-equal "$3=$INVALID+$invalid")
         (expect (document-text document) :to-equal source))))
 
-  (it "uses a collision-free deleted-column reference when INVALID survives"
+  (it "remaps deleted numeric references through a surviving INVALID name"
     (let* ((source (format nil
-                           "| Key | INVALID | Other | Result |~%| key | name | other | result |~%#+TBLFM: $4=$1+$INVALID+@2$3~%"))
+                           "| Result | Key | INVALID | Other |~%| 5 | key | 30 | other |~%#+TBLFM: @2$1=@2$2+@2$3~%"))
            (document (parse-org source))
            (table (table-edit-test-find-node (document-root document) :table))
-           (delete-result (table-delete-column document table 1))
+           (delete-result (table-delete-column document table 2))
            (after-delete (edit-result-updated-document delete-result))
            (after-delete-table
              (table-edit-test-find-node (document-root after-delete) :table))
-           (after-delete-formula
-             (first (node-property after-delete-table :tblfm)))
-           (insert-result
-             (table-insert-column after-delete after-delete-table 2
-                                  :values '("new" "new")))
-           (after-insert (edit-result-updated-document insert-result))
-           (after-insert-formula
-             (first (node-property
-                     (table-edit-test-find-node
-                      (document-root after-insert) :table)
-                     :tblfm))))
+           (after-delete-formula (first (node-property after-delete-table :tblfm))))
       (with-soft-assertions
         (expect (edit-result-p delete-result) :to-be t)
-        (expect after-delete-formula :to-equal "$3=$0+$INVALID+@2$2")
-        (expect (edit-result-p insert-result) :to-be t)
-        (expect after-insert-formula :to-equal "$4=$0+$INVALID+@2$3")
+        (expect after-delete-formula
+                :to-equal "@2$1=@2$INVALID+@2$2")
         (expect (document-text document) :to-equal source))))
 
   (it "does not treat an INVALID row after an hline as the column header"
@@ -537,6 +593,21 @@
         (expect (first condition) :to-be :table)
         (expect (third condition) :to-be :uneditable-structure)
         (expect (fourth condition) :to-equal "table")
+        (expect (document-text document) :to-equal source))))
+
+  (it "preserves malformed INVALID assignment targets during edits"
+    (let* ((source (format nil
+                           "| A | B |~%| x | y |~%#+TBLFM: @INVALID$2=1~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (result (table-insert-row document table 1))
+           (updated (edit-result-updated-document result))
+           (updated-table
+             (table-edit-test-find-node (document-root updated) :table)))
+      (with-soft-assertions
+        (expect (edit-result-p result) :to-be t)
+        (expect (node-property updated-table :tblfm)
+                :to-equal '("@INVALID$2=1"))
         (expect (document-text document) :to-equal source))))
 
   (it "rejects multiple attached TBLFM directives with a contract reason"
