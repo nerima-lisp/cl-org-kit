@@ -736,6 +736,10 @@
              (export-gfm-test-view :src-block
                                    :properties '(:value "hidden")
                                    :payload '(:exports :none)))
+           (source-code
+             (export-gfm-test-view :src-block
+                                   :properties '(:value "code")
+                                   :payload '(:exports :code)))
            (source-results
              (export-gfm-test-view :src-block
                                    :properties '(:value "hidden")
@@ -768,6 +772,10 @@
                              (string #\Newline) (string #\Newline) "---"))
         (expect (org-kit::export-gfm-render-view state source-none)
                 :to-equal "")
+        (expect (org-kit::export-gfm-render-view state source-code)
+                :to-equal
+                (concatenate 'string "~~~" (string #\Newline) "code"
+                             (string #\Newline) "~~~"))
         (expect (org-kit::export-gfm-render-view state source-results)
                 :to-equal "---")
         (expect (org-kit::export-gfm-view-trailing-post-blank

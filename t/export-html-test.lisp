@@ -819,6 +819,18 @@
           (expect (search "&lt;2026-10-14 Wed&gt;" output)
                   :not :to-be nil)))))
 
+  (it "omits source code and results when the HTML serializer mode is none"
+    (let* ((document
+             (parse-org
+              (format nil "#+BEGIN_SRC text~%hidden~%#+END_SRC~%")))
+           (source (export-html-test-node-of-type document :src-block))
+           (view (org-kit::%make-export-view
+                  :node source :payload '(:exports :none)))
+           (state (org-kit::%make-export-html-state)))
+      (org-kit::export-html-render-source-block state view)
+      (expect (coerce (org-kit::export-html-state-output state) 'string)
+              :to-equal "")))
+
   (it "handles empty and unterminated Org block values"
     (let* ((document
              (parse-org
