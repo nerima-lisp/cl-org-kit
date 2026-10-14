@@ -1,0 +1,15 @@
+#+OPTIONS: toc:nil num:nil
+
+* Code policy
+:PROPERTIES:
+:CUSTOM_ID: code-policy
+:END:
+Inline delimiters: ~code with `` two ticks~ and =plain verbatim= and +struck text+.
+
+#+BEGIN_EXAMPLE
+Example contains ~~~ and <br>.
+#+END_EXAMPLE
+
+#+BEGIN_SRC text :exports code
+source contains ~~~ and punctuation: <&>
+#+END_SRC

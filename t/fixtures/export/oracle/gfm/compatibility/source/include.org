@@ -1,0 +1,10 @@
+#+TITLE: Include oracle
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+#+OPTIONS: toc:nil num:nil
+
+Before included content
+
+#+INCLUDE: "included/fragment.org"
+
+After included content

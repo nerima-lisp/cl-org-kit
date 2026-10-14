@@ -47,6 +47,27 @@ The oracle pins Emacs 31.1, Org 9.8.10, and ox-gfm 20231215.1901. The generator 
 arguments, including `:exports`. The source-block oracle therefore records Org's nil-mode output;
 the kit's explicit source export modes are covered separately by policy tests.
 
+The `export/oracle/gfm/compatibility/` manifest is a GFM-only subset of the E1 cases. Its four
+source copies preserve metadata and selection pruning, explicit `EXCLUDE_TAGS`, includes, macros,
+footnotes, headings, and paragraphs. Each heading has an explicit `CUSTOM_ID` where needed and
+`toc:nil` avoids coupling this subset to the serializer's deterministic anchor and destination
+policy. The source copies remove links, literal code, tables, and other constructs with deliberate
+GFM serializer differences; the shared oracle sources and outputs remain unchanged. Their complete
+outputs were generated with Emacs 31.1, Org 9.8.10, and pinned ox-gfm commit
+`4f774f13d34b3db9ea4ddb0b1edc070b1526ccbb` (version 20231215.1901; source SHA-256
+`84c841f4204447eec317453ebab514741d22d4b65459a652eb87e04b29483771`).
+
+The `export/policy/gfm/` corpus fixes those differences separately. `links.org` covers angle
+destinations, escaped labels, relative and fragment links, and unsafe URL fallback. `code.org` and
+`source-blocks.org` cover adaptive code delimiters and source export modes; `source-blocks.org` is
+the policy copy of the E1 source-block case because ox-gfm emits fixed triple-backtick fences.
+`table-structure.org` covers escaped table pipes and rows, prose hard line breaks, headings and TOC,
+lists, quotes, verse, and repeated footnotes. A focused serializer assertion covers a newline within
+a table cell because the Org object parser does not produce line-break objects inside table cells.
+`raw.org` is exported both with raw GFM constructs disabled and with the explicit opt-in. Policy
+expectations are hand-reviewed kit outputs, not Ox-generated parity data. Parity tests consume only
+the GFM-specific compatibility manifest for oracle comparisons and never launch Emacs.
+
 Export policy fixtures also record deliberate differences from Org: duplicate TITLE, AUTHOR, DATE,
 LANGUAGE, SELECT_TAGS, EXCLUDE_TAGS, and MACRO declarations are rejected, and global keywords in
 included or macro-expanded fragments are rejected even where Org accepts them. Multiple

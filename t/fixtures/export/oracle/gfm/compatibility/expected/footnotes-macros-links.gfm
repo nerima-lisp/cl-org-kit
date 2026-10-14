@@ -1,0 +1,12 @@
+# Overview
+
+Hello reader with a named footnote<sup><a id="fnr.note" class="footref" href="#fn.note" role="doc-backlink">1</a></sup> and another reference<sup><a id="fnr.note.1" class="footref" href="#fn.note" role="doc-backlink">1</a></sup> Macro arguments one
+
+
+# Detail
+
+The local fragment destination is safe
+
+## Footnotes
+
+<sup><a id="fn.1" class="footnum" href="#fnr.1">1</a></sup> One definition serves both references

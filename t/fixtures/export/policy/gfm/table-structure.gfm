@@ -1,0 +1,54 @@
+- [Structure with punctuation](<#org-structure-with-punctuation>)
+- [Duplicate slug](<#org-duplicate-slug>)
+- [Duplicate slug](<#org-duplicate-slug-2>)
+
+<a id="org-structure-with-punctuation"></a>
+
+# Structure with punctuation
+
+Literal punctuation\: \<br\> \& \[square\] \(round\) **star**\.
+
+
+First hard break  
+Second line\.
+
+
+> Quoted first line\. Quoted second line\.
+
+
+Verse first line  
+Verse second line
+
+
+-  [ ] unchecked task
+-  [X] checked task
+  -  Nested item
+1.  Ordered first
+2.  Ordered second
+
+
+| Cell | Content |
+| --- | --- |
+| Pipe | left\\\|right |
+| Break | first\\\\ |
+
+
+Footnote reference<sup><a id="fnr.policy" class="footref" href="#fn.policy" role="doc-backlink">1</a></sup> and again<sup><a id="fnr.policy.1" class="footref" href="#fn.policy" role="doc-backlink">1</a></sup>\.
+
+
+<a id="org-duplicate-slug"></a>
+
+# Duplicate slug
+
+Second heading body\.
+
+
+<a id="org-duplicate-slug-2"></a>
+
+# Duplicate slug
+
+Third heading body\.
+
+## Footnotes
+
+<sup><a id="fn.1" class="footnum" href="#fnr.1">1</a></sup> Footnote definition with \`code\`\.

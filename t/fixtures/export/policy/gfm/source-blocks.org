@@ -1,0 +1,55 @@
+#+TITLE: Source block export modes
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+#+OPTIONS: toc:nil num:nil
+#+PROPERTY: header-args :eval never-export
+
+* Existing results are exported without execution
+:PROPERTIES:
+:CUSTOM_ID: source-block-modes
+:END:
+
+#+begin_src emacs-lisp :exports both
+(error "Babel must remain disabled")
+#+end_src
+
+#+RESULTS:
+: preexisting both result
+
+#+begin_src emacs-lisp :exports code
+(error "Code-only block was not evaluated")
+#+end_src
+
+#+begin_src emacs-lisp :exports results
+(error "Results-only block was not evaluated")
+#+end_src
+
+#+RESULTS:
+: preexisting results-only output
+
+#+begin_src emacs-lisp :exports none
+(error "Hidden block was not evaluated")
+#+end_src
+
+#+RESULTS:
+: hidden preexisting output
+
+#+begin_src emacs-lisp :exports none
+(error "Adjacent hidden results block was not evaluated")
+#+end_src
+
+#+RESULTS:
+: adjacent hidden output
+
+#+begin_src emacs-lisp
+(error "Default source block was not evaluated")
+#+end_src
+
+#+begin_src emacs-lisp :exports results
+(error "Non-adjacent results source block was not evaluated")
+#+end_src
+
+The paragraph separates the following results from the source block.
+
+#+RESULTS:
+: non-adjacent output

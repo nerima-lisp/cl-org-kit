@@ -1,0 +1,15 @@
+# Link policy
+
+Safe destinations\: [HTTPS label \(with punctuation\)](<https://example.test/a%20b%3Cc%3E>) and [Mail label](<mailto:reader@example.test>)\.
+
+
+Relative destinations\: [Guide](<docs/guide.org>)\, [Ampersand path](<docs/road&amp;map.org>)\, and [Rooted path](</rooted%20path>)\.
+
+
+Local destination\: [This heading](<#link-policy>)\.
+
+
+Unsafe destinations\: JavaScript label\, Named entity label\, Decimal entity label\, Hex entity label\, Network label\, and Backslash label\.
+
+
+Query strings preserve entity\-like text\: [Entity\-like query](<https://example.test/search?q=one&amp;colon;two>)\.

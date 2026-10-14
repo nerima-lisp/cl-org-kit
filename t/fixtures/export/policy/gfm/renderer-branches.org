@@ -1,0 +1,84 @@
+#+OPTIONS: toc:nil num:nil
+#+LINK: docs https://example.test/documentation/%s
+
+* Render branches!
+
+Anchor <<plain-target>> and radio <<<radio phrase>>>. [[Render branches!]] [[radio phrase]].
+
+Inline *bold* /italic/ +strike+ _under_ x^2 a_b \alpha and <2024-01-01 Mon> [cite:@doe2020] [50%].
+
+No label [[relative path]]. Image [[images/picture.SVG][Picture]]. Query [[https://example.test/search?q=one&two=2][Search]].
+
+Labels flatten inline objects: [[https://example.test/label][Text *bold* ~code~ \alpha]]. Expanded abbreviation [[docs:guide][Documentation]]. Plain https://example.test/plain.
+
+Inline source src_lisp{(+ 1 2)}.
+
+#+BEGIN_NOTE
+Special block content.
+#+END_NOTE
+
+: Fixed-width text.
+
+\begin{equation}
+x = y
+\end{equation}
+
+#+BEGIN_SRC bad.lang :exports code
+invalid-language-tag
+#+END_SRC
+
+#+BEGIN_SRC text :exports both
+body for both mode
+#+END_SRC
+
+#+RESULTS:
+: preexisting result
+
+#+BEGIN_SRC text :exports results
+body hidden by results mode
+#+END_SRC
+
+#+RESULTS:
+: preexisting results-only result
+
+#+BEGIN_SRC text :exports none
+hidden source and result
+#+END_SRC
+
+#+RESULTS:
+: hidden result
+
+#+BEGIN: dynamic-name
+Dynamic & text
+#+END:
+
+-----
+
+#+BEGIN_QUOTE
+First\\
+Second
+#+END_QUOTE
+
+#+BEGIN_CENTER
+Centered *content*.
+#+END_CENTER
+
+#+BEGIN_VERSE
+Verse first line
+Verse second line
+#+END_VERSE
+
+- [-] Partial task
+  - Nested item
+1. Ordered first
+2. Ordered second
+
+| A | B |
+|---+---|
+| value | |
+
+Anonymous [fn::inline note] and named[fn:complex].
+
+[fn:complex] Definition paragraph
+    - nested footnote item
+      continuation

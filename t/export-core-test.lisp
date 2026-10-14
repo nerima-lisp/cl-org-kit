@@ -1527,3 +1527,66 @@
                   :to-be :max-heading-depth)
           (expect (org-resource-limit-error-limit condition) :to-be 2)
           (expect (org-resource-limit-error-actual condition) :to-be 3))))))
+
+(describe "E3 shared URL and renderer dispatch"
+  (it "parses ASCII URL scheme characters and rejects malformed schemes"
+    (with-soft-assertions
+      (dolist (scheme '("h1" "h+" "h." "h-"))
+        (expect (org-kit::export-explicit-url-scheme
+                 (concatenate 'string scheme ":value"))
+                :to-equal scheme))
+      (dolist (destination '("relative/path" ":value" "1http:value"
+                             "h_:value"))
+        (expect (org-kit::export-explicit-url-scheme destination)
+                :to-be nil))))
+
+  (it "validates raw and expanded URLs before rendering"
+    (let ((control (string (code-char 1)))
+          (unicode-space (string (code-char #x3000))))
+      (with-soft-assertions
+        (expect (org-kit::export-safe-url-p "https://example.test"
+                                             "https://example.test")
+                :to-be t)
+        (expect (org-kit::export-safe-url-p "guide/page" "guide/page")
+                :to-be t)
+        (expect (org-kit::export-safe-url-p "/" "/") :to-be t)
+        (expect (org-kit::export-safe-url-p "javascript:alert(1)"
+                                             "javascript:alert(1)")
+                :to-be nil)
+        (expect (org-kit::export-safe-url-p (concatenate 'string "https://x/"
+                                                         control "raw")
+                                             "https://example.test")
+                :to-be nil)
+        (expect (org-kit::export-safe-url-p "https://example.test"
+                                             (concatenate 'string "https://x/"
+                                                          control "expanded"))
+                :to-be nil)
+        (expect (org-kit::export-safe-url-p "" "") :to-be nil)
+        (expect (org-kit::export-safe-url-p "guide" unicode-space)
+                :to-be nil)
+        (expect (org-kit::export-safe-url-p "guide\\private"
+                                             "guide\\private")
+                :to-be nil)
+        (expect (org-kit::export-safe-url-p "//example.test" "//example.test")
+                :to-be nil))))
+
+  (it "accepts an explicit context through the public export API"
+    (let* ((document (parse-org "Body"))
+           (context (make-export-context :language "fr"))
+           (output (export-org document :gfm :context context)))
+      (with-soft-assertions
+        (expect (export-context-p context) :to-be t)
+        (expect (search "Body" output) :to-be-truthy))))
+
+  (it "signals when a backend has no renderer method"
+    (let* ((preparation (org-kit::export-prepare (parse-org "Body") :html))
+           (condition
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-render-preparation preparation :unknown)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-backend condition) :to-be :unknown)
+          (expect (org-export-error-reason condition)
+                  :to-be :unsupported-backend))))))

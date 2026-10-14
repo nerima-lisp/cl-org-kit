@@ -1,0 +1,41 @@
+#+OPTIONS: toc:2 num:nil
+
+* Structure with punctuation
+:PROPERTIES:
+:CUSTOM_ID: structure-main
+:END:
+Literal punctuation: <br> & [square] (round) *star*.
+
+First hard break\\
+Second line.
+
+#+BEGIN_QUOTE
+Quoted first line.
+Quoted second line.
+#+END_QUOTE
+
+#+BEGIN_VERSE
+Verse first line
+Verse second line
+#+END_VERSE
+
+- [ ] unchecked task
+- [X] checked task
+  - Nested item
+1. Ordered first
+2. Ordered second
+
+| Cell | Content |
+|------+---------|
+| Pipe | left\|right |
+| Break | first\\| second |
+
+Footnote reference[fn:policy] and again[fn:policy].
+
+* Duplicate slug
+Second heading body.
+
+* Duplicate slug
+Third heading body.
+
+[fn:policy] Footnote definition with `code`.

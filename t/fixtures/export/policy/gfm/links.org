@@ -1,0 +1,15 @@
+#+OPTIONS: toc:nil num:nil
+
+* Link policy
+:PROPERTIES:
+:CUSTOM_ID: link-policy
+:END:
+Safe destinations: [[https://example.test/a b<c>][HTTPS label (with punctuation)]] and [[mailto:reader@example.test][Mail label]].
+
+Relative destinations: [[docs/guide.org][Guide]], [[docs/road&map.org][Ampersand path]], and [[/rooted path][Rooted path]].
+
+Local destination: [[#link-policy][This heading]].
+
+Unsafe destinations: [[javascript:alert(1)][JavaScript label]], [[javascript&colon;alert(1)][Named entity label]], [[javascript&#58;alert(1)][Decimal entity label]], [[javascript&#x3a;alert(1)][Hex entity label]], [[//example.test/path][Network label]], and [[docs\private][Backslash label]].
+
+Query strings preserve entity-like text: [[https://example.test/search?q=one&colon;two][Entity-like query]].

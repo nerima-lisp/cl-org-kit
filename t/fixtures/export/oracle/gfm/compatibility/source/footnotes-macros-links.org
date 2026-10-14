@@ -1,0 +1,21 @@
+#+TITLE: Footnotes and macros
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+#+OPTIONS: toc:nil num:nil
+#+MACRO: greet Hello $1
+#+MACRO: single $1
+
+* Overview
+:PROPERTIES:
+:CUSTOM_ID: overview
+:END:
+{{{greet(reader)}}} with a named footnote[fn:note] and another reference[fn:note]
+Macro arguments {{{single(one)}}}
+
+* Detail
+:PROPERTIES:
+:CUSTOM_ID: details
+:END:
+The local fragment destination is safe
+
+[fn:note] One definition serves both references

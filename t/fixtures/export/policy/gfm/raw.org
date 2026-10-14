@@ -1,0 +1,17 @@
+#+OPTIONS: toc:nil num:nil
+
+* Raw policy
+:PROPERTIES:
+:CUSTOM_ID: raw-policy
+:END:
+Ordinary HTML-like text stays literal: <br>.
+
+#+BEGIN_EXPORT gfm
+<aside>raw & content</aside>
+#+END_EXPORT
+
+#+BEGIN_EXPORT html
+<strong>other backend</strong>
+#+END_EXPORT
+
+@@gfm:<u>snippet & text</u>@@ and @@html:<i>other backend</i>@@.

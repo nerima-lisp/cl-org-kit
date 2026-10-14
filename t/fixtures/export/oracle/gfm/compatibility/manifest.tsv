@@ -1,0 +1,5 @@
+case	source	include	expected
+metadata-selection	compatibility/source/metadata-selection.org	-	compatibility/expected/metadata-selection.gfm
+exclude-tags-override	compatibility/source/exclude-tags-override.org	-	compatibility/expected/exclude-tags-override.gfm
+footnotes-macros-links	compatibility/source/footnotes-macros-links.org	-	compatibility/expected/footnotes-macros-links.gfm
+include	compatibility/source/include.org	compatibility/source/included/fragment.org	compatibility/expected/include.gfm

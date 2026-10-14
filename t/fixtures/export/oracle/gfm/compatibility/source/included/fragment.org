@@ -1,0 +1,5 @@
+* Included section
+:PROPERTIES:
+:CUSTOM_ID: included-section
+:END:
+The include source is copied into the compatibility corpus
