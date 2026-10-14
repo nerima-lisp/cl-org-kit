@@ -730,7 +730,7 @@
         (expect (org-kit:org-time-range-include-start-p offset-range) :to-be t)
         (expect (org-kit:org-time-range-include-end-p equal-range) :to-be t)
         (expect (org-kit:org-time-error-reason mixed-values) :to-be :invalid-time)
-        (expect (org-kit:org-time-error-reason reversed-values) :to-be :invalid-time)
+        (expect (org-kit:org-time-error-reason reversed-values) :to-be :reversed-range)
         (expect (org-kit:org-time-error-reason invalid-range) :to-be :invalid-time)
         (expect (org-kit:org-time-error-reason missing-end) :to-be :invalid-time)
         (expect (org-kit:org-time-error-reason invalid-start-inclusion) :to-be :invalid-time)

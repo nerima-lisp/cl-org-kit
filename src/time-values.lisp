@@ -71,6 +71,7 @@ VALUE may be an ORG-KIT value or a legacy cl-date-kit local date/time."
   (error 'org-time-error
          :message (ecase reason
                     (:invalid-time "Invalid date or time")
+                    (:reversed-range "Invalid date or time")
                     (:unknown-zone "Unknown time zone")
                     (:dst-gap "Nonexistent local time")
                     (:dst-overlap "Ambiguous local time"))
@@ -345,7 +346,7 @@ Endpoints must both carry UTC offsets or both be local values."
                (typep include-end-p 'boolean))
     (%org-time-error :invalid-time "invalid range fields"))
   (when (plusp (%time-values-compare start end))
-    (%org-time-error :invalid-time "range start is after range end"))
+    (%org-time-error :reversed-range "range start is after range end"))
   (%make-org-time-range :start start :end end
                         :include-start-p include-start-p
                         :include-end-p include-end-p))
