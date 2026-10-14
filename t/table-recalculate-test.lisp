@@ -25,6 +25,12 @@
             (org-resource-limit-error-limit condition)
             (org-resource-limit-error-actual condition)))))
 
+(defun table-recalculate-test-caught-condition (thunk)
+  (handler-case
+      (progn (funcall thunk) nil)
+    (org-table-unsupported-syntax (condition) condition)
+    (org-table-error (condition) condition)))
+
 (defun table-recalculate-test-run-fixture (source-path expected-path)
   (let* ((source (table-recalculate-test-fixture source-path))
          (expected (table-recalculate-test-fixture expected-path))
@@ -49,6 +55,30 @@
              "corpus/recalculate/field-column-overlap.org"
              "expected/recalculate/field-column-overlap.org")))
       (expect (length (edit-result-spans result)) :to-be 1)))
+
+  (it "does not let a field formula hide a column formula error"
+    (let* ((source
+             (format nil "| value | result |~%|-------+--------|~%| 0 | old |~%| 2 | old |~%#+TBLFM: $2=$1/$1::@2$2=42~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (condition
+             (table-recalculate-test-condition
+              (lambda () (table-recalculate document table)))))
+      (with-soft-assertions
+        (expect condition :to-equal '(:table :division-by-zero))
+        (expect (document-text document) :to-equal source))))
+
+  (it "reads a field-overridden cell before applying field formulas"
+    (let* ((source
+             (format nil "| a | b | c |~%|---+---+---|~%| 1 | 2 | 0 |~%#+TBLFM: @2$2=9::$3=$2+1~%"))
+           (expected
+             (format nil "| a | b | c |~%|---+---+---|~%| 1 | 9 | 3 |~%#+TBLFM: @2$2=9::$3=$2+1~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result)) :to-equal expected)
+        (expect (document-text document) :to-equal source))))
 
   (it "uses earlier column results in source order"
     (let ((result
@@ -100,35 +130,61 @@
         (expect (document-text (edit-result-updated-document result)) :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
-  (it "rejects multiple directives without changing the input"
+  (it "bounds the formula in a multiple-directive condition"
+    (let* ((long-formula (format nil "$1=~A" (make-string 96 :initial-element #\1)))
+           (source (format nil "| a |~%|---|~%| 1 |~%#+TBLFM: ~A~%#+TBLFM: $1=2~%"
+                           long-formula))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (condition (table-recalculate-test-caught-condition
+                       (lambda () (table-recalculate document table)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+        (when (typep condition 'org-table-unsupported-syntax)
+          (expect (org-table-unsupported-syntax-feature condition)
+                  :to-be :multiple-tblfm-directives)
+          (expect (org-table-unsupported-syntax-formula condition)
+                  :to-equal (org-kit::bounded-text long-formula)))
+        (expect (document-text document) :to-equal source))))
+
+  (it "rejects duplicate field targets"
     (let* ((source (table-recalculate-test-fixture
-                    "policy/recalculate/multiple-directives.org"))
+                    "policy/recalculate/duplicate-fields.org"))
            (expected (table-recalculate-test-fixture
-                      "policy/expected/recalculate/multiple-directives.org"))
+                      "policy/expected/recalculate/duplicate-fields.org"))
            (document (parse-org source))
            (table (table-recalculate-test-find-node (document-root document) :table)))
       (with-soft-assertions
         (expect (table-recalculate-test-condition
                  (lambda () (table-recalculate document table)))
-                :to-equal '(:unsupported :multiple-tblfm-directives))
+                :to-equal '(:table :duplicate-target))
         (expect (document-text document) :to-equal expected))))
 
-  (it "rejects duplicate targets and dependency cycles before patching"
-    (dolist (case '("duplicate-fields" "cyclic-columns" "cyclic-fields"))
-      (let* ((source-path (format nil "policy/recalculate/~A.org" case))
-             (expected-path (format nil "policy/expected/recalculate/~A.org" case))
-             (source (table-recalculate-test-fixture source-path))
-             (expected (table-recalculate-test-fixture expected-path))
-             (document (parse-org source))
-             (table (table-recalculate-test-find-node (document-root document) :table))
-             (condition (table-recalculate-test-condition
-                         (lambda () (table-recalculate document table)))))
-        (with-soft-assertions
-          (expect condition :to-equal
-                  (if (string= case "duplicate-fields")
-                      '(:table :duplicate-target)
-                      '(:table :cyclic-formula)))
-          (expect (document-text document) :to-equal expected)))))
+  (it "rejects cycles between column targets"
+    (let* ((source (table-recalculate-test-fixture
+                    "policy/recalculate/cyclic-columns.org"))
+           (expected (table-recalculate-test-fixture
+                      "policy/expected/recalculate/cyclic-columns.org"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (with-soft-assertions
+        (expect (table-recalculate-test-condition
+                 (lambda () (table-recalculate document table)))
+                :to-equal '(:table :cyclic-formula))
+        (expect (document-text document) :to-equal expected))))
+
+  (it "rejects cycles between field targets"
+    (let* ((source (table-recalculate-test-fixture
+                    "policy/recalculate/cyclic-fields.org"))
+           (expected (table-recalculate-test-fixture
+                      "policy/expected/recalculate/cyclic-fields.org"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (with-soft-assertions
+        (expect (table-recalculate-test-condition
+                 (lambda () (table-recalculate document table)))
+                :to-equal '(:table :cyclic-formula))
+        (expect (document-text document) :to-equal expected))))
 
   (it "rejects duplicate column targets"
     (let* ((document (parse-org
@@ -137,6 +193,79 @@
       (expect (table-recalculate-test-condition
                (lambda () (table-recalculate document table)))
               :to-equal '(:table :duplicate-target))))
+
+  (it "resolves named column targets and accepts a trailing separator"
+    (let* ((source (format nil "| amount | total |~%|--------+-------|~%| 2 | 0 |~%#+TBLFM: $total=$amount+1::~%"))
+           (expected (format nil "| amount | total |~%|--------+-------|~%| 2 | 3 |~%#+TBLFM: $total=$amount+1::~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result)) :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
+  (it "resolves named field targets against header columns"
+    (let* ((source (format nil "| amount | total |~%|--------+-------|~%| 2 | 0 |~%#+TBLFM: @2$total=$amount+2::~%"))
+           (expected (format nil "| amount | total |~%|--------+-------|~%| 2 | 4 |~%#+TBLFM: @2$total=$amount+2::~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result)) :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
+  (it "resolves named first-row field targets"
+    (let* ((source (format nil "| amount | total |~%|--------+-------|~%| 2 | 0 |~%#+TBLFM: @<$total=9~%"))
+           (expected (format nil "| amount | 9 |~%|--------+-------|~%| 2 | 0 |~%#+TBLFM: @<$total=9~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (expect (document-text (edit-result-updated-document result)) :to-equal expected)))
+
+  (it "detects duplicate targets expressed by a name and a number"
+    (let* ((document (parse-org
+                      (format nil "| amount | total |~%|--------+-------|~%| 2 | 0 |~%#+TBLFM: $total=1::$2=2~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (expect (table-recalculate-test-condition
+               (lambda () (table-recalculate document table)))
+              :to-equal '(:table :duplicate-target))))
+
+  (it "rejects invalid and unknown assignment target kinds"
+    (let* ((document (parse-org
+                      (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%#+TBLFM: @INVALID$2=1~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment
+             (first (org-kit::table-calc-program-assignments
+                     (org-kit::table-calc-parse-formula "$1=1"))))
+           (unknown (org-kit::copy-table-calc-assignment assignment)))
+      (setf (org-kit::table-calc-assignment-kind unknown) :future)
+      (with-soft-assertions
+        (expect (table-recalculate-test-condition
+                 (lambda () (table-recalculate document table)))
+                :to-equal '(:table :invalid-target))
+        (expect (table-recalculate-test-condition
+                 (lambda ()
+                   (org-kit::table-recalculate-assignments-by-kind
+                    (list unknown) :column)))
+                :to-equal '(:table :unsupported-target-kind)))))
+
+  (it "reads a self-referencing column formula from its original cell"
+    (let* ((source (format nil "| a | b |~%|---+---|~%| 0 | 1 |~%| 0 | 2 |~%#+TBLFM: $2=$2+1~%"))
+           (expected (format nil "| a | b |~%|---+---|~%| 0 | 2 |~%| 0 | 3 |~%#+TBLFM: $2=$2+1~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result)) :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
+  (it "reads a self-referencing field formula from the original cell"
+    (let* ((source (format nil "| a | b |~%|---+---|~%| 0 | 0 |~%#+TBLFM: @2$2=@2$2+1~%"))
+           (expected (format nil "| a | b |~%|---+---|~%| 0 | 1 |~%#+TBLFM: @2$2=@2$2+1~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (expect (document-text (edit-result-updated-document result)) :to-equal expected)))
 
   (it "validates every expression before evaluating any formula"
     (let* ((source (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%#+TBLFM: @2$1=1/0::@2$2=@3$1~%"))
@@ -157,6 +286,31 @@
                  (lambda () (table-recalculate document table)))
                 :to-equal '(:limit :max-formula-work 4 5))
         (expect (document-text document) :to-equal source))))
+
+  (it "charges range dependency inspection to the formula work budget"
+    (let* ((source
+             (with-output-to-string (stream)
+               (format stream "| value | total |~%|-------+-------|~%")
+               (loop for value below 100
+                     do (format stream "| ~D | 0 |~%" value))
+               (format stream "#+TBLFM: @101$2=vsum(@2$1..@101$1)~%")))
+           (document (parse-org source :limits (make-limits :max-formula-work 220)))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (expect (table-recalculate-test-condition
+               (lambda () (table-recalculate document table)))
+              :to-equal '(:limit :max-formula-work 220 310))))
+
+  (it "stores standard table rows in a vector"
+    (let* ((document (parse-org
+                      (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (multiple-value-bind (rows data-rows header-row)
+          (org-kit::table-recalculate-standard-rows table)
+        (declare (ignore data-rows))
+        (with-soft-assertions
+          (expect (vectorp rows) :to-be t)
+          (when (vectorp rows)
+            (expect (aref rows 0) :to-be header-row))))))
 
   (it "uses named, relative, last-row, and current-row references"
     (let* ((source
@@ -307,6 +461,35 @@
                 :to-equal '(:edit :foreign-node))
         (expect (document-text document) :to-equal
                 (format nil "| a |~%|---|~%| 1 |~%")))))
+
+  (it "uses the table as the target for reference resolution errors"
+    (let* ((document (parse-org
+                      (format nil "| a | b |~%|---+---|~%| 1 | 0 |~%#+TBLFM: @2$2=@99$1~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment
+             (first (org-kit::table-calc-program-assignments
+                     (org-kit::table-calc-parse-formula "@2$2=@99$1"))))
+           (entry (org-kit::make-table-recalculate-entry
+                   :assignment assignment :row 2 :column 2 :owner 0))
+           (condition
+             (multiple-value-bind (rows data-rows header-row)
+                 (org-kit::table-recalculate-standard-rows table)
+               (declare (ignore data-rows header-row))
+               (table-recalculate-test-caught-condition
+                (lambda ()
+                  (org-kit::table-recalculate-evaluate-entries
+                   (list entry) rows (length rows) 2
+                   (make-hash-table :test #'equal) (document-limits document)
+                   (org-kit::make-table-calc-work-budget)
+                   (make-hash-table :test #'equal)
+                   (lambda (work-map row column)
+                     (declare (ignore work-map))
+                     (org-kit::table-recalculate-cell-value rows row column))
+                   table))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-table-error) :to-be t)
+        (when (typep condition 'org-table-error)
+          (expect (org-table-error-target condition) :to-equal "table")))))
 
   (it "preserves CRLF and untouched source text when patching cell spans"
     (let* ((source (format nil "#+TITLE: Keep~C~%| a | b |~C~%|---+---|~C~%| 1 | 8 |~C~%#+TBLFM: @2$2=$1+1~C~%" #\Return #\Return #\Return #\Return #\Return))
