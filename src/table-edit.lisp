@@ -1413,7 +1413,7 @@
         (table-column-layout
          normalized-models width
          (1+ (limit-value (document-limits document) :max-output-length))
-         #'%table-edit-row-values)
+         #'%table-edit-row-values :numeric-alignment-p t)
       (let ((row-output-length
               (table-edit-output-rows-length
                normalized-models (length prefix) widths newline-length

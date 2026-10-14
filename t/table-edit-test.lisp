@@ -718,6 +718,12 @@
                 :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
+  (it "recognizes numeric cells for edit alignment"
+    (expect (mapcar #'org-kit::table-cell-numeric-p
+                    '("1" "+2.5" "-.75" "1e3" "1e+3" ">-4"
+                      "text" "1e" "" ">"))
+            :to-equal '(t t t t t t nil nil nil nil)))
+
   (it "keeps existing backslash escapes before inserted pipes balanced"
     (let* ((source (format nil "| A | B |~%| old | row |~%"))
            (document (parse-org source))
