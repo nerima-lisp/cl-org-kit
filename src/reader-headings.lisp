@@ -845,8 +845,8 @@
                (object-end
                 (reader-heading-trim-right text object-start title-end))
                (raw-value
-                (string-trim (list #\Space #\Tab #\Return)
-                             (subseq text title-start title-end))))
+                (string-trim (list #\Space #\Tab)
+                             (subseq text title-start (min title-end line-end)))))
           (list :level
                 (logical-heading-level (reader-context-document context)
                                        star-count)

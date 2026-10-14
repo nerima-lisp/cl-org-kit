@@ -86,6 +86,13 @@
                 (expect (node-property trimmed :title) :to-equal '("Trimmed"))
                 (expect (node-property empty :raw-value) :to-equal "")
                 (expect (node-property empty :title) :to-equal '(""))))
+          (it "preserves a bare CR at EOF in the raw headline value"
+              (let* ((source (concatenate 'string "* Item" (string #\Return)))
+                     (document (parse-org source))
+                     (headline
+                       (first (reader-headings-test-elements document :headline))))
+                (expect (node-property headline :raw-value)
+                        :to-equal (concatenate 'string "Item" (string #\Return)))))
           (it
            "collects custom TODO sequences and lets explicit settings override them"
            (let* ((source
