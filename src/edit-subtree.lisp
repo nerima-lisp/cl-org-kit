@@ -158,9 +158,11 @@
       (after (string #\Newline))
       (t (string #\Newline)))))
 
-(defun edit-subtree-join-fragment (document offset raw-subtree suffix-p)
+(defun edit-subtree-join-fragment (document offset raw-subtree suffix-p
+                                  &optional line-ending)
   (let* ((source (document-text document))
-         (newline (edit-subtree-line-ending document offset))
+         (newline (or line-ending
+                      (edit-subtree-line-ending document offset)))
          (prefix-p (and (plusp offset)
                         (not (char= (char source (1- offset)) #\Newline))))
          (raw-final-newline-p

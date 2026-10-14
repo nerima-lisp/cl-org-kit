@@ -212,6 +212,34 @@
         (expect (count #\Return updated-text) :to-be 1)
         (expect (count #\Newline updated-text) :to-be 3))))
 
+  (it "uses LF separators when refiling into a nonempty target without an EOL"
+    (let* ((crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text (format nil "* Parent~A** Child~Abody~A"
+                                crlf crlf crlf))
+           (target-text "* Target")
+           (source (parse-org source-text))
+           (target (parse-org target-text))
+           (result
+             (refile-subtree source
+                             (edit-relocate-test-headline source "Child")
+                             target
+                             (edit-relocate-test-headline target "Target")))
+           (updated-source (edit-result-updated-document
+                            (relocation-result-source-edit result)))
+           (updated-target (edit-result-updated-document
+                            (relocation-result-target-edit result)))
+           (updated-text (document-text updated-target)))
+      (with-soft-assertions
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text)
+        (expect (document-text updated-source)
+                :to-equal (format nil "* Parent~A" crlf))
+        (expect updated-text
+                :to-equal
+                (format nil "* Target~%** Child~%body~%"))
+        (expect (count #\Return updated-text) :to-be 0)
+        (expect (count #\Newline updated-text) :to-be 3))))
+
   (it "copies a subtree without a source edit and keeps the source document intact"
     (let* ((source-text (format nil "* Source~%source body~%"))
            (target-text (format nil "* Target~%target body~%"))

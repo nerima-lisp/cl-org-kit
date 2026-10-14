@@ -401,7 +401,7 @@
 
 (defun edit-relocate-line-ending (source-document source-offset
                                   target-document target-offset)
-  (if (position #\Newline (document-text target-document))
+  (if (plusp (length (document-text target-document)))
       (edit-subtree-line-ending target-document target-offset)
       (edit-subtree-line-ending source-document source-offset)))
 
@@ -489,13 +489,15 @@
                                                            target-heading
                                                            (or target-heading
                                                                heading)))
+             (line-ending (edit-relocate-line-ending
+                           source-document source-start
+                           target-document target-offset))
              (raw
                (edit-relocate-normalize-line-endings
                 (edit-relocate-transform-fragment
                  source-document source-heading source-start source-end
                  target-document target-heading archive-p heading)
-                (edit-relocate-line-ending source-document source-start
-                                           target-document target-offset)))
+                line-ending))
              (fragment-canonical
                (nth-value 2 (edit-subtree-fragment target-document raw heading)))
              (destination-source (document-text target-document))
@@ -503,7 +505,7 @@
                            (document-final-newline-p target-document)))
              (target-replacement
                (edit-subtree-join-fragment target-document target-offset raw
-                                           suffix-p))
+                                           suffix-p line-ending))
              (source-patches
                (when (eq mode :move)
                  (list (edit-make-patch source-start source-end "" heading))))
