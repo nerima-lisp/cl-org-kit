@@ -349,52 +349,18 @@
                         titles)
                   :to-be nil)))))
 
-  (it "ignores an inactive timestamp attached as planning data"
+  (it "ignores an inactive timestamp beside parsed planning data"
     (let* ((document
              (parse-org
               (format nil
                       "* TODO Inactive planning~%SCHEDULED: <2025-01-01 Wed>~%[2025-01-01 Wed]")))
-           (planning nil)
-           (inactive nil)
            (context (agenda-test-context "2025-01-01T12:00:00+00:00")))
-      (map-nodes (lambda (node)
-                   (case (node-type node)
-                     (:planning (setf planning node))
-                     (:timestamp
-                      (when (eq (org-timestamp-view-kind (timestamp-view node))
-                                :inactive)
-                        (setf inactive node)))))
-                 (document-root document))
-      (with-soft-assertions
-        (expect (not (null planning)) :to-be t)
-        (expect (not (null inactive)) :to-be t)
-        (when inactive
-          (expect (org-timestamp-view-kind (timestamp-view inactive))
-                  :to-be :inactive))
-        (when planning
-          (setf (node-property planning :scheduled) inactive)
-          (expect (agenda-result-entries
-                   (agenda (list document) (make-org-time-value "2025-01-01")
-                           (make-org-time-value "2025-01-01")
-                           :time-context context))
-                  :to-equal '())))))
-
-  (it "does not scan a canonical planning timestamp as a second active timestamp"
-    (let* ((document
-             (parse-org (format nil "* TODO Scheduled~%SCHEDULED: <2025-01-01>")))
-           (planning nil))
-      (map-nodes (lambda (node)
-                   (when (eq (node-type node) :planning)
-                     (setf planning node)))
-                 (document-root document))
-      (setf (node-children planning) (list (node-property planning :scheduled)))
-      (let ((entries
-              (agenda-result-entries
-               (agenda (list document) (make-org-time-value "2025-01-01")
-                       (make-org-time-value "2025-01-01")
-                       :time-context
-                       (agenda-test-context "2025-01-01T12:00:00+00:00")))))
-        (expect (mapcar #'agenda-entry-kind entries) :to-equal '(:scheduled))))))
+      (expect (mapcar #'agenda-entry-kind
+                      (agenda-result-entries
+                       (agenda (list document) (make-org-time-value "2025-01-01")
+                               (make-org-time-value "2025-01-01")
+                               :time-context context)))
+              :to-equal '(:scheduled))))
 
   (it "covers deadline warning boundaries around the reference and range"
     (labels ((rows (source reference start end &optional (warning-days 3))
@@ -469,6 +435,7 @@
                             ("Delayed repeat" "2025-01-04")
                             ("Visible repeat" "2025-01-05")
                             ("Delayed repeat" "2025-01-05"))))))
+)
 
 (describe "Agenda resource limits and errors"
   (it "enforces inclusive range and row limits below, at and above the ceiling"

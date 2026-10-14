@@ -267,14 +267,13 @@
                  (when (eq type :headline)
                    (when collect-headlines-p
                      (push node headlines)))
-                 (unless (eq type :planning)
-                   (when (and collect-timestamps-p
-                              (eq type :timestamp) owner)
-                     (push node (gethash owner timestamps)))
-                   (dolist (child (node-children node))
-                     (visit child owner))))))
-      (when (document-root document)
-        (visit (document-root document) nil)))
+                 (when (and collect-timestamps-p
+                            (eq type :timestamp) owner)
+                   (push node (gethash owner timestamps)))
+                 (dolist (child (node-children node))
+                   (visit child owner)))))
+      (when root
+        (visit root nil)))
     (values (when collect-headlines-p (nreverse headlines))
             timestamps indices)))
 
