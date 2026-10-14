@@ -152,8 +152,7 @@
                  (clock-row-unscoped-duration line duration)))
          (org-time-error (condition)
            (if (and duration
-                    (eq (org-time-error-reason condition) :invalid-time)
-                    (not (clock-reversed-range-error-p condition)))
+                    (eq (org-time-error-reason condition) :invalid-time))
                (clock-row-unscoped-duration line duration)
                (if (clock-reversed-range-error-p condition)
                    (%org-clock-error :malformed-clock line)
