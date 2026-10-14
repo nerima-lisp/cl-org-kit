@@ -286,8 +286,8 @@
            (time-error (timestamp-time-error
                         (lambda () (org-kit:timestamp-view time-range)))))
       (with-soft-assertions
-        (expect (org-kit:org-time-error-reason date-error) :to-be :invalid-time)
-        (expect (org-kit:org-time-error-reason time-error) :to-be :invalid-time))))
+        (expect (org-kit:org-time-error-reason date-error) :to-be :reversed-range)
+        (expect (org-kit:org-time-error-reason time-error) :to-be :reversed-range))))
 
   (it "exposes repeater and warning amount, source unit, and mode"
     (let* ((node (timestamp-node-from-org "<2026-10-12 Mon ++2d --3w>"))
