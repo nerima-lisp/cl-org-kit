@@ -169,6 +169,18 @@
                 :to-equal '("A" "Same" "Same" "Z"))
         (expect (document-text document) :to-equal source))))
 
+  (it "sorts a final child without adding a final newline"
+    (let* ((source (format nil "* P~%** B~%** A"))
+           (document (parse-org source))
+           (result (sort-subtree-children document
+                                          (edit-sort-test-parent document)
+                                          :alpha))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* P~%** A~%** B"))
+        (expect (document-text document) :to-equal source))))
+
   (it "keeps parent section content while sorting its headline children"
     (let* ((source
              (format nil

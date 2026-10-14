@@ -139,10 +139,23 @@
                  (expected (edit-canonical-copy
                             (edit-canonical-document document)))
                  (children (edit-subtree-canonical-children expected path))
+                 (second-slice (subseq source second-start second-end))
+                 (first-slice (subseq source first-start first-end))
+                 (untrimmed-replacement
+                   (concatenate 'string second-slice
+                                (if (char= (char second-slice
+                                                (1- (length second-slice)))
+                                           #\Newline)
+                                    ""
+                                    (edit-subtree-line-ending document
+                                                              first-start))
+                                first-slice))
                  (replacement
-                   (concatenate 'string
-                                (subseq source second-start second-end)
-                                (subseq source first-start first-end))))
+                   (if (and (= second-end (length source))
+                            (not (document-final-newline-p document)))
+                       (string-right-trim '(#\Return #\Newline)
+                                          untrimmed-replacement)
+                       untrimmed-replacement)))
             (edit-canonical-set-children
              expected path
              (edit-relocate-swap-children children first-index second-index))

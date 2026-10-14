@@ -410,6 +410,17 @@
         (expect (edit-relocate-test-span-data result)
                 :to-equal (list (list 0 (length source-text)))))))
 
+  (it "moves a final sibling without adding a final newline"
+    (let* ((source-text (format nil "* A~%* B"))
+           (document (parse-org source-text))
+           (result (move-subtree document
+                                 (edit-relocate-test-headline document "B")
+                                 :direction :up))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-text updated) :to-equal (format nil "* B~%* A"))
+        (expect (document-text document) :to-equal source-text))))
+
   (it "records Org's incompatible TODO preservation and rejects it by contract"
     (let* ((fixture (edit-relocate-test-fixture
                      "t/fixtures/e/oracle/relocate/refile-incompatible-todo.sexp"))

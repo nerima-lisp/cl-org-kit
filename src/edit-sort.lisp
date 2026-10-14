@@ -236,10 +236,23 @@
                     (prog1 (edit-sort-entry-canonical (pop sorted)))
                     canonical)))
 
-(defun edit-sort-source-replacement (entries)
-  (with-output-to-string (stream)
-    (dolist (entry entries)
-      (write-string (edit-sort-entry-source-text entry) stream))))
+(defun edit-sort-source-replacement (document entries final-span-p)
+  (let* ((line-ending (edit-subtree-line-ending document 0))
+         (replacement
+           (with-output-to-string (stream)
+             (loop for remaining on entries
+                   for entry = (first remaining)
+                   for next = (second remaining)
+                   for source-text = (edit-sort-entry-source-text entry)
+                   do (write-string source-text stream)
+                      (when (and next
+                                 (not (char= (char source-text
+                                                   (1- (length source-text)))
+                                             #\Newline)))
+                        (write-string line-ending stream))))))
+    (if (and final-span-p (not (document-final-newline-p document)))
+        (string-right-trim '(#\Return #\Newline) replacement)
+        replacement)))
 
 (defun sort-subtree-children (document heading key
                               &key (property-name nil property-name-p)
@@ -305,7 +318,9 @@ Missing values stay last in both directions, and ties retain source order."
                  (last-entry (car (last source-order)))
                  (start (edit-sort-entry-source-start first-entry))
                  (end (edit-sort-entry-source-end last-entry))
-                 (replacement (edit-sort-source-replacement ordered))
+                 (replacement
+                   (edit-sort-source-replacement
+                    document ordered (= end (length (document-text document)))))
                  (expected (edit-canonical-copy canonical))
                  (reordered-children
                    (edit-sort-reordered-canonical-children
