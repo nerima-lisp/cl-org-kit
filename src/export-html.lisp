@@ -10,6 +10,7 @@
   (references (make-hash-table :test #'eq))
   (wrapper-references (make-hash-table :test #'eq))
   (used-references (make-hash-table :test #'equal))
+  (reference-suffixes (make-hash-table :test #'equal))
   (reference-targets (make-hash-table :test #'equal))
   (footnote-definition-ids (make-hash-table :test #'equal))
   (footnote-reference-ids (make-hash-table :test #'eq))
@@ -289,14 +290,18 @@
                (return candidate))))
 
 (defun export-html-reserve-reference (state candidate)
-  (let ((used (export-html-state-used-references state)))
-    (loop for suffix from 0
+  (let ((used (export-html-state-used-references state))
+        (suffixes (export-html-state-reference-suffixes state)))
+    (loop for suffix = (gethash candidate suffixes 0)
           for reference = (if (zerop suffix)
                               candidate
                               (format nil "~A.~D" candidate suffix))
-          unless (gethash reference used)
-            do (setf (gethash reference used) t)
-               (return reference))))
+          do (if (gethash reference used)
+                 (setf (gethash candidate suffixes) (1+ suffix))
+                 (progn
+                   (setf (gethash candidate suffixes) (1+ suffix)
+                         (gethash reference used) t)
+                   (return reference))))))
 
 (defun export-html-explicit-reference (state node)
   (multiple-value-bind (reference found-p)
@@ -812,16 +817,15 @@
          (export-html-image-path-p path))))
 
 (defun export-html-link-label (state node child-views view)
-  (if (or child-views (and view (export-view-children view)))
+  (if (or child-views
+          (and view (export-view-children view))
+          (and (null view) (node-children node)))
       (export-html-write-node-children state node child-views view)
-      (if (and (null view) (node-children node))
-          (export-html-write-node-children state node child-views view)
-          (export-html-escape-to-output state :text
-                                        (or (node-property node :path) "")))))
+      (export-html-escape-to-output state :text
+                                    (or (node-property node :path) ""))))
 
 (defun export-html-render-image (state node attributes)
-  (let* ((attributes attributes)
-         (path (node-property node :path))
+  (let* ((path (node-property node :path))
          (destination (export-html-link-destination state node))
          (alt (or (cdr (assoc "alt" attributes :test #'string=)) path "")))
     (when destination
@@ -1151,8 +1155,7 @@
     (export-html-write state "<pre class=\"example\">
 ")
     (export-html-escape-to-output state :text value)
-    (unless (and (plusp (length value))
-                 (char= #\Newline (char value (1- (length value)))))
+    (unless (export-html-ends-with-newline-p value)
       (export-html-write state "
 "))
     (export-html-write state "</pre>

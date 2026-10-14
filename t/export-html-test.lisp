@@ -549,6 +549,15 @@
         (expect (search "generated-reference-" (prin1-to-string normalized))
                 :not :to-be nil))))
 
+  (it "reserves repeated explicit IDs using the next available suffix"
+    (let ((state (org-kit::%make-export-html-state)))
+      (setf (gethash "topic.1"
+                     (org-kit::export-html-state-used-references state))
+            t)
+      (expect (loop repeat 3
+                    collect (org-kit::export-html-reserve-reference state "topic"))
+              :to-equal '("topic" "topic.2" "topic.3"))))
+
   (it "validates links through export-org after public node updates"
     (let* ((raw-control (format nil "https://example.test~C" (code-char 1)))
            (expanded-control-type (format nil "https~C" (code-char 1)))

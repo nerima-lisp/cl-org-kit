@@ -137,10 +137,13 @@
   (let ((code (char-code character)))
     (or (<= code #x1f) (<= #x7f code #x9f))))
 
+(defun export-whitespace-p (character)
+  (find character '(#\Space #\Tab #\Newline #\Return #\Page)))
+
 (defun export-whitespace-character-p (character)
   (let ((code (char-code character)))
-    (or (<= #x09 code #x0d)
-        (= code #x20)
+    (or (export-whitespace-p character)
+        (= code #x0b)
         (member code '(#x85 #xa0 #x1680 #x2028 #x2029 #x202f #x205f #x3000))
         (<= #x2000 code #x200a))))
 
@@ -238,9 +241,6 @@
               (write-string text stream)
               stream)
             text))))
-
-(defun export-whitespace-p (character)
-  (find character '(#\Space #\Tab #\Newline #\Return #\Page)))
 
 (defun export-trim (string)
   (string-trim '(#\Space #\Tab #\Newline #\Return #\Page) string))
