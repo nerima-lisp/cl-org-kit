@@ -826,9 +826,12 @@
   (it "keeps malformed entity text escaped after a public node update"
     (let* ((document (parse-org (format nil "\\alpha")))
            (entity (export-html-test-node-of-type document :entity)))
-      (setf (node-property entity :html) "<unsafe>")
-      (expect (search "&lt;unsafe&gt;" (export-org document :html))
-              :not :to-be nil)))
+      (setf (node-property entity :html) "&<script>x</script>;")
+      (let ((output (export-org document :html)))
+        (with-soft-assertions
+          (expect (search "&amp;&lt;script&gt;x&lt;/script&gt;;" output)
+                  :not :to-be nil)
+          (expect (search "<script>" output) :to-be nil)))))
 
   (it "renders a non-paragraph first list child"
     (let* ((document
