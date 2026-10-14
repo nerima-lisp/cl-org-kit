@@ -852,7 +852,7 @@
 
 (defun export-ascii-visible-control-character-p (character)
   (let ((code (char-code character)))
-    (and (not (char= character #\Newline))
+    (and (not (member character '(#\Newline #\Tab)))
          (or (<= 0 code #x1f)
              (<= #x7f code #x9f)))))
 

@@ -1219,6 +1219,31 @@
                           "\\u0080" "\\u009f"))
                 :to-equal '(t t t t t t)))))
 
+  (it "preserves tabs in ASCII source blocks"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+BEGIN_SRC make~%target:~%~Ccommand~%#+END_SRC~%"
+                     #\Tab))
+           (document (parse-org source))
+           (output (export-org document :ascii)))
+      (with-soft-assertions
+        (expect (find #\Tab output) :not :to-be nil)
+        (expect (search "\\x09" output) :to-be nil))))
+
+  (it "preserves source-block carriage returns during parsing and spells them visibly"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+BEGIN_SRC text~%left~Cright~%#+END_SRC~%"
+                     #\Return))
+           (document (parse-org source))
+           (block (export-ascii-test-find-node (document-root document) :src-block))
+           (value (node-property block :value))
+           (output (export-org document :ascii)))
+      (with-soft-assertions
+        (expect (find #\Return value) :not :to-be nil)
+        (expect (search "\\x0D" output) :not :to-be nil)
+        (expect (find #\Return output) :to-be nil))))
+
   (it "reuses stable output without mutating source nodes"
     (let* ((source
              (export-ascii-test-source
