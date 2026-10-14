@@ -921,6 +921,48 @@
             (expect (output-at-boundary :column column-output)
                     :to-equal column-output))))))
 
+  (it "keeps formula size estimates consistent with parsed rewrites"
+    (let* ((source
+             (format nil
+                     "| A | B |~%| a | b |~%| c | d |~%| e | f |~%| g | h |~%#+TBLFM: @2$1=@3$2::@4$2=@2$1~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (formula (first (node-property table :tblfm))))
+      (labels ((check (operation)
+                 (multiple-value-bind (estimated-characters estimated-octets)
+                     (if (eq (getf operation :kind) :insert)
+                         (values
+                          (org-kit::table-edit-insert-formula-adjustment
+                           table operation)
+                          (org-kit::table-edit-insert-formula-adjustment
+                           table operation :utf-16))
+                         (org-kit::table-edit-remap-formula-adjustments
+                          source table operation :utf-16))
+                   (let* ((plan
+                            (first (org-kit::table-edit-plan-formulas
+                                    source table operation)))
+                          (output
+                            (org-kit::table-edit-formula-output
+                             (org-kit::%table-edit-formula-source plan)
+                             (org-kit::%table-edit-formula-kept-assignments plan)
+                             (org-kit::%table-edit-formula-edits plan)
+                             (org-kit::%table-edit-formula-removed-p plan)
+                             (org-kit::%table-edit-formula-terminal-p plan)))
+                          (actual-characters (- (length output)
+                                                (length formula)))
+                          (actual-octets
+                            (- (org-kit::edit-encoded-range-octets
+                                output 0 (length output) :utf-16)
+                               (org-kit::edit-encoded-range-octets
+                                formula 0 (length formula) :utf-16))))
+                     (expect estimated-characters :to-be actual-characters)
+                     (expect estimated-octets :to-be actual-octets)
+                     (expect (org-kit::%table-edit-formula-output-length plan)
+                             :to-be (length output))))))
+        (check (list :kind :insert :axis :row :index 2))
+        (check (list :kind :delete :axis :column :index 2))
+        (check (list :kind :move :axis :row :from 2 :to 4)))))
+
   (it "accounts for retained formulas and inserted absolute-reference growth"
     (let* ((digits (make-string 40 :initial-element #\9))
            (base-source (format nil "| A |~%| x |~%"))
