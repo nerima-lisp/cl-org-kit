@@ -604,6 +604,17 @@
               (expect (not (null (search href output)))
                       :to-be (fourth case))))))))
 
+  (it "validates destinations after LINK abbreviation expansion"
+    (let* ((document
+             (parse-org
+              (format nil "#+LINK: x javascript:%s~%~%[[x:alert(1)]]~%")))
+           (link (export-html-test-node-of-type document :link))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (node-property link :path) :to-equal "javascript:alert(1)")
+        (expect (search "href=\"javascript:alert(1)\"" output) :to-be nil)
+        (expect (search "javascript:alert(1)" output) :not :to-be nil))))
+
   (it "fails closed for unknown backends and escaping contexts"
     (let* ((backend-error
              (export-html-test-catch-error
