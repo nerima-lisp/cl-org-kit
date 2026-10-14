@@ -4,7 +4,6 @@
 (error "Babel must remain disabled")
 ~~~
 
-
 ~~~
 preexisting both result
 ~~~
@@ -17,16 +16,6 @@ preexisting both result
 
 ~~~
 preexisting results-only output
-~~~
-
-
-~~~
-hidden preexisting output
-~~~
-
-
-~~~
-adjacent hidden output
 ~~~
 
 

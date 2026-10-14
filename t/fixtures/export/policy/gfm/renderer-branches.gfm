@@ -40,7 +40,6 @@ invalid-language-tag
 body for both mode
 ~~~
 
-
 ~~~
 preexisting result
 ~~~
@@ -48,11 +47,6 @@ preexisting result
 
 ~~~
 preexisting results-only result
-~~~
-
-
-~~~
-hidden result
 ~~~
 
 

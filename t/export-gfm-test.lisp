@@ -178,6 +178,17 @@
                             "table-structure" "source-blocks"
                             "renderer-branches")))))
 
+  (it "renders both-mode source code without an adjacent result block"
+    (let* ((newline (string #\Newline))
+           (document
+             (parse-org
+              (format nil "#+begin_src text :exports both~%body~%#+end_src")))
+           (output (export-org document :gfm)))
+      (expect output
+              :to-equal (concatenate 'string "~~~text" newline "body"
+                                     newline "~~~"))
+      (expect (count #\~ output) :to-equal 6)))
+
   (it "keeps the policy branch inputs as the expected parsed GFM node types"
     (let* ((link-document (parse-org (export-gfm-test-policy-source "links.org")))
            (code-document (parse-org (export-gfm-test-policy-source "code.org")))
