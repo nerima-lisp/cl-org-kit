@@ -725,10 +725,6 @@ after the later of VIEW's date and the reference date."
        (agenda-add-heading-entry state heading-data :timestamp
                                  date view nil nil timestamp)))))
 
-(defun agenda-heading-entry-data (document heading indices)
-  "Return heading fields in the order expected by agenda entry constructors."
-  (multiple-value-list (agenda-heading-data document heading indices)))
-
 (defun agenda-build-planning-rows (state heading-data planning
                                    start-date end-date warning-days scheduled-delay
                                    future-repeats time-context)
@@ -812,7 +808,7 @@ TIME-CONTEXT is required and is the only source of reference time."
       (agenda-signal-error :invalid-range (list start-date end-date)
                            "Agenda start date follows its end date"))
     (check-limit limits :max-agenda-range-days
-                  (agenda-range-size start-local end-local))
+                 (agenda-range-size start-local end-local))
     (let ((state (%make-agenda-build-state :limits limits
                                            :entry-count 0 :repeat-count 0
                                            :entries nil)))
@@ -821,11 +817,13 @@ TIME-CONTEXT is required and is the only source of reference time."
             (agenda-document-heading-data
              document :collect-headlines-p t :collect-timestamps-p t)
           (dolist (heading headings)
-            (let* ((heading-data (agenda-heading-entry-data
-                                  document heading indices))
+            (let* ((heading-data
+                     (multiple-value-list
+                      (agenda-heading-data document heading indices)))
                    (planning (agenda-planning-node heading)))
               (agenda-build-planning-rows state heading-data
-                                          planning start-local end-local warning-days
+                                          planning start-local end-local
+                                          warning-days
                                           scheduled-delay future-repeats time-context)
               (agenda-build-timestamp-rows
                state (nreverse (gethash heading timestamps-by-heading))
@@ -862,7 +860,8 @@ MATCH uses the existing Org match syntax; TIME-CONTEXT is required."
                 (agenda-build-check-entry-limit state)
                 (agenda-build-store-entry
                  state (agenda-make-entry-for-heading
-                        (agenda-heading-entry-data document heading indices)
+                        (multiple-value-list
+                         (agenda-heading-data document heading indices))
                         :todo nil nil nil nil heading))))))))
     (make-agenda-result :entries (nreverse (agenda-build-state-entries state))
                         :start-date nil :end-date nil
