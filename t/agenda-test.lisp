@@ -349,18 +349,28 @@
                         titles)
                   :to-be nil)))))
 
-  (it "ignores an inactive timestamp beside parsed planning data"
+  (it "ignores an inactive timestamp in parsed planning data"
     (let* ((document
              (parse-org
-              (format nil
-                      "* TODO Inactive planning~%SCHEDULED: <2025-01-01 Wed>~%[2025-01-01 Wed]")))
+              (format nil "* TODO Inactive planning~%SCHEDULED: [2025-01-01 Wed]")))
            (context (agenda-test-context "2025-01-01T12:00:00+00:00")))
-      (expect (mapcar #'agenda-entry-kind
-                      (agenda-result-entries
-                       (agenda (list document) (make-org-time-value "2025-01-01")
-                               (make-org-time-value "2025-01-01")
-                               :time-context context)))
-              :to-equal '(:scheduled))))
+      (let ((planning nil))
+        (map-nodes (lambda (node)
+                     (when (eq (node-type node) :planning)
+                       (setf planning node)))
+                   (document-root document))
+        (let ((timestamp (and planning (node-property planning :scheduled))))
+          (with-soft-assertions
+            (expect (not (null planning)) :to-be t)
+            (expect (not (null timestamp)) :to-be t)
+            (when timestamp
+              (expect (org-timestamp-view-kind (timestamp-view timestamp))
+                      :to-be :inactive))
+            (expect (agenda-result-entries
+                     (agenda (list document) (make-org-time-value "2025-01-01")
+                             (make-org-time-value "2025-01-01")
+                             :time-context context))
+                    :to-equal '()))))))
 
   (it "covers deadline warning boundaries around the reference and range"
     (labels ((rows (source reference start end &optional (warning-days 3))
