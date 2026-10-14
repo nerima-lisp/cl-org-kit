@@ -182,6 +182,36 @@
         (expect (document-text updated-target)
                 :to-equal (format nil "* Target~%** Child~%body~%")))))
 
+  (it "preserves a body carriage return while normalizing refiled LF separators"
+    (let* ((standalone-cr (string #\Return))
+           (source-text
+             (format nil "* Parent~%** Child~%body~Acontinues~%"
+                     standalone-cr))
+           (target-text (format nil "* Target~%"))
+           (source (parse-org source-text))
+           (target (parse-org target-text))
+           (result
+             (refile-subtree source
+                             (edit-relocate-test-headline source "Child")
+                             target
+                             (edit-relocate-test-headline target "Target")))
+           (updated-source (edit-result-updated-document
+                            (relocation-result-source-edit result)))
+           (updated-target (edit-result-updated-document
+                            (relocation-result-target-edit result)))
+           (updated-text (document-text updated-target)))
+      (with-soft-assertions
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text)
+        (expect (document-text updated-source)
+                :to-equal (format nil "* Parent~%"))
+        (expect updated-text
+                :to-equal
+                (format nil "* Target~%** Child~%body~Acontinues~%"
+                        standalone-cr))
+        (expect (count #\Return updated-text) :to-be 1)
+        (expect (count #\Newline updated-text) :to-be 3))))
+
   (it "copies a subtree without a source edit and keeps the source document intact"
     (let* ((source-text (format nil "* Source~%source body~%"))
            (target-text (format nil "* Target~%target body~%"))
