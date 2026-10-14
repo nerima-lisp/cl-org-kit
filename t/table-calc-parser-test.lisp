@@ -297,7 +297,7 @@
                         references)
                 :to-equal '("INVALID" "invalid")))))
 
-  (it "normalizes zero-padded references and bounds oversized reference integers"
+  (it "treats zero-row references as current row and bounds oversized integers"
     (let* ((overlong-digits
              (make-string (1+ (length (write-to-string most-positive-fixnum)))
                           :initial-element #\9))
@@ -314,10 +314,16 @@
              (org-kit::table-calc-expression-value
               (table-calc-test-assignment-expression
                (format nil "$1=@+1$-~A" overlong-digits))))
+           (zero-kind (org-kit::table-calc-reference-row-kind zero-reference))
            (zero-value (org-kit::table-calc-reference-row-value zero-reference))
            (row-value (org-kit::table-calc-reference-row-value overlong-row)))
       (with-soft-assertions
-        (expect zero-value :to-be 0)
+        (expect zero-kind :to-be :current)
+        (expect zero-value :to-be nil)
+        (expect (org-kit::table-calc-reference-row-start zero-reference)
+                :to-be 1)
+        (expect (org-kit::table-calc-reference-row-end zero-reference)
+                :to-be 4)
         (expect row-value :to-be :too-large)
         (expect (org-kit::table-calc-reference-column-value overlong-column)
                 :to-be :too-large))))

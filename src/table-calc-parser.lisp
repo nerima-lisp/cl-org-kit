@@ -273,9 +273,10 @@
             (setf row-kind :relative
                   row-value (table-calc-reference-integer parser token))))
          ((eql (table-calc-current-kind parser) :number)
-          (let ((token (table-calc-advance parser)))
-            (setf row-kind :absolute
-                  row-value (table-calc-reference-integer parser token)
+          (let* ((token (table-calc-advance parser))
+                 (value (table-calc-reference-integer parser token)))
+            (setf row-kind (if (eql value 0) :current :absolute)
+                  row-value (unless (eql value 0) value)
                   row-start (table-calc-token-start token)
                   row-end (table-calc-token-end token))))
          ((and (eql (table-calc-current-kind parser) :identifier)

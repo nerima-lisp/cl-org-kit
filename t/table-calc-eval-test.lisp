@@ -306,11 +306,30 @@
             (table-calc-eval-test-condition
              "@1$1=@INVALID$2" :cells (table-calc-eval-test-cell-map))))
       (table-calc-eval-test-expect-table-error condition :invalid-reference)
-      (expect (org-table-error-target condition) :to-equal "@1$1"))
+      (expect (org-table-error-target condition) :to-equal "@1$1")))
+
+  (it "evaluates @0 as the current row"
+    (expect (table-calc-eval-test-evaluate
+             "$2=@0$1"
+             :base-row 3 :base-column 2 :last-row 3
+             :cells (table-calc-eval-test-cell-map '(3 1 "42")))
+            :to-equal "42"))
+
+  (it "rejects relative references that resolve outside the table"
     (let ((condition
-            (table-calc-eval-test-condition "@1$1=@0$1")))
+            (table-calc-eval-test-condition
+             "@1$1=@+1$-1" :base-column 1
+             :cells (table-calc-eval-test-cell-map))))
       (table-calc-eval-test-expect-table-error condition :unsupported-reference)
       (expect (org-table-error-target condition) :to-equal "@1$1")))
+
+  (it "rejects current-row references when the position resolver returns row zero"
+    (let ((condition
+            (table-calc-eval-test-condition
+             "$2=@0$1" :base-row 0 :base-column 2
+             :cells (table-calc-eval-test-cell-map))))
+      (table-calc-eval-test-expect-table-error condition :unsupported-reference)
+      (expect (org-table-error-target condition) :to-equal "$2")))
 
   (it "evaluates hline-anchor ranges across inserted rows"
     (let ((before-insertion
