@@ -1172,8 +1172,7 @@
             (export-html-write state "<pre class=\"example\">
 ")
             (export-html-escape-to-output state :text value)
-            (unless (and (plusp (length value))
-                         (char= #\Newline (char value (1- (length value)))))
+            (unless (export-html-ends-with-newline-p value)
               (export-html-write state "
 "))
             (export-html-write state "</pre>
