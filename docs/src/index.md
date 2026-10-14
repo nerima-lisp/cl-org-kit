@@ -11,10 +11,9 @@ The 0.1.0 public API includes:
 - clock start and stop edits, clock summaries, and clocktable generation
 - Org pipe-table formatting, row and column editing, stable sorting, and
   supported formula recalculation
-- HTML and GitHub Flavored Markdown export
+- HTML, GitHub Flavored Markdown, and ASCII export
 
-The 0.1.0 public API does not include ASCII export or a dedicated TODO
-transition helper.
+The 0.1.0 public API does not include a dedicated TODO transition helper.
 
 Start with [Getting Started](getting-started.md), then see the
 [TODO and Agenda](guides/todo-agenda.md), [Clock](guides/clock.md),

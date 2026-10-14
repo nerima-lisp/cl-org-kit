@@ -17,10 +17,9 @@ targets SBCL.
 - Start and stop clocks, summarize clock time, and create clocktable data.
 - Format, edit, and stably sort Org pipe tables, and recalculate supported
   table formulas.
-- Export to HTML and GitHub Flavored Markdown (GFM).
+- Export to HTML, GitHub Flavored Markdown (GFM), and ASCII.
 
-The 0.1.0 public API does not provide ASCII export. See the
-[feature guides](docs/src/guides/todo-agenda.md) and
+See the [feature guides](docs/src/guides/todo-agenda.md) and
 [API stability scope](docs/src/reference/api-stability.md) for supported calls,
 return values, conditions, and limits.
 
