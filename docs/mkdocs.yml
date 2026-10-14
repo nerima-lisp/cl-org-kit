@@ -12,7 +12,13 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Guides:
+      - TODO and Agenda: guides/todo-agenda.md
+      - Clock: guides/clock.md
+      - Tables: guides/tables.md
+      - Export: guides/export.md
   - Reference:
       - Node Model: reference/node-model.md
+      - API Stability: reference/api-stability.md
   - Project:
       - Development: project/development.md
