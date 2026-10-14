@@ -4,11 +4,11 @@
 (in-package #:org-kit)
 
 (defstruct (relocation-result
-            (:constructor %make-relocation-result
-                (source-edit target-edit mode source-path target-path))
-            (:conc-name %relocation-result-)
+            (:constructor make-relocation-result
+                (&key source-edit target-edit mode source-path target-path))
+            (:conc-name relocation-result-)
             (:copier nil)
-            (:predicate %relocation-result-p))
+            (:predicate relocation-result-p))
   "The validated edit results and heading paths for a relocation."
   (source-edit nil :read-only t)
   (target-edit nil :read-only t)
@@ -16,34 +16,21 @@
   (source-path nil :read-only t)
   (target-path nil :read-only t))
 
-(defun make-relocation-result (&key source-edit target-edit mode source-path
-                                    target-path)
-  "Return a relocation result containing the validated edits and paths."
-  (%make-relocation-result source-edit target-edit mode source-path target-path))
-
-(defun relocation-result-p (object)
-  "Return true when OBJECT is a relocation result."
-  (%relocation-result-p object))
-
-(defun relocation-result-source-edit (result)
-  "Return RESULT's source edit, or NIL when the operation copied a subtree."
-  (%relocation-result-source-edit result))
-
-(defun relocation-result-target-edit (result)
-  "Return RESULT's target edit."
-  (%relocation-result-target-edit result))
-
-(defun relocation-result-mode (result)
-  "Return RESULT's :MOVE or :COPY mode."
-  (%relocation-result-mode result))
-
-(defun relocation-result-source-path (result)
-  "Return the source heading path before the relocation."
-  (%relocation-result-source-path result))
-
-(defun relocation-result-target-path (result)
-  "Return the inserted heading path in the updated target document."
-  (%relocation-result-target-path result))
+(eval-when (:load-toplevel :execute)
+  (setf (documentation 'make-relocation-result 'function)
+        "Return a relocation result containing the validated edits and paths."
+        (documentation 'relocation-result-p 'function)
+        "Return true when OBJECT is a relocation result."
+        (documentation 'relocation-result-source-edit 'function)
+        "Return RESULT's source edit, or NIL when the operation copied a subtree."
+        (documentation 'relocation-result-target-edit 'function)
+        "Return RESULT's target edit."
+        (documentation 'relocation-result-mode 'function)
+        "Return RESULT's :MOVE or :COPY mode."
+        (documentation 'relocation-result-source-path 'function)
+        "Return the source heading path before the relocation."
+        (documentation 'relocation-result-target-path 'function)
+        "Return the inserted heading path in the updated target document."))
 
 (defun edit-relocate-check-document (document)
   (unless (document-p document)
@@ -555,9 +542,7 @@
                                (list source-operation target-operation)
                                (list target-operation)))
                (results (edit-apply-patches-transaction operations))
-               (source-result (cond ((eq mode :copy) nil)
-                                    (same-document-p (first results))
-                                    (t (first results))))
+               (source-result (if (eq mode :copy) nil (first results)))
                (target-result (if source-operation
                                   (second results)
                                   (first results)))
@@ -597,7 +582,7 @@
      :expected
      (edit-headline-expected document headline
                              (list :tags updated-tags
-                                   :archivedp (if archived-p t nil))))))
+                                   :archivedp archived-p)))))
 
 (defun archive-subtree-to (source-document heading destination-document
                            &key target-heading)

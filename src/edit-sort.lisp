@@ -233,7 +233,7 @@
         for child in children
         for canonical in canonical-children
         collect (if (edit-sort-headline-p child)
-                    (prog1 (edit-sort-entry-canonical (pop sorted)))
+                    (edit-sort-entry-canonical (pop sorted))
                     canonical)))
 
 (defun edit-sort-source-replacement (document entries final-span-p)
