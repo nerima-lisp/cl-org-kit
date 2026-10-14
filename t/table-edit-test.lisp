@@ -927,6 +927,11 @@
             (expect (output-at-boundary :column column-output)
                     :to-equal column-output))))))
 
+  (it "keeps zero-only formula coordinates below an insertion index"
+    (expect (org-kit::table-edit-formula-coordinate-insert-adjustment
+             "000" 0 3 "1")
+            :to-be 0))
+
   (it "keeps formula size estimates consistent with parsed rewrites"
     (let* ((source
              (format nil
