@@ -21,8 +21,7 @@
      (lambda (node)
        (when (and (eq (node-type node) :headline)
                   (string= title
-                           (string-right-trim '(#\Return)
-                                              (node-property node :raw-value))))
+                           (node-property node :raw-value)))
          (setf found node)))
      (document-root document))
     found))
@@ -560,6 +559,29 @@
         (expect (search "Archived entries from file" updated-text)
                 :to-be nil)
         (expect (relocation-result-mode result) :to-be :move))))
+
+  (it "writes archive outliner paths without CR from CRLF headline values"
+    (let* ((crlf (concatenate 'string (string #\Return) (string #\Newline)))
+           (source-text (concatenate 'string "* Parent" crlf "** Child" crlf
+                                     "*** Work" crlf "body" crlf))
+           (source (parse-org source-text :source-name "tasks.org"))
+           (target (parse-org (format nil "* Archive~%")))
+           (heading (edit-relocate-test-headline source "Work"))
+           (archive-heading
+             (edit-relocate-test-headline target "Archive"))
+           (result (archive-subtree-to source heading target
+                                       :target-heading archive-heading))
+           (updated-text
+             (document-text
+              (edit-result-updated-document
+               (relocation-result-target-edit result)))))
+      (with-soft-assertions
+        (expect (search ":ARCHIVE_OLPATH: Parent/Child" updated-text)
+                :to-be-truthy)
+        (expect (search (concatenate 'string ":ARCHIVE_OLPATH: Parent"
+                                     (string #\Return) "/Child")
+                        updated-text)
+                :to-be nil))))
 
   (it "matches archive metadata from every Org archive oracle fixture"
     (dolist (relative-path

@@ -845,7 +845,7 @@
                (object-end
                 (reader-heading-trim-right text object-start title-end))
                (raw-value
-                (string-trim (list #\Space #\Tab)
+                (string-trim (list #\Space #\Tab #\Return)
                              (subseq text title-start title-end))))
           (list :level
                 (logical-heading-level (reader-context-document context)

@@ -169,6 +169,41 @@
                 :to-equal '("A" "Same" "Same" "Z"))
         (expect (document-text document) :to-equal source))))
 
+  (it "treats CRLF and EOF headline titles as equal for alpha sorting"
+    (let* ((crlf (concatenate 'string (string #\Return) (string #\Newline)))
+           (source (concatenate 'string "* Parent" crlf
+                                "** Same" crlf "** Same"))
+           (document (parse-org source))
+           (result (sort-subtree-children document
+                                          (edit-sort-test-parent document)
+                                          :alpha))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent document))
+                :to-equal '("Same" "Same"))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent updated))
+                :to-equal '("Same" "Same"))
+        (expect (document-text updated) :to-equal source))))
+
+  (it "numerically sorts CRLF headline values without treating CR as data"
+    (let* ((crlf (concatenate 'string (string #\Return) (string #\Newline)))
+           (source (concatenate 'string "* Parent" crlf
+                                "** 10" crlf "** 2" crlf))
+           (document (parse-org source))
+           (result (sort-subtree-children document
+                                          (edit-sort-test-parent document)
+                                          :numeric))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent updated))
+                :to-equal '("2" "10"))
+        (expect (document-text updated)
+                :to-equal (concatenate 'string "* Parent" crlf
+                                       "** 2" crlf "** 10" crlf)))))
+
   (it "sorts a final child without adding a final newline"
     (let* ((source (format nil "* P~%** B~%** A"))
            (document (parse-org source))
@@ -242,9 +277,7 @@
                                 :encoding :utf-8))
            (parent (find "Parent" (edit-sort-test-headlines document)
                           :key (lambda (node)
-                                 (string-right-trim
-                                  '(#\Return)
-                                  (node-property node :raw-value)))
+                                 (node-property node :raw-value))
                           :test #'string=))
            (result (sort-subtree-children document parent :alpha))
            (updated (edit-result-updated-document result)))
