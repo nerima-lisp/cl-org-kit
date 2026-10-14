@@ -190,16 +190,12 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                                  :workflow-options workflow-options :note note))))
 
 (defun edit-todo-normalize-at (at)
-  (handler-case
-      (cond ((org-time-value-p at) at)
-            ((stringp at) (make-org-time-value at))
-            ((cl-date-kit:local-date-p at) (%time-value-from-local-value at))
-            ((cl-date-kit:local-date-time-p at)
-             (%time-value-from-local-value at))
-            (t (%org-time-error :invalid-time at)))
-    (org-time-error (condition) (error condition))
-    (cl-date-kit:invalid-date () (%org-time-error :invalid-time at))
-    (cl-date-kit:invalid-time () (%org-time-error :invalid-time at))))
+  (cond ((org-time-value-p at) at)
+        ((stringp at) (make-org-time-value at))
+        ((cl-date-kit:local-date-p at) (%time-value-from-local-value at))
+        ((cl-date-kit:local-date-time-p at)
+         (%time-value-from-local-value at))
+        (t (%org-time-error :invalid-time at))))
 
 (defun edit-todo-context-zone (time-context)
   (unless (org-time-context-p time-context)
