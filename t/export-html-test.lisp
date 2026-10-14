@@ -496,6 +496,39 @@
         (expect (search "[fn::" output) :to-be nil)
         (expect (search "id=\"footnotes\"" output) :to-be nil))))
 
+  (it "signals unresolved errors for unnumbered footnote references"
+    (let* ((document
+             (parse-org
+              (format nil "Reference [fn:note].~%~%[fn:note] Definition.")))
+           (preparation (org-kit::export-prepare document :html))
+           (state (org-kit::%make-export-html-state
+                   :preparation preparation
+                   :limits (document-limits document)))
+           (reference
+             (export-html-test-node-of-type document :footnote-reference))
+           (condition
+             (export-html-test-catch-error
+              (lambda ()
+                (org-kit::export-html-footnote-reference
+                 state reference nil nil)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-reason condition)
+                  :to-be :unresolved-footnote)))))
+
+  (it "signals an unresolved error for a missing footnote definition"
+    (let* ((document (parse-org "Text[fn:missing]."))
+           (condition
+             (export-html-test-catch-error
+              (lambda () (export-org document :html)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-backend condition) :to-be :html)
+          (expect (org-export-error-reason condition)
+                  :to-be :unresolved-footnote)))))
+
   (it "collision-resolves generated footnote IDs against explicit IDs"
     (let* ((document
              (parse-org

@@ -882,7 +882,9 @@
          (export-html-write state "\" role=\"doc-backlink\">")
          (export-html-write state (write-to-string number))
          (export-html-write state "</a></sup>")))
-      )))
+      (label
+       (export-error :html :unresolved-footnote node
+                     "Footnote reference has no selected definition")))))
 
 (defun export-html-render-footnotes (state)
   (let ((footnotes (export-preparation-footnotes
