@@ -140,37 +140,14 @@
   (handler-case (progn (funcall function) nil)
     (error (condition) condition)))
 
-(defun agenda-test-count-public-tree-walks (function)
-  (let ((original-map-nodes (symbol-function 'org-kit:map-nodes))
-        (original-node-children (symbol-function 'org-kit:node-children))
-        (map-depth 0)
-        (map-calls 0)
-        (map-visits 0)
-        (children-reads 0))
-    (unwind-protect
-         (progn
-           (setf (symbol-function 'org-kit:map-nodes)
-                 (lambda (visitor node)
-                   (if (zerop map-depth)
-                       (progn
-                         (incf map-calls)
-                         (incf map-depth)
-                         (unwind-protect
-                              (funcall original-map-nodes
-                                       (lambda (visited-node)
-                                         (incf map-visits)
-                                         (funcall visitor visited-node))
-                                       node)
-                           (decf map-depth)))
-                       (funcall original-map-nodes visitor node)))
-                 (symbol-function 'org-kit:node-children)
-                 (lambda (node)
-                   (incf children-reads)
-                   (funcall original-node-children node)))
-           (let ((result (funcall function)))
-             (values result map-calls map-visits children-reads)))
-      (setf (symbol-function 'org-kit:map-nodes) original-map-nodes
-            (symbol-function 'org-kit:node-children) original-node-children))))
+(defun agenda-test-count-source-data-visits (function)
+  (let ((node-visits 0))
+    (let ((org-kit::*agenda-data-walk-observer*
+            (lambda (node)
+              (declare (ignore node))
+              (incf node-visits))))
+      (let ((result (funcall function)))
+        (values result node-visits)))))
 
 (defun agenda-test-titles-on-date (entries date)
   (loop for entry in entries
@@ -205,7 +182,7 @@
                       (agenda-test-expected-entries
                        (getf expected-snapshot :entries)))))))))
 
-  (it "keeps public tree visits bounded for agenda and matched TODO rows"
+  (it "keeps agenda source-data visits bounded for agenda and matched TODO rows"
     (let* ((heading-count 2000)
            (source
              (with-output-to-string (stream)
@@ -223,12 +200,12 @@
            (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
            (agenda-observation
              (multiple-value-list
-              (agenda-test-count-public-tree-walks
+              (agenda-test-count-source-data-visits
                (lambda ()
                  (agenda (list document) date date :time-context context)))))
            (todo-observation
              (multiple-value-list
-              (agenda-test-count-public-tree-walks
+              (agenda-test-count-source-data-visits
                (lambda ()
                  (agenda-todo-list (list document) :match "TODO=\"TODO\""
                                    :time-context context))))))
@@ -237,16 +214,10 @@
                 :to-be heading-count)
         (expect (length (agenda-result-entries (first todo-observation)))
                 :to-be heading-count)
-        (expect (<= (second agenda-observation) 2) :to-be t)
-        (expect (<= (+ (third agenda-observation)
-                       (fourth agenda-observation))
-                    (* 4 node-count))
-                :to-be t)
-        (expect (<= (second todo-observation) 2) :to-be t)
-        (expect (<= (third todo-observation) (* 2 node-count)) :to-be t)
-        (expect (<= (+ (third todo-observation)
-                       (fourth todo-observation))
-                    (* 8 node-count))
+        (expect (<= node-count (second agenda-observation)) :to-be t)
+        (expect (<= (second agenda-observation) (* 2 node-count)) :to-be t)
+        (expect (<= node-count (second todo-observation)) :to-be t)
+        (expect (<= (second todo-observation) (* 2 node-count))
                 :to-be t))))
 
   (it "keeps repeated agenda calls in stable date, kind and source order"

@@ -243,6 +243,13 @@
         thereis (and (eq (node-type child) :section)
                      (find :planning (node-children child) :key #'node-type))))
 
+;; Tests bind this per thread to count the collector without redefining shared functions.
+(defvar *agenda-data-walk-observer* nil)
+
+(defun agenda-data-walk-observe (node)
+  (when *agenda-data-walk-observer*
+    (funcall *agenda-data-walk-observer* node)))
+
 (defun agenda-document-heading-data (document &key collect-headlines-p
                                                 collect-timestamps-p)
   "Collect selected heading data and sibling indices for DOCUMENT."
@@ -254,6 +261,7 @@
                       (query-heading-sibling-indices root)
                       (make-hash-table :test #'eq))))
     (labels ((visit (node heading)
+               (agenda-data-walk-observe node)
                (let* ((type (node-type node))
                       (owner (if (eq type :headline) node heading)))
                  (when (eq type :headline)
