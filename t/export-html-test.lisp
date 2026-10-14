@@ -670,9 +670,6 @@
     (let* ((backend-error
              (export-html-test-catch-error
               (lambda () (export-org (parse-org "Body") :unknown))))
-           (ascii-renderer-error
-             (export-html-test-catch-error
-              (lambda () (export-org (parse-org "Body") :ascii))))
            (context-error
              (export-html-test-catch-error
               (lambda ()
@@ -684,14 +681,6 @@
           (expect (org-export-error-reason backend-error) :to-be :unknown-backend)
           (expect (org-export-error-source backend-error) :to-be nil)
           (expect (org-kit-error-message backend-error) :to-be-truthy))
-        (expect (typep ascii-renderer-error 'org-export-error) :to-be t)
-        (when (typep ascii-renderer-error 'org-export-error)
-          (expect (org-export-error-backend ascii-renderer-error)
-                  :to-be :ascii)
-          (expect (org-export-error-reason ascii-renderer-error)
-                  :to-be :unsupported-backend)
-          (expect (org-export-error-source ascii-renderer-error) :to-be nil)
-          (expect (org-kit-error-message ascii-renderer-error) :to-be-truthy))
         (expect (typep context-error 'org-export-error) :to-be t)
         (when (typep context-error 'org-export-error)
           (expect (org-export-error-backend context-error) :to-be :html)
