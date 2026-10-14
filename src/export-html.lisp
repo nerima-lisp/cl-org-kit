@@ -763,10 +763,6 @@
                  (push child stack)))))
   state)
 
-(defun export-html-link-source-control-p (node)
-  (let ((source (node-text node)))
-    (and source (notany #'export-control-character-p source))))
-
 (defun export-html-image-path-p (path)
   (and (stringp path)
        (let ((extension (position #\. path :from-end t)))
@@ -804,7 +800,6 @@
              (t path))))
     (when (and (stringp path)
                (stringp destination)
-               (export-html-link-source-control-p node)
                (export-safe-url-p path destination))
       destination)))
 
@@ -821,8 +816,18 @@
           (and view (export-view-children view))
           (and (null view) (node-children node)))
       (export-html-write-node-children state node child-views view)
-      (export-html-escape-to-output state :text
-                                    (or (node-property node :path) ""))))
+      (let* ((type (node-property node :type))
+             (path (node-property node :path)))
+        (export-html-escape-to-output
+         state :text
+         (or (node-property node :raw-link)
+             (and (stringp type)
+                  (stringp path)
+                  (member type '("http" "https" "mailto")
+                          :test #'string-equal)
+                  (concatenate 'string type ":" path))
+             path
+             "")))))
 
 (defun export-html-render-image (state node attributes)
   (let* ((path (node-property node :path))

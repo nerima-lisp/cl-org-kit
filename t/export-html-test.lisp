@@ -615,6 +615,24 @@
         (expect (search "href=\"javascript:alert(1)\"" output) :to-be nil)
         (expect (search "javascript:alert(1)" output) :not :to-be nil))))
 
+  (it "preserves anchors across multiline link descriptions"
+    (let* ((document
+             (parse-org
+              (format nil "[[https://a.test][two~%lines]]")))
+           (output (export-org document :html)))
+      (expect (search (format nil "<a href=\"https://a.test\">two~%lines</a>")
+                      output)
+              :not :to-be nil)))
+
+  (it "uses the complete raw link as a label when description is absent"
+    (let* ((document (parse-org "[[https://a.test]]"))
+           (output (export-org document :html)))
+      (with-soft-assertions
+        (expect (search "<a href=\"https://a.test\">" output)
+                :not :to-be nil)
+        (expect (search ">https://a.test</a>" output)
+                :not :to-be nil))))
+
   (it "fails closed for unknown backends and escaping contexts"
     (let* ((backend-error
              (export-html-test-catch-error
