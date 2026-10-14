@@ -1,12 +1,14 @@
 # Node Model
 
-This page is the contract between the parsers, the writers, the query engine
-and the editor. Every symbol named here is exported from `ORG-KIT`; callers
-never need a symbol from another library.
+This page describes the parser, writers, query engine, and editor. Every
+cl-org-kit API symbol named here is exported from `ORG-KIT`; Common Lisp and
+keyword symbols are named as well.
 
 ## Documents
 
-`make-document` decodes its input and returns a `document` with no tree yet.
+`make-document` normalizes its input to text and returns a `document` with no
+tree. `parse-org` parses the text and installs an `:org-data` root on its
+returned document.
 
 ```lisp
 (org-kit:make-document input &key source-name encoding limits)
@@ -14,7 +16,7 @@ never need a symbol from another library.
 
 | Input | Decoding |
 |---|---|
-| string | used as is |
+| string | no character decoding |
 | character stream | read to the end |
 | octet vector, octet stream, pathname | `encoding` if given, otherwise the Unicode encoding detected from a BOM or null-byte pattern, falling back to UTF-8 |
 
@@ -33,8 +35,8 @@ Failures:
 | Reader | Value |
 |---|---|
 | `document-text` | the decoded text without BOM; every node offset indexes this string |
-| `document-limits` | the `limits` given to `make-document` (or its defaults), for reparsing the same document under the same ceilings |
-| `document-root` | the `:org-data` node, or `NIL` before parsing; `setf` installs a tree |
+| `document-limits` | the `limits` given to `make-document` (or defaults); operations reuse these ceilings and do not implicitly reparse the text |
+| `document-root` | the `:org-data` node installed by `parse-org`, or `NIL` after `make-document` and before parsing; `setf` installs a tree |
 | `document-settings` | plist of in-buffer settings; `setf`-able |
 | `document-newline` | `:lf`, `:crlf`, `:mixed`, or `:none` |
 | `document-final-newline-p` | whether the text ends with a newline |
@@ -42,14 +44,16 @@ Failures:
 | `offset-line-column` | 1-based line and column of an offset (the text length is allowed) |
 | `line-offset` | offset at which a 1-based line starts |
 
-Only `#\Newline` ends a line. The `#\Return` of a CRLF pair stays on the line it
-terminates, so a writer that copies spans reproduces CRLF and mixed endings
-exactly.
+Only `#\Newline` advances to the next line. In a CRLF pair, offsets at both
+`#\Return` and `#\Newline` are reported on the line being terminated; the
+column at the `#\Newline` includes the preceding `#\Return`. The offset just
+after `#\Newline` is column 1 of the next line. A writer that copies spans
+reproduces CRLF and mixed endings exactly.
 
 ## Offsets
 
 All offsets are 0-based character indexes into `document-text`. End offsets
-are exclusive. For one node:
+are exclusive. The non-`NIL` offsets on one node are ordered as follows:
 
 ```
 begin <= post-affiliated <= contents-begin <= contents-end <= end
@@ -67,8 +71,7 @@ order, and `type-error` for an unknown type. Offsets that do not apply are
 | `end` | after the node, including trailing blank lines |
 | `post-blank` | blank lines after an element, or spaces after an object |
 
-These follow Emacs org-element, so its parse of the same text can be compared
-directly. Derived positions are available on any node attached to a document:
+Derived positions are available on any node attached to a document:
 `node-start-position`, `node-end-position` (1-based line and column),
 `node-line-range` (first and last line, both inclusive, a trailing newline
 counted on the line it ends) and `node-text` (the spanned source). On a node
@@ -98,8 +101,9 @@ structures; type-specific data lives in the property plist.
 
 ### Property keys
 
-Property keys are the keyword form of the org-element property names for that
-type, for example `:raw-value`, `:level`, `:todo-keyword`, `:todo-type`,
+Here, `org-element` refers to Emacs Org's API for naming parsed elements and
+their properties. cl-org-kit uses the corresponding property names as keywords,
+for example `:raw-value`, `:level`, `:todo-keyword`, `:todo-type`,
 `:priority`, `:tags`, `:archivedp`, `:commentedp` and `:title` on a headline;
 `:key` and `:value` on a keyword; `:language`, `:switches`, `:parameters` and
 `:value` on a src block. Slots above (`begin`, `end`, the contents offsets,
@@ -110,8 +114,9 @@ is a list of nodes whose parent is the owning node.
 ## Node types
 
 `node-types` lists the 56 types below and `node-type-category` maps each to its
-category. `node-type-p` and the `node-type` type test membership. The names are
-org-element's.
+category. `node-type-p` and the `node-type` type test membership. The names
+match Emacs Org's `org-element` API; this is a naming convention, not a claim
+that both parsers produce identical trees.
 
 | Category | Types |
 |---|---|
@@ -120,16 +125,19 @@ org-element's.
 | `:lesser-element` | `:babel-call`, `:clock`, `:comment`, `:comment-block`, `:diary-sexp`, `:example-block`, `:export-block`, `:fixed-width`, `:horizontal-rule`, `:keyword`, `:latex-environment`, `:node-property`, `:paragraph`, `:planning`, `:src-block`, `:table-row`, `:verse-block` |
 | `:object` | `:bold`, `:citation`, `:citation-reference`, `:code`, `:entity`, `:export-snippet`, `:footnote-reference`, `:inline-babel-call`, `:inline-src-block`, `:italic`, `:latex-fragment`, `:line-break`, `:link`, `:macro`, `:plain-text`, `:radio-target`, `:statistics-cookie`, `:strike-through`, `:subscript`, `:superscript`, `:table-cell`, `:target`, `:timestamp`, `:underline`, `:verbatim` |
 
-Org Syntax's greater blocks are the three types `:center-block`,
-`:quote-block` and `:special-block`; its lesser blocks are `:comment-block`,
-`:example-block`, `:export-block`, `:src-block` and `:verse-block`. `#+CALL:`
-lines are `:babel-call`.
+In Org Syntax, “greater blocks” is a syntax grouping for `:center-block`,
+`:quote-block`, and `:special-block`; “lesser blocks” groups
+`:comment-block`, `:example-block`, `:export-block`, `:src-block`, and
+`:verse-block`. These syntax groupings are distinct from the `:greater-element`
+node category. `#+CALL:` lines are `:babel-call`.
 
 ## Resource limits
 
-`make-limits` returns the ceilings a parse or write enforces. Exceeding one
-signals `org-resource-limit-error` carrying the limit keyword, its value and the
-measured amount.
+`make-limits` returns resource ceilings used by parsing, editing, queries,
+agendas, clock summaries, table operations, and export. An operation that
+exceeds an applicable ceiling signals `org-resource-limit-error` with the limit
+keyword, configured value, and measured amount. Limits passed to `parse-org`
+are kept on the document and reused by its queries, edits, and exporters.
 
 | Keyword | Default | Bounds |
 |---|---|---|
@@ -138,12 +146,43 @@ measured amount.
 | `:max-element-depth` | 512 | element nesting |
 | `:max-object-depth` | 128 | object nesting |
 | `:max-node-count` | 4 Mi nodes | nodes in one document |
-| `:max-output-length` | 64 MiB | characters written |
+| `:max-output-length` | 64 Mi characters | characters emitted |
+| `:max-output-octets` | 256 Mi octets | encoded output |
+| `:max-agenda-range-days` | 3,660 days | inclusive days in one agenda range |
+| `:max-agenda-entries` | 1,000,000 | generated entries in one agenda call |
+| `:max-future-repeats` | 10,000 | generated future timestamp repeats |
+| `:max-export-expansion-depth` | 32 | recursive export expansion depth |
+| `:max-export-expanded-characters` | 64 Mi characters | cumulative expanded text per export |
+| `:max-export-expanded-nodes` | 4 Mi nodes | cumulative expanded nodes per export |
+| `:max-formula-tokens` | 10,000 | tokens in one table formula |
+| `:max-formula-ast-depth` | 256 | syntax tree depth for one formula |
+| `:max-formula-precision` | 34 | significant decimal digits |
+| `:max-formula-exponent` | 6,144 | absolute decimal exponent |
+| `:max-formula-work` | 1,000,000 | work units for one formula calculation |
+
+Agenda calls over multiple documents use the strictest configured agenda
+ceilings among those documents. Structural table edits parse supported
+`TBLFM` formulas to remap references, so token, syntax-depth, decimal-precision,
+and exponent ceilings apply there. Decimal-precision and exponent ceilings
+also apply to numeric table sorting. The work ceiling belongs to formula
+evaluation; version 0.1.0 does not expose public table-formula recalculation.
+
+List-form queries are copied before evaluation: `:max-node-count` counts their
+cons cells and `:max-element-depth` bounds nested lists. String values in list
+queries and Org match strings are bounded by `:max-input-length`. A path-filter
+string and its literal values use that same limit; selector segment count and
+filter-predicate nodes/depth use `:max-node-count` and `:max-element-depth`.
+Regular-expression pattern length uses `:max-input-length`, and group nesting
+uses `:max-element-depth`. Regex matches against `FILE` or `CATEGORY` also
+check the candidate value's length against `:max-input-length`. Query
+evaluation has no separate result-count limit: the document's
+`:max-node-count` bounds the candidate nodes it can visit.
 
 ## Conditions
 
-Every condition is an `org-kit-error`, whose `org-kit-error-message` is a
-bounded description.
+The cl-org-kit conditions listed here inherit from `org-kit-error`, whose
+`org-kit-error-message` is a bounded description. APIs may also signal Common
+Lisp conditions, including `type-error`.
 
 | Condition | Readers |
 |---|---|
@@ -151,7 +190,13 @@ bounded description.
 | `org-query-error` | `-query`, `-position` |
 | `org-edit-error` | `-target`, `-reason` |
 | `org-resource-limit-error` | `-limit-name`, `-limit`, `-actual` |
+| `org-time-error` | `-reason`, `-context` |
+| `org-agenda-error` | `-reason`, `-context` |
+| `org-clock-error` | `-reason`, `-context` |
+| `org-table-error` | `-target`, `-reason` |
+| `org-table-unsupported-syntax` | `-formula`, `-position`, `-feature` |
+| `org-export-error` | `-backend`, `-reason`, `-source` |
+| `org-export-unsupported-syntax` | `-backend`, `-source`, `-position`, `-feature` |
 
-Input excerpts stored in a condition (contexts, query text, edit targets) are
-passed through the internal `bounded-text`, which escapes control characters
-and backslashes and truncates after 80 characters.
+Input excerpts stored in a condition (contexts, query text, edit targets) escape
+control characters and backslashes and are truncated after 80 characters.

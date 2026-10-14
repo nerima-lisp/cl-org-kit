@@ -1,0 +1,168 @@
+# Clock
+
+Clock APIs use explicit time values and an explicit `org-time-context`. The
+context provides the time zone and daylight-saving-time policy; these calls do
+not consult the system clock.
+
+## Start and stop a clock
+
+`clock-in` and `clock-out` make format-preserving edits. Each returns two
+values: an `edit-result` and a timestamp or interval string. Use the updated
+document from the result before making another edit.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(labels ((first-headline (document)
+           (let ((found nil))
+             (org-kit:map-nodes
+              (lambda (node)
+                (when (and (null found)
+                           (eq (org-kit:node-type node) :headline))
+                  (setf found node)))
+              (org-kit:document-root document))
+             found)))
+  (let* ((document (org-kit:parse-org (format nil "* Task~%")))
+         (time-context
+           (org-kit:make-time-context
+            :reference-time
+            (org-kit:make-org-time-value "2025-01-01T10:30:00")
+            :zone (org-kit:make-fixed-time-zone 0))))
+    (multiple-value-bind (started start-timestamp)
+        (org-kit:clock-in
+         document (first-headline document)
+         :at (org-kit:make-org-time-value "2025-01-01T09:00:00")
+         :time-context time-context)
+      (let* ((started-document
+               (org-kit:edit-result-updated-document started))
+             (started-heading (first-headline started-document)))
+        (multiple-value-bind (finished interval)
+            (org-kit:clock-out
+             started-document started-heading
+             :at (org-kit:make-org-time-value "2025-01-01T10:30:00")
+             :time-context time-context)
+          (list start-timestamp interval
+                (org-kit:write-org
+                 (org-kit:edit-result-updated-document finished))))))))
+~~~
+
+With no `CLOCK_INTO_DRAWER` setting, `clock-in` writes to a LOGBOOK drawer. A
+drawer name selects that drawer; `t` follows `LOG_INTO_DRAWER`, falling back to
+LOGBOOK. A numeric setting is a threshold: `clock-in` uses LOGBOOK when adding
+the new clock would bring the heading's clock count to at least that number;
+below the threshold it writes the CLOCK line without a drawer. It refuses to
+start a second running clock on the same heading. `clock-out` requires exactly
+one running clock. Both return edits without changing the input document.
+
+## Sum clock time
+
+`sum-clocks` totals a heading and its descendants over the half-open interval
+`[FROM, TO)`. The default excludes running clocks. Duration-only CLOCK rows
+have no dated interval to clip and are included in the total by default only
+when `[FROM, TO)` is nonempty.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(labels ((first-headline (document)
+           (let ((found nil))
+             (org-kit:map-nodes
+              (lambda (node)
+                (when (and (null found)
+                           (eq (org-kit:node-type node) :headline))
+                  (setf found node)))
+              (org-kit:document-root document))
+             found)))
+  (let* ((document
+           (org-kit:parse-org
+            (format nil
+                    "* Task~%CLOCK: [2025-01-01 Wed 09:00]--[2025-01-01 Wed 09:30] => 0:30~%")))
+         (time-context
+           (org-kit:make-time-context
+            :reference-time (org-kit:make-org-time-value "2025-01-01T10:00:00")
+            :zone (org-kit:make-fixed-time-zone 0)))
+         (summary
+           (org-kit:sum-clocks
+            document (first-headline document)
+            (org-kit:make-org-time-value "2025-01-01T09:00:00")
+            (org-kit:make-org-time-value "2025-01-01T10:00:00")
+            :time-context time-context)))
+    (list (org-kit:clock-summary-total-minutes summary)
+          (org-kit:clock-summary-scoped-minutes summary)
+          (org-kit:clock-summary-unscoped-minutes summary))))
+~~~
+
+The result is a `clock-summary`. `clock-summary-scoped-minutes` counts dated
+CLOCK intervals after clipping to `[FROM, TO)`. `clock-summary-unscoped-minutes`
+counts duration-only CLOCK rows, which have no timestamp to clip; they are
+included in the total by default. `clock-summary-total-minutes` returns the
+sum, and `clock-summary-clipped-interval-count` counts dated intervals with
+positive length after clipping. `:include-running-p t` includes running clocks
+through the context's reference instant. `:include-unscoped-p nil` excludes
+duration-only rows. `:as-of` does not select a separate cutoff instant; it only
+asserts that the supplied value resolves to the time context's reference
+instant.
+
+## Generate a clocktable
+
+`clocktable-data` returns a `clocktable-result` for a heading subtree. It
+requires a `:range`, a `:time-context`, and accepts optional Org `:match`
+syntax and `:max-depth` (default 30). `:max-depth` filters by absolute logical
+heading level, not distance from the starting heading. Running clock rows are
+excluded. The result contains total minutes and rows in document order. Its row
+accessors are `clocktable-row-level`, `clocktable-row-title`,
+`clocktable-row-tags`, `clocktable-row-range`, and `clocktable-row-minutes`.
+Level is the absolute logical heading level; title is the unformatted heading
+title. Tags are unique
+effective tags from file settings, ancestor headings, and the heading itself.
+They are processed in that order, with ancestors from root to parent; a
+repeated tag moves to its nearest occurrence's position. Range is the
+supplied `org-time-range`; minutes are clipped over its start-inclusive,
+end-exclusive interval and accumulated for that heading's subtree.
+
+`write-clocktable` replaces the body of a parsed `clocktable` dynamic block
+with that result and returns an `edit-result`.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(labels ((first-node-of-type (document wanted-type)
+           (let ((found nil))
+             (org-kit:map-nodes
+              (lambda (node)
+                (when (and (null found)
+                           (eq (org-kit:node-type node) wanted-type))
+                  (setf found node)))
+              (org-kit:document-root document))
+             found)))
+  (let* ((document
+           (org-kit:parse-org
+            (format nil
+                    "* Task~%:LOGBOOK:~%CLOCK: [2025-01-01 Wed 09:00]--[2025-01-01 Wed 09:30] => 0:30~%:END:~%#+BEGIN: clocktable~%#+END:~%")))
+         (heading (first-node-of-type document :headline))
+         (dynamic-block (first-node-of-type document :dynamic-block))
+         (time-context
+           (org-kit:make-time-context
+            :reference-time (org-kit:make-org-time-value "2025-01-01T10:00:00")
+            :zone (org-kit:make-fixed-time-zone 0)))
+         (range
+           (org-kit:make-time-range
+            (org-kit:make-org-time-value "2025-01-01T09:00:00")
+            (org-kit:make-org-time-value "2025-01-01T10:00:00")
+            :include-start-p t :include-end-p nil))
+         (data
+           (org-kit:clocktable-data document heading
+                                    :range range :time-context time-context))
+         (edit (org-kit:write-clocktable document dynamic-block data)))
+    (list (org-kit:clocktable-result-total-minutes data)
+          (org-kit:write-org (org-kit:edit-result-updated-document edit)))))
+~~~
+
+Invalid clock rows, ranges, or options can signal `org-clock-error` or
+`org-time-error`. Clock edits can also signal `org-edit-error`. Clock
+operations enforce the document's `:max-node-count`; clocktable writes also
+enforce node and output limits. Exceeding a configured limit signals
+`org-resource-limit-error`.
