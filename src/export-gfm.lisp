@@ -3,12 +3,38 @@
 
 (defstruct (export-gfm-state (:constructor %make-export-gfm-state))
   preparation
+  limits
   (heading-ids (make-hash-table :test #'eq))
   (heading-targets (make-hash-table :test #'equal))
   (anchored-headings (make-hash-table :test #'eq))
-  (reference-ids (make-hash-table :test #'equal))
-  (used-ids (make-hash-table :test #'equal))
+  (reference-ids (make-hash-table :test #'equalp))
+  (used-ids (make-hash-table :test #'equalp))
   (footnote-reference-counts (make-hash-table :test #'equal)))
+
+(defvar *export-gfm-output-limits* nil)
+(defvar *export-gfm-output-prefix-length* 0)
+
+(defun export-gfm-check-total-output-length (length)
+  (when *export-gfm-output-limits*
+    (check-limit *export-gfm-output-limits* :max-output-length
+                 (+ *export-gfm-output-prefix-length* length)))
+  length)
+
+(defun export-gfm-render-with-prefix (prefix-length function)
+  (let ((outer-prefix *export-gfm-output-prefix-length*))
+    (let* ((*export-gfm-output-prefix-length* (+ outer-prefix prefix-length))
+           (rendered (funcall function)))
+      (let ((*export-gfm-output-prefix-length* outer-prefix))
+        (export-gfm-check-total-output-length
+         (+ prefix-length (length rendered))))
+      rendered)))
+
+(defun export-gfm-normalized-newline-length (text &optional (start 0) end)
+  (let ((end (or end (length text))))
+    (- (- end start)
+       (loop for index from start below (1- end)
+             count (and (char= (char text index) #\Return)
+                        (char= (char text (1+ index)) #\Newline))))))
 
 (defun export-gfm-ascii-punctuation-p (character)
   (let ((code (char-code character)))
@@ -17,68 +43,169 @@
         (<= #x5b code #x60)
         (<= #x7b code #x7e))))
 
-(defun export-gfm-normalize-newlines (text)
+(defun export-gfm-normalize-newlines (text &optional (start 0) end)
+  (let ((end (or end (length text))))
+  (export-gfm-check-total-output-length
+   (export-gfm-normalized-newline-length text start end))
   (with-output-to-string (output)
-    (loop with index = 0
-          while (< index (length text))
+    (loop with index = start
+          while (< index end)
           for character = (char text index)
           do (cond
                ((char= character #\Return)
                 (write-char #\Newline output)
-                (when (and (< (1+ index) (length text))
+                (when (and (< (1+ index) end)
                            (char= (char text (1+ index)) #\Newline))
                   (incf index)))
                (t (write-char character output)))
-             (incf index))))
+             (incf index)))))
+
+(defun export-gfm-loop-escaped-literal-parts
+    (parts emit &key table-cell-p soft-newline-p trim-terminal-newline-p)
+  (let ((remaining parts)
+        (source nil)
+        (index 0)
+        (end 0))
+    (labels ((available-p ()
+               (loop while (and (or (null source) (>= index end)) remaining)
+                     do (destructuring-bind (next-source next-start next-end)
+                            (pop remaining)
+                          (setf source next-source
+                                index next-start
+                                end next-end)))
+               (and source (< index end)))
+             (peek ()
+               (when (available-p)
+                 (char source index)))
+             (consume ()
+               (let ((character (peek)))
+                 (when character (incf index))
+                 character))
+             (newline-p (character)
+               (member character '(#\Return #\Newline) :test #'char=))
+             (range-terminal-newlines-p (text start finish)
+               (loop for position from start below finish
+                     always (newline-p (char text position))))
+             (remaining-terminal-newlines-p ()
+               (and (range-terminal-newlines-p source index end)
+                    (loop for (text start finish) in remaining
+                          always
+                          (range-terminal-newlines-p text start finish)))))
+      (loop while (available-p)
+            for character = (char source index)
+            do (cond
+                 ((char= character #\Tab)
+                  (funcall emit #\Space)
+                  (consume))
+                 ((newline-p character)
+                  (cond
+                    (table-cell-p
+                     (funcall emit "<br>")
+                     (consume)
+                     (when (and (char= character #\Return)
+                                (eql (peek) #\Newline))
+                       (consume)))
+                    ((and trim-terminal-newline-p
+                          (remaining-terminal-newlines-p))
+                     (setf remaining nil index end))
+                    (soft-newline-p
+                     (loop while (and (available-p)
+                                      (newline-p (char source index)))
+                           for newline = (consume)
+                           do (when (and (char= newline #\Return)
+                                         (eql (peek) #\Newline))
+                                (consume)))
+                     (when (available-p)
+                       (funcall emit #\Space)))
+                    (t
+                     (funcall emit #\Newline)
+                     (consume)
+                     (when (and (char= character #\Return)
+                                (eql (peek) #\Newline))
+                       (consume)))))
+                 ((export-gfm-ascii-punctuation-p character)
+                  (funcall emit "\\")
+                  (funcall emit character)
+                  (consume))
+                 (t
+                  (funcall emit character)
+                  (consume))))))
+  nil)
+
+(defun export-gfm-escaped-literal-parts-output-length
+    (parts &key table-cell-p soft-newline-p trim-terminal-newline-p)
+  (let ((output-length 0))
+    (export-gfm-loop-escaped-literal-parts
+     parts (lambda (item)
+             (incf output-length
+                   (if (characterp item) 1 (length item))))
+     :table-cell-p table-cell-p :soft-newline-p soft-newline-p
+     :trim-terminal-newline-p trim-terminal-newline-p)
+    output-length))
+
+(defun export-gfm-escaped-literal-output-length
+    (text &key table-cell-p soft-newline-p trim-terminal-newline-p
+                start end)
+  (export-gfm-escaped-literal-parts-output-length
+   (list (list text (or start 0) (or end (length text))))
+   :table-cell-p table-cell-p :soft-newline-p soft-newline-p
+   :trim-terminal-newline-p trim-terminal-newline-p))
+
+(defun export-gfm-escape-literal-parts
+    (parts &key table-cell-p soft-newline-p trim-terminal-newline-p)
+  (export-gfm-check-total-output-length
+   (export-gfm-escaped-literal-parts-output-length
+    parts :table-cell-p table-cell-p :soft-newline-p soft-newline-p
+    :trim-terminal-newline-p trim-terminal-newline-p))
+  (with-output-to-string (output)
+    (export-gfm-loop-escaped-literal-parts
+     parts (lambda (item)
+             (if (characterp item)
+                 (write-char item output)
+                 (write-string item output)))
+     :table-cell-p table-cell-p :soft-newline-p soft-newline-p
+     :trim-terminal-newline-p trim-terminal-newline-p)))
+
+(defun export-gfm-escape-literal-range
+    (text start end &key table-cell-p soft-newline-p trim-terminal-newline-p)
+  (export-gfm-escape-literal-parts
+   (list (list text start end)) :table-cell-p table-cell-p
+   :soft-newline-p soft-newline-p
+   :trim-terminal-newline-p trim-terminal-newline-p))
 
 (defun export-gfm-escape-literal
     (text &key table-cell-p soft-newline-p trim-terminal-newline-p)
-  (with-output-to-string (output)
-    (loop with index = 0
-          while (< index (length text))
-          for character = (char text index)
-          do (cond
-               ((char= character #\Tab) (write-char #\Space output))
-               ((member character '(#\Return #\Newline) :test #'char=)
-                (cond
-                  (table-cell-p
-                   (write-string "<br>" output)
-                   (when (and (char= character #\Return)
-                              (< (1+ index) (length text))
-                              (char= (char text (1+ index)) #\Newline))
-                     (incf index)))
-                  ((and trim-terminal-newline-p
-                        (loop for position from index below (length text)
-                              always (member (char text position)
-                                             '(#\Return #\Newline)
-                                             :test #'char=)))
-                   (setf index (length text)))
-                  (soft-newline-p
-                   (loop while (and (< index (length text))
-                                    (member (char text index)
-                                            '(#\Return #\Newline)
-                                            :test #'char=))
-                         do (when (and (char= (char text index) #\Return)
-                                       (< (1+ index) (length text))
-                                       (char= (char text (1+ index)) #\Newline))
-                              (incf index))
-                            (incf index))
-                   (when (< index (length text))
-                     (write-char #\Space output))
-                   (decf index))
-                  (t
-                   (write-char #\Newline output)
-                   (when (and (char= character #\Return)
-                              (< (1+ index) (length text))
-                              (char= (char text (1+ index)) #\Newline))
-                     (incf index)))))
-               ((export-gfm-ascii-punctuation-p character)
-                (write-char #\\ output)
-                (write-char character output))
-               (t (write-char character output)))
-             (incf index))))
+  (export-gfm-escape-literal-range
+   text 0 (length text) :table-cell-p table-cell-p
+   :soft-newline-p soft-newline-p
+   :trim-terminal-newline-p trim-terminal-newline-p))
+
+(defun export-gfm-escape-node-source-text
+    (node &key table-cell-p soft-newline-p trim-terminal-newline-p)
+  (let* ((document (node-document node))
+         (start (node-begin node))
+         (end (node-end node)))
+    (if (and document start end)
+        (export-gfm-escape-literal-range
+         (document-text document) start end
+         :table-cell-p table-cell-p :soft-newline-p soft-newline-p
+         :trim-terminal-newline-p trim-terminal-newline-p)
+        (export-gfm-escape-literal
+         (or (node-text node) "")
+         :table-cell-p table-cell-p :soft-newline-p soft-newline-p
+         :trim-terminal-newline-p trim-terminal-newline-p))))
+
+(defun export-gfm-html-attribute-output-length (text)
+  (loop for character across text
+        sum (case character
+              (#\& 5)
+              ((#\< #\>) 4)
+              (#\" 6)
+              (t 1))))
 
 (defun export-gfm-escape-html-attribute (text)
+  (export-gfm-check-total-output-length
+   (export-gfm-html-attribute-output-length text))
   (with-output-to-string (output)
     (loop for character across text
           do (case character
@@ -88,34 +215,54 @@
                (#\" (write-string "&quot;" output))
                (t (write-char character output))))))
 
-(defun export-gfm-longest-run (text character)
+(defun export-gfm-longest-run (text character &optional (start 0) end)
+  (let ((end (or end (length text))))
   (loop with longest = 0
         with current = 0
-        for item across text
+        for index from start below end
+        for item = (char text index)
         do (if (char= item character)
                (setf longest (max longest (incf current)))
                (setf current 0))
-        finally (return longest)))
+        finally (return longest))))
 
-(defun export-gfm-code-span (value &key table-cell-p)
-  (let* ((normalized-text (substitute #\Space #\Newline
-                                      (export-gfm-normalize-newlines value)))
-         (text (if (and table-cell-p (find #\| normalized-text))
-                   (with-output-to-string (output)
-                     (loop for character across normalized-text
-                           do (when (char= character #\|)
-                                (write-char #\\ output))
-                              (write-char character output)))
-                   normalized-text))
-         (delimiter (make-string (1+ (export-gfm-longest-run text #\`))
-                                 :initial-element #\`))
-         (pad-p (and (plusp (length text))
-                     (or (find (char text 0) '(#\Space #\Tab #\`))
-                         (find (char text (1- (length text)))
-                               '(#\Space #\Tab #\`))))))
-    (if pad-p
-        (format nil "~A ~A ~A" delimiter text delimiter)
-        (format nil "~A~A~A" delimiter text delimiter))))
+(defun export-gfm-code-span (value &key table-cell-p start end)
+  (let* ((start (or start 0))
+         (end (or end (length value)))
+         (normalized-length
+           (export-gfm-normalized-newline-length value start end))
+         (pipe-count (if table-cell-p
+                         (loop for index from start below end
+                               count (char= (char value index) #\|))
+                         0))
+         (delimiter-length
+           (1+ (export-gfm-longest-run value #\` start end)))
+         (pad-p (and (plusp normalized-length)
+                     (or (find (char value start)
+                               '(#\Space #\Tab #\` #\Return #\Newline))
+                         (find (char value (1- end))
+                               '(#\Space #\Tab #\` #\Return #\Newline)))))
+         (output-length (+ (* 2 delimiter-length) normalized-length pipe-count
+                           (if pad-p 2 0))))
+    (export-gfm-check-total-output-length output-length)
+    (let* ((normalized-text (substitute #\Space #\Newline
+                                        (export-gfm-normalize-newlines
+                                         value start end)))
+           (text (if (and table-cell-p (find #\| normalized-text))
+                     (with-output-to-string (output)
+                       (loop for character across normalized-text
+                             do (when (char= character #\|)
+                                  (write-char #\\ output))
+                                (write-char character output)))
+                     normalized-text))
+           (delimiter (make-string delimiter-length :initial-element #\`))
+           (actual-pad-p (and (plusp (length text))
+                              (or (find (char text 0) '(#\Space #\Tab #\`))
+                                  (find (char text (1- (length text)))
+                                        '(#\Space #\Tab #\`))))))
+      (if actual-pad-p
+          (format nil "~A ~A ~A" delimiter text delimiter)
+          (format nil "~A~A~A" delimiter text delimiter)))))
 
 (defun export-gfm-code-fence (value)
   (make-string (max 3 (1+ (export-gfm-longest-run value #\~)))
@@ -132,51 +279,82 @@
       language)))
 
 (defun export-gfm-fenced-block (value &optional language)
-  (let* ((body (export-gfm-normalize-newlines value))
-         (fence (export-gfm-code-fence body)))
-    (with-output-to-string (output)
-      (write-string fence output)
-      (when language (write-string language output))
-      (write-char #\Newline output)
-      (write-string body output)
-      (unless (and (plusp (length body))
-                   (char= (char body (1- (length body))) #\Newline))
-        (write-char #\Newline output))
-      (write-string fence output))))
+  (let* ((body-length (export-gfm-normalized-newline-length value))
+         (fence-length (max 3 (1+ (export-gfm-longest-run value #\~))))
+         (body-ends-in-newline-p
+           (and (plusp (length value))
+                (member (char value (1- (length value)))
+                        '(#\Return #\Newline) :test #'char=)))
+         (output-length (+ (* 2 fence-length) (length (or language "")) 1
+                           body-length
+                           (if (and (plusp body-length)
+                                    (not body-ends-in-newline-p))
+                               1 0))))
+    (export-gfm-check-total-output-length output-length)
+    (let* ((body (export-gfm-normalize-newlines value))
+           (fence (make-string fence-length :initial-element #\~)))
+      (with-output-to-string (output)
+        (write-string fence output)
+        (when language (write-string language output))
+        (write-char #\Newline output)
+        (write-string body output)
+        (unless (and (plusp (length body))
+                     (char= (char body (1- (length body))) #\Newline))
+          (write-char #\Newline output))
+        (write-string fence output)))))
 
 (defun export-gfm-slug (title)
-  (let ((slug
-          (with-output-to-string (output)
-            (loop with pending-separator = nil
-                  with wrote-character = nil
-                  for character across title
-                  do (if (alphanumericp character)
-                         (progn
-                           (when (and pending-separator
-                                      wrote-character)
-                             (write-char #\- output))
-                           (setf pending-separator nil)
-                           (write-char (char-downcase character) output)
-                           (setf wrote-character t))
-                         (setf pending-separator t))))))
-    (concatenate 'string "org-" (if (zerop (length slug)) "section" slug))))
+  (let ((slug-length
+          (loop with output-length = 4
+                with pending-separator = nil
+                with wrote-character = nil
+                for character across title
+                do (if (alphanumericp character)
+                       (progn
+                         (when (and pending-separator wrote-character)
+                           (incf output-length))
+                         (incf output-length)
+                         (setf pending-separator nil
+                               wrote-character t))
+                       (setf pending-separator t))
+                finally (return (if wrote-character
+                                    output-length
+                                    (+ output-length 7))))))
+    (export-gfm-check-total-output-length slug-length)
+    (with-output-to-string (output)
+      (write-string "org-" output)
+      (loop with pending-separator = nil
+            with wrote-character = nil
+            for character across title
+            do (if (alphanumericp character)
+                   (progn
+                     (when (and pending-separator wrote-character)
+                       (write-char #\- output))
+                     (setf pending-separator nil
+                           wrote-character t)
+                     (write-char (char-downcase character) output))
+                   (setf pending-separator t))
+            finally (unless wrote-character
+                      (write-string "section" output))))))
 
 (defun export-gfm-unique-id (state candidate)
+  (export-gfm-check-total-output-length (length candidate))
   (let ((id candidate)
         (suffix 1))
-    (loop while (gethash (string-downcase id)
-                         (export-gfm-state-used-ids state))
-          do (incf suffix)
-             (setf id (format nil "~A-~D" candidate suffix)))
-    (setf (gethash (string-downcase id)
-                   (export-gfm-state-used-ids state))
+    (loop while (gethash id (export-gfm-state-used-ids state))
+          do (let* ((next-suffix (1+ suffix))
+                    (suffix-text (write-to-string next-suffix)))
+               (export-gfm-check-total-output-length
+                (+ (length candidate) 1 (length suffix-text)))
+               (setf suffix next-suffix
+                     id (concatenate 'string candidate "-" suffix-text))))
+    (setf (gethash id (export-gfm-state-used-ids state))
           t)
     id))
 
 (defun export-gfm-register-reference (state name id)
   (when (and (stringp name) (plusp (length name)))
-    (setf (gethash (string-downcase name)
-                   (export-gfm-state-reference-ids state))
+    (setf (gethash name (export-gfm-state-reference-ids state))
           id)))
 
 (defun export-gfm-heading-reference (state node)
@@ -193,12 +371,10 @@
     (when (and (stringp type) (stringp path))
       (cond
         ((string-equal type "custom-id")
-         (or (gethash (string-downcase path)
-                      (export-gfm-state-reference-ids state))
+         (or (gethash path (export-gfm-state-reference-ids state))
              path))
         ((member type '("fuzzy" "radio") :test #'string-equal)
-         (gethash (string-downcase path)
-                  (export-gfm-state-reference-ids state)))))))
+         (gethash path (export-gfm-state-reference-ids state)))))))
 
 (defun export-gfm-mark-heading-anchors (state)
   (let* ((preparation (export-gfm-state-preparation state))
@@ -250,13 +426,18 @@
     state))
 
 (defun export-gfm-join (strings separator)
-  (with-output-to-string (output)
-    (loop with first-p = t
-          for string in strings
-          unless (zerop (length string))
+  (let* ((nonempty (remove-if (lambda (string) (zerop (length string))) strings))
+         (separator-length (* (max 0 (1- (length nonempty)))
+                              (length separator)))
+         (output-length (+ separator-length
+                           (reduce #'+ nonempty :key #'length :initial-value 0))))
+    (export-gfm-check-total-output-length output-length)
+    (with-output-to-string (output)
+      (loop with first-p = t
+            for string in nonempty
             do (unless first-p (write-string separator output))
                (write-string string output)
-               (setf first-p nil))))
+               (setf first-p nil)))))
 
 (defun export-gfm-view-trailing-post-blank (view)
   (let* ((node (export-view-node view))
@@ -280,91 +461,144 @@
 (defun export-gfm-render-views (state views &key preserve-source-breaks-p)
   (with-output-to-string (output)
     (let ((previous-view nil)
-          (first-p t))
+          (first-p t)
+          (output-length 0))
       (dolist (view views)
-        (let ((rendered
-                (export-gfm-render-view
-                 state view
-                 :preserve-source-breaks-p preserve-source-breaks-p)))
+        (let* ((separator-length
+                 (if first-p 0
+                     (+ 2 (export-gfm-view-trailing-post-blank previous-view))))
+               (*export-gfm-output-prefix-length*
+                 (+ *export-gfm-output-prefix-length* output-length))
+               (rendered (export-gfm-render-view
+                          state view
+                          :preserve-source-breaks-p preserve-source-breaks-p)))
           (unless (zerop (length rendered))
+            (export-gfm-check-total-output-length
+             (+ separator-length (length rendered)))
             (unless first-p
-              (write-string
-               (make-string (+ 2 (export-gfm-view-trailing-post-blank
-                                  previous-view))
-                            :initial-element #\Newline)
-               output))
+              (loop repeat separator-length do (write-char #\Newline output)))
             (write-string rendered output)
+            (incf output-length (+ separator-length (length rendered)))
             (setf previous-view view
                   first-p nil)))))))
 
 (defun export-gfm-render-inline-views
     (state views &key table-cell-p preserve-source-breaks-p)
   (with-output-to-string (output)
-    (dolist (view views)
-      (write-string (export-gfm-render-inline-view
-                     state view :table-cell-p table-cell-p
-                     :preserve-source-breaks-p preserve-source-breaks-p)
-                    output))))
+    (let ((output-length 0))
+      (dolist (view views)
+        (let* ((*export-gfm-output-prefix-length*
+                 (+ *export-gfm-output-prefix-length* output-length))
+               (rendered (export-gfm-render-inline-view
+                          state view :table-cell-p table-cell-p
+                          :preserve-source-breaks-p preserve-source-breaks-p)))
+          (export-gfm-check-total-output-length (length rendered))
+          (write-string rendered output)
+          (incf output-length (length rendered)))))))
 
-(defun export-gfm-inline-code-value (node)
-  (let* ((type (node-type node))
-         (value (or (node-property node :value) (node-text node) ""))
-         (delimiter (case type
-                      (:code #\~)
-                      (:verbatim #\=)))
-         (end (- (length value) (node-post-blank node))))
-    (if (and delimiter
-             (> end 1)
-             (char= (char value 0) delimiter)
-             (char= (char value (1- end)) delimiter))
-        (subseq value 1 (1- end))
-        value)))
+(defun export-gfm-inline-code-value-range (node)
+  (let* ((property-value (node-property node :value))
+         (document (node-document node))
+         (source (and document (document-text document)))
+         (node-start (node-begin node))
+         (node-end (node-end node)))
+    (multiple-value-bind (value start end)
+        (cond
+          ((stringp property-value)
+           (values property-value 0 (length property-value)))
+          ((and source node-start node-end)
+           (values source node-start node-end))
+          (t (values "" 0 0)))
+      (let* ((type (node-type node))
+             (delimiter (case type
+                          (:code #\~)
+                          (:verbatim #\=)))
+             (trimmed-end (- end (node-post-blank node))))
+        (if (and delimiter
+                 (> (- trimmed-end start) 1)
+                 (char= (char value start) delimiter)
+                 (char= (char value (1- trimmed-end)) delimiter))
+            (values value (1+ start) (1- trimmed-end))
+            (values value start end))))))
 
-(defun export-gfm-literal-view-text (view)
+(defun export-gfm-node-literal-part (node)
+  (let* ((document (node-document node))
+         (source (and document (document-text document)))
+         (start (node-begin node))
+         (end (node-end node)))
+    (when (and source start end)
+      (list (list source start end)))))
+
+(defun export-gfm-literal-view-parts (view)
   (let* ((node (export-view-node view))
          (type (node-type node))
          (children (export-view-children view)))
     (cond
       ((member type '(:code :verbatim :inline-src-block) :test #'eq)
-       (export-gfm-inline-code-value node))
+       (multiple-value-bind (text start end)
+           (export-gfm-inline-code-value-range node)
+         (list (list text start end))))
       ((eq type :entity)
-       (or (node-property node :utf-8) (node-property node :unicode)
-           (node-property node :html) (node-text node) ""))
+       (let ((value (or (node-property node :utf-8)
+                        (node-property node :unicode)
+                        (node-property node :html))))
+         (if (stringp value)
+             (list (list value 0 (length value)))
+             (or (export-gfm-node-literal-part node) nil))))
       ((eq type :link)
-       (or (node-property node :path) ""))
+       (let ((value (or (node-property node :path) "")))
+         (list (list value 0 (length value)))))
       (children
-       (with-output-to-string (output)
-         (dolist (child children)
-           (write-string (export-gfm-literal-view-text child) output))))
-      (t (or (node-text node) "")))))
+       (loop for child in children
+             append (export-gfm-literal-view-parts child)))
+      (t (or (export-gfm-node-literal-part node) nil)))))
 
 (defun export-gfm-link-label (view &key table-cell-p)
   (let* ((node (export-view-node view))
          (children (export-view-children view))
-         (text (if children
-                   (with-output-to-string (output)
-                     (dolist (child children)
-                       (write-string (export-gfm-literal-view-text child)
-                                     output)))
-                   (or (node-property node :path) ""))))
-    (export-gfm-escape-literal text :table-cell-p table-cell-p
-                               :soft-newline-p (not table-cell-p))))
+         (parts (if children
+                    (loop for child in children
+                          append (export-gfm-literal-view-parts child))
+                    (let ((text (or (node-property node :path) "")))
+                      (list (list text 0 (length text)))))))
+    (export-gfm-escape-literal-parts
+     parts :table-cell-p table-cell-p
+     :soft-newline-p (not table-cell-p))))
 
-(defun export-gfm-serialize-destination (destination &key table-cell-p)
+(defun export-gfm-serialized-destination-parts-output-length
+    (parts &key table-cell-p)
+  (+ 2
+     (loop for part in parts
+           sum (loop for character across part
+                     sum (case character
+                           ((#\Space #\< #\>) 3)
+                           (#\| (if table-cell-p 3 1))
+                           (#\& 5)
+                           (t 1))))))
+
+(defun export-gfm-serialize-destination-parts (parts &key table-cell-p)
+  (export-gfm-check-total-output-length
+   (export-gfm-serialized-destination-parts-output-length
+    parts :table-cell-p table-cell-p))
   (with-output-to-string (output)
     (write-char #\< output)
-    (loop for character across destination
-          do (case character
-               (#\Space (write-string "%20" output))
-               (#\< (write-string "%3C" output))
-               (#\> (write-string "%3E" output))
-               (#\| (if table-cell-p
-                        (write-string "%7C" output)
-                        (write-char character output)))
-               ;; Preserve literal URI ampersands after Markdown entity decoding.
-               (#\& (write-string "&amp;" output))
-               (t (write-char character output))))
+    (loop for part in parts
+          do (loop for character across part
+                   do (case character
+                        (#\Space (write-string "%20" output))
+                        (#\< (write-string "%3C" output))
+                        (#\> (write-string "%3E" output))
+                        (#\| (if table-cell-p
+                                 (write-string "%7C" output)
+                                 (write-char character output)))
+                        ;; Preserve literal URI ampersands after Markdown entity decoding.
+                        (#\& (write-string "&amp;" output))
+                        (t (write-char character output)))))
     (write-char #\> output)))
+
+(defun export-gfm-serialize-destination (destination &key table-cell-p)
+  (export-gfm-serialize-destination-parts
+   (list destination) :table-cell-p table-cell-p))
 
 ;; GFM expands character references before browsers interpret the destination.
 (defun export-gfm-scheme-obfuscation-p (destination)
@@ -373,22 +607,83 @@
                                  (find character "/?#"))
                                destination)))
     (and entity
-         (null (export-explicit-url-scheme destination))
+         (null (export-explicit-url-scheme-end destination))
          (or (null boundary) (< entity boundary)))))
 
+(defun export-gfm-node-source-range (node)
+  (let* ((document (node-document node))
+         (source (and document (document-text document)))
+         (start (node-begin node))
+         (end (node-end node)))
+    (if (and (stringp source) start end
+             (<= 0 start end (length source)))
+        (values source start end)
+        (let ((text (node-text node)))
+          (values text 0 nil)))))
+
 (defun export-gfm-link-source-control-p (node)
-  (let ((source (node-text node)))
-    (and source (notany #'export-control-character-p source))))
+  (multiple-value-bind (source start end)
+      (export-gfm-node-source-range node)
+    (and source
+         (loop for position from start below end
+               always (not (export-control-character-p
+                            (char source position)))))))
+
+(defun export-gfm-bracket-path-safe-p (type path target-id)
+  (and (stringp path)
+       (notany #'export-control-character-p path)
+       (cond
+         ((and (stringp type)
+               (member type '("http" "https" "mailto")
+                       :test #'string-equal))
+          (and (not (find #\\ path))
+               (not (export-gfm-scheme-obfuscation-p path))))
+         ((and target-id (stringp type)
+               (member type '("custom-id" "fuzzy" "radio")
+                       :test #'string-equal))
+          (and (notany #'export-control-character-p target-id)
+               (not (find #\\ target-id))))
+         (t (and (not (export-gfm-scheme-obfuscation-p path))
+                 (export-safe-url-p path path))))))
+
+(defun export-gfm-preflight-link-destination
+    (type path format target-id table-cell-p)
+  (when (stringp path)
+    (cond
+      ((and (eq format :bracket)
+            (export-gfm-bracket-path-safe-p type path target-id))
+       (export-gfm-check-total-output-length
+        (export-gfm-serialized-destination-parts-output-length
+         (cond
+           ((and (stringp type)
+                 (member type '("http" "https" "mailto")
+                         :test #'string-equal))
+            (list type ":" path))
+           ((and target-id (stringp type)
+                 (member type '("custom-id" "fuzzy" "radio")
+                         :test #'string-equal))
+            (list "#" target-id))
+           (t (list path)))
+         :table-cell-p table-cell-p)))
+      ((and (stringp type)
+            (member type '("http" "https" "mailto") :test #'string-equal)
+            (not (find #\\ path))
+            (notany #'export-control-character-p path)
+            (not (export-gfm-scheme-obfuscation-p path)))
+       (export-gfm-check-total-output-length
+        (export-gfm-serialized-destination-parts-output-length
+         (list type ":" path) :table-cell-p table-cell-p))))))
 
 (defun export-gfm-raw-bracket-link-path (node)
-  (let ((source (node-text node)))
+  (multiple-value-bind (source start end)
+      (export-gfm-node-source-range node)
     (when (and (stringp source)
-               (>= (length source) 4)
-               (string= "[[" source :end2 2))
-      (let ((close (link-object-bracket-close source 2 (length source))))
+               (>= (- end start) 4)
+               (string= "[[" source :start2 start :end2 (+ start 2)))
+      (let ((close (link-object-bracket-close source (+ start 2) end)))
         (when close
           (link-object-normalize-bracket-path
-           (link-object-unescape-path (subseq source 2 close))))))))
+           (link-object-unescape-path (subseq source (+ start 2) close))))))))
 
 (defun export-gfm-expanded-bracket-path (node raw-path)
   (let ((document (node-document node)))
@@ -401,23 +696,37 @@
     (let* ((type (node-property node :type))
            (path (node-property node :path))
            (format (node-property node :format))
-           (raw-path (and (eq format :bracket)
+           (target-id (export-gfm-link-target-id state node))
+           (preflight (export-gfm-preflight-link-destination
+                       type path format target-id table-cell-p))
+           (bracket-path-safe-p
+             (and (eq format :bracket)
+                  (export-gfm-bracket-path-safe-p type path target-id)))
+           (internal-target-p
+             (and target-id (stringp type)
+                  (member type '("custom-id" "fuzzy" "radio")
+                          :test #'string-equal)))
+           (raw-path (and bracket-path-safe-p (not internal-target-p)
                           (export-gfm-raw-bracket-link-path node)))
-           (raw-destination (or raw-path path))
+           (raw-destination (or raw-path (if internal-target-p target-id path)))
            (expanded-path (and raw-path
                                (export-gfm-expanded-bracket-path node raw-path)))
-           (target-id (export-gfm-link-target-id state node))
            (destination
              (cond
-               ((and target-id
-                     (stringp type)
-                     (member type '("custom-id" "fuzzy" "radio")
-                             :test #'string-equal))
+               (internal-target-p
+                (export-gfm-check-total-output-length
+                 (export-gfm-serialized-destination-parts-output-length
+                  (list "#" target-id) :table-cell-p table-cell-p))
                 (concatenate 'string "#" target-id))
                ((eq format :bracket) expanded-path)
-               ((and (stringp type) (stringp path))
+               ((and (stringp type) (stringp path)
+                     (member type '("http" "https" "mailto")
+                             :test #'string-equal)
+                     (not (find #\\ path)))
                 (concatenate 'string type ":" path))
+               ((and (stringp type) (stringp path)) nil)
                ((stringp path) path))))
+      (declare (ignore preflight))
       (when (and (stringp raw-destination)
                  (stringp destination)
                  (not (export-gfm-scheme-obfuscation-p raw-destination))
@@ -430,39 +739,84 @@
   (and (stringp path)
        (let ((extension (position #\. path :from-end t)))
          (and extension
-              (member (string-downcase (subseq path (1+ extension)))
-                      '("png" "jpg" "jpeg" "gif" "svg" "webp")
-                      :test #'string=)))))
+              (loop for suffix in '("png" "jpg" "jpeg" "gif" "svg" "webp")
+                    thereis (and (= (length suffix)
+                                    (- (length path) (1+ extension)))
+                                 (string-equal suffix path
+                                               :start2 (1+ extension))))))))
 
 (defun export-gfm-render-link (state view &key table-cell-p)
   (let* ((node (export-view-node view))
          (destination (export-gfm-link-destination
                        state node :table-cell-p table-cell-p))
          (image-p (export-gfm-image-path-p (node-property node :path)))
-         (label (export-gfm-link-label view :table-cell-p table-cell-p)))
+         (label-reserve (if destination
+                            (+ (length destination) 4 (if image-p 1 0))
+                            0))
+         (label (export-gfm-render-with-prefix
+                 label-reserve
+                 (lambda ()
+                   (export-gfm-link-label view :table-cell-p table-cell-p)))))
     (if destination
-        (format nil "~A[~A](~A)" (if image-p "!" "") label destination)
+        (progn
+          (export-gfm-check-total-output-length
+           (+ label-reserve (length label)))
+          (format nil "~A[~A](~A)" (if image-p "!" "") label destination))
         label)))
+
+(defun export-gfm-render-target (state view)
+  (let* ((node (export-view-node view))
+         (value (node-property node :value))
+         (id (or (gethash (and (stringp value) value)
+                          (export-gfm-state-reference-ids state))
+                 (export-gfm-slug (or value ""))))
+         (attribute-length (export-gfm-html-attribute-output-length id))
+         (radio-p (eq (node-type node) :radio-target))
+         (text-length (if radio-p
+                          (export-gfm-escaped-literal-output-length
+                           (or value ""))
+                          0)))
+    (export-gfm-check-total-output-length
+     (+ (length "<a id=\"") attribute-length
+        (if radio-p
+            (+ (length "\">") text-length (length "</a>"))
+            (length "\"></a>"))))
+    (if radio-p
+        (format nil "<a id=\"~A\">~A</a>"
+                (export-gfm-escape-html-attribute id)
+                (export-gfm-escape-literal (or value "")))
+        (format nil "<a id=\"~A\"></a>"
+                (export-gfm-escape-html-attribute id)))))
 
 (defun export-gfm-render-inline-view
     (state view &key table-cell-p preserve-source-breaks-p)
   (let* ((node (export-view-node view))
          (type (node-type node))
          (children (export-view-children view))
+         (content-reserve
+           (case type
+             (:bold 4)
+             (:italic 2)
+             (:strike-through 4)
+             (:underline 7)
+             ((:subscript :superscript) 11)
+             (otherwise 0)))
          (content (lambda ()
-                    (export-gfm-render-inline-views
-                     state children :table-cell-p table-cell-p
-                     :preserve-source-breaks-p preserve-source-breaks-p)))
+                    (export-gfm-render-with-prefix
+                     content-reserve
+                     (lambda ()
+                       (export-gfm-render-inline-views
+                        state children :table-cell-p table-cell-p
+                        :preserve-source-breaks-p
+                        preserve-source-breaks-p)))))
          (rendered
            (case type
       ((:plain-text :text)
-       (export-gfm-escape-literal (or (node-text node) "")
-                                  :table-cell-p table-cell-p
-                                  :soft-newline-p
-                                  (not (or table-cell-p
-                                           preserve-source-breaks-p))
-                                  :trim-terminal-newline-p
-                                  preserve-source-breaks-p))
+       (export-gfm-escape-node-source-text
+        node :table-cell-p table-cell-p
+        :soft-newline-p
+        (not (or table-cell-p preserve-source-breaks-p))
+        :trim-terminal-newline-p preserve-source-breaks-p))
       (:bold (format nil "**~A**" (funcall content)))
       (:italic (format nil "*~A*" (funcall content)))
       (:strike-through
@@ -471,8 +825,10 @@
       (:subscript (format nil "<sub>~A</sub>" (funcall content)))
       (:superscript (format nil "<sup>~A</sup>" (funcall content)))
       ((:code :verbatim :inline-src-block)
-       (export-gfm-code-span (export-gfm-inline-code-value node)
-                             :table-cell-p table-cell-p))
+       (multiple-value-bind (value start end)
+           (export-gfm-inline-code-value-range node)
+         (export-gfm-code-span value :start start :end end
+                              :table-cell-p table-cell-p)))
       (:entity
        (export-gfm-escape-literal
         (or (node-property node :utf-8) (node-property node :unicode)
@@ -486,24 +842,24 @@
        (export-gfm-render-target state view))
       ((:babel-call :inline-babel-call :citation :citation-reference
         :latex-fragment :statistics-cookie :timestamp)
-       (export-gfm-escape-literal (or (node-text node) "")
-                                  :table-cell-p table-cell-p
-                                  :soft-newline-p
-                                  (not (or table-cell-p
-                                           preserve-source-breaks-p))))
+       (export-gfm-escape-node-source-text
+        node :table-cell-p table-cell-p
+        :soft-newline-p
+        (not (or table-cell-p preserve-source-breaks-p))))
       (:macro (funcall content))
       (otherwise
        (if children
            (funcall content)
-           (export-gfm-escape-literal (or (node-text node) "")
-                                      :table-cell-p table-cell-p
-                                      :soft-newline-p
-                                      (not (or table-cell-p
-                                               preserve-source-breaks-p))))))))
+           (export-gfm-escape-node-source-text
+            node :table-cell-p table-cell-p
+            :soft-newline-p
+            (not (or table-cell-p preserve-source-breaks-p))))))))
     (if (plusp (node-post-blank node))
-        (concatenate 'string rendered
-                     (make-string (node-post-blank node)
-                                  :initial-element #\Space))
+        (let ((output-length (+ (length rendered) (node-post-blank node))))
+          (export-gfm-check-total-output-length output-length)
+          (concatenate 'string rendered
+                       (make-string (node-post-blank node)
+                                    :initial-element #\Space)))
         rendered)))
 
 (defun export-gfm-render-heading (state view)
@@ -512,46 +868,86 @@
          (title (or (node-property node :raw-value) ""))
          (tags (node-property node :tags))
          (id (export-gfm-heading-reference state node))
+         (anchored-p (gethash node
+                              (export-gfm-state-anchored-headings state)))
+         (title-output-length
+           (export-gfm-escaped-literal-output-length title))
+         (tag-output-length
+           (if tags
+               (+ 7
+                  (reduce #'+ tags :key #'length :initial-value 0)
+                  (max 0 (1- (length tags))))
+               0))
+         (heading-output-length
+           (+ (if anchored-p
+                  (+ 15 (export-gfm-html-attribute-output-length id))
+                  0)
+              (min 6 (max 1 level)) 1 title-output-length
+              tag-output-length))
          (heading
-           (with-output-to-string (output)
-             (when (gethash node
-                            (export-gfm-state-anchored-headings state))
-               (format output "<a id=\"~A\"></a>~%~%"
-                       (export-gfm-escape-html-attribute id)))
-             (write-string (make-string (min 6 (max 1 level))
-                                        :initial-element #\#)
-                           output)
-             (write-char #\Space output)
-             (write-string (export-gfm-escape-literal title) output)
-             (when tags
-               (write-string "     :" output)
-               (write-string (format nil "~{~A~^:~}" tags) output)
-               (write-char #\: output))))
-         (children (export-gfm-render-views state (export-view-children view))))
+           (progn
+             (export-gfm-check-total-output-length heading-output-length)
+             (with-output-to-string (output)
+               (when anchored-p
+                 (format output "<a id=\"~A\"></a>~%~%"
+                         (export-gfm-escape-html-attribute id)))
+               (write-string (make-string (min 6 (max 1 level))
+                                          :initial-element #\#)
+                             output)
+               (write-char #\Space output)
+               (write-string (export-gfm-escape-literal title) output)
+               (when tags
+                 (write-string "     :" output)
+                 (write-string (format nil "~{~A~^:~}" tags) output)
+                 (write-char #\: output)))))
+         (children
+           (export-gfm-render-with-prefix
+            (+ (length heading) 2)
+            (lambda ()
+              (export-gfm-render-views state (export-view-children view))))))
     (if (zerop (length children))
         heading
-        (format nil "~A~%~%~A" heading children))))
+        (progn
+          (export-gfm-check-total-output-length
+           (+ (length heading) 2 (length children)))
+          (format nil "~A~%~%~A" heading children)))))
 
 (defun export-gfm-toc (state)
   (let ((entries (export-preparation-toc
                   (export-gfm-state-preparation state))))
-    (export-gfm-join
-     (mapcar (lambda (entry)
-               (let* ((view (getf entry :view))
-                      (node (export-view-node view))
-                      (level (getf entry :level))
-                      (id (export-gfm-heading-reference state node))
-                      (title (or (getf entry :title) "")))
-                 (format nil "~A- [~A](~A)"
-                         (make-string (* 2 (1- level)) :initial-element #\Space)
-                         (export-gfm-escape-literal title)
-                         (export-gfm-serialize-destination
-                          (concatenate 'string "#" id)))))
-             entries)
-     (string #\Newline))))
+    (with-output-to-string (output)
+      (let ((output-length 0)
+            (first-p t))
+        (dolist (entry entries)
+          (let* ((separator-length (if first-p 0 1))
+                 (*export-gfm-output-prefix-length*
+                   (+ *export-gfm-output-prefix-length*
+                      output-length separator-length))
+                 (view (getf entry :view))
+                 (node (export-view-node view))
+                 (level (getf entry :level))
+                 (indent (make-string (* 2 (1- level)) :initial-element #\Space))
+                 (id (export-gfm-heading-reference state node))
+                 (destination
+                   (export-gfm-serialize-destination-parts (list "#" id)))
+                 (title
+                   (export-gfm-render-with-prefix
+                    (+ (length indent) 6 (length destination))
+                    (lambda ()
+                      (export-gfm-escape-literal
+                       (or (getf entry :title) "")))))
+                 (line (format nil "~A- [~A](~A)" indent title destination)))
+            (export-gfm-check-total-output-length
+             (length line))
+            (unless first-p (write-char #\Newline output))
+            (write-string line output)
+            (incf output-length (+ separator-length (length line)))
+            (setf first-p nil)))))))
 
 (defun export-gfm-render-quote (state view)
   (let ((text (export-gfm-render-views state (export-view-children view))))
+    (export-gfm-check-total-output-length
+     (+ (length text) (* 2 (1+ (count #\Newline text)))))
     (with-output-to-string (output)
       (loop with start = 0
             for newline = (position #\Newline text :start start)
@@ -571,53 +967,87 @@
          (prefix (format nil "~A~A "
                          (make-string (* 2 depth) :initial-element #\Space)
                          marker))
-         (first-text
-           (if paragraph
-               (export-gfm-render-inline-views
-                state (export-view-children paragraph))
-               (if children
-                   (export-gfm-render-view state (first children))
-                   "")))
          (checkbox (node-property (export-view-node view) :checkbox))
          (checkbox-text (case checkbox
                           (:off "[ ] ")
                           (:on "[X] ")
                           (:trans "[-] ")))
+         (first-text
+           (export-gfm-render-with-prefix
+            (+ (length prefix) (length (or checkbox-text "")))
+            (lambda ()
+              (if paragraph
+                  (export-gfm-render-inline-views
+                   state (export-view-children paragraph))
+                  (if children
+                      (export-gfm-render-view state (first children))
+                      "")))))
          (remaining (if paragraph (remove paragraph children :test #'eq)
                         (rest children))))
     (with-output-to-string (output)
+      (let ((output-length (+ (length prefix) (length (or checkbox-text ""))
+                              (length first-text))))
+        (export-gfm-check-total-output-length output-length)
       (write-string prefix output)
       (when checkbox-text (write-string checkbox-text output))
       (write-string first-text output)
       (dolist (child remaining)
-        (let ((rendered (export-gfm-render-view state child)))
+        (let* ((continuation-indent (* 2 (1+ depth)))
+               (outer-prefix *export-gfm-output-prefix-length*)
+               (*export-gfm-output-prefix-length*
+                 (+ outer-prefix output-length 1))
+               (rendered
+                 (export-gfm-render-with-prefix
+                  continuation-indent
+                  (lambda () (export-gfm-render-view state child)))))
           (unless (zerop (length rendered))
+            (let ((line-indent-count
+                    (* (1+ (count #\Newline rendered)) continuation-indent)))
+              (let ((*export-gfm-output-prefix-length* outer-prefix))
+                (export-gfm-check-total-output-length
+                 (+ output-length 1 (length rendered) line-indent-count))))
             (write-char #\Newline output)
             (loop with start = 0
                   for newline = (position #\Newline rendered :start start)
                   do (write-string
-                      (make-string (* 2 (1+ depth)) :initial-element #\Space)
+                      (make-string continuation-indent :initial-element #\Space)
                       output)
                      (write-string rendered output :start start :end newline)
                      (when newline
                        (write-char #\Newline output)
                        (setf start (1+ newline)))
-                  while newline)))))))
+                  while newline)
+            (incf output-length
+                  (+ 1 (length rendered)
+                     (* (1+ (count #\Newline rendered)) continuation-indent))))))))))
 
 (defun export-gfm-render-list (state view)
   (let* ((node (export-view-node view))
          (kind (node-property node :type))
          (ordered-p (eq kind :ordered)))
-    (export-gfm-join
-     (loop for item in (export-view-children view)
-           for number from 1
-           for item-node = (export-view-node item)
-           for marker = (if ordered-p
-                            (format nil "~A." (or (node-property item-node :counter)
-                                                  number))
-                            (or (node-property item-node :bullet) "-"))
-           collect (export-gfm-render-list-item state item marker 0))
-     (string #\Newline))))
+    (with-output-to-string (output)
+      (let ((output-length 0)
+            (first-p t))
+        (loop for item in (export-view-children view)
+              for number from 1
+              for item-node = (export-view-node item)
+              for marker = (if ordered-p
+                               (format nil "~A."
+                                       (or (node-property item-node :counter)
+                                           number))
+                               (or (node-property item-node :bullet) "-"))
+              for separator-length = (if first-p 0 1)
+              for rendered =
+                (let ((*export-gfm-output-prefix-length*
+                        (+ *export-gfm-output-prefix-length*
+                           output-length separator-length)))
+                  (export-gfm-render-list-item state item marker 0))
+              unless (zerop (length rendered))
+                do (export-gfm-check-total-output-length (length rendered))
+                   (unless first-p (write-char #\Newline output))
+                   (write-string rendered output)
+                   (incf output-length (+ separator-length (length rendered)))
+                   (setf first-p nil))))))
 
 (defun export-gfm-table-cell (state view)
   (let ((children (export-view-children view)))
@@ -632,11 +1062,23 @@
   (let ((cells (export-view-children view)))
     (with-output-to-string (output)
       (write-char #\| output)
-      (loop for index below column-count
-            for cell = (nth index cells)
-            do (write-char #\Space output)
-               (when cell (write-string (export-gfm-table-cell state cell) output))
-               (write-string " |" output)))))
+      (let ((output-length 1))
+        (loop for index below column-count
+              for cell = (nth index cells)
+              for rendered =
+                (when cell
+                  (let ((*export-gfm-output-prefix-length*
+                          (+ *export-gfm-output-prefix-length* output-length)))
+                    (export-gfm-render-with-prefix
+                     3 (lambda () (export-gfm-table-cell state cell)))))
+              do (when cell
+                   (export-gfm-check-total-output-length
+                    (+ 3 (length rendered))))
+                 (write-char #\Space output)
+                 (when cell (write-string rendered output))
+                 (write-string " |" output)
+                 (incf output-length (+ 3 (length (or rendered ""))))
+                 (export-gfm-check-total-output-length output-length))))))
 
 (defun export-gfm-render-table (state view)
   (let* ((rows (remove-if
@@ -649,14 +1091,28 @@
     (if (zerop column-count)
         ""
         (with-output-to-string (output)
-          (write-string (export-gfm-table-row state header column-count) output)
-          (write-char #\Newline output)
-          (write-char #\| output)
-          (loop repeat column-count
-                do (write-string " --- |" output))
-          (dolist (row body)
+          (let* ((outer-prefix *export-gfm-output-prefix-length*)
+                 (header-row (export-gfm-render-with-prefix
+                              0 (lambda ()
+                                  (export-gfm-table-row
+                                   state header column-count))))
+                 (output-length (length header-row))
+                 (separator-length (+ 2 (* 6 column-count))))
+            (export-gfm-check-total-output-length
+             (+ output-length separator-length))
+            (write-string header-row output)
             (write-char #\Newline output)
-            (write-string (export-gfm-table-row state row column-count) output))))))
+            (write-char #\| output)
+            (loop repeat column-count do (write-string " --- |" output))
+            (incf output-length separator-length)
+            (dolist (row body)
+              (let* ((*export-gfm-output-prefix-length*
+                       (+ outer-prefix output-length 1))
+                     (row-text (export-gfm-table-row state row column-count)))
+                (export-gfm-check-total-output-length (length row-text))
+                (write-char #\Newline output)
+                (write-string row-text output)
+                (incf output-length (1+ (length row-text))))))))))
 
 (defun export-gfm-render-footnote-reference (state view)
   (let* ((node (export-view-node view))
@@ -672,13 +1128,21 @@
                (count (1+ (gethash label
                                    (export-gfm-state-footnote-reference-counts state)
                                    0)))
-               (reference-id (format nil "fnr.~A~A"
-                                     label
-                                     (if (= count 1) ""
-                                         (format nil ".~D" (1- count))))))
+               (suffix (if (= count 1) ""
+                           (format nil ".~D" (1- count))))
+               (label-length (export-gfm-html-attribute-output-length label))
+               (reference-id-length (+ 4 label-length (length suffix)))
+               (number-text (princ-to-string number))
+               (reference-id nil))
+          (export-gfm-check-total-output-length
+           (+ (length "<sup><a id=\"") reference-id-length
+              (length "\" class=\"footref\" href=\"#fn.") label-length
+              (length "\" role=\"doc-backlink\">")
+              (length number-text) (length "</a></sup>")))
           (setf (gethash label
                          (export-gfm-state-footnote-reference-counts state))
-                count)
+                count
+                reference-id (concatenate 'string "fnr." label suffix))
           (format nil
                   "<sup><a id=\"~A\" class=\"footref\" href=\"#fn.~A\" role=\"doc-backlink\">~D</a></sup>"
                   (export-gfm-escape-html-attribute reference-id)
@@ -692,42 +1156,53 @@
   (let* ((number (getf entry :number))
          (view (getf entry :definition))
          (children (export-view-children view))
-         (content
-           (export-gfm-join
-            (mapcar (lambda (child)
-                      (if (eq (node-type (export-view-node child)) :paragraph)
-                          (export-gfm-render-inline-views
-                           state (export-view-children child))
-                          (export-gfm-render-view state child)))
-                    children)
-            (format nil "~%~%"))))
-    (format nil
-            "<sup><a id=\"fn.~A\" class=\"footnum\" href=\"#fnr.~A\">~D</a></sup> ~A"
-            number number number content)))
+         (header (format nil
+                         "<sup><a id=\"fn.~A\" class=\"footnum\" href=\"#fnr.~A\">~D</a></sup> "
+                         number number number)))
+    (with-output-to-string (output)
+      (write-string header output)
+      (let ((outer-prefix *export-gfm-output-prefix-length*)
+            (output-length (length header))
+            (first-p t))
+        (dolist (child children)
+          (let* ((separator-length (if first-p 0 2))
+                 (*export-gfm-output-prefix-length*
+                   (+ outer-prefix output-length separator-length))
+                 (rendered
+                   (if (eq (node-type (export-view-node child)) :paragraph)
+                       (export-gfm-render-inline-views
+                        state (export-view-children child))
+                       (export-gfm-render-view state child))))
+            (unless (zerop (length rendered))
+              (export-gfm-check-total-output-length (length rendered))
+              (unless first-p (write-string (format nil "~%~%") output))
+              (write-string rendered output)
+              (incf output-length (+ separator-length (length rendered)))
+              (setf first-p nil))))))))
 
 (defun export-gfm-render-footnotes (state)
   (let ((entries (export-preparation-footnotes
                   (export-gfm-state-preparation state))))
     (when entries
-      (format nil "## Footnotes~%~%~A"
-              (export-gfm-join
-               (mapcar (lambda (entry)
-                         (export-gfm-render-footnote-definition state entry))
-                       entries)
-               (format nil "~%~%"))))))
-
-(defun export-gfm-render-target (state view)
-  (let* ((node (export-view-node view))
-         (value (node-property node :value))
-         (id (or (gethash (and (stringp value) (string-downcase value))
-                          (export-gfm-state-reference-ids state))
-                 (export-gfm-slug (or value "")))))
-    (if (eq (node-type node) :radio-target)
-        (format nil "<a id=\"~A\">~A</a>"
-                (export-gfm-escape-html-attribute id)
-                (export-gfm-escape-literal (or value "")))
-        (format nil "<a id=\"~A\"></a>"
-                (export-gfm-escape-html-attribute id)))))
+      (let ((heading "## Footnotes"))
+        (export-gfm-check-total-output-length (+ (length heading) 2))
+        (with-output-to-string (output)
+          (write-string heading output)
+          (write-string (format nil "~%~%") output)
+          (let ((outer-prefix *export-gfm-output-prefix-length*)
+                (output-length (+ (length heading) 2))
+                (first-p t))
+            (dolist (entry entries)
+              (let* ((separator-length (if first-p 0 2))
+                     (*export-gfm-output-prefix-length*
+                       (+ outer-prefix output-length separator-length))
+                     (rendered
+                       (export-gfm-render-footnote-definition state entry)))
+              (export-gfm-check-total-output-length (length rendered))
+              (unless first-p (write-string (format nil "~%~%") output))
+              (write-string rendered output)
+              (incf output-length (+ separator-length (length rendered)))
+              (setf first-p nil)))))))))
 
 (defun export-gfm-render-src-block (state view)
   (let* ((node (export-view-node view))
@@ -741,7 +1216,10 @@
       (:results results)
       (:code code)
       (otherwise (if (zerop (length results)) code
-                     (format nil "~A~%~%~A" code results))))))
+                     (progn
+                       (export-gfm-check-total-output-length
+                        (+ (length code) 2 (length results)))
+                       (format nil "~A~%~%~A" code results)))))))
 
 (defun export-gfm-render-export-block (state node)
   (let ((backend (node-property node :type))
@@ -793,6 +1271,8 @@
       (:verse-block
        (let ((content (export-gfm-render-views
                        state children :preserve-source-breaks-p t)))
+         (export-gfm-check-total-output-length
+          (+ (length content) (* 2 (count #\Newline content))))
          (with-output-to-string (output)
            (loop with start = 0
                  for newline = (position #\Newline content :start start)
@@ -815,23 +1295,36 @@
        (export-gfm-render-inline-view
         state view :preserve-source-breaks-p preserve-source-breaks-p))
       (:latex-environment
-       (export-gfm-escape-literal (or (node-text node) "")))
-      (otherwise (export-gfm-escape-literal (or (node-text node) ""))))))
+       (export-gfm-escape-node-source-text node))
+      (otherwise (export-gfm-escape-node-source-text node)))))
 
 (defun export-gfm-render-document (state)
   (let* ((preparation (export-gfm-state-preparation state))
+         (outer-prefix *export-gfm-output-prefix-length*)
          (toc (export-gfm-toc state))
-         (body (export-gfm-render-views
-                state (export-preparation-root-views preparation)))
-         (footnotes (export-gfm-render-footnotes state)))
-    (export-gfm-join
-     (remove-if-not (lambda (text)
-                      (and (stringp text) (plusp (length text))))
-                    (list toc body footnotes))
-     (format nil "~%~%"))))
+         (body
+           (let ((*export-gfm-output-prefix-length*
+                   (+ outer-prefix (length toc))))
+             (export-gfm-render-views
+              state (export-preparation-root-views preparation))))
+         (footnotes
+           (let ((*export-gfm-output-prefix-length*
+                   (+ outer-prefix (length toc) (length body))))
+             (export-gfm-render-footnotes state))))
+    (let ((*export-gfm-output-prefix-length* outer-prefix))
+      (export-gfm-join
+       (remove-if-not (lambda (text)
+                        (and (stringp text) (plusp (length text))))
+                      (list toc body footnotes))
+       (format nil "~%~%")))))
 
 (defmethod export-render-preparation
     ((preparation export-preparation) (backend (eql :gfm)))
-  (let ((state (%make-export-gfm-state :preparation preparation)))
+  (let* ((state (%make-export-gfm-state
+                 :preparation preparation
+                 :limits (document-limits
+                          (export-preparation-document preparation))))
+         (*export-gfm-output-limits* (export-gfm-state-limits state))
+         (*export-gfm-output-prefix-length* 0))
     (export-gfm-index-state state)
     (export-gfm-render-document state)))

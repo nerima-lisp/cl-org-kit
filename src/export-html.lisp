@@ -9,9 +9,9 @@
   (explicit-references (make-hash-table :test #'eq))
   (references (make-hash-table :test #'eq))
   (wrapper-references (make-hash-table :test #'eq))
-  (used-references (make-hash-table :test #'equal))
-  (reference-suffixes (make-hash-table :test #'equal))
-  (reference-targets (make-hash-table :test #'equal))
+  (used-references (make-hash-table :test #'equalp))
+  (reference-suffixes (make-hash-table :test #'equalp))
+  (reference-targets (make-hash-table :test #'equalp))
   (footnote-definition-ids (make-hash-table :test #'equal))
   (footnote-reference-ids (make-hash-table :test #'eq))
   (footnote-first-reference-ids (make-hash-table :test #'equal))
@@ -206,21 +206,52 @@
   .org-svg { }
 ")
 
-(defun export-html-write (state text)
+(defun export-html-check-output-length (state additional-length)
   (let* ((output (export-html-state-output state))
-         (next-length (+ (fill-pointer output) (length text))))
-    (check-limit (export-html-state-limits state) :max-output-length next-length)
-    (loop for character across text
-          do (vector-push-extend character output)))
+         (next-length (+ (fill-pointer output) additional-length)))
+    (check-limit (export-html-state-limits state) :max-output-length
+                 next-length)))
+
+(defun export-html-escaped-output-length (context text start end)
+  (loop for position from start below end
+        for character = (char text position)
+        sum (case character
+              (#\& 5)
+              ((#\< #\>) 4)
+              (#\" (if (eq context :attribute) 6 1))
+              (t 1))))
+
+(defun export-html-check-escaped-parts (state context parts)
+  (export-html-check-output-length
+   state
+   (loop for (text start end) in parts
+         sum (export-html-escaped-output-length
+              context text start (or end (length text))))))
+
+(defun export-html-write-range (state text start end)
+  (let* ((output (export-html-state-output state))
+         (length (- end start)))
+    (export-html-check-output-length state length)
+    (loop for position from start below end
+          do (vector-push-extend (char text position) output)))
   state)
 
-(defun export-html-escape-to-output (state context text)
+(defun export-html-write (state text)
+  (export-html-write-range state text 0 (length text)))
+
+(defun export-html-write-spaces (state count)
+  (let ((output (export-html-state-output state)))
+    (export-html-check-output-length state count)
+    (loop repeat count
+          do (vector-push-extend #\Space output)))
+  state)
+
+(defun export-html-escape-to-output-range (state context text start end)
   (unless (member context '(:text :attribute) :test #'eq)
     (export-error :html :invalid-escape-context nil
                   "Unknown HTML escaping context"))
-  (let ((run-start 0)
-        (length (length text)))
-    (loop for position from 0 below length
+  (let ((run-start start))
+    (loop for position from start below end
           for character = (char text position)
           for replacement =
             (case context
@@ -235,12 +266,15 @@
                             (#\" "&quot;"))))
           when replacement
             do (when (< run-start position)
-                 (export-html-write state (subseq text run-start position)))
+                 (export-html-write-range state text run-start position))
                (export-html-write state replacement)
                (setf run-start (1+ position))
-          finally (when (< run-start length)
-                    (export-html-write state (subseq text run-start length))))
+          finally (when (< run-start end)
+                    (export-html-write-range state text run-start end)))
   state))
+
+(defun export-html-escape-to-output (state context text)
+  (export-html-escape-to-output-range state context text 0 (length text)))
 
 (defun export-html-write-attribute (state name value)
   (export-html-write state " ")
@@ -254,11 +288,9 @@
   (export-unsupported-syntax :html node (export-source-position node)
                              :html-attribute message))
 
-(defun export-html-attribute-tokens (value node)
-  (let ((tokens nil)
-        (start nil)
+(defun export-html-next-attribute-token (value node index)
+  (let ((start nil)
         (quoted-p nil)
-        (index 0)
         (length (length value)))
     (loop while (< index length)
           for character = (char value index)
@@ -269,15 +301,15 @@
                ((and (not quoted-p)
                      (find character '(#\Space #\Tab #\Newline #\Return)))
                 (when start
-                  (push (subseq value start index) tokens)
-                  (setf start nil)))
+                  (return-from export-html-next-attribute-token
+                    (values start index (1+ index)))))
                ((null start) (setf start index)))
              (incf index))
     (when quoted-p
       (export-html-attribute-error node "Unclosed quoted HTML attribute value"))
-    (when start
-      (push (subseq value start length) tokens))
-    (nreverse tokens)))
+    (if start
+        (values start length length)
+        (values nil nil length))))
 
 (defun export-html-generated-reference (state)
   (let ((used (export-html-state-used-references state)))
@@ -335,10 +367,9 @@
 
 (defun export-html-index-reference-alias (state alias reference)
   (when (and (stringp alias) (plusp (length alias)))
-    (let ((key (string-downcase alias))
-          (targets (export-html-state-reference-targets state)))
-      (unless (gethash key targets)
-        (setf (gethash key targets) reference)))))
+    (let ((targets (export-html-state-reference-targets state)))
+      (unless (gethash alias targets)
+        (setf (gethash alias targets) reference)))))
 
 (defun export-html-wrapper-reference (state node)
   (or (gethash node (export-html-state-wrapper-references state))
@@ -374,9 +405,8 @@
                       (export-html-write-inline-views state (cdr macro-entry))
                       (export-html-render-node state segment nil nil)))
                 (when (plusp (node-post-blank segment))
-                  (export-html-write
-                   state (make-string (node-post-blank segment)
-                                      :initial-element #\Space))))
+                  (export-html-write-spaces state
+                                            (node-post-blank segment))))
               (export-html-escape-to-output state :text segment)))
         (export-html-escape-to-output state :text
                                       (or (node-property node :raw-value) ""))))
@@ -525,21 +555,24 @@
   (dolist (view views)
     (export-html-render-view state view)))
 
-(defun export-html-escape-verse-text-to-output (state text)
-  (loop with start = 0
-        for end = (position #\Newline text :start start)
-        do (export-html-escape-to-output
-            state :text (subseq text start (or end (length text))))
-           (when end
+(defun export-html-escape-verse-text-range (state text start end)
+  (loop with line-start = start
+        for newline = (position #\Newline text :start line-start :end end)
+        do (export-html-escape-to-output-range
+            state :text text line-start (or newline end))
+           (when newline
              (export-html-write state "<br />")
              (export-html-write state (string #\Newline))
-             (setf start (1+ end)))
-        while end))
+             (setf line-start (1+ newline)))
+        while newline))
+
+(defun export-html-write-text-range (state text start end)
+  (if (export-html-state-verse-output-p state)
+      (export-html-escape-verse-text-range state text start end)
+      (export-html-escape-to-output-range state :text text start end)))
 
 (defun export-html-write-text (state text)
-  (if (export-html-state-verse-output-p state)
-      (export-html-escape-verse-text-to-output state text)
-      (export-html-escape-to-output state :text text)))
+  (export-html-write-text-range state text 0 (length text)))
 
 (defun export-html-write-inline-views (state views &optional trim-list-indent)
   (loop with trim-list-indent-p = trim-list-indent
@@ -562,15 +595,13 @@
                              while (member (char text position)
                                            '(#\Space #\Tab) :test #'char=)
                              finally (return position))))
-                (export-html-write-text state (subseq text start))
+                (export-html-write-text-range state text start (length text))
                 (when (< start (length text))
                   (setf trim-list-indent-p nil))))
              (t (export-html-render-view state view)))
            (when (and (not (member type '(:section :paragraph) :test #'eq))
                       (plusp (node-post-blank node)))
-             (export-html-write
-              state (make-string (node-post-blank node)
-                                 :initial-element #\Space)))))
+             (export-html-write-spaces state (node-post-blank node)))))
 
 (defun export-html-trim-output-newline (state)
   (let* ((output (export-html-state-output state))
@@ -678,52 +709,69 @@
                         (<= #x30 code #x39)
                         (char= character #\#)))))
 
-(defun export-html-safe-attribute-value (node key value)
+(defun export-html-safe-attribute-value (node key value start end)
   (when (member key '("height" "width") :test #'string=)
-    (let* ((percent (and (plusp (length value))
-                         (char= (char value (1- (length value))) #\%)))
-           (digits (if percent (subseq value 0 (1- (length value))) value)))
-      (unless (and (plusp (length digits))
-                   (every #'digit-char-p digits))
+    (let ((digits-end
+            (if (and (< start end)
+                     (char= (char value (1- end)) #\%))
+                (1- end)
+                end)))
+      (unless (and (< start digits-end)
+                   (loop for position from start below digits-end
+                         always (digit-char-p (char value position))))
         (export-html-attribute-error
          node "HTML image dimensions must be decimal integers or percentages"))))
-  value)
+  (subseq value start end))
 
-(defun export-html-parse-attributes (node)
+(defun export-html-attribute-key (value start end)
+  (when (and (> (- end start) 1)
+             (char= (char value start) #\:))
+    (loop for key in '("alt" "class" "height" "id" "title" "width")
+          when (string-equal key value :start2 (1+ start) :end2 end)
+            return key)))
+
+(defun export-html-parse-attributes (node state)
   (let ((value (node-property node :ATTR_HTML))
-        (attributes nil))
+        (attributes nil)
+        (output-length 0))
     (when value
       (unless (stringp value)
         (export-html-attribute-error node "ATTR_HTML must be a string"))
-      (let ((tokens (export-html-attribute-tokens value node)))
-        (unless tokens
-          (export-html-attribute-error node "ATTR_HTML has no attributes"))
-        (loop while tokens
-              for key-token = (pop tokens)
-              for key = (if (and (> (length key-token) 1)
-                                 (char= (char key-token 0) #\:))
-                            (string-downcase (subseq key-token 1))
-                            nil)
-              for value-token = (pop tokens)
-              do (unless (and key
-                              (member key '("alt" "class" "height" "id"
-                                            "title" "width")
-                                      :test #'string=)
-                              value-token
-                              (not (assoc key attributes :test #'string=)))
-                   (export-html-attribute-error
-                    node "Unsupported or malformed ATTR_HTML attribute"))
-                 (let* ((attribute-value
-                          (if (and (> (length value-token) 1)
-                                   (char= (char value-token 0) #\")
-                                   (char= (char value-token
-                                                (1- (length value-token))) #\"))
-                              (subseq value-token 1 (1- (length value-token)))
-                              value-token)))
-                   (push (cons key
-                               (export-html-safe-attribute-value
-                                node key attribute-value))
-                         attributes)))))
+      (let ((index 0))
+        (loop
+          (multiple-value-bind (key-start key-end next-index)
+              (export-html-next-attribute-token value node index)
+            (setf index next-index)
+            (unless key-start
+              (return))
+            (multiple-value-bind (value-start value-end value-next-index)
+                (export-html-next-attribute-token value node index)
+              (setf index value-next-index)
+              (let ((key (export-html-attribute-key
+                          value key-start key-end)))
+                (unless (and key value-start
+                             (not (assoc key attributes :test #'string=)))
+                  (export-html-attribute-error
+                   node "Unsupported or malformed ATTR_HTML attribute"))
+                (when (and (> (- value-end value-start) 1)
+                           (char= (char value value-start) #\")
+                           (char= (char value (1- value-end)) #\"))
+                  (incf value-start)
+                  (decf value-end))
+                (let* ((value-output-length
+                         (export-html-escaped-output-length
+                          :attribute value value-start value-end))
+                       (attribute-output-length
+                         (+ 4 (length key) value-output-length)))
+                  (export-html-check-output-length
+                   state (+ output-length attribute-output-length))
+                  (incf output-length attribute-output-length)
+                  (push (cons key
+                              (export-html-safe-attribute-value
+                               node key value value-start value-end))
+                        attributes)))))))
+      (unless attributes
+        (export-html-attribute-error node "ATTR_HTML has no attributes")))
     (nreverse attributes)))
 
 (defun export-html-index-attribute-ids (state)
@@ -734,7 +782,7 @@
           for view = (pop stack)
           for node = (export-view-node view)
           do (when (node-property node :ATTR_HTML)
-               (dolist (attribute (export-html-parse-attributes node))
+               (dolist (attribute (export-html-parse-attributes node state))
                  (when (string= (car attribute) "id")
                    (setf (gethash (cdr attribute)
                                   (export-html-state-used-references state))
@@ -767,9 +815,11 @@
   (and (stringp path)
        (let ((extension (position #\. path :from-end t)))
          (and extension
-              (member (string-downcase (subseq path (1+ extension)))
-                      '("png" "jpg" "jpeg" "gif" "svg" "webp")
-                      :test #'string=)))))
+              (loop for suffix in '("png" "jpg" "jpeg" "gif" "svg" "webp")
+                    thereis (and (= (length suffix)
+                                    (- (length path) (1+ extension)))
+                                 (string-equal suffix path
+                                               :start2 (1+ extension))))))))
 
 (defun export-html-link-destination (state node)
   (let* ((type (node-property node :type))
@@ -777,26 +827,48 @@
          (destination
            (cond
              ((and (stringp type)
+                   (stringp path)
                    (member type '("http" "https" "mailto")
-                           :test #'string-equal))
+                           :test #'string-equal)
+                   (notany #'export-control-character-p path)
+                   (not (find #\\ path)))
+              (export-html-check-escaped-parts
+               state :attribute
+               (list (list type 0 (length type))
+                     (list ":" 0 1)
+                     (list path 0 (length path))))
               (concatenate 'string type ":" path))
              ((and (stringp type) (string-equal type "custom-id"))
-              (concatenate 'string "#" path))
+              (when (stringp path)
+                (when (and (notany #'export-control-character-p path)
+                           (not (find #\\ path)))
+                  (export-html-check-escaped-parts
+                   state :attribute (list (list "#" 0 1)
+                                          (list path 0 (length path)))))
+                (concatenate 'string "#" path)))
              ((and (stringp type) (string-equal type "file"))
-              (and (export-html-image-path-p path) path))
+              (when (and (export-html-image-path-p path)
+                         (stringp path)
+                         (export-safe-url-p path path))
+                (export-html-check-escaped-parts
+                 state :attribute (list (list path 0 (length path))))
+                path))
              ((and (stringp type)
                    (member type '("fuzzy" "radio") :test #'string-equal))
-              (or (let ((target (or (gethash path
-                                             (export-html-state-reference-targets
-                                              state))
-                                    (and (stringp path)
-                                         (gethash (string-downcase path)
-                                                  (export-html-state-reference-targets
-                                                   state))))))
-                    (and target (concatenate 'string "#" target)))
-                  path))
-             ((and (stringp type) (stringp path))
-              (concatenate 'string type ":" path))
+              (let ((target
+                      (gethash path
+                               (export-html-state-reference-targets state))))
+                (if (and target
+                         (notany #'export-control-character-p path)
+                         (notany #'export-control-character-p target)
+                         (not (find #\\ target)))
+                    (progn
+                      (export-html-check-escaped-parts
+                       state :attribute
+                       (list (list "#" 0 1) (list target 0 (length target))))
+                      (concatenate 'string "#" target))
+                    path)))
+             ((and (stringp type) (stringp path)) nil)
              (t path))))
     (when (and (stringp path)
                (stringp destination)
@@ -825,6 +897,11 @@
                   (stringp path)
                   (member type '("http" "https" "mailto")
                           :test #'string-equal)
+                  (export-html-check-escaped-parts
+                   state :text
+                   (list (list type 0 (length type))
+                         (list ":" 0 1)
+                         (list path 0 (length path))))
                   (concatenate 'string type ":" path))
              path
              "")))))
@@ -1062,7 +1139,7 @@
   (let* ((attribute-value (node-property node :ATTR_HTML))
          (image-view (export-html-standalone-image-view child-views))
          (attributes (when attribute-value
-                       (export-html-parse-attributes node))))
+                       (export-html-parse-attributes node state))))
     (when (and attribute-value (null image-view))
       (export-html-attribute-error
        node "ATTR_HTML requires one unambiguous image link"))
@@ -1109,12 +1186,17 @@
     (export-html-write state "</pre>
 ")))
 
-(defun export-html-literal-object-value (node)
-  (let* ((source (or (node-text node) ""))
-         (end (- (length source) (node-post-blank node))))
-    (if (> end 2)
-        (subseq source 1 (1- end))
-        "")))
+(defun export-html-literal-object-value-range (node)
+  (let* ((document (node-document node))
+         (source (and document (document-text document)))
+         (start (node-begin node))
+         (end (node-end node)))
+    (if (and source start end)
+        (let ((trimmed-end (- end (node-post-blank node))))
+          (if (> (- trimmed-end start) 2)
+              (values source (1+ start) (1- trimmed-end))
+              (values source start start)))
+        (values "" 0 0))))
 
 (defun export-html-render-source-block (state view)
   (let* ((node (export-view-node view))
@@ -1149,20 +1231,23 @@
         (export-html-write-raw-text state node))))
 
 (defun export-html-render-code-block (state node)
-  (let* ((value
-           (if (eq (node-type node) :dynamic-block)
-               (let* ((document (node-document node))
-                      (text (document-text document))
-                      (start (node-contents-begin node))
-                      (end (node-contents-end node)))
-                 (if (and text start end)
-                     (subseq text start end)
-                     (or (node-property node :value) "")))
-               (or (node-property node :value) (node-text node) ""))))
+  (let* ((dynamic-block-p (eq (node-type node) :dynamic-block))
+         (document (and dynamic-block-p (node-document node)))
+         (source (and document (document-text document)))
+         (start (and dynamic-block-p (node-contents-begin node)))
+         (end (and dynamic-block-p (node-contents-end node)))
+         (source-range-p (and source start end))
+         (value (unless source-range-p
+                  (or (node-property node :value) (node-text node) ""))))
     (export-html-write state "<pre class=\"example\">
 ")
-    (export-html-escape-to-output state :text value)
-    (unless (export-html-ends-with-newline-p value)
+    (if source-range-p
+        (export-html-escape-to-output-range state :text source start end)
+        (export-html-escape-to-output state :text value))
+    (unless (if source-range-p
+                (and (> end start)
+                     (char= (char source (1- end)) #\Newline))
+                (export-html-ends-with-newline-p value))
       (export-html-write state "
 "))
     (export-html-write state "</pre>
@@ -1309,7 +1394,7 @@
 ")))
 
 (defun export-html-render-table (state node child-views)
-  (let* ((attributes (export-html-parse-attributes node))
+  (let* ((attributes (export-html-parse-attributes node state))
          (rows (remove-if (lambda (view)
                             (eq (node-property (export-view-node view) :type)
                                 :rule))
@@ -1429,11 +1514,13 @@
                (export-html-write state tag)
                (export-html-write state ">")))
          (if (member type '(:inline-src-block :code :verbatim) :test #'eq)
-             (export-html-escape-to-output
-              state :text
-              (if (member type '(:code :verbatim) :test #'eq)
-                  (export-html-literal-object-value node)
-                  (or (node-property node :value) "")))
+             (if (member type '(:code :verbatim) :test #'eq)
+                 (multiple-value-bind (value start end)
+                     (export-html-literal-object-value-range node)
+                   (export-html-escape-to-output-range
+                    state :text value start end))
+                 (export-html-escape-to-output
+                  state :text (or (node-property node :value) "")))
              (export-html-write-node-children state node child-views view))
          (if (eq type :underline)
              (export-html-write state "</span>")

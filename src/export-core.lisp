@@ -157,7 +157,7 @@
         (or (<= #x30 code #x39)
             (find character '(#\+ #\. #\-))))))
 
-(defun export-explicit-url-scheme (destination)
+(defun export-explicit-url-scheme-end (destination)
   (let ((colon (position #\: destination)))
     (when (and colon
                (plusp colon)
@@ -165,7 +165,18 @@
                (loop for position from 1 below colon
                      always (export-ascii-scheme-character-p
                              (char destination position))))
-      (subseq destination 0 colon))))
+      colon)))
+
+(defun export-explicit-url-scheme (destination)
+  (let ((end (export-explicit-url-scheme-end destination)))
+    (and end (subseq destination 0 end))))
+
+(defun export-allowed-url-scheme-p (destination end)
+  (not (null
+        (member-if (lambda (scheme)
+                     (and (= (length scheme) end)
+                          (string-equal destination scheme :end1 end)))
+                   '("http" "https" "mailto")))))
 
 (defun export-safe-url-p (raw-destination expanded-destination)
   "Return true when an expanded destination uses an allowed scheme or is relative."
@@ -176,11 +187,10 @@
        (not (find #\\ expanded-destination))
        (not (and (>= (length expanded-destination) 2)
                  (string= "//" expanded-destination :end2 2)))
-       (let ((scheme (export-explicit-url-scheme expanded-destination)))
-         (or (null scheme)
-             (not (null
-                   (member scheme '("http" "https" "mailto")
-                           :test #'string-equal)))))))
+       (let ((scheme-end
+               (export-explicit-url-scheme-end expanded-destination)))
+         (or (null scheme-end)
+             (export-allowed-url-scheme-p expanded-destination scheme-end)))))
 
 (defun export-utf8-length (text backend)
   (loop with total = 0

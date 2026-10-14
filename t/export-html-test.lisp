@@ -637,6 +637,39 @@
               (expect (not (null (search href output)))
                       :to-be (fourth case))))))))
 
+  (it "rejects backslashes in external and custom-id URLs"
+    (let* ((state (org-kit::%make-export-html-state))
+           (unsafe-path (concatenate 'string "unsafe" (string #\\) "path"))
+           (control-path
+             (concatenate 'string "unsafe" (string (code-char 1)) "path"))
+           (external-link
+             (make-node :link :properties
+                        (list :type "https" :path unsafe-path)))
+           (custom-id-link
+             (make-node :link :properties
+                        (list :type "custom-id" :path unsafe-path)))
+           (missing-custom-id-link
+             (make-node :link :properties '(:type "custom-id")))
+           (control-custom-id-link
+             (make-node :link :properties
+                        (list :type "custom-id" :path control-path)))
+           (fuzzy-link
+             (make-node :link :properties '(:type "fuzzy" :path "target"))))
+      (setf (gethash "target"
+                     (org-kit::export-html-state-reference-targets state))
+            unsafe-path)
+      (with-soft-assertions
+        (expect (org-kit::export-html-link-destination state external-link)
+                :to-be nil)
+        (expect (org-kit::export-html-link-destination state custom-id-link)
+                :to-be nil)
+        (expect (org-kit::export-html-link-destination state missing-custom-id-link)
+                :to-be nil)
+        (expect (org-kit::export-html-link-destination state control-custom-id-link)
+                :to-be nil)
+        (expect (org-kit::export-html-link-destination state fuzzy-link)
+                :to-equal "target"))))
+
   (it "validates destinations after LINK abbreviation expansion"
     (let* ((document
              (parse-org
@@ -1006,3 +1039,206 @@ paragraph" table-list) :not :to-be nil))))
         (expect (export-core-test-document-snapshot valid) :to-equal valid-before)
         (expect (typep condition 'org-export-unsupported-syntax) :to-be t)
         (expect (export-core-test-document-snapshot invalid) :to-equal invalid-before)))))
+
+  (it "checks HTML escaping before allocating a large unescaped run"
+    (let* ((text (make-string (* 2 1024 1024) :initial-element #\x))
+           (state (org-kit::%make-export-html-state
+                   :limits (make-limits :max-output-length 0)))
+           (before (progn
+                     (sb-ext:gc :full t)
+                     (sb-ext:get-bytes-consed)))
+           (condition
+             (export-html-test-catch-error
+              (lambda ()
+                (org-kit::export-html-escape-to-output state :text text))))
+           (allocated (- (sb-ext:get-bytes-consed) before)))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-actual condition)
+                  :to-be (length text)))
+        (expect (< allocated (floor (length text) 2)) :to-be t))))
+
+  (it "checks dynamic block output before allocating a source slice"
+    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+           (prefix (format nil "#+OPTIONS: toc:nil num:nil~%#+BEGIN: populated~%"))
+           (suffix (format nil "~%#+END:~%"))
+           (source (concatenate 'string prefix body suffix))
+           (document (make-document source))
+           (dynamic-block
+             (make-node :dynamic-block
+                        :begin 0 :end (length source)
+                        :contents-begin (length prefix)
+                        :contents-end (+ (length prefix) (length body))))
+           (root (make-node :org-data :children (list dynamic-block)))
+           (state
+             (org-kit::%make-export-html-state
+              :limits (make-limits :max-output-length 2048)))
+           (attached (setf (document-root document) root))
+           (before (progn
+                     (sb-ext:gc :full t)
+                     (sb-ext:get-bytes-consed)))
+           (condition
+             (export-html-test-catch-error
+              (lambda ()
+                (org-kit::export-html-render-code-block state dynamic-block))))
+           (allocated (- (sb-ext:get-bytes-consed) before)))
+      (with-soft-assertions
+        (expect attached :to-be root)
+        (expect (typep dynamic-block 'node) :to-be t)
+        (expect (node-contents-begin dynamic-block) :not :to-be nil)
+        (expect (node-contents-end dynamic-block) :not :to-be nil)
+        (when (and (node-contents-begin dynamic-block)
+                   (node-contents-end dynamic-block))
+          (expect (>= (- (node-contents-end dynamic-block)
+                         (node-contents-begin dynamic-block))
+                      (length body))
+                  :to-be t))
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length))
+        (expect (< allocated (floor (length body) 2)) :to-be t))))
+
+  (it "checks HTML link destinations before concatenating them"
+    (let* ((path (make-string (* 2 1024 1024) :initial-element #\x))
+           (source (concatenate 'string "https://budget.test/" path))
+           (limits (make-limits :max-output-length 128))
+           (document (make-document source :limits limits))
+           (link (make-node :link :begin 0 :end (length source)
+                            :properties (list :type "https" :path path)))
+           (root (make-node :org-data :children (list link)))
+           (attached (setf (document-root document) root))
+           (before (progn
+                     (sb-ext:gc :full t)
+                     (sb-ext:get-bytes-consed)))
+           (condition
+             (export-html-test-catch-error
+              (lambda () (export-org document :html))))
+           (allocated (- (sb-ext:get-bytes-consed) before)))
+      (with-soft-assertions
+        (expect attached :to-be root)
+        (expect (node-type link) :to-be :link)
+        (expect (node-property link :type) :to-equal "https")
+        (expect (node-property link :path) :to-equal path)
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length))
+        (expect (> (length source) (* 1024 1024)) :to-be t)
+        (expect (< allocated (floor (length source) 2)) :to-be t))))
+
+  (it "checks HTML attribute values before copying them"
+    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+           (value (concatenate 'string ":id \"" body "\""))
+           (node (make-node :table :properties (list :ATTR_HTML value)))
+           (state (org-kit::%make-export-html-state
+                   :limits (make-limits :max-output-length 128)))
+           (before (progn
+                     (sb-ext:gc :full t)
+                     (sb-ext:get-bytes-consed)))
+           (condition
+             (export-html-test-catch-error
+              (lambda () (org-kit::export-html-parse-attributes node state))))
+           (allocated (- (sb-ext:get-bytes-consed) before)))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length))
+        (expect (> (length value) (* 1024 1024)) :to-be t)
+        (expect (< allocated (floor (length value) 2)) :to-be t))))
+
+  (it "uses the remaining text when an escaped HTML part omits its end"
+    (let ((state (org-kit::%make-export-html-state :limits (make-limits))))
+      (with-soft-assertions
+        (expect (org-kit::export-html-escaped-output-length
+                 :text (string #\") 0 1)
+                :to-equal 1)
+        (expect (org-kit::export-html-escaped-output-length
+                 :attribute (string #\") 0 1)
+                :to-equal 6)
+        (expect (progn
+                  (org-kit::export-html-check-escaped-parts
+                   state :text (list (list "plain" 0)))
+                  t)
+                :to-be t))))
+
+(describe "HTML export budget regressions"
+  (it "returns an empty source range for a detached literal object"
+    (multiple-value-bind (source start end)
+        (org-kit::export-html-literal-object-value-range (make-node :code))
+      (with-soft-assertions
+        (expect (list source start end) :to-equal (list "" 0 0)))))
+
+  (it "renders empty and unterminated dynamic source ranges"
+    (let* ((nonempty-document (make-document "x"))
+           (nonempty-node
+             (make-node :dynamic-block :begin 0 :end 1
+                        :contents-begin 0 :contents-end 1))
+           (nonempty-root (make-node :org-data :children (list nonempty-node)))
+           (empty-document (make-document ""))
+           (empty-node
+             (make-node :dynamic-block :begin 0 :end 0
+                        :contents-begin 0 :contents-end 0))
+           (empty-root (make-node :org-data :children (list empty-node)))
+           (nonempty-state
+             (org-kit::%make-export-html-state
+              :limits (make-limits :max-output-length 100)))
+           (empty-state
+             (org-kit::%make-export-html-state
+              :limits (make-limits :max-output-length 100)))
+           (nonempty-output
+             (progn
+               (setf (document-root nonempty-document) nonempty-root)
+               (org-kit::export-html-render-code-block
+                nonempty-state nonempty-node)
+               (coerce (org-kit::export-html-state-output nonempty-state)
+                       'string)))
+           (empty-output
+             (progn
+               (setf (document-root empty-document) empty-root)
+               (org-kit::export-html-render-code-block empty-state empty-node)
+               (coerce (org-kit::export-html-state-output empty-state)
+                       'string))))
+      (with-soft-assertions
+        (expect nonempty-output
+                :to-equal (format nil "<pre class=\"example\">~%x~%</pre>~%"))
+        (expect empty-output
+                :to-equal (format nil "<pre class=\"example\">~%~%</pre>~%")))))
+
+  (it "checks HTML output before copying inline code source text"
+    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+           (source (concatenate 'string "Before ~" body "~ after"))
+           (document
+             (parse-org source
+                        :limits (make-limits :max-output-length 32)))
+           (node (export-html-test-node-of-type document :code))
+           (view (org-kit::%make-export-view :node node))
+           (state (org-kit::%make-export-html-state
+                   :limits (make-limits :max-output-length 32)))
+           (input-length (length source))
+           (before (progn
+                     (sb-ext:gc :full t)
+                     (sb-ext:get-bytes-consed)))
+           (condition
+             (export-html-test-catch-error
+              (lambda ()
+                (org-kit::export-html-render-view state view))))
+           (allocated (- (sb-ext:get-bytes-consed) before)))
+      (with-soft-assertions
+        (expect (typep node 'node) :to-be t)
+        (when (typep node 'node)
+          (expect (>= (- (node-end node) (node-begin node))
+                      (length body))
+                  :to-be t))
+        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (> (org-resource-limit-error-actual condition) 32)
+                  :to-be t))
+        (expect (< allocated (floor input-length 2)) :to-be t)))))
