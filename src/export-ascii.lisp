@@ -850,6 +850,24 @@
       ((:latex-environment :latex-fragment) (export-ascii-node-value node :value))
       (otherwise (funcall child-text)))))
 
+(defun export-ascii-visible-control-character-p (character)
+  (let ((code (char-code character)))
+    (and (not (char= character #\Newline))
+         (or (<= 0 code #x1f)
+             (<= #x7f code #x9f)))))
+
+(defun export-ascii-sanitize-controls (text)
+  (if (notany #'export-ascii-visible-control-character-p text)
+      text
+      (with-output-to-string (output)
+        (loop for character across text
+              for code = (char-code character)
+              do (if (export-ascii-visible-control-character-p character)
+                     (if (<= #x80 code #x9f)
+                         (format output "\\u~4,'0X" code)
+                         (format output "\\x~2,'0X" code))
+                     (write-char character output))))))
+
 (defun export-ascii-render-preparation (preparation)
   (let* ((numbers (export-ascii-numbering preparation))
          (title (export-ascii-document-title preparation))
@@ -858,7 +876,8 @@
                 (export-preparation-root-views preparation) preparation))
          (footnotes (export-ascii-footnote-section preparation))
          (text (concatenate 'string title (or toc "") body (or footnotes "")))
-         (text (export-ascii-normalize-output text)))
+         (text (export-ascii-normalize-output text))
+         (text (export-ascii-sanitize-controls text)))
     (check-limit (document-limits (export-preparation-document preparation))
                  :max-output-length (length text))
     text))

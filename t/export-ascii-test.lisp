@@ -1188,6 +1188,37 @@
           (expect (org-export-error-backend footnote) :to-be :ascii)
           (expect (org-export-error-reason footnote) :to-be :unresolved-footnote)))))
 
+  (it "spells C0 and C1 controls visibly across ASCII output paths"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%Body~ABody~A~%| x~A | y~A |~%|---+---|~%#+BEGIN_SRC text~%block~A~%#+END_SRC~%"
+                     (code-char #x1b) (code-char #x07)
+                     (code-char #x7f) (code-char #x80)
+                     (code-char #x9f)))
+           (document (parse-org source))
+           (table (export-ascii-test-find-node (document-root document) :table))
+           (context
+             (make-export-context
+              :title (format nil "metadata~Avalue" (code-char #x00))))
+           (output (export-org document :ascii :context context))
+           (folded-output (string-downcase output))
+           (raw-control-codes
+             (loop for character across output
+                   for code = (char-code character)
+                   when (or (and (< code 32) (/= code 10))
+                            (<= 127 code 159))
+                     collect code)))
+      (with-soft-assertions
+        (expect (node-property table :type) :to-be :org)
+        (expect (export-ascii-test-find-node (document-root document) :src-block)
+                :not :to-be nil)
+        (expect raw-control-codes :to-equal nil)
+        (expect (mapcar (lambda (spelling)
+                          (not (null (search spelling folded-output))))
+                        '("\\x00" "\\x07" "\\x1b" "\\x7f"
+                          "\\u0080" "\\u009f"))
+                :to-equal '(t t t t t t)))))
+
   (it "reuses stable output without mutating source nodes"
     (let* ((source
              (export-ascii-test-source
