@@ -15,13 +15,14 @@ targets SBCL.
   planning data, subtrees, checkboxes, clocks, and Org pipe tables.
 - Build TODO lists and date-range agendas from one or more documents.
 - Start and stop clocks, summarize clock time, and create clocktable data.
-- Format, edit, and stably sort Org pipe tables.
+- Format, edit, and stably sort Org pipe tables, and recalculate supported
+  table formulas.
 - Export to HTML and GitHub Flavored Markdown (GFM).
 
-The 0.1.0 public API does not provide ASCII export or a table-formula
-recalculation function. See the [feature guides](docs/src/guides/todo-agenda.md)
-and [API stability scope](docs/src/reference/api-stability.md) for supported
-calls, return values, conditions, and limits.
+The 0.1.0 public API does not provide ASCII export. See the
+[feature guides](docs/src/guides/todo-agenda.md) and
+[API stability scope](docs/src/reference/api-stability.md) for supported calls,
+return values, conditions, and limits.
 
 Runtime dependencies are `cl-parser-kit`, `cl-regex-kit`, `cl-codec-kit`, and
 `cl-date-kit`.
