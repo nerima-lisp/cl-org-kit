@@ -158,14 +158,15 @@ are kept on the document and reused by its queries, edits, and exporters.
 | `:max-formula-ast-depth` | 256 | syntax tree depth for one formula |
 | `:max-formula-precision` | 34 | significant decimal digits |
 | `:max-formula-exponent` | 6,144 | absolute decimal exponent |
-| `:max-formula-work` | 1,000,000 | work units for one formula calculation |
+| `:max-formula-work` | 1,000,000 | cumulative work units for one `table-recalculate` call |
 
 Agenda calls over multiple documents use the strictest configured agenda
 ceilings among those documents. Structural table edits parse supported
-`TBLFM` formulas to remap references, so token, syntax-depth, decimal-precision,
-and exponent ceilings apply there. Decimal-precision and exponent ceilings
-also apply to numeric table sorting. The work ceiling belongs to formula
-evaluation; version 0.1.0 does not expose public table-formula recalculation.
+`TBLFM` formulas to remap references, and `table-recalculate` parses and
+evaluates them; formula token, syntax-depth, decimal-precision, and exponent
+ceilings apply to both operations. Decimal-precision and exponent ceilings also
+apply to numeric table sorting. The formula-work ceiling counts cumulative work
+during one `table-recalculate` call.
 
 List-form queries are copied before evaluation: `:max-node-count` counts their
 cons cells and `:max-element-depth` bounds nested lists. String values in list
