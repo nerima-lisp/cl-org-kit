@@ -246,23 +246,17 @@
 (defun agenda-document-heading-data (document &key collect-headlines-p
                                                 collect-timestamps-p)
   "Collect selected heading data and sibling indices for DOCUMENT."
-  (let ((headlines nil)
-        (timestamps (when collect-timestamps-p
-                      (make-hash-table :test #'eq)))
-        (indices (make-hash-table :test #'eq))
-        (counts-by-parent (make-hash-table :test #'eq)))
+  (let* ((root (document-root document))
+         (headlines nil)
+         (timestamps (when collect-timestamps-p
+                       (make-hash-table :test #'eq)))
+         (indices (if root
+                      (query-heading-sibling-indices root)
+                      (make-hash-table :test #'eq))))
     (labels ((visit (node heading)
                (let* ((type (node-type node))
                       (owner (if (eq type :headline) node heading)))
                  (when (eq type :headline)
-                   (let* ((counts
-                            (or (gethash heading counts-by-parent)
-                                (setf (gethash heading counts-by-parent)
-                                      (make-hash-table :test #'equal))))
-                          (title (node-property node :raw-value ""))
-                          (index (1+ (gethash title counts 0))))
-                     (setf (gethash title counts) index
-                           (gethash node indices) index))
                    (when collect-headlines-p
                      (push node headlines)))
                  (unless (eq type :planning)
