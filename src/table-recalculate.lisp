@@ -25,21 +25,24 @@
          (push row rows)
          (if after-first-rule
              (push row-index data-rows)
-             (progn
-               (unless header
-                 (setf header row)))))))
+             (unless header
+               (setf header row))))))
     (setf rows (nreverse rows)
           data-rows (nreverse data-rows))
     (unless after-first-rule
       (setf data-rows (loop for row in rows for index from 1 collect index)
             header nil))
-    (values rows data-rows header)))
+    (values (coerce rows 'vector) data-rows header)))
 
 (defun table-recalculate-cell (standard-rows row column)
-  (let* ((row-node (nth (1- row) standard-rows))
-         (cell (and (<= 1 column (length (node-children row-node)))
-                    (nth (1- column) (node-children row-node)))))
-    cell))
+  (let ((row-node
+          (and (integerp row)
+               (<= 1 row (length standard-rows))
+               (aref standard-rows (1- row)))))
+    (when (and row-node
+               (integerp column)
+               (<= 1 column (length (node-children row-node))))
+      (nth (1- column) (node-children row-node)))))
 
 (defun table-recalculate-cell-value (standard-rows row column)
   (let ((cell (table-recalculate-cell standard-rows row column)))
@@ -51,11 +54,19 @@
       (loop for cell in (node-children header-row)
             for column from 1
             for name = (node-property cell :value)
-            do (multiple-value-bind (prior present) (gethash name columns)
-                 (declare (ignore prior))
-                 (setf (gethash name columns)
-                       (if present :ambiguous column)))))
+            do (setf (gethash name columns)
+                     (if (gethash name columns) :ambiguous column))))
     columns))
+
+(defun table-recalculate-named-column (name header-columns target)
+  (multiple-value-bind (column present) (gethash name header-columns)
+    (unless present
+      (table-recalculate-signal-error
+       target :unknown-column-name "Formula references an unknown column name"))
+    (when (eq column :ambiguous)
+      (table-recalculate-signal-error
+       target :ambiguous-column-name "Formula references an ambiguous column name"))
+    column))
 
 (defun table-recalculate-reference-position
     (reference current-row current-column row-count column-count header-columns target)
@@ -65,9 +76,22 @@
          (column-value (table-calc-reference-column-value reference))
          (row (case row-kind
                 (:current current-row)
+                (:first 1)
                 (:last row-count)
                 (:absolute row-value)
-                (:relative (and (integerp row-value) (+ current-row row-value)))))
+                (:relative
+                 (and (integerp row-value) (+ current-row row-value)))
+                (:invalid
+                 (table-recalculate-signal-error
+                  target :invalid-reference "Formula reference has an invalid row"))
+                (:hline-anchor
+                 (table-recalculate-signal-error
+                  target :unsupported-reference
+                  "Hline-anchored formula references are unsupported"))
+                (otherwise
+                 (table-recalculate-signal-error
+                  target :unsupported-reference
+                  "Formula reference has an unsupported row kind"))))
          (column
            (case column-kind
              (:current current-column)
@@ -75,15 +99,12 @@
              (:relative (and (integerp column-value)
                              (+ current-column column-value)))
              (:name
-              (multiple-value-bind (value present)
-                  (gethash column-value header-columns)
-                (unless present
-                  (table-recalculate-signal-error
-                   target :unknown-column-name "Formula references an unknown column name"))
-                (when (eq value :ambiguous)
-                  (table-recalculate-signal-error
-                   target :ambiguous-column-name "Formula references an ambiguous column name"))
-                value)))))
+              (table-recalculate-named-column
+               column-value header-columns target))
+             (otherwise
+              (table-recalculate-signal-error
+               target :unsupported-reference
+               "Formula reference has an unsupported column kind")))))
     (unless (and (integerp row) (<= 1 row row-count)
                  (integerp column) (<= 1 column column-count))
       (table-recalculate-signal-error
@@ -91,13 +112,15 @@
     (values row column)))
 
 (defun table-recalculate-expression-regions
-    (expression current-row current-column row-count column-count header-columns target)
+    (expression current-row current-column row-count column-count header-columns target
+     limits work-budget)
   (loop with pending = (list expression)
         with regions = nil
         while pending
         for node = (pop pending)
         for kind = (table-calc-expression-kind node)
-        do (case kind
+        do (table-calc-charge-work limits work-budget 1)
+           (case kind
              (:reference
               (multiple-value-bind (row column)
                   (table-recalculate-reference-position
@@ -129,31 +152,91 @@
 (defun table-recalculate-target-key (row column)
   (cons row column))
 
-(defun table-recalculate-validate-duplicates (assignments target)
+(defun table-recalculate-assignment-kind (assignment target)
+  (case (table-calc-assignment-kind assignment)
+    (:column :column)
+    (:field :field)
+    (:invalid
+     (table-recalculate-signal-error
+      target :invalid-target "Formula assignment has an invalid target"))
+    (otherwise
+     (table-recalculate-signal-error
+      target :unsupported-target-kind
+      "Formula assignment has an unsupported target kind"))))
+
+(defun table-recalculate-target-column (reference header-columns target)
+  (case (table-calc-reference-column-kind reference)
+    (:absolute (table-calc-reference-column-value reference))
+    (:name (table-recalculate-named-column
+            (table-calc-reference-column-value reference)
+            header-columns target))
+    (otherwise
+     (table-recalculate-signal-error
+      target :invalid-target "Formula assignment has an invalid column target"))))
+
+(defun table-recalculate-target-row (reference row-count target)
+  (case (table-calc-reference-row-kind reference)
+    (:absolute (table-calc-reference-row-value reference))
+    (:first 1)
+    (:last row-count)
+    (otherwise
+     (table-recalculate-signal-error
+      target :invalid-target "Formula assignment has an invalid row target"))))
+
+(defun table-recalculate-normalize-assignment-target
+    (assignment row-count column-count header-columns target)
+  (let* ((kind (table-recalculate-assignment-kind assignment target))
+         (reference (table-calc-assignment-target assignment))
+         (row-kind (table-calc-reference-row-kind reference))
+         (column (table-recalculate-target-column
+                  reference header-columns target))
+         (row (when (eq kind :field)
+                (table-recalculate-target-row reference row-count target))))
+    (when (and (eq kind :column) (not (eq row-kind :current)))
+      (table-recalculate-signal-error
+       target :invalid-target "Column formula has a non-current row target"))
+    (unless (and (integerp column) (<= 1 column column-count))
+      (table-recalculate-signal-error
+       target :invalid-reference "Formula assignment column is outside the table"))
+    (when (and row (not (and (integerp row) (<= 1 row row-count))))
+      (table-recalculate-signal-error
+       target :invalid-reference "Formula assignment row is outside the table"))
+    (let* ((normalized-reference (copy-table-calc-reference reference))
+           (normalized-assignment (copy-table-calc-assignment assignment)))
+      (setf (table-calc-reference-column-kind normalized-reference) :absolute
+            (table-calc-reference-column-value normalized-reference) column)
+      (when row
+        (setf (table-calc-reference-row-kind normalized-reference) :absolute
+              (table-calc-reference-row-value normalized-reference) row))
+      (setf (table-calc-assignment-target normalized-assignment)
+            normalized-reference)
+      normalized-assignment)))
+
+(defun table-recalculate-validate-duplicates
+    (assignments target limits work-budget)
   (let ((columns (make-hash-table))
         (fields (make-hash-table :test #'equal)))
     (dolist (assignment assignments)
-      (let* ((kind (table-calc-assignment-kind assignment))
+      (table-calc-charge-work limits work-budget 1)
+      (let* ((kind (table-recalculate-assignment-kind assignment target))
              (reference (table-calc-assignment-target assignment))
              (row (table-calc-reference-row-value reference))
              (column (table-calc-reference-column-value reference)))
-        (if (eq kind :column)
-            (multiple-value-bind (prior present) (gethash column columns)
-              (declare (ignore prior))
-              (when present
-                (table-recalculate-signal-error
-                 target :duplicate-target "Column formula target is duplicated"))
-              (setf (gethash column columns) t))
-            (let ((key (table-recalculate-target-key row column)))
-              (multiple-value-bind (prior present) (gethash key fields)
-                (declare (ignore prior))
-                (when present
-                  (table-recalculate-signal-error
-                   target :duplicate-target "Field formula target is duplicated"))
-                (setf (gethash key fields) t))))))))
+        (case kind
+          (:column
+           (when (gethash column columns)
+             (table-recalculate-signal-error
+              target :duplicate-target "Column formula target is duplicated"))
+           (setf (gethash column columns) t))
+          (:field
+           (let ((key (table-recalculate-target-key row column)))
+             (when (gethash key fields)
+               (table-recalculate-signal-error
+                target :duplicate-target "Field formula target is duplicated"))
+             (setf (gethash key fields) t))))))))
 
 (defun table-recalculate-plan-column-assignments
-    (assignments data-rows standard-rows column-count target)
+    (assignments data-rows standard-rows column-count target limits work-budget)
   (let ((entries nil)
         (owner 0))
     (dolist (assignment assignments)
@@ -163,6 +246,7 @@
           (table-recalculate-signal-error
            target :invalid-reference "Column formula target is outside the table"))
         (dolist (row data-rows)
+          (table-calc-charge-work limits work-budget 1)
           (when (table-recalculate-cell standard-rows row column)
             (push (make-table-recalculate-entry
                    :assignment assignment :row row :column column :owner owner)
@@ -171,10 +255,11 @@
     (values (nreverse entries) owner)))
 
 (defun table-recalculate-plan-field-assignments
-    (assignments standard-rows row-count column-count target)
+    (assignments standard-rows row-count column-count target limits work-budget)
   (let ((entries nil)
         (owner 0))
     (dolist (assignment assignments)
+      (table-calc-charge-work limits work-budget 1)
       (let* ((reference (table-calc-assignment-target assignment))
              (row (table-calc-reference-row-value reference))
              (column (table-calc-reference-column-value reference)))
@@ -198,15 +283,22 @@
                      targets)
             (table-recalculate-entry-owner entry)))))
 
-(defun table-recalculate-region-includes-p (region row column)
-  (destructuring-bind (first-row first-column last-row last-column) region
-    (and (<= first-row row last-row)
-         (<= first-column column last-column))))
+(defun table-recalculate-add-cycle-dependency
+    (owner dependency dependencies dependency-seen)
+  (unless (= owner dependency)
+    (let ((seen (aref dependency-seen owner)))
+      (unless (gethash dependency seen)
+        (setf (gethash dependency seen) t)
+        (push dependency (aref dependencies owner))))))
 
 (defun table-recalculate-check-cycles
-    (entries owner-count target-map row-count column-count header-columns target)
+    (entries owner-count target-map row-count column-count header-columns target
+     limits work-budget)
   (let ((dependencies (make-array owner-count :initial-element nil))
-        (dependents (make-array owner-count :initial-element nil)))
+        (dependents (make-array owner-count :initial-element nil))
+        (dependency-seen (make-array owner-count)))
+    (dotimes (owner owner-count)
+      (setf (aref dependency-seen owner) (make-hash-table)))
     (dolist (entry entries)
       (let* ((owner (table-recalculate-entry-owner entry))
              (assignment (table-recalculate-entry-assignment entry))
@@ -215,22 +307,18 @@
                 (table-calc-assignment-expression assignment)
                 (table-recalculate-entry-row entry)
                 (table-recalculate-entry-column entry)
-                row-count column-count header-columns target)))
+                row-count column-count header-columns target limits work-budget)))
         (dolist (region regions)
-          (if (and (= (first region) (third region))
-                   (= (second region) (fourth region)))
-              (multiple-value-bind (dependency present)
-                  (gethash (table-recalculate-target-key
-                            (first region) (second region)) target-map)
-                (when (and present (not (member dependency (aref dependencies owner))))
-                  (push dependency (aref dependencies owner))))
-              (maphash
-               (lambda (position dependency)
-                 (when (and (table-recalculate-region-includes-p
-                             region (car position) (cdr position))
-                            (not (member dependency (aref dependencies owner))))
-                   (push dependency (aref dependencies owner))))
-               target-map)))))
+          (destructuring-bind (first-row first-column last-row last-column) region
+            (loop for row from first-row to last-row
+                  do (loop for column from first-column to last-column
+                           do (table-calc-charge-work limits work-budget 1)
+                              (multiple-value-bind (dependency present)
+                                  (gethash (table-recalculate-target-key row column)
+                                           target-map)
+                                (when present
+                                  (table-recalculate-add-cycle-dependency
+                                   owner dependency dependencies dependency-seen)))))))))
     (loop for owner below owner-count
           do (dolist (dependency (aref dependencies owner))
                (push owner (aref dependents dependency))))
@@ -253,18 +341,26 @@
          target :cyclic-formula "Formula targets contain a dependency cycle")))))
 
 (defun table-recalculate-validate-entry-references
-    (entries row-count column-count header-columns target)
+    (entries row-count column-count header-columns target limits work-budget)
   (dolist (entry entries)
     (table-recalculate-expression-regions
      (table-calc-assignment-expression
       (table-recalculate-entry-assignment entry))
      (table-recalculate-entry-row entry)
      (table-recalculate-entry-column entry)
-     row-count column-count header-columns target)))
+     row-count column-count header-columns target limits work-budget)))
+
+(defun table-recalculate-work-map-cell-value
+    (work-map standard-rows row column)
+  (multiple-value-bind (value present)
+      (gethash (table-recalculate-target-key row column) work-map)
+    (if present
+        value
+        (table-recalculate-cell-value standard-rows row column))))
 
 (defun table-recalculate-evaluate-entries
     (entries standard-rows row-count column-count header-columns limits work-budget
-     work-map read-work-map-p)
+     work-map cell-value-function target)
   (dolist (entry entries)
     (let* ((row (table-recalculate-entry-row entry))
            (column (table-recalculate-entry-column entry))
@@ -275,18 +371,10 @@
               (lambda (reference)
                 (table-recalculate-reference-position
                  reference row column row-count column-count header-columns
-                 (table-recalculate-entry-assignment entry)))
+                 target))
               (lambda (reference-row reference-column)
-                (if read-work-map-p
-                    (multiple-value-bind (prior present)
-                        (gethash (table-recalculate-target-key
-                                  reference-row reference-column)
-                                 work-map)
-                      (if present prior
-                          (table-recalculate-cell-value
-                           standard-rows reference-row reference-column)))
-                    (table-recalculate-cell-value
-                     standard-rows reference-row reference-column)))
+                (funcall cell-value-function
+                         work-map reference-row reference-column))
               :limits limits :work-budget work-budget)))
       (setf (gethash key work-map) value)))
   work-map)
@@ -324,12 +412,12 @@
                                   (node-contents-end cell) value)
                  patches))))
      values)
-    (nreverse patches)))
+    patches))
 
-(defun table-recalculate-assignments-by-kind (assignments kind)
-  (remove-if-not (lambda (assignment)
-                   (eq (table-calc-assignment-kind assignment) kind))
-                 assignments))
+(defun table-recalculate-assignments-by-kind (assignments kind &optional target)
+  (loop for assignment in assignments
+        when (eq (table-recalculate-assignment-kind assignment target) kind)
+          collect assignment))
 
 (defun table-recalculate (document target)
   "Recalculate a pipe table's TBLFM formulas and return its validated edit result."
@@ -341,7 +429,7 @@
       (when (> (length formulas) 1)
         (error 'org-table-unsupported-syntax
                :message "Multiple table formula directives are unsupported"
-               :formula (first formulas)
+               :formula (bounded-text (first formulas))
                :position 0
                :feature :multiple-tblfm-directives))
       (unless formulas
@@ -349,11 +437,8 @@
           (make-edit-result :updated-document document :spans nil)))
       (let* ((limits (document-limits document))
              (program (table-calc-parse-formula (first formulas) limits))
-             (assignments (table-calc-program-assignments program))
-             (column-assignments
-               (table-recalculate-assignments-by-kind assignments :column))
-             (field-assignments
-               (table-recalculate-assignments-by-kind assignments :field)))
+             (parsed-assignments (table-calc-program-assignments program))
+             (work-budget (make-table-calc-work-budget)))
         (multiple-value-bind (standard-rows data-rows header-row)
             (table-recalculate-standard-rows table)
           (let* ((row-count (length standard-rows))
@@ -361,38 +446,59 @@
                    (reduce #'max standard-rows
                            :key (lambda (row) (length (node-children row)))
                            :initial-value 0))
-                 (header-columns (table-recalculate-header-columns header-row)))
-            (table-recalculate-validate-duplicates assignments table)
+                 (header-columns (table-recalculate-header-columns header-row))
+                 (assignments
+                   (mapcar (lambda (assignment)
+                             (table-recalculate-normalize-assignment-target
+                              assignment row-count column-count header-columns table))
+                           parsed-assignments))
+                 (column-assignments
+                   (table-recalculate-assignments-by-kind
+                    assignments :column table))
+                 (field-assignments
+                   (table-recalculate-assignments-by-kind
+                    assignments :field table))
+                 (column-values (make-hash-table :test #'equal))
+                 (field-values (make-hash-table :test #'equal)))
+            (table-recalculate-validate-duplicates
+             assignments table limits work-budget)
             (multiple-value-bind (column-entries column-owner-count)
                 (table-recalculate-plan-column-assignments
-                 column-assignments data-rows standard-rows column-count table)
+                 column-assignments data-rows standard-rows column-count table
+                 limits work-budget)
               (multiple-value-bind (field-entries field-owner-count)
                   (table-recalculate-plan-field-assignments
-                   field-assignments standard-rows row-count column-count table)
+                   field-assignments standard-rows row-count column-count table
+                   limits work-budget)
                 (table-recalculate-validate-entry-references
-                 column-entries row-count column-count header-columns table)
+                 column-entries row-count column-count header-columns table
+                 limits work-budget)
                 (table-recalculate-validate-entry-references
-                 field-entries row-count column-count header-columns table)
+                 field-entries row-count column-count header-columns table
+                 limits work-budget)
                 (table-recalculate-check-cycles
                  column-entries column-owner-count
                  (table-recalculate-entry-target-map column-entries)
-                 row-count column-count header-columns table)
+                 row-count column-count header-columns table limits work-budget)
                 (table-recalculate-check-cycles
                  field-entries field-owner-count
                  (table-recalculate-entry-target-map field-entries)
-                 row-count column-count header-columns table)
-                (let* ((work-budget (make-table-calc-work-budget))
-                       (column-values
-                         (table-recalculate-evaluate-entries
-                          column-entries standard-rows row-count column-count
-                          header-columns limits work-budget
-                          (make-hash-table :test #'equal) t))
-                       (field-values
-                         (table-recalculate-evaluate-entries
-                          field-entries standard-rows row-count column-count
-                          header-columns limits work-budget
-                          (make-hash-table :test #'equal) nil))
-                       (values (table-recalculate-final-values
+                 row-count column-count header-columns table limits work-budget)
+                (table-recalculate-evaluate-entries
+                 column-entries standard-rows row-count column-count
+                 header-columns limits work-budget column-values
+                 (lambda (work-map row column)
+                   (table-recalculate-work-map-cell-value
+                    work-map standard-rows row column))
+                 table)
+                (table-recalculate-evaluate-entries
+                 field-entries standard-rows row-count column-count
+                 header-columns limits work-budget field-values
+                 (lambda (work-map row column)
+                   (declare (ignore work-map))
+                   (table-recalculate-cell-value standard-rows row column))
+                 table)
+                (let* ((values (table-recalculate-final-values
                                 column-values field-values))
                        (patches (table-recalculate-patches
                                  values standard-rows)))
