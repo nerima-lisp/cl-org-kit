@@ -423,12 +423,11 @@
 (defun table-edit-expression-reference-edits (expression operation formula)
   (let ((edits nil))
     (when (eq (table-calc-expression-kind expression) :reference)
-      (let ((reference (table-calc-expression-value expression)))
-        (dolist (axis '(:row :column))
-          (when (eq axis (getf operation :axis))
-            (let ((edit (table-edit-reference-component-edit
-                         reference axis operation formula)))
-              (when edit (push edit edits)))))))
+      (let ((edit
+              (table-edit-reference-component-edit
+               (table-calc-expression-value expression)
+               (getf operation :axis) operation formula)))
+        (when edit (push edit edits))))
     (dolist (child (table-calc-expression-children expression))
       (dolist (edit (table-edit-expression-reference-edits
                      child operation formula))
@@ -562,38 +561,15 @@
             do (decf content-end))
       (values value-start content-end))))
 
-(defun table-edit-formula-value-range (source range)
-  (multiple-value-bind (start end)
-      (table-edit-formula-value-boundaries source range)
-    (cons start end)))
-
-(defun table-edit-column-name-survives-delete-p (table name deleted-index)
-  (block header
-    (dolist (row (node-children table))
-      (case (node-property row :type)
-        (:rule (return-from header nil))
-        (:standard
-         (return-from header
-           (loop for cell in (node-children row)
-                 for index from 1
-                 thereis (and (/= index deleted-index)
-                              (string= (node-property cell :value) name)))))))))
-
 (defun table-edit-plan-formulas (source table operation)
   (let ((formulas (node-property table :tblfm))
         (ranges (node-property table :reader-tblfm-ranges)))
-    (when (and (eq (getf operation :axis) :column)
-               (eq (getf operation :kind) :delete))
-      (setf (getf operation :invalid-name-survives-p)
-            (table-edit-column-name-survives-delete-p
-             table "INVALID" (getf operation :index))))
     (when (> (length formulas) 1)
       (table-align-signal-error
        table :uneditable-structure
        "Multiple TBLFM directives cannot be remapped safely"))
     (loop for formula in formulas
           for range in ranges
-          for value-range = (table-edit-formula-value-range source range)
           collect
           (multiple-value-bind (value-start value-end)
               (table-edit-formula-value-boundaries source range)
@@ -1162,11 +1138,9 @@
          (let* ((old-octets (* old-length digit-octets))
                 (new-octets
                   (cond (sentinel
-                         (if (eq sentinel :zero)
-                             digit-octets
-                             (- (edit-encoded-range-octets
-                                 "INVALID" 0 7 encoding)
-                                (edit-encoded-range-octets "" 0 0 encoding))))
+                         (- (edit-encoded-range-octets
+                             "INVALID" 0 7 encoding)
+                            (edit-encoded-range-octets "" 0 0 encoding)))
                         (mapped-length (* mapped-length digit-octets))
                         (t old-octets))))
            (- new-octets old-octets)))))))
@@ -1226,7 +1200,7 @@
                                    digit-octets))))
                         (multiple-value-bind (character-delta octet-delta)
                             (table-edit-formula-remap-coordinate-delta
-                             formula digits-start digits-end axis operation
+                             formula digits-start digits-end operation
                              encoding digit-octets)
                           (incf characters character-delta)
                           (when encoding (incf octets octet-delta)))))
@@ -1435,11 +1409,6 @@
                         line-ending
                         (string #\Newline))))
          (newline-length (length newline)))
-    (when (and (eq (getf operation :axis) :column)
-               (eq (getf operation :kind) :delete))
-      (setf (getf operation :invalid-name-survives-p)
-            (table-edit-column-name-survives-delete-p
-             table "INVALID" (getf operation :index))))
     (multiple-value-bind (widths alignments)
         (table-column-layout
          normalized-models width
@@ -1474,15 +1443,14 @@
                               (%table-edit-formula-removed-p plan)
                               (%table-edit-formula-terminal-p plan)))
                            formats))
-                 (formulas formula-outputs)
                  (patches (table-edit-formula-patches formats formula-outputs))
                  (expected
                    (if (and (null normalized-models)
                             (zerop (table-edit-values-count models)))
                        (table-edit-canonical-without-empty-table
-                        document table formulas)
+                        document table formula-outputs)
                        (table-edit-canonical-expected
-                        document table normalized-models width formulas))))
+                        document table normalized-models width formula-outputs))))
             (unless (string= row-output (subseq source row-start row-end))
               (push (edit-make-patch row-start row-end row-output table) patches))
             (edit-apply-patches-result document (nreverse patches)
@@ -1586,25 +1554,25 @@
                                           operation))))))))
 
 (defun table-insert-row (document target index &key values)
-  "Insert a row in a pipe table and return its validated edit result."
+  "Insert a row at a one-based table position and preserve unaffected source text."
   (table-edit-run document target :insert-row index :values values))
 
 (defun table-delete-row (document target index)
-  "Delete a row from a pipe table and return its validated edit result."
+  "Delete a row by its one-based table position and preserve unaffected source text."
   (table-edit-run document target :delete-row index))
 
 (defun table-move-row (document target from to)
-  "Move a row in a pipe table and return its validated edit result."
+  "Move a row between one-based positions within its hline-delimited section."
   (table-edit-run document target :move-row nil :from from :to to))
 
 (defun table-insert-column (document target index &key values)
-  "Insert a column in a pipe table and return its validated edit result."
+  "Insert a column at a one-based position and optionally provide values per row."
   (table-edit-run document target :insert-column index :values values))
 
 (defun table-delete-column (document target index)
-  "Delete a column from a pipe table and return its validated edit result."
+  "Delete a column by its one-based table position and remap supported references."
   (table-edit-run document target :delete-column index))
 
 (defun table-move-column (document target from to)
-  "Move a column in a pipe table and return its validated edit result."
+  "Move a column between one-based positions and remap supported references."
   (table-edit-run document target :move-column nil :from from :to to))
