@@ -385,7 +385,8 @@
              (setf (org-kit::table-calc-reference-row-value reference)
                    (second case)))
             (:column
-             (setf (org-kit::table-calc-reference-column-value reference)
+             (setf (org-kit::table-calc-reference-row-value reference) 1
+                   (org-kit::table-calc-reference-column-value reference)
                    (second case))))
           (expect (table-recalculate-test-condition
                    (lambda ()
