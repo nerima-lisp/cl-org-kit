@@ -1073,6 +1073,481 @@
           (when (typep condition 'org-edit-error)
             (expect (org-edit-error-reason condition) :to-be :invalid-value))))))
 
+  (it "covers date-time repeat units, warnings, and external timestamp ranges"
+    (labels ((run (source at context)
+               (let* ((document (parse-org source))
+                      (heading (edit-todo-state-test-first-heading document)))
+                 (apply #'transition-heading-todo document heading "DONE"
+                        :at at
+                        (when context (list :time-context context))))))
+      (let* ((at (make-org-time-value "2025-03-07T09:00:00"))
+             (context (edit-todo-state-test-context "2025-03-07T09:00:00")))
+        (with-soft-assertions
+          (dolist (case '(("+1d" "<2025-03-02 Sun 08:00 +1d>")
+                          ("+1m" "<2025-04-01 Tue 08:00 +1m>")
+                          ("+1y" "<2026-03-01 Sun 08:00 +1y>")))
+            (let* ((source
+                     (format nil
+                             "#+TODO: TODO | DONE~%* TODO Unit~%SCHEDULED: <2025-03-01 Sat 08:00 ~A>~%"
+                             (first case)))
+                   (expected (second case)))
+              (multiple-value-bind (edit transition) (run source at context)
+                (expect (transition-result-rescheduled-timestamps transition)
+                        :to-equal (list expected))
+                (expect (search expected
+                                (document-text (edit-result-updated-document edit)))
+                        :to-be-truthy))))
+          (dolist (warning '("--2h" "-2d" "--2w" "-2m" "--2y"))
+            (let* ((timestamp
+                     (format nil "<2025-03-01 Sat 08:00 +1d ~A>" warning))
+                   (expected
+                     (format nil "<2025-03-02 Sun 08:00 +1d ~A>" warning))
+                   (source
+                     (format nil
+                             "#+TODO: TODO | DONE~%* TODO Warning~%SCHEDULED: ~A~%"
+                             timestamp)))
+              (multiple-value-bind (edit transition) (run source at context)
+                (expect (transition-result-rescheduled-timestamps transition)
+                        :to-equal (list expected))
+                (expect (search expected
+                                (document-text (edit-result-updated-document edit)))
+                        :to-be-truthy))))
+          (dolist (case
+                    (list
+                     (list
+                      (format nil
+                              "#+TODO: TODO | DONE~%* TODO Active range~%SCHEDULED: <2025-03-01 Sat +1w>--<2025-03-08 Sat>~%")
+                      "<2025-03-08 Sat +1w>--<2025-03-15 Sat>")
+                     (list
+                      (format nil
+                              "#+TODO: TODO | DONE~%* TODO Inactive range~%History [2025-03-01 Sat +1w]--[2025-03-08 Sat]~%")
+                      "[2025-03-08 Sat +1w]--[2025-03-15 Sat]")))
+            (multiple-value-bind (edit transition)
+                (run (first case) (make-org-time-value "2025-03-07") nil)
+              (expect (transition-result-rescheduled-timestamps transition)
+                      :to-equal (list (second case)))
+              (expect (search (second case)
+                              (document-text (edit-result-updated-document edit)))
+                      :to-be-truthy)))))))
+
+  (it "normalizes boolean and string logging modes and removes completed schedules"
+    (let* ((at (make-org-time-value "2025-03-07T09:00:00"))
+           (source (format nil "#+TODO: TODO | DONE~%* TODO Target~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document))
+           (time-result
+             (multiple-value-list
+              (transition-heading-todo
+               document heading "DONE" :at at
+               :workflow-options (make-org-workflow-options :log-done t))))
+           (note-result
+             (multiple-value-list
+              (transition-heading-todo
+               document heading "DONE" :at at
+               :workflow-options (make-org-workflow-options :log-done "NOTE")
+               :note "finished")))
+           (off-result
+             (multiple-value-list
+              (transition-heading-todo
+               document heading "DONE" :at at
+               :workflow-options (make-org-workflow-options :log-done "OFF"))))
+           (invalid-mode
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 document heading "DONE" :at at
+                 :workflow-options (make-org-workflow-options :log-done 7)))))
+           (missing-note
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 document heading "DONE" :at at
+                 :workflow-options (make-org-workflow-options :log-done "NOTE"))))))
+      (with-soft-assertions
+        (expect (transition-result-closed-timestamp (second time-result))
+                :to-equal "[2025-03-07 Fri 09:00]")
+        (expect (transition-result-log-events (second note-result)) :to-be-truthy)
+        (expect (transition-result-closed-timestamp (second note-result))
+                :to-equal "[2025-03-07 Fri 09:00]")
+        (expect (transition-result-closed-timestamp (second off-result)) :to-be nil)
+        (expect (transition-result-log-events (second off-result)) :to-be nil))
+      (edit-todo-state-test-assert-error invalid-mode :invalid-value)
+      (edit-todo-state-test-assert-error missing-note :invalid-value))
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Scheduled~%SCHEDULED: <2025-03-01 Sat>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo document heading "DONE"
+                                   :at (make-org-time-value "2025-03-07"))
+        (let ((updated (document-text (edit-result-updated-document edit))))
+          (with-soft-assertions
+            (expect (transition-result-new-state transition) :to-equal "DONE")
+            (expect (search "SCHEDULED:" updated) :to-be nil)))))
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Symbol repeat state~%SCHEDULED: <2025-03-01 Sat +1w>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07")
+           :workflow-options
+           (make-org-workflow-options :repeat-to-state :TODO))
+        (with-soft-assertions
+          (expect (transition-result-new-state transition) :to-equal "TODO")
+          (expect (search "SCHEDULED: <2025-03-08 Sat +1w>"
+                          (document-text (edit-result-updated-document edit)))
+                  :to-be-truthy)))))
+
+  (it "uses the first TODO state when repeat-to-state is nil"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Nil repeat state~%SCHEDULED: <2025-03-01 Sat +1w>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07")
+           :workflow-options (make-org-workflow-options :repeat-to-state "nil"))
+        (with-soft-assertions
+          (expect (transition-result-new-state transition) :to-equal "TODO")
+          (expect (search "SCHEDULED: <2025-03-08 Sat +1w>"
+                          (document-text (edit-result-updated-document edit)))
+                  :to-be-truthy)))))
+
+  (it "updates stale body and headline cookies alongside repeated title timestamps"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO [1/1] <2025-03-01 Sat +1w> Parent~%** TODO Child~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo document heading "DONE"
+                                   :at (make-org-time-value "2025-03-07"))
+        (declare (ignore transition))
+        (with-soft-assertions
+          (expect (search "* TODO [0/1] <2025-03-08 Sat +1w> Parent"
+                          (document-text (edit-result-updated-document edit)))
+                  :to-be-truthy))))
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Checkbox cookie~%  - Parent [1/1]~%    - [ ] unchecked~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo document heading "DONE"
+                                   :at (make-org-time-value "2025-03-07"))
+        (declare (ignore transition))
+        (with-soft-assertions
+          (expect (search "Parent [0/1]"
+                          (document-text (edit-result-updated-document edit)))
+                  :to-be-truthy))))
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Shifted cookie~%  - Parent [1/1]~%    - [ ] unchecked~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE"
+           :at (make-org-time-value "2025-03-07T09:00:00")
+           :workflow-options (make-org-workflow-options :log-done :time))
+        (let ((updated (document-text (edit-result-updated-document edit))))
+          (with-soft-assertions
+            (expect (transition-result-closed-timestamp transition)
+                    :to-equal "[2025-03-07 Fri 09:00]")
+            (expect (search "Parent [0/1]" updated) :to-be-truthy)))))
+    (let* ((source (format nil "#+TODO: TODO | DONE~%* TODO Note cookie~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07")
+           :workflow-options (make-org-workflow-options
+                              :log-done :note :log-into-drawer nil)
+           :note "Keep this spelling [1/1]")
+        (declare (ignore transition))
+        (with-soft-assertions
+          (expect (search "Keep this spelling [1/1]"
+                          (document-text (edit-result-updated-document edit)))
+                  :to-be-truthy)))))
+
+  (it "handles offset restarts and rejects a repeated timestamp year beyond its format"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Offset restart~%SCHEDULED: <2025-03-01 Sat .+1w>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document))
+           (at (make-org-time-value "2025-03-07T09:00:00-05:00"))
+           (context (make-time-context
+                     :reference-time at
+                     :zone (resolve-time-zone "America/New_York"))))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo document heading "DONE" :at at
+                                   :time-context context)
+        (declare (ignore transition))
+        (with-soft-assertions
+          (expect (search "SCHEDULED: <2025-03-14 Fri .+1w>"
+                          (document-text (edit-result-updated-document edit)))
+                  :to-be-truthy))))
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Beyond formatter year~%SCHEDULED: <9999-12-31 Fri +1y>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document))
+           (condition
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 document heading "DONE"
+                 :at (make-org-time-value "2025-03-07"))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-time-error) :to-be t))))
+
+  (it "covers transition defaults and timestamp patch boundaries"
+    (let* ((patch (org-kit::edit-make-patch 10 20 "abcde" "headline"))
+           (offset-at (make-org-time-value "2025-03-07T09:00:00-05:00"))
+           (restarted
+             (org-kit::edit-todo-restart-value
+              (make-org-time-value "2025-03-01") offset-at))
+           (restarted-time
+             (org-kit::edit-todo-restart-value
+              (make-org-time-value "2025-03-01T08:00:00")
+              (make-org-time-value "2025-03-07")))
+           (kept-date-time
+             (org-kit::edit-todo-restart-value
+              (make-org-time-value "2025-03-01T08:00:00")
+              (make-org-time-value "2025-03-07T09:00:00")))
+           (kept-date
+             (org-kit::edit-todo-restart-value
+              (make-org-time-value "2025-03-01")
+              (make-org-time-value "2025-03-07")))
+           (unformattable
+             (org-kit::%make-org-time-value
+              :kind :date :iso8601 "10000-01-01"
+              :year 10000 :month 1 :day 1))
+           (format-error
+             (edit-todo-state-test-error
+              (lambda ()
+                (org-kit::edit-todo-format-point-timestamp unformattable))))
+           (missing-at-document
+             (parse-org (format nil "#+TODO: TODO | DONE~%* TODO Missing time~%")))
+           (missing-at-heading
+             (edit-todo-state-test-first-heading missing-at-document))
+           (missing-at-error
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 missing-at-document missing-at-heading "DONE"))))
+           (remove-present-p
+             (org-kit::edit-todo-final-planning-present-p
+              nil '((:scheduled :action :remove)) :scheduled)))
+      (with-soft-assertions
+        (expect (org-time-value-iso8601 restarted) :to-equal "2025-03-07")
+        (expect (org-time-value-iso8601 restarted-time)
+                :to-equal "2025-03-07T08:00:00")
+        (expect (org-time-value-iso8601 kept-date-time)
+                :to-equal "2025-03-07T09:00:00")
+        (expect (org-time-value-iso8601 kept-date)
+                :to-equal "2025-03-07")
+        (expect (typep format-error 'org-time-error) :to-be t)
+        (expect (typep missing-at-error 'org-edit-error) :to-be t)
+        (when (typep missing-at-error 'org-edit-error)
+          (expect (org-edit-error-reason missing-at-error) :to-be :invalid-value))
+        (expect remove-present-p :to-be nil)
+        (expect (multiple-value-list
+                 (org-kit::edit-todo-staged-offset-to-original
+                  12 (list patch) :start))
+                :to-equal '(nil nil))
+        (expect (multiple-value-list
+                 (org-kit::edit-todo-staged-offset-to-original
+                  10 (list patch) :end))
+                :to-equal '(10 t))
+        (expect (multiple-value-list
+                 (org-kit::edit-todo-staged-offset-to-original
+                  12 (list patch) :end))
+                :to-equal '(nil nil)))))
+
+  (it "uses the default transition keywords when omitted"
+    (let* ((source (format nil "#+TODO: TODO | DONE(d!)~%* TODO Defaults~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document))
+           (missing-at
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo document heading "DONE")))))
+      (edit-todo-state-test-assert-error missing-at :invalid-value)
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07T09:00:00")
+           :workflow-options (make-org-workflow-options :log-done :time))
+        (let ((updated (document-text (edit-result-updated-document edit))))
+          (with-soft-assertions
+            (expect (transition-result-log-events transition) :to-be-truthy)
+            (expect (search ":LOGBOOK:" updated) :to-be-truthy))))))
+
+  (it "restarts a date-time repeater from a date-only completion time"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Restart date-time~%SCHEDULED: <2025-03-01 Sat 08:00 .+1w>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07")
+           :time-context
+           (edit-todo-state-test-context "2025-03-07T09:00:00"))
+        (let ((updated (document-text (edit-result-updated-document edit))))
+          (with-soft-assertions
+            (expect (transition-result-rescheduled-timestamps transition)
+                    :to-equal '("<2025-03-14 Fri 08:00 .+1w>"))
+            (expect (search "SCHEDULED: <2025-03-14 Fri 08:00 .+1w>" updated)
+                    :to-be-truthy))))))
+
+  (it "restarts a date-only repeater from a date-only completion time"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Restart date~%SCHEDULED: <2025-03-01 Sat .+1w>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07"))
+        (let ((updated (document-text (edit-result-updated-document edit))))
+          (with-soft-assertions
+            (expect (transition-result-new-state transition) :to-equal "TODO")
+            (expect (transition-result-rescheduled-timestamps transition)
+                    :to-equal '("<2025-03-14 Fri .+1w>"))
+            (expect (search "SCHEDULED: <2025-03-14 Fri .+1w>" updated)
+                    :to-be-truthy))))))
+
+  (it "formats a parsed timestamp without a repeater suffix"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Timestamp view~%SCHEDULED: <2025-03-01 Sat>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document))
+           (view (timestamp-view (node-property heading :scheduled)))
+           (start (org-timestamp-view-start view)))
+      (with-soft-assertions
+        (expect (org-kit::edit-todo-repeater-suffix view) :to-equal "")
+        (expect (org-kit::edit-todo-format-timestamp view start nil nil)
+                :to-equal "<2025-03-01 Sat>"))))
+
+  (it "removes CLOSED and a nonrepeating schedule when a body repeater fires"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* DONE Keep schedule~%SCHEDULED: <2025-03-02 Sun> CLOSED: [2025-03-01 Sat]~%Body repeater <2025-03-03 Mon +1w>~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07")
+           :workflow-options (make-org-workflow-options :repeat-to-state "TODO"))
+        (let ((updated (document-text (edit-result-updated-document edit))))
+          (with-soft-assertions
+            (expect (transition-result-new-state transition) :to-equal "TODO")
+            (expect (transition-result-rescheduled-timestamps transition)
+                    :to-equal '("<2025-03-10 Mon +1w>"))
+            (expect (search "CLOSED:" updated) :to-be nil)
+            (expect (search "SCHEDULED:" updated) :to-be nil)
+            (expect (search "Body repeater <2025-03-10 Mon +1w>" updated)
+                    :to-be-truthy))))))
+
+  (it "inserts a drawerless done log at EOF without adding a final newline"
+    (let* ((source (format nil "#+TODO: TODO | DONE(d!)~%* TODO Log at EOF"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document))
+           (options (make-org-workflow-options :log-into-drawer nil)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07T09:00:00")
+           :workflow-options options)
+        (let* ((updated (document-text (edit-result-updated-document edit)))
+               (last-character (char updated (1- (length updated)))))
+          (with-soft-assertions
+            (expect (transition-result-log-events transition)
+                    :to-equal
+                    '("- State \"DONE\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
+            (expect (search "- State \"DONE\"" updated) :to-be-truthy)
+            (expect (search ":LOGBOOK:" updated) :to-be nil)
+            (expect updated
+                    :to-equal
+                    (format nil
+                            "#+TODO: TODO | DONE(d!)~%* DONE Log at EOF~%- State \"DONE\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
+            (expect (char= last-character #\Newline) :to-be nil))))))
+
+  (it "transitions a state-less heading to no TODO state"
+    (let* ((source (format nil "#+TODO: TODO | DONE~%* Plain heading~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading nil :at (make-org-time-value "2025-03-07"))
+        (with-soft-assertions
+          (expect (transition-result-previous-state transition) :to-be nil)
+          (expect (transition-result-new-state transition) :to-be nil)
+          (expect (edit-result-spans edit) :to-be nil)
+          (expect (document-text (edit-result-updated-document edit))
+                  :to-equal source)))))
+
+  (it "does not log an unchanged TODO state with a logging marker"
+    (let* ((source
+             (format nil "#+TODO: TODO(t!) | DONE(d!)~%* TODO Unchanged~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "TODO" :at (make-org-time-value "2025-03-07"))
+        (with-soft-assertions
+          (expect (transition-result-new-state transition) :to-equal "TODO")
+          (expect (transition-result-log-events transition) :to-be nil)
+          (expect (document-text (edit-result-updated-document edit))
+                  :to-equal source)))))
+
+  (it "updates scheduled planning without closing a property drawer"
+    (let* ((source (format nil "#+TODO: TODO | DONE~%* TODO Planning helper~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document))
+           (value
+             (org-kit::edit-properties-planning-value
+              document :scheduled "<2025-03-08 Sat>" heading))
+           (expected (org-kit::edit-canonical-document document))
+           (changes
+             (list (cons :scheduled
+                         (list :action :set :canonical-value value))))
+           (actual
+             (org-kit::edit-todo-canonical-planning-changes
+              expected document heading changes heading))
+           (updated-document
+             (parse-org (format nil
+                                "#+TODO: TODO | DONE~%* TODO Planning helper~%SCHEDULED: <2025-03-08 Sat>~%"))))
+      (with-soft-assertions
+        (expect actual
+                :to-equal (org-kit::edit-canonical-document updated-document)))))
+
+  (it "keeps inline logs before generic drawers"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE(d!)~%* TODO Generic drawer~%:NOTES:~%Archive text~%:END:~%"))
+           (document (parse-org source))
+           (heading (edit-todo-state-test-first-heading document)))
+      (multiple-value-bind (edit transition)
+          (transition-heading-todo
+           document heading "DONE" :at (make-org-time-value "2025-03-07T09:00:00")
+           :workflow-options (make-org-workflow-options
+                              :log-done :time :log-into-drawer nil))
+        (let* ((updated (document-text (edit-result-updated-document edit)))
+               (log-position (search "- State" updated))
+               (drawer-position (search ":NOTES:" updated))
+               (body-position (search "Archive text" updated)))
+          (with-soft-assertions
+            (expect (transition-result-log-events transition) :to-be-truthy)
+            (expect (< log-position drawer-position) :to-be t)
+            (expect (< drawer-position body-position) :to-be t))))))
+
   (it "matches planned repeater nodes by their source range"
     (let* ((source
              (format nil

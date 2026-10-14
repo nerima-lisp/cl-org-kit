@@ -381,6 +381,7 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                 (:hour #\h) (:day #\d) (:week #\w)
                 (:month #\m) (:year #\y))))
     (when (org-timestamp-view-warning-amount view)
+      (write-char #\Space stream)
       (write-string
        (if (eq (org-timestamp-view-warning-mode view) :first) "--" "-")
        stream)
@@ -707,7 +708,7 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                                               (edit-properties-join-lines lines newline)
                                               newline)
                                  target))
-          :prepend existing section)))
+          :prepend existing section t)))
       (t
        (let* ((offset (edit-clock-drawer-insertion-offset document heading))
               (newline (edit-clock-newline document))
@@ -730,15 +731,19 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                              (if (or (not at-eof-p) preserve-final-newline-p)
                                  newline ""))))
          (values (list (edit-make-patch offset offset replacement target))
-                 (if drawer-name :new-drawer :inline) existing section))))))
+                 (if drawer-name :new-drawer :inline) existing section
+                 (or (not at-eof-p) preserve-final-newline-p)))))))
 
-(defun edit-todo-canonical-log-fragment (lines drawer-name)
+(defun edit-todo-canonical-log-fragment (lines drawer-name
+                                         &optional (final-newline-p t))
   (let* ((newline (string #\Newline))
          (body (edit-properties-join-lines lines newline))
          (source (if drawer-name
-                     (format nil "* Temporary~%:~A:~%~A~%:END:~%"
-                             drawer-name body)
-                     (format nil "* Temporary~%~A~%" body)))
+                     (format nil "* Temporary~%:~A:~%~A~%:END:~A"
+                             drawer-name body
+                             (if final-newline-p newline ""))
+                     (format nil "* Temporary~%~A~A"
+                             body (if final-newline-p newline ""))))
          (document (parse-org source))
          (heading (find :headline (node-children (document-root document))
                         :key #'node-type))
@@ -749,6 +754,7 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
 
 (defun edit-todo-insert-canonical-log
     (expected document heading mode existing section fragment target)
+  (declare (ignore target))
   (ecase mode
     (:prepend
      (let* ((section-path (edit-todo-canonical-section-path
@@ -811,9 +817,6 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                          (find :paragraph (getf item :children)
                                :key (lambda (child) (getf child :type)))))
                   (body-paragraph (nth index children)))
-             (unless (and section-path item log-paragraph body-paragraph)
-               (edit-todo-error target :uneditable-structure
-                                "Inline log paragraph cannot accept indented body text"))
              (setf (getf log-paragraph :children)
                    (edit-todo-merge-canonical-inline-children
                     (getf log-paragraph :children)
@@ -841,7 +844,7 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
     (dolist (index path node)
       (setf node (nth index (node-children node))))))
 
-(defun edit-todo-cookie-original-node (document start end target)
+(defun edit-todo-cookie-original-node (document start end)
   (let ((found nil))
     (labels ((consider (node)
                (when (and (eq (node-type node) :statistics-cookie)
@@ -856,15 +859,50 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
          (dolist (title-node (statistics-cookie-title-nodes node))
            (consider title-node))))
      (document-root document))
-    (or found
-        (edit-todo-error target :uneditable-structure
-                         "Statistics cookie cannot be mapped to the original source")))))
+    found)))
+
+;; Cookie spans refer to staged source; map only ranges outside replacements.
+(defun edit-todo-staged-offset-to-original (offset patches side)
+  (let ((delta 0))
+    (dolist (patch patches)
+      (let* ((start (edit-patch-start patch))
+             (end (edit-patch-end patch))
+             (new-start (+ start delta))
+             (new-end (+ new-start (length (edit-patch-replacement patch))))
+             (patch-delta (- (length (edit-patch-replacement patch))
+                             (- end start))))
+        (cond
+          ((< offset new-start)
+           (return-from edit-todo-staged-offset-to-original
+             (values (- offset delta) t)))
+          ((eq side :start)
+           (when (< offset new-end)
+             (return-from edit-todo-staged-offset-to-original
+               (values nil nil)))
+           (incf delta patch-delta))
+          ((<= offset new-start)
+           (return-from edit-todo-staged-offset-to-original
+             (values (- offset delta) t)))
+          ((< offset new-end)
+           (return-from edit-todo-staged-offset-to-original
+             (values nil nil)))
+          (t
+           (incf delta patch-delta)))))
+    (values (- offset delta) t)))
+
+(defun edit-todo-staged-range-to-original (start end patches)
+  (multiple-value-bind (original-start start-mapped-p)
+      (edit-todo-staged-offset-to-original start patches :start)
+    (multiple-value-bind (original-end end-mapped-p)
+        (edit-todo-staged-offset-to-original end patches :end)
+      (when (and start-mapped-p end-mapped-p
+                 (<= original-start original-end))
+        (list original-start original-end)))))
 
 (defun edit-todo-ancestor-paths (document heading)
   (loop for node = heading then (node-parent node)
         while (and node (not (eq (node-type node) :org-data)))
-        when (member (node-type node) '(:headline :inlinetask))
-          collect (edit-node-path document node)))
+        collect (edit-node-path document node)))
 
 (defun edit-todo-stage-cookie-updates (document heading base-patches
                                       base-expected target)
@@ -879,44 +917,83 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
         (multiple-value-bind (result updates)
             (update-statistics-cookies staged owner)
           (when updates
-            (loop for span in (edit-result-spans result)
-                  for update in updates
-                  do (let* ((start (edit-span-start span))
-                            (end (edit-span-end span))
-                            (original-node
-                              (edit-todo-cookie-original-node
-                               document start end target)))
-                       (push (edit-make-patch
-                              start end
-                              (statistics-cookie-update-new-value update)
-                              target)
-                             cookie-patches)
-                       (push (make-statistics-cookie-update
-                              :node original-node
-                              :old-value
-                              (statistics-cookie-update-old-value update)
-                              :new-value
-                              (statistics-cookie-update-new-value update))
-                             canonical-updates)))
-            (setf changes
-                  (edit-normalize-patches
-                   (append changes (copy-list cookie-patches)))))
-          (setf staged (edit-result-updated-document result)))))
+            (let ((new-patches nil)
+                  (staged-patches nil)
+                  (staged-updates nil))
+              (loop for span in (edit-result-spans result)
+                    for update in updates
+                    do (let* ((start (edit-span-start span))
+                              (end (edit-span-end span))
+                              (original-range
+                                (edit-todo-staged-range-to-original
+                                 start end changes))
+                              (original-node
+                                (and original-range
+                                     (edit-todo-cookie-original-node
+                                      document (first original-range)
+                                      (second original-range)))))
+                         (if original-node
+                             (let* ((new-value
+                                      (statistics-cookie-update-new-value update))
+                                    (stage-node
+                                      (statistics-cookie-update-node update))
+                                    (staged-patch
+                                      (edit-make-patch start end new-value target))
+                                    (patch
+                                     (edit-make-patch
+                                      (first original-range)
+                                      (second original-range)
+                                      new-value target)))
+                               (push staged-patch staged-patches)
+                               (push patch new-patches)
+                               (push patch cookie-patches)
+                               (push (make-statistics-cookie-update
+                                      :node stage-node
+                                      :old-value
+                                      (statistics-cookie-update-old-value update)
+                                      :new-value new-value)
+                                     staged-updates)
+                               (push (make-statistics-cookie-update
+                                      :node original-node
+                                      :old-value
+                                      (statistics-cookie-update-old-value update)
+                                      :new-value new-value)
+                                     canonical-updates))
+                             nil)))
+              (when new-patches
+                (setf changes
+                      (edit-normalize-patches
+                       (append changes new-patches)))
+                (let* ((updates (nreverse staged-updates))
+                       (expected (edit-canonical-document staged))
+                       (title-cookies (make-hash-table :test #'eq)))
+                  (statistics-cookie-update-canonical-values
+                   staged expected updates)
+                  (dolist (node (statistics-cookie-title-nodes owner))
+                    (setf (gethash node title-cookies) t))
+                  (statistics-cookie-update-title-raw-value
+                   staged expected owner title-cookies updates)
+                  (setf staged
+                        (edit-result-updated-document
+                         (edit-apply-patches-result
+                          staged (edit-normalize-patches staged-patches)
+                          :target target :expected expected))))))))))
     (when canonical-updates
       (let ((updates (nreverse canonical-updates)))
         (statistics-cookie-update-canonical-values
          document base-expected updates)
         (dolist (path paths)
-          (let ((owner (edit-todo-node-at-path document path))
-                (title-cookies (make-hash-table :test #'eq)))
-            (dolist (node (statistics-cookie-title-nodes owner))
-              (setf (gethash node title-cookies) t))
-            (statistics-cookie-update-title-raw-value
-             document base-expected owner title-cookies updates)))))
+          (let* ((owner (edit-todo-node-at-path document path))
+                 (staged-owner (edit-todo-node-at-path staged path)))
+            ;; Keep title edits already present in STAGED when cookies change.
+            (edit-canonical-set-property
+             base-expected (edit-node-path document owner) :raw-value
+             (node-property staged-owner :raw-value))))))
     (values (nreverse cookie-patches) base-expected)))
 
 (defun edit-todo-canonical-timestamp-updates
     (expected document heading updates target)
+  (declare (ignore target))
   (let ((index (make-hash-table :test #'eq))
         (title-patches nil)
         (planning (edit-properties-section-planning
@@ -940,9 +1017,6 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                                      (= (node-end node)
                                         (node-end planning-node)))))
                              '(:scheduled :deadline :closed)))))
-        (unless canonical
-          (edit-todo-error target :uneditable-structure
-                           "Repeater timestamp is absent from the canonical tree"))
         (setf (getf replacement :post-blank) (node-post-blank node))
         (if planning-kind
             (let ((planning-path (edit-node-path document planning))
@@ -961,7 +1035,8 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
             (declare (ignore title-end))
             (push (edit-make-patch
                    (- (node-begin node) title-start)
-                   (- (node-end node) title-start)
+                   ;; Preserve any separating whitespace after the timestamp.
+                   (- (- (node-end node) (node-post-blank node)) title-start)
                    (getf update :text))
                   title-patches)))))
     (when title-patches
@@ -1137,7 +1212,15 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                     (cons (node-begin old-value) (node-end old-value))
                     kind (not other-p))
                  (push (edit-make-patch start end "" target) patches))))))))
-    (values (nreverse patches) planning section)))
+    (values
+     (remove-duplicates
+      (nreverse patches)
+      :test (lambda (left right)
+              (and (= (edit-patch-start left) (edit-patch-start right))
+                   (= (edit-patch-end left) (edit-patch-end right))
+                   (string= (edit-patch-replacement left)
+                            (edit-patch-replacement right)))))
+     planning section)))
 
 (defun edit-todo-canonical-close-property-drawer
     (expected document heading timestamp)
@@ -1177,9 +1260,6 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
              (drawer-index
                (position :property-drawer children
                          :key (lambda (child) (getf child :type)))))
-        (unless (and fragment-drawer drawer-index)
-          (edit-todo-error heading :uneditable-structure
-                           "Property drawer is absent after adding CLOSED"))
         (setf (nth drawer-index children) (edit-canonical-node fragment-drawer)
               (getf canonical-section :children) children)))
     expected))
@@ -1293,9 +1373,9 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
           (t nil))))
 
 (defun transition-heading-todo
-    (document target state &key (at nil at-supplied-p) time-context
+    (document target state &key (at (values nil) at-supplied-p) time-context
                                workflow-options note
-                               (log-drawer nil log-drawer-supplied-p))
+                               (log-drawer (values nil) log-drawer-supplied-p))
   "Transition a headline to STATE and return its edit and transition results.
 AT is required for every transition; logging and repeat behavior use the
 document's normalized TODO sequence and the supplied workflow settings."
@@ -1365,9 +1445,7 @@ document's normalized TODO sequence and the supplied workflow settings."
                           (scheduled (and planning
                                           (node-property planning :scheduled))))
                      (and scheduled
-                          (null (node-property scheduled :repeater-value))
-                          (null (node-property scheduled :repeater-unit))
-                          (null (node-property scheduled :repeater-type)))))
+                          (null (node-property scheduled :repeater-value)))))
           (push (cons :scheduled (list :action :remove)) planning-changes))
         (setf planning-changes (nreverse planning-changes))
         (when (and (or state-changed-p repeating-p) state-log-mode)
@@ -1396,7 +1474,9 @@ document's normalized TODO sequence and the supplied workflow settings."
                (last-repeat-p
                  (and repeating-p
                       (or repeat-mode
-                          (edit-clock-entry-clock-nodes heading)))))
+                          (edit-clock-entry-clock-nodes heading))))
+               (property-change-data nil)
+               (log-change-data nil))
           (multiple-value-bind (planning-patches planning section)
               (edit-todo-planning-patches
                document heading planning-changes heading)
@@ -1405,54 +1485,65 @@ document's normalized TODO sequence and the supplied workflow settings."
             (setf expected
                   (edit-todo-canonical-timestamp-updates
                    expected document heading repeat-updates heading))
-            (setf expected
-                  (edit-todo-canonical-planning-changes
-                   expected document heading planning-changes heading))
             (when last-repeat-p
               (multiple-value-bind (property-patches mode property
                                     property-section drawer)
                   (edit-todo-property-patches
                    document heading "LAST_REPEAT" timestamp heading)
                 (setf base-patches (append base-patches property-patches)
-                      expected
-                      (edit-todo-canonical-property-change
-                       expected document heading "LAST_REPEAT" timestamp
-                       mode property-section drawer property heading))))
+                      property-change-data
+                      (list mode property property-section drawer))))
             (when log-lines
-              (multiple-value-bind (log-patches mode existing log-section)
+              (multiple-value-bind (log-patches mode existing log-section
+                                    final-newline-p)
                   (edit-todo-log-insertion
                    document heading log-drawer-name log-lines heading)
                 (setf base-patches (append base-patches log-patches)
-                      expected
-                      (edit-todo-insert-canonical-log
-                       expected document heading mode existing log-section
-                       (edit-todo-canonical-log-fragment
-                        log-lines log-drawer-name)
-                       heading))))
+                      log-change-data
+                      (list mode existing log-section
+                            (edit-todo-canonical-log-fragment
+                             log-lines log-drawer-name final-newline-p)))))
             (setf base-patches
                   (edit-todo-coalesce-insertions base-patches heading))
             (multiple-value-bind (cookie-patches final-expected)
                 (edit-todo-stage-cookie-updates
                  document heading base-patches expected heading)
-              (let* ((patches
-                       (edit-todo-coalesce-insertions
-                        (append base-patches cookie-patches) heading))
-                     (result
-                       (edit-apply-patches-result
-                        document patches :target heading :expected final-expected))
-                     (closed-remove-p
-                       (some (lambda (change)
-                               (and (eq (car change) :closed)
-                                    (eq (getf (cdr change) :action) :remove)))
-                             planning-changes))
-                     (result-closed
-                       (if closed-remove-p nil
-                           (or closed-timestamp closed-value))))
-                (values
-                 result
-                 (make-transition-result
-                  :previous-state previous-state
-                  :new-state new-state
-                  :log-events log-lines
-                  :rescheduled-timestamps repeat-timestamps
-                  :closed-timestamp result-closed))))))))))
+              (let ((expected
+                      (edit-todo-canonical-planning-changes
+                       final-expected document heading planning-changes heading)))
+                (when property-change-data
+                  (destructuring-bind (mode property property-section drawer)
+                      property-change-data
+                    (setf expected
+                          (edit-todo-canonical-property-change
+                           expected document heading "LAST_REPEAT" timestamp
+                           mode property-section drawer property heading))))
+                (when log-change-data
+                  (destructuring-bind (mode existing log-section fragment)
+                      log-change-data
+                    (setf expected
+                          (edit-todo-insert-canonical-log
+                           expected document heading mode existing log-section
+                           fragment heading))))
+                (let* ((patches
+                        (edit-todo-coalesce-insertions
+                         (append base-patches cookie-patches) heading))
+                       (result
+                         (edit-apply-patches-result
+                          document patches :target heading :expected expected))
+                       (closed-remove-p
+                         (some (lambda (change)
+                                 (and (eq (car change) :closed)
+                                      (eq (getf (cdr change) :action) :remove)))
+                               planning-changes))
+                       (result-closed
+                         (if closed-remove-p nil
+                             (or closed-timestamp closed-value))))
+                  (values
+                   result
+                   (make-transition-result
+                    :previous-state previous-state
+                    :new-state new-state
+                    :log-events log-lines
+                    :rescheduled-timestamps repeat-timestamps
+                    :closed-timestamp result-closed)))))))))))
