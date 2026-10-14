@@ -304,6 +304,31 @@
                 :to-be nil)
         (expect (org-kit::reader-heading-setting-kind 42) :to-be nil))))
 
+  (it "rejects missing IDs, duplicate IDs, and active keywords in explicit TODO sequences"
+    (labels ((sequence (id keyword)
+               (list :kind :sequence
+                     :declaration-kind :todo
+                     :sequence-id id
+                     :declaration-index 1
+                     :todo-keywords
+                     (list (list :keyword keyword :logging-mode :none
+                                 :exit-logging-p nil :fast-key nil))
+                     :done-keywords nil)))
+      (signals org-parse-error
+        (parse-org "" :settings
+                   (list :todo-sequences
+                         (list (sequence nil "OPEN")))))
+      (signals org-parse-error
+        (parse-org "" :settings
+                   (list :todo-sequences
+                         (list (sequence "duplicate" "OPEN")
+                               (sequence "duplicate" "WAIT")))))
+      (signals org-parse-error
+        (parse-org "" :settings
+                   (list :todo-sequences
+                         (list (sequence "first" "OPEN")
+                               (sequence "second" "OPEN")))))))
+
   (it "preserves and safely ignores malformed explicit TODO keyword settings"
     (dolist (keywords '(42 (42 (:WAIT) ("UNKNOWN" . :other))))
       (let* ((document

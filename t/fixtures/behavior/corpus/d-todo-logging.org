@@ -1,0 +1,31 @@
+#+TODO: TODO(t) NEXT(n!) | DONE
+* Logging cases
+** TODO Done off
+** TODO Done time
+** TODO Done note
+** TODO Multiline done note
+** TODO Note with no drawer
+** TODO Note with existing indented body
+
+  Existing body paragraph text
+** TODO Explicit drawer
+** TODO Reuse existing drawer
+:LOGBOOK:
+:END:
+** TODO Existing repeat property
+:PROPERTIES:
+:LAST_REPEAT: [2025-02-28 Fri 09:00]
+:END:
+** TODO Local drawer property
+:PROPERTIES:
+:LOG_INTO_DRAWER: LOCAL
+:END:
+** TODO Existing body bullet with state log
+- Existing body bullet
+** TODO Drawerless state log before indented body
+
+  Existing indented paragraph text
+** DONE Reopen without logging
+CLOSED: [2025-03-06 Thu]
+** DONE Reopen with closing logging enabled
+CLOSED: [2025-03-06 Thu]

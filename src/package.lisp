@@ -61,6 +61,17 @@
    ;; Format-preserving headline edits
    #:set-heading-todo #:set-heading-priority #:replace-heading-title
    #:add-heading-tags #:remove-heading-tags #:replace-heading-tags
+   ;; TODO workflow transitions
+   #:org-workflow-options #:make-org-workflow-options #:org-workflow-options-p
+   #:org-workflow-options-log-done #:org-workflow-options-log-repeat
+   #:org-workflow-options-repeat-to-state
+   #:org-workflow-options-log-into-drawer
+   #:org-workflow-options-clock-into-drawer
+   #:transition-result #:make-transition-result #:transition-result-p
+   #:transition-result-previous-state #:transition-result-new-state
+   #:transition-result-log-events #:transition-result-rescheduled-timestamps
+   #:transition-result-closed-timestamp
+   #:cycle-heading-todo #:transition-heading-todo
    ;; Format-preserving metadata edits
    #:set-property #:remove-property #:set-planning #:remove-planning
    #:set-keyword-value #:remove-keyword

@@ -1,0 +1,6 @@
+#+TODO: TODO(t!) NEXT(n@) WAITING(w/!) REVIEW(r) | DONE(d@)
+* Marker cases
+** Empty enter time
+** Empty enter note
+** WAITING Leave with exit marker
+** WAITING Target entry marker wins

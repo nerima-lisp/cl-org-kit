@@ -1,0 +1,5 @@
+#+SEQ_TODO: WAITING REVIEW | CANCELLED
+* Second sequence cases
+** WAITING Cycle next
+** REVIEW Cycle previous
+** WAITING Explicit state

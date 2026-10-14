@@ -40,6 +40,18 @@
     "EDIT-SPAN" "MAKE-EDIT-SPAN" "EDIT-SPAN-P" "EDIT-SPAN-START" "EDIT-SPAN-END"
     "EDIT-RESULT" "MAKE-EDIT-RESULT" "EDIT-RESULT-P"
     "EDIT-RESULT-UPDATED-DOCUMENT" "EDIT-RESULT-SPANS"
+    ;; TODO transitions
+    "ORG-WORKFLOW-OPTIONS" "MAKE-ORG-WORKFLOW-OPTIONS" "ORG-WORKFLOW-OPTIONS-P"
+    "ORG-WORKFLOW-OPTIONS-LOG-DONE" "ORG-WORKFLOW-OPTIONS-LOG-REPEAT"
+    "ORG-WORKFLOW-OPTIONS-REPEAT-TO-STATE"
+    "ORG-WORKFLOW-OPTIONS-LOG-INTO-DRAWER"
+    "ORG-WORKFLOW-OPTIONS-CLOCK-INTO-DRAWER"
+    "TRANSITION-RESULT" "MAKE-TRANSITION-RESULT" "TRANSITION-RESULT-P"
+    "TRANSITION-RESULT-PREVIOUS-STATE" "TRANSITION-RESULT-NEW-STATE"
+    "TRANSITION-RESULT-LOG-EVENTS"
+    "TRANSITION-RESULT-RESCHEDULED-TIMESTAMPS"
+    "TRANSITION-RESULT-CLOSED-TIMESTAMP"
+    "CYCLE-HEADING-TODO" "TRANSITION-HEADING-TODO"
     ;; Resource limits
     "LIMITS" "MAKE-LIMITS" "LIMITS-P" "LIMIT-VALUE"
     ;; Documents
@@ -164,7 +176,21 @@ docs/src/reference/node-model.md.")
     names))
 
 (defparameter +generated-structure-function-owners+
-  '((org-time-value-p . org-time-value)
+  '((make-org-workflow-options . org-workflow-options)
+    (org-workflow-options-p . org-workflow-options)
+    (org-workflow-options-log-done . org-workflow-options)
+    (org-workflow-options-log-repeat . org-workflow-options)
+    (org-workflow-options-repeat-to-state . org-workflow-options)
+    (org-workflow-options-log-into-drawer . org-workflow-options)
+    (org-workflow-options-clock-into-drawer . org-workflow-options)
+    (make-transition-result . transition-result)
+    (transition-result-p . transition-result)
+    (transition-result-previous-state . transition-result)
+    (transition-result-new-state . transition-result)
+    (transition-result-log-events . transition-result)
+    (transition-result-rescheduled-timestamps . transition-result)
+    (transition-result-closed-timestamp . transition-result)
+    (org-time-value-p . org-time-value)
     (org-time-zone-p . org-time-zone)
     (org-time-zone-name . org-time-zone)
     (org-time-zone-offset-minutes . org-time-zone)

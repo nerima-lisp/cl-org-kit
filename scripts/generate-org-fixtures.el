@@ -851,6 +851,256 @@
     (princ (format "Generated %d H1 clock cases.\n" (length cases)))
     (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
 
+(defun org-fixture--d-todo-validate-cases (cases)
+  (let ((ids (make-hash-table :test #'equal))
+        (sources '("d-todo-cycle.org" "d-todo-sequence.org"
+                   "d-todo-cookie.org" "d-todo-logging.org"
+                   "d-todo-markers.org" "d-todo-repeat.org"))
+        (known-keys '(:id :source :heading-path :action :direction :state
+                      :sequence-id :at :log-done :log-repeat :repeat-to-state
+                      :log-into-drawer :note :capture-document))
+        (required-keys '(:id :source :heading-path :action :at)))
+    (dolist (case cases)
+      (unless (and (proper-list-p case) (eq (car-safe case) :id))
+        (error "Malformed D TODO case: %S" case))
+      (let ((plist case)
+            (seen nil))
+        (while plist
+          (unless (and (consp plist)
+                       (consp (cdr plist))
+                       (memq (car plist) known-keys)
+                       (not (memq (car plist) seen)))
+            (error "Malformed D TODO case property list: %S" case))
+          (push (car plist) seen)
+          (setq plist (cddr plist)))
+        (unless (cl-every (lambda (key) (memq key seen)) required-keys)
+          (error "Missing required D TODO case property: %S" case))
+        (let ((id (plist-get case :id))
+              (path (plist-get case :heading-path))
+              (action (plist-get case :action))
+              (state-present-p (plist-member case :state))
+              (sequence-id (plist-get case :sequence-id))
+              (log-done (plist-get case :log-done))
+              (log-repeat (plist-get case :log-repeat))
+              (repeat-to-state (plist-get case :repeat-to-state))
+              (log-drawer (plist-get case :log-into-drawer))
+              (note (plist-get case :note)))
+          (unless (and (stringp id)
+                       (not (gethash id ids))
+                       (member (plist-get case :source) sources)
+                       (and (proper-list-p path) path (cl-every #'stringp path))
+                       (memq action '(:cycle :transition))
+                       (stringp (plist-get case :at))
+                       (if (eq action :cycle)
+                           (and (not state-present-p)
+                                (memq (plist-get case :direction) '(:next :previous)))
+                         (and (not (plist-member case :direction))
+                              state-present-p
+                              (or (null (plist-get case :state))
+                                  (stringp (plist-get case :state)))))
+                       (or (null sequence-id) (stringp sequence-id))
+                       (memq log-done '(nil time note))
+                       (memq log-repeat '(nil time note))
+                       (or (null repeat-to-state) (eq repeat-to-state t)
+                           (stringp repeat-to-state))
+                       (or (null log-drawer) (eq log-drawer t)
+                           (stringp log-drawer))
+                       (or (null note) (stringp note))
+                       (memq (plist-get case :capture-document) '(nil t))
+                       (not (gethash id ids)))
+            (error "Invalid D TODO case: %S" case))
+          (when (and (eq action :transition)
+                     (stringp (plist-get case :state))
+                     (string= (plist-get case :state) ""))
+            (error "Use NIL, not an empty string, for a cleared TODO state: %S" case))
+          (puthash id t ids))))
+    cases))
+
+(defun org-fixture--d-todo-heading-position (path)
+  (let ((current-path nil)
+        found)
+    (save-excursion
+      (goto-char (point-min))
+      (while (and (not found)
+                  (re-search-forward "^\\(\\*+\\)[ \t]+.*$" nil t))
+        (let* ((position (match-beginning 0))
+               (level (length (match-string 1)))
+               (title (save-excursion
+                        (goto-char position)
+                        (org-get-heading t t t t))))
+          (setq current-path
+                (append (cl-subseq current-path 0
+                                   (min (1- level) (length current-path)))
+                        (list title)))
+          (when (equal current-path path)
+            (setq found position)))))
+    (or found (error "D TODO heading path not found: %S" path))))
+
+(defun org-fixture--d-todo-subtree (position)
+  (save-excursion
+    (goto-char position)
+    (org-end-of-subtree t t)
+    (buffer-substring-no-properties position (point))))
+
+(defun org-fixture--d-todo-log-event-lines (subtree)
+  (let ((lines (split-string subtree "\n"))
+        (inside-event nil)
+        (pending-empty-lines nil)
+        (events nil))
+    (dolist (line lines)
+      (cond
+        ((or (string-prefix-p "- State " line)
+             (string-prefix-p "- CLOSING NOTE " line))
+         (setq pending-empty-lines nil)
+         (push line events)
+         (setq inside-event (string-suffix-p "\\\\" line)))
+        ((and inside-event (string-prefix-p "  " line))
+         (dolist (empty-line (nreverse pending-empty-lines))
+           (push empty-line events))
+         (setq pending-empty-lines nil)
+         (push line events))
+        ((and inside-event (string-empty-p line))
+         (push line pending-empty-lines))
+        (t (setq inside-event nil
+                 pending-empty-lines nil))))
+    (nreverse events)))
+
+(defun org-fixture--d-todo-log-events (before after)
+  (let ((previous-counts (make-hash-table :test #'equal))
+        (events (org-fixture--d-todo-log-event-lines after))
+        (inserted nil))
+    (let ((lines (split-string before "\n")))
+      (when (string-suffix-p "\n" before)
+        (setq lines (butlast lines)))
+      (dolist (line lines)
+        (puthash line (1+ (gethash line previous-counts 0)) previous-counts)))
+    (dolist (line (reverse events))
+      (let ((count (gethash line previous-counts 0)))
+        (if (> count 0)
+            (puthash line (1- count) previous-counts)
+          (push line inserted))))
+    inserted))
+
+(defun org-fixture--d-todo-repeat-timestamps (text)
+  (let ((position 0)
+        (timestamps nil))
+    (while (< position (length text))
+      (let* ((start-angle (cl-position ?< text :start position))
+             (start-square (cl-position 91 text :start position))
+             (start (cond ((and start-angle start-square)
+                           (min start-angle start-square))
+                          (start-angle start-angle)
+                          (start-square start-square))))
+        (if (null start)
+            (setq position (length text))
+          (let* ((close (if (= (aref text start) ?<) ?> 93))
+                 (end (cl-position close text :start (1+ start))))
+            (if (null end)
+                (setq position (length text))
+              (let ((timestamp (substring text start (1+ end))))
+                (when (string-match-p org-repeat-re timestamp)
+                  (push timestamp timestamps)))
+              (setq position (1+ end)))))))
+    (nreverse timestamps)))
+
+(defun org-fixture--d-todo-rescheduled-timestamps (before after)
+  (let ((old (org-fixture--d-todo-repeat-timestamps before))
+        (new (org-fixture--d-todo-repeat-timestamps after))
+        (changed nil))
+    (while new
+      (unless (equal (pop old) (car new))
+        (push (car new) changed))
+      (pop new))
+    (nreverse changed)))
+
+(defun org-fixture--d-todo-case (case corpus-directory)
+  (let* ((source-name (plist-get case :source))
+         (source (expand-file-name source-name corpus-directory))
+         (at (org-fixture--g1-clock-parse-time (plist-get case :at)))
+         (note (plist-get case :note))
+         (system-time-locale "C")
+         (org-log-done (plist-get case :log-done))
+         (org-log-repeat (plist-get case :log-repeat))
+         (org-todo-repeat-to-state (plist-get case :repeat-to-state))
+         (org-log-into-drawer (plist-get case :log-into-drawer))
+         (org-todo-log-states nil))
+    (unless (file-exists-p source)
+      (error "D TODO corpus file does not exist: %s" source-name))
+    (with-temp-buffer
+      (org-fixture--read-buffer source)
+      (let* ((heading-position
+              (org-fixture--d-todo-heading-position
+               (plist-get case :heading-path)))
+             (heading-marker (copy-marker heading-position))
+             (before (org-fixture--d-todo-subtree heading-position))
+             (previous-state (save-excursion
+                               (goto-char heading-marker)
+                               (org-get-todo-state)))
+             (org-log-buffer-setup-hook
+               (if note
+                   (list (lambda () (insert note)))
+                 org-log-buffer-setup-hook)))
+        (goto-char heading-marker)
+        (cl-letf (((symbol-function 'current-time) (lambda () at))
+                  ((symbol-function 'org-today)
+                   (lambda () (time-to-days at)))
+                  ((symbol-function 'current-time-string)
+                   (lambda (&optional time)
+                     (format-time-string "%a %b %e %T %Y" (or time at)))))
+          (if (eq (plist-get case :action) :cycle)
+              (org-todo (if (eq (plist-get case :direction) :next) 'right 'left))
+            (org-todo (or (plist-get case :state) "")))
+          (when org-log-setup
+            (org-add-log-note)
+            (when (get-buffer "*Org Note*")
+              (with-current-buffer "*Org Note*"
+                (org-store-log-note)))))
+        (let* ((after (org-fixture--d-todo-subtree heading-marker))
+               (closed (save-excursion
+                         (goto-char heading-marker)
+                         (org-entry-get nil "CLOSED")))
+               (new-state (save-excursion
+                            (goto-char heading-marker)
+                            (org-get-todo-state))))
+          (list :id (plist-get case :id)
+                :previous-state previous-state
+                :new-state new-state
+                :source-after after
+                :document-after
+                (and (plist-get case :capture-document)
+                     (buffer-substring-no-properties (point-min) (point-max)))
+                :log-events (org-fixture--d-todo-log-events before after)
+                :rescheduled-timestamps
+                (org-fixture--d-todo-rescheduled-timestamps before after)
+                :closed-timestamp closed))))))
+
+(defun org-fixture-generate-d-todo-state
+    (corpus-directory cases-file expected-file)
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "D TODO oracle requires Emacs 31.1 and Org 9.8.10; found %s and %s"
+           emacs-version (org-version)))
+  (unless (file-directory-p corpus-directory)
+    (error "D TODO corpus directory does not exist: %s" corpus-directory))
+  (let* ((cases (org-fixture--d-todo-validate-cases
+                 (org-fixture--g1-clock-read-cases cases-file)))
+         (results (mapcar (lambda (case)
+                            (org-fixture--d-todo-case case corpus-directory))
+                          cases))
+         (content
+          (org-fixture--check-output
+           (concat
+            (format "; Generated from org-todo with Emacs %s and Org %s.\n"
+                    emacs-version (org-version))
+            "; The case timestamp is fixed; log-note text is supplied by the manifest.\n"
+            "(" (mapconcat #'org-fixture--cl-value results "\n ") ")\n"))))
+    (make-directory (file-name-directory expected-file) t)
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region content nil expected-file nil 'silent))
+    (princ (format "Wrote %s\n" (file-name-nondirectory expected-file)))
+    (princ (format "Generated %d D TODO cases.\n" (length cases)))
+    (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
 (defun org-fixture-generate (corpus-directory expected-directory)
   "Generate one .sexp file per .org file under CORPUS-DIRECTORY."
   (unless (file-directory-p corpus-directory)
@@ -1444,6 +1694,11 @@
        (expand-file-name (nth 1 arguments))
        (expand-file-name (nth 2 arguments))
        (expand-file-name (nth 3 arguments))))
+     ((and (= (length arguments) 4) (equal (car arguments) "--d-todo-state"))
+      (org-fixture-generate-d-todo-state
+       (expand-file-name (nth 1 arguments))
+       (expand-file-name (nth 2 arguments))
+       (expand-file-name (nth 3 arguments))))
      ((and (= (length arguments) 3) (equal (car arguments) "--check-types"))
       (org-fixture-check-types (expand-file-name (nth 1 arguments))
                                (expand-file-name (nth 2 arguments))))
@@ -1477,6 +1732,7 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --g2-clocktable CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --g1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --h1-clock CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --d-todo-state CORPUS-DIR CASES-FILE EXPECTED-FILE\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --include-effective-tags CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-recalculate CORPUS-DIR EXPECTED-DIR\n"

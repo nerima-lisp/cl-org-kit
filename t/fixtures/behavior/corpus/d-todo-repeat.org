@@ -1,0 +1,40 @@
+#+TODO: TODO NEXT WAITING | DONE
+* Repeat cases
+** TODO Plus repeater
+SCHEDULED: <2025-03-01 Sat +1w>
+** TODO Plus plus repeater
+SCHEDULED: <2025-03-01 Sat ++1w>
+** TODO Dot plus repeater
+SCHEDULED: <2025-03-01 Sat .+1w>
+** TODO Variable repeat state
+SCHEDULED: <2025-03-01 Sat +1w>
+** TODO Local repeat state
+:PROPERTIES:
+:REPEAT_TO_STATE: WAITING
+:END:
+SCHEDULED: <2025-03-01 Sat +1w>
+** TODO Repeat without log or clock
+SCHEDULED: <2025-03-01 Sat +1w>
+** TODO Repeat with log
+SCHEDULED: <2025-03-01 Sat +1w>
+** TODO Repeat with existing LAST_REPEAT and log
+:PROPERTIES:
+:LAST_REPEAT: [2025-02-28 Fri 09:00]
+:END:
+SCHEDULED: <2025-03-01 Sat +1w>
+** TODO Plus plus with note log and LAST_REPEAT
+:PROPERTIES:
+:LAST_REPEAT: [2025-02-28 Fri 09:00]
+:END:
+SCHEDULED: <2025-03-01 Sat ++1w>
+** TODO Repeat with clock
+CLOCK: [2025-03-19 Wed 08:00]--[2025-03-19 Wed 08:15] =>  0:15
+SCHEDULED: <2025-03-01 Sat +1w>
+** TODO Remove nonrepeat schedule
+SCHEDULED: <2025-03-01 Sat> DEADLINE: <2025-03-01 Sat +1w>
+Plain timestamp: <2025-03-01 Sat +1w>
+** TODO Remove schedule on completion
+SCHEDULED: <2025-03-25 Tue>
+** TODO Remove schedule before body repeater
+SCHEDULED: <2025-03-01 Sat>
+Repeating body timestamp: <2025-03-01 Sat +1w>

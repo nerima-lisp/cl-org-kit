@@ -257,6 +257,10 @@
       (setf (gethash sequence active-set) t))
     (dolist (sequence sequences)
       (let ((id (getf sequence :sequence-id)))
+        (unless (and (stringp id) (plusp (length id)))
+          (reader-heading-settings-error
+           context (getf sequence :reader-offset)
+           "TODO sequence ID must be a nonempty string"))
         (when (gethash id ids)
           (reader-heading-settings-error
            context (getf sequence :reader-offset)
@@ -707,11 +711,11 @@
                 (reader-heading-explicit-todo-sequences
                  (getf settings :todo-keywords) context)))))
       ((reader-heading-setting-present-p explicit-settings :todo-sequences)
-       (when (reader-heading-normalized-todo-sequences-p
-              (getf settings :todo-sequences))
-         (setf (getf settings :todo-keywords)
-               (reader-heading-flatten-todo-sequences
-                (getf settings :todo-sequences))))))
+       (let ((sequences (getf settings :todo-sequences)))
+         (when (reader-heading-normalized-todo-sequences-p sequences)
+           (reader-heading-validate-todo-sequences sequences context)
+           (setf (getf settings :todo-keywords)
+                 (reader-heading-flatten-todo-sequences sequences))))))
     (setf (reader-context-recognized-todo-keywords context)
           (reader-heading-recognized-todo-keywords settings))
     settings))

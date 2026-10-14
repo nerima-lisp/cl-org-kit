@@ -1,0 +1,8 @@
+#+TODO: TODO NEXT | DONE
+* Cycle cases
+** Empty next
+** Empty previous
+** DONE Done next
+** TODO First previous
+** TODO Explicit state
+** TODO Explicit clear

@@ -65,6 +65,7 @@
                (:file "query-match")
                (:file "clock")
                (:file "edit-clock")
+               (:file "edit-todo-state")
                (:file "clocktable")
                (:file "edit-clocktable")
                ;; F agenda
@@ -143,6 +144,7 @@
                (:file "clock-test")
                (:file "edit-clock-test")
                (:file "edit-clocktable-test")
+               (:file "edit-todo-state-test")
                (:file "agenda-test")
                ;; Unit E1 export core
                (:file "clocktable-test")
