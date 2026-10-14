@@ -396,6 +396,22 @@
                                         target-document raw target)
         raw)))
 
+(defun edit-relocate-normalize-line-endings (source newline)
+  (with-output-to-string (stream)
+    (loop for position from 0 below (length source)
+          for character = (char source position)
+          do (cond
+               ((char= character #\Return)
+                (if (and (< (1+ position) (length source))
+                         (char= (char source (1+ position)) #\Newline))
+                    (progn
+                      (write-string newline stream)
+                      (incf position))
+                    (write-char character stream)))
+               ((char= character #\Newline)
+                (write-string newline stream))
+               (t (write-char character stream))))))
+
 (defun edit-relocate-target-boundary (document target-heading target)
   (if target-heading
       (multiple-value-bind (next offset)
@@ -480,10 +496,12 @@
                                                            target-heading
                                                            (or target-heading
                                                                heading)))
-             (raw (edit-relocate-transform-fragment
-                   source-document source-heading source-start source-end
-                   target-document
-                   target-heading archive-p heading))
+             (raw
+               (edit-relocate-normalize-line-endings
+                (edit-relocate-transform-fragment
+                 source-document source-heading source-start source-end
+                 target-document target-heading archive-p heading)
+                (edit-subtree-line-ending target-document target-offset)))
              (fragment-canonical
                (nth-value 2 (edit-subtree-fragment target-document raw heading)))
              (destination-source (document-text target-document))

@@ -162,6 +162,27 @@
                 :to-equal (format nil "~%* Source~%"))
         (expect (document-text target) :to-equal blank))))
 
+  (it "uses the target line ending when refiling a CRLF subtree to LF"
+    (let* ((crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text (format nil "* Parent~A** Child~Abody~A"
+                                crlf crlf crlf))
+           (target-text (format nil "* Target~%"))
+           (source (parse-org source-text))
+           (target (parse-org target-text))
+           (result (refile-subtree
+                    source (edit-relocate-test-headline source "Child")
+                    target (edit-relocate-test-headline target "Target")))
+           (updated-source (edit-result-updated-document
+                            (relocation-result-source-edit result)))
+           (updated-target (edit-result-updated-document
+                            (relocation-result-target-edit result))))
+      (with-soft-assertions
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text)
+        (expect (document-text updated-source) :to-equal (format nil "* Parent~A" crlf))
+        (expect (document-text updated-target)
+                :to-equal (format nil "* Target~%** Child~%body~%")))))
+
   (it "copies a subtree without a source edit and keeps the source document intact"
     (let* ((source-text (format nil "* Source~%source body~%"))
            (target-text (format nil "* Target~%target body~%"))
@@ -618,6 +639,29 @@
                         #\Return #\Newline #\Return #\Newline
                         #\Return #\Newline #\Return #\Newline
                         #\Return #\Newline)))))
+
+  (it "uses the target line ending for refiled archive content and properties"
+    (let* ((crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text (format nil "* Work~Abody~A" crlf crlf))
+           (source (parse-org source-text :source-name "tasks.org"))
+           (target-text (format nil "* Archive~%"))
+           (target (parse-org target-text))
+           (result
+             (archive-subtree-to
+              source (edit-relocate-test-headline source "Work") target
+              :target-heading (edit-relocate-test-headline target "Archive")))
+           (updated-source (edit-result-updated-document
+                            (relocation-result-source-edit result)))
+           (updated-target (edit-result-updated-document
+                            (relocation-result-target-edit result))))
+      (with-soft-assertions
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text)
+        (expect (document-text updated-source) :to-equal "")
+        (expect (document-text updated-target)
+                :to-equal
+                (format nil
+                        "* Archive~%** Work~%:PROPERTIES:~%:ARCHIVE_FILE: tasks.org~%:ARCHIVE_CATEGORY: tasks~%:END:~%body~%")))))
 
   (it "adds and removes the local ARCHIVE tag while preserving other tags"
     (let* ((source-text (format nil "* Task :LOCAL:~%"))
