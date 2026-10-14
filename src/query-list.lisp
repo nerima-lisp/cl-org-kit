@@ -14,11 +14,11 @@
 (defun query-list-form-error (query message)
   (query-signal-error query nil message))
 
-(defun query-list-copy-form (form query)
+(defun query-list-copy-form (form limits query)
   (unless (%query-proper-list-p form)
     (query-list-form-error query "List query must be a proper list"))
   (handler-case
-      (%query-copy-proper-tree form)
+      (%query-copy-proper-tree form limits)
     (type-error ()
       (query-list-form-error query "List query must contain only proper lists"))))
 
@@ -227,7 +227,7 @@
        (query-list-form-error query "Unknown query operator")))))
 
 (defun query-list-parse-form (form context limits reference-time query)
-  (let ((copy (query-list-copy-form form query)))
+  (let ((copy (query-list-copy-form form limits query)))
     (query-list-parse-predicate copy context limits reference-time query)))
 
 (defun query-list (document form &key (scope :headlines) context reference-time)

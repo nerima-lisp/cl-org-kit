@@ -318,6 +318,12 @@
       (signals org-resource-limit-error
         (org-kit::query-list document '(:tag := "longer")))))
 
+  (it "applies document node limits while copying the query form"
+    (let ((document (make-document "" :limits (make-limits :max-node-count 2))))
+      (signals org-resource-limit-error
+        (org-kit::query-list
+         document '(:type :headline :ignored (extra values))))))
+
   (it "requires reference-time for relative dates"
     (let ((document (query-list-test-document)))
       (signals org-query-error

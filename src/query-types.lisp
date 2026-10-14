@@ -41,9 +41,8 @@
        (handler-case (integerp (list-length value))
          (type-error () nil))))
 
-(defun %query-copy-proper-tree (value)
-  (let* ((limits (make-limits))
-         (active (make-hash-table :test #'eq))
+(defun %query-copy-proper-tree (value &optional (limits (make-limits)))
+  (let* ((active (make-hash-table :test #'eq))
          (cons-count 0))
     (labels ((copy-value (item depth)
                (if (consp item)
