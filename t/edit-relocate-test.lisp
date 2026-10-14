@@ -867,6 +867,16 @@
                 (refile-subtree source source-heading comment-document
                                 (edit-relocate-test-headline comment-document
                                                              "Target")))))
+           (comment-keyword-text
+             (format nil "* Target~%#+COMMENT:"))
+           (comment-keyword-document (parse-org comment-keyword-text))
+           (comment-keyword-error
+             (edit-relocate-test-edit-error
+              (lambda ()
+                (refile-subtree
+                 source source-heading comment-keyword-document
+                 (edit-relocate-test-headline comment-keyword-document
+                                              "Target")))))
            (heading-affiliation-text
              (format nil "* Target~%~%#+CAPTION: trailing~%"))
            (heading-affiliation-document (parse-org heading-affiliation-text))
@@ -888,12 +898,16 @@
       (with-soft-assertions
         (expect (org-edit-error-reason comment-error)
                 :to-be :uneditable-structure)
+        (expect (org-edit-error-reason comment-keyword-error)
+                :to-be :uneditable-structure)
         (expect (org-edit-error-reason heading-affiliation-error)
                 :to-be :uneditable-structure)
         (expect (org-edit-error-reason affiliation-error)
                 :to-be :uneditable-structure)
         (expect (document-text source) :to-equal source-text)
         (expect (document-text comment-document) :to-equal comment-text)
+        (expect (document-text comment-keyword-document)
+                :to-equal comment-keyword-text)
         (expect (document-text heading-affiliation-document)
                 :to-equal heading-affiliation-text)
         (expect (document-text affiliation-document) :to-equal affiliation-text))))

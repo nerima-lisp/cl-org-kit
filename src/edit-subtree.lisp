@@ -67,7 +67,8 @@
   "Return true when the last nonblank line in [START, END) is a comment."
   (loop with line-end = end
         while (plusp line-end)
-        do (decf line-end)
+        do (when (char= (char source (1- line-end)) #\Newline)
+             (decf line-end))
            (when (and (plusp line-end)
                       (char= (char source (1- line-end)) #\Return))
              (decf line-end))
