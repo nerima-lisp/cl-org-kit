@@ -706,6 +706,18 @@
         (expect (document-text delete-document) :to-equal source)
         (expect (document-text move-document) :to-equal source))))
 
+  (it "recalculates column widths when deleting the widest row"
+    (let* ((source
+             (format nil "| Heading |~%| widest row value |~%| x |~%"))
+           (expected (format nil "| Heading |~%| x |~%"))
+           (document (parse-org source))
+           (table (table-edit-test-find-node (document-root document) :table))
+           (result (table-delete-row document table 2)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
   (it "keeps existing backslash escapes before inserted pipes balanced"
     (let* ((source (format nil "| A | B |~%| old | row |~%"))
            (document (parse-org source))
