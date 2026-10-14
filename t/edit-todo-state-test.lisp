@@ -129,6 +129,116 @@
                     (list :log-drawer log-drawer)))))
     (apply #'transition-heading-todo document heading state arguments)))
 
+(defun edit-todo-state-test-check-transition-case (case-id)
+  (let* ((manifest
+           (getf (edit-todo-state-test-fixture "cases/d-todo-state.sexp")
+                 :cases))
+         (case (find case-id manifest :key (lambda (entry) (getf entry :id))
+                     :test #'string=))
+         (oracle (edit-todo-state-test-fixture "expected/d-todo-state.sexp"))
+         (id (getf case :id))
+         (expected (find id oracle :key (lambda (entry) (getf entry :id))
+                         :test #'string=))
+         (source-octets
+           (read-conformance-octets
+            (conformance-fixture-path
+             "behavior"
+             (concatenate 'string "corpus/" (getf case :source)))))
+         (document (parse-org source-octets))
+         (source (document-text document))
+         (heading (edit-todo-state-test-heading-path
+                   document (getf case :heading-path))))
+    (with-soft-assertions
+      (expect (plusp (length source-octets)) :to-be t)
+      (expect expected :to-be-truthy)
+      (expect (node-p heading) :to-be t)
+      (when (and expected (node-p heading))
+        (multiple-value-bind (edit transition)
+            (edit-todo-state-test-case-call document heading case)
+          (let* ((updated (edit-result-updated-document edit))
+                 (updated-source (document-text updated))
+                 (updated-heading
+                   (and (null (getf expected :document-after))
+                        (edit-todo-state-test-heading-path
+                         updated (getf case :heading-path))))
+                 (actual-source-after
+                   (if (getf expected :document-after)
+                       updated-source
+                       (and updated-heading
+                            (subseq updated-source
+                                    (node-begin updated-heading)
+                                    (node-end updated-heading)))))
+                 (expected-source-after
+                   (or (getf expected :document-after)
+                       (getf expected :source-after)))
+                 (spans (edit-result-spans edit)))
+            (expect (edit-result-p edit) :to-be t)
+            (expect (transition-result-p transition) :to-be t)
+            (expect (transition-result-previous-state transition)
+                    :to-equal (getf expected :previous-state))
+            (expect (transition-result-new-state transition)
+                    :to-equal (getf expected :new-state))
+            (expect (transition-result-log-events transition)
+                    :to-equal (getf expected :log-events))
+            (when (string= id "existing-body-bullet-with-state-log")
+              (expect (transition-result-log-events transition)
+                      :to-equal
+                      '("- State \"NEXT\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
+              (expect (search "- Existing body bullet" updated-source)
+                      :to-be-truthy))
+            (when (string= id "drawerless-state-log-before-indented-body")
+              (expect (transition-result-log-events transition)
+                      :to-equal
+                      '("- State \"NEXT\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
+              (expect (search "  Existing indented paragraph text"
+                              updated-source)
+                      :to-be-truthy))
+            (when (string= id "done-note-multiline-blank-line")
+              (expect (transition-result-log-events transition)
+                      :to-equal
+                      (list (format nil "- CLOSING NOTE [2025-03-07 Fri 09:00] ~C~C" (code-char 92) (code-char 92))
+                            "  first line"
+                            ""
+                            "  third line")))
+            (expect (transition-result-rescheduled-timestamps transition)
+                    :to-equal (getf expected :rescheduled-timestamps))
+            (expect (transition-result-closed-timestamp transition)
+                    :to-equal (getf expected :closed-timestamp))
+            (expect actual-source-after :to-equal expected-source-after)
+            (expect (document-text document) :to-equal source)
+            (expect (write-org document :output-type :octets)
+                    :to-equalp source-octets)
+            (expect (mapcar #'edit-span-start spans)
+                    :to-equal (sort (mapcar #'edit-span-start spans) #'<))
+            (dolist (span spans)
+              (expect (edit-span-p span) :to-be t)
+              (expect (<= 0 (edit-span-start span)
+                          (edit-span-end span) (length source))
+                      :to-be t))
+            (loop for tail on spans
+                  while (cdr tail)
+                  for left = (first tail)
+                  for right = (second tail)
+                  do (expect (<= (edit-span-end left)
+                                 (edit-span-start right))
+                             :to-be t))
+            (expect (edit-todo-state-test-unpatched-ranges-match-p
+                     source updated-source spans)
+                    :to-be t)
+            (when (string= id "cookie-child-completes")
+              (let* ((todo-start (search "TODO" source
+                                         :start2 (node-begin heading)))
+                     (cookie-start (search "[0/1]" source))
+                     (ranges (edit-todo-state-test-span-ranges spans)))
+                (expect (member
+                         (list todo-start (+ todo-start (length "TODO")))
+                         ranges :test #'equal)
+                        :to-be-truthy)
+                (expect (member
+                         (list cookie-start (+ cookie-start (length "[0/1]")))
+                         ranges :test #'equal)
+                        :to-be-truthy)))))))))
+
 (describe "TODO state transitions"
   (it "constructs workflow options and transition results with public readers"
     (let* ((defaults (make-org-workflow-options))
@@ -174,7 +284,7 @@
                 '("TODO" "DONE" ("- State \"DONE\"")
                   ("<2025-03-08 Sat +1w>") "[2025-03-07 Fri 09:00]")))))
 
-  (it "matches every pinned Org 9.8.10 transition result and source edit"
+  (it "checks the complete pinned Org 9.8.10 transition fixture inventory"
     (let* ((manifest
              (getf (edit-todo-state-test-fixture "cases/d-todo-state.sexp")
                    :cases))
@@ -184,109 +294,52 @@
         (expect (length manifest) :to-be 41)
         (expect (length oracle) :to-be 41)
         (expect (mapcar (lambda (case) (getf case :id)) manifest)
-                :to-equal oracle-ids)
-        (dolist (case manifest)
-          (let* ((id (getf case :id))
-                 (expected (find id oracle :key (lambda (entry) (getf entry :id))
-                                 :test #'string=))
-                 (source-octets
-                   (read-conformance-octets
-                    (conformance-fixture-path
-                     "behavior"
-                     (concatenate 'string "corpus/" (getf case :source)))))
-                 (document (parse-org source-octets))
-                 (source (document-text document))
-                 (heading (edit-todo-state-test-heading-path
-                           document (getf case :heading-path))))
-            (expect (plusp (length source-octets)) :to-be t)
-            (expect expected :to-be-truthy)
-            (expect (node-p heading) :to-be t)
-            (when (and expected (node-p heading))
-              (multiple-value-bind (edit transition)
-                  (edit-todo-state-test-case-call document heading case)
-                (let* ((updated (edit-result-updated-document edit))
-                       (updated-source (document-text updated))
-                       (updated-heading
-                         (and (null (getf expected :document-after))
-                              (edit-todo-state-test-heading-path
-                               updated (getf case :heading-path))))
-                       (actual-source-after
-                         (if (getf expected :document-after)
-                             updated-source
-                             (and updated-heading
-                                  (subseq updated-source
-                                          (node-begin updated-heading)
-                                          (node-end updated-heading)))))
-                       (expected-source-after
-                         (or (getf expected :document-after)
-                             (getf expected :source-after)))
-                       (spans (edit-result-spans edit)))
-                  (expect (edit-result-p edit) :to-be t)
-                  (expect (transition-result-p transition) :to-be t)
-                  (expect (transition-result-previous-state transition)
-                          :to-equal (getf expected :previous-state))
-                  (expect (transition-result-new-state transition)
-                          :to-equal (getf expected :new-state))
-                  (expect (transition-result-log-events transition)
-                          :to-equal (getf expected :log-events))
-                  (when (string= id "existing-body-bullet-with-state-log")
-                    (expect (transition-result-log-events transition)
-                            :to-equal
-                            '("- State \"NEXT\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
-                    (expect (search "- Existing body bullet" updated-source)
-                            :to-be-truthy))
-                  (when (string= id "drawerless-state-log-before-indented-body")
-                    (expect (transition-result-log-events transition)
-                            :to-equal
-                            '("- State \"NEXT\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
-                    (expect (search "  Existing indented paragraph text"
-                                    updated-source)
-                            :to-be-truthy))
-                  (when (string= id "done-note-multiline-blank-line")
-                    (expect (transition-result-log-events transition)
-                            :to-equal
-                            (list (format nil "- CLOSING NOTE [2025-03-07 Fri 09:00] ~C~C" (code-char 92) (code-char 92))
-                              "  first line"
-                              ""
-                              "  third line")))
-                  (expect (transition-result-rescheduled-timestamps transition)
-                          :to-equal (getf expected :rescheduled-timestamps))
-                  (expect (transition-result-closed-timestamp transition)
-                          :to-equal (getf expected :closed-timestamp))
-                  (expect actual-source-after :to-equal expected-source-after)
-                  (expect (document-text document) :to-equal source)
-                  (expect (write-org document :output-type :octets)
-                          :to-equalp source-octets)
-                  (expect (mapcar #'edit-span-start spans)
-                          :to-equal (sort (mapcar #'edit-span-start spans) #'<))
-                  (dolist (span spans)
-                    (expect (edit-span-p span) :to-be t)
-                    (expect (<= 0 (edit-span-start span)
-                                (edit-span-end span) (length source))
-                            :to-be t))
-                  (loop for tail on spans
-                        while (cdr tail)
-                        for left = (first tail)
-                        for right = (second tail)
-                        do (expect (<= (edit-span-end left)
-                                       (edit-span-start right))
-                                   :to-be t))
-                  (expect (edit-todo-state-test-unpatched-ranges-match-p
-                           source updated-source spans)
-                          :to-be t)
-                  (when (string= id "cookie-child-completes")
-                    (let* ((todo-start (search "TODO" source
-                                               :start2 (node-begin heading)))
-                           (cookie-start (search "[0/1]" source))
-                           (ranges (edit-todo-state-test-span-ranges spans)))
-                      (expect (member
-                               (list todo-start (+ todo-start (length "TODO")))
-                               ranges :test #'equal)
-                              :to-be-truthy)
-                      (expect (member
-                               (list cookie-start (+ cookie-start (length "[0/1]")))
-                               ranges :test #'equal)
-                              :to-be-truthy)))))))))))
+                :to-equal oracle-ids))))
+
+  (it-each (("cycle-empty-next")
+            ("cycle-empty-previous")
+            ("cycle-done-next-clears")
+            ("cycle-first-previous-clears")
+            ("cycle-second-sequence-next")
+            ("cycle-second-sequence-previous")
+            ("transition-explicit-state")
+            ("transition-explicit-state-second-sequence")
+            ("transition-explicit-clear")
+            ("done-log-off")
+            ("done-log-time")
+            ("done-log-note")
+            ("done-note-multiline-blank-line")
+            ("done-note-no-drawer")
+            ("done-note-with-existing-indented-body")
+            ("done-note-explicit-drawer")
+            ("done-note-reuses-existing-drawer")
+            ("done-note-with-existing-repeat-property")
+            ("done-note-local-drawer-overrides-global")
+            ("existing-body-bullet-with-state-log")
+            ("drawerless-state-log-before-indented-body")
+            ("reopen-without-state-log")
+            ("reopen-with-closed-logging-enabled")
+            ("marker-enter-time")
+            ("marker-enter-time-native-default-drawer")
+            ("marker-enter-note")
+            ("marker-exit-time")
+            ("marker-target-entry-overrides-exit")
+            ("repeat-plus")
+            ("repeat-plus-plus")
+            ("repeat-dot-plus")
+            ("repeat-variable-state")
+            ("repeat-local-state-precedence")
+            ("repeat-no-last-repeat-without-log-or-clock")
+            ("repeat-last-repeat-with-log")
+            ("repeat-overwrites-existing-last-repeat-with-log")
+            ("repeat-plus-plus-note-log-last-repeat-and-done-log")
+            ("repeat-last-repeat-with-clock")
+            ("repeat-removes-nonrepeat-scheduled")
+            ("repeat-removes-scheduled-before-body-repeater")
+            ("cookie-child-completes"))
+      "matches pinned Org 9.8.10 transition case ~A"
+      (case-id)
+    (edit-todo-state-test-check-transition-case case-id))
 
   (it "keeps Org's native no-drawer behavior separate from the kit LOGBOOK policy"
     (let* ((oracle (edit-todo-state-test-fixture "expected/d-todo-state.sexp"))
