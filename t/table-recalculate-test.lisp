@@ -31,6 +31,10 @@
     (org-table-unsupported-syntax (condition) condition)
     (org-table-error (condition) condition)))
 
+(defun table-recalculate-test-assignment (formula)
+  (first (org-kit::table-calc-program-assignments
+          (org-kit::table-calc-parse-formula formula))))
+
 (defun table-recalculate-test-run-fixture (source-path expected-path)
   (let* ((source (table-recalculate-test-fixture source-path))
          (expected (table-recalculate-test-fixture expected-path))
@@ -222,6 +226,128 @@
            (result (table-recalculate document table)))
       (expect (document-text (edit-result-updated-document result)) :to-equal expected)))
 
+  (it "resolves last-row field targets"
+    (let* ((source (format nil "| amount | total |~%|--------+-------|~%| 2 | 0 |~%| 4 | 0 |~%#+TBLFM: @>$2=9~%"))
+           (expected (format nil "| amount | total |~%|--------+-------|~%| 2 | 0 |~%| 4 | 9 |~%#+TBLFM: @>$2=9~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (expect (document-text (edit-result-updated-document result)) :to-equal expected)))
+
+  (it "resolves first-row expression references"
+    (let* ((source (format nil "| 1 | 0 |~%| 2 | 0 |~%#+TBLFM: @2$2=@<$1~%"))
+           (expected (format nil "| 1 | 0 |~%| 2 | 1 |~%#+TBLFM: @2$2=@<$1~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (expect (document-text (edit-result-updated-document result)) :to-equal expected)))
+
+  (it "rejects invalid reference rows"
+    (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (reference
+             (org-kit::copy-table-calc-reference
+              (org-kit::table-calc-assignment-target
+               (table-recalculate-test-assignment "$1=1")))))
+      (setf (org-kit::table-calc-reference-row-kind reference) :invalid)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-reference-position
+                  reference 1 1 2 1 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects hline-anchored reference rows"
+    (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (reference
+             (org-kit::copy-table-calc-reference
+              (org-kit::table-calc-assignment-target
+               (table-recalculate-test-assignment "$1=1")))))
+      (setf (org-kit::table-calc-reference-row-kind reference) :hline-anchor)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-reference-position
+                  reference 1 1 2 1 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects unknown reference row kinds"
+    (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (reference
+             (org-kit::copy-table-calc-reference
+              (org-kit::table-calc-assignment-target
+               (table-recalculate-test-assignment "$1=1")))))
+      (setf (org-kit::table-calc-reference-row-kind reference) :future)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-reference-position
+                  reference 1 1 2 1 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects unsupported reference column kinds"
+    (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (reference
+             (org-kit::copy-table-calc-reference
+              (org-kit::table-calc-assignment-target
+               (table-recalculate-test-assignment "$1=1")))))
+      (setf (org-kit::table-calc-reference-column-kind reference) :future)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-reference-position
+                  reference 1 1 2 1 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects invalid assignment target columns"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "@2$1=1")))
+      (setf (org-kit::table-calc-reference-column-kind
+             (org-kit::table-calc-assignment-target assignment))
+            :relative)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-normalize-assignment-target
+                  assignment 2 2 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects invalid assignment target rows"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "@2$1=1")))
+      (setf (org-kit::table-calc-reference-row-kind
+             (org-kit::table-calc-assignment-target assignment))
+            :relative)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-normalize-assignment-target
+                  assignment 2 2 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects non-current row targets for column formulas"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "$1=1"))
+           (reference (org-kit::table-calc-assignment-target assignment)))
+      (setf (org-kit::table-calc-reference-row-kind reference) :absolute
+            (org-kit::table-calc-reference-row-value reference) 1)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-normalize-assignment-target
+                  assignment 2 2 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects out-of-table column assignment plans"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "$3=1")))
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-plan-column-assignments
+                  (list assignment) nil #() 2 table
+                  (make-limits) (org-kit::make-table-calc-work-budget))))
+              :to-equal '(:table :invalid-reference))))
+
   (it "detects duplicate targets expressed by a name and a number"
     (let* ((document (parse-org
                       (format nil "| amount | total |~%|--------+-------|~%| 2 | 0 |~%#+TBLFM: $total=1::$2=2~%")))
@@ -279,6 +405,21 @@
 
   (it "shares the formula work budget across expanded cells"
     (let* ((source (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%| 3 | 4 |~%#+TBLFM: $2=$1+1~%"))
+           (document (parse-org source :limits (make-limits :max-formula-work 37)))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (with-soft-assertions
+        (expect (table-recalculate-test-condition
+                 (lambda () (table-recalculate document table)))
+                :to-equal '(:limit :max-formula-work 37 38))
+        (expect (document-text document) :to-equal source))))
+
+  (it "charges public range dependency inspection to the formula work budget"
+    (let* ((row-count 5)
+           (source
+             (with-output-to-string (stream)
+               (dotimes (index row-count)
+                 (format stream "| ~D | 0 |~%" (1+ index)))
+               (format stream "#+TBLFM: @1$2=vsum(@1$1..@5$1)~%")))
            (document (parse-org source :limits (make-limits :max-formula-work 33)))
            (table (table-recalculate-test-find-node (document-root document) :table)))
       (with-soft-assertions
@@ -307,12 +448,12 @@
 
   (it "charges cell indexing to the formula work budget"
     (let* ((source (format nil "| a | b | c |~%|---+---+---|~%| 1 | 2 | 3 |~%#+TBLFM: $3=$1~%"))
-           (document (parse-org source :limits (make-limits :max-formula-work 5)))
+           (document (parse-org source :limits (make-limits :max-formula-work 8)))
            (table (table-recalculate-test-find-node (document-root document) :table)))
       (with-soft-assertions
         (expect (table-recalculate-test-condition
                  (lambda () (table-recalculate document table)))
-                :to-equal '(:limit :max-formula-work 5 6))
+                :to-equal '(:limit :max-formula-work 8 9))
         (expect (document-text document) :to-equal source))))
 
   (it "stores standard table rows in a vector"
@@ -330,6 +471,16 @@
             (when (plusp (length (aref rows 0)))
               (expect (aref (aref rows 0) 0) :to-be
                       (first (node-children header-row)))))))))
+
+  (it "charges repeated rule rows even when the table has no standard rows"
+    (let* ((document (parse-org (format nil "|---|~%|---|~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-standard-rows
+                  table (make-limits :max-formula-work 1)
+                  (org-kit::make-table-calc-work-budget))))
+              :to-equal '(:limit :max-formula-work 1 2))))
 
   (it "uses named, relative, last-row, and current-row references"
     (let* ((source
@@ -418,6 +569,15 @@
                                   (edit-span-end span)))
                         (edit-result-spans result))
                 :to-equal '("9")))))
+
+  (it "does not apply column formulas when a separator has no following data rows"
+    (let* ((source (format nil "| a | b |~%|---+---|~%#+TBLFM: $2=9~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result (table-recalculate document table)))
+      (with-soft-assertions
+        (expect (edit-result-updated-document result) :to-be document)
+        (expect (edit-result-spans result) :to-equal nil))))
 
   (it "returns an empty edit result when there is no formula or no changed value"
     (let* ((plain (parse-org (format nil "| a |~%|---|~%| 1 |~%")))

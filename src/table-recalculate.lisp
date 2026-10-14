@@ -10,41 +10,40 @@
          :reason reason))
 
 (defun table-recalculate-row-cells (row limits work-budget)
+  (table-calc-charge-work limits work-budget 1)
   (let ((cells (make-array 0 :adjustable t :fill-pointer 0)))
-    (table-calc-charge-work limits work-budget 1)
     (dolist (cell (node-children row) cells)
       (table-calc-charge-work limits work-budget 1)
       (vector-push-extend cell cells))))
 
 (defun table-recalculate-standard-rows (table limits work-budget)
-  (let ((rows nil)
+  (let ((rows (make-array 0 :adjustable t :fill-pointer 0))
         (after-first-rule nil)
         (header nil)
         (row-index 0)
         (data-rows nil))
     (dolist (row (node-children table))
+      (table-calc-charge-work limits work-budget 1)
       (cond
         ((eq (node-property row :type) :rule)
          (unless after-first-rule
-           (setf after-first-rule t)))
+           (setf after-first-rule t
+                 data-rows (make-array 0 :adjustable t :fill-pointer 0))))
         (t
          (incf row-index)
-         (push row rows)
-         (if after-first-rule
-             (push row-index data-rows)
-             (unless header
-               (setf header row))))))
-    (setf rows (nreverse rows)
-          data-rows (nreverse data-rows))
+         (unless after-first-rule
+           (unless header
+             (setf header row)))
+         (let ((cells (table-recalculate-row-cells row limits work-budget)))
+           (table-calc-charge-work limits work-budget 1)
+           (vector-push-extend cells rows))
+         (when after-first-rule
+           (table-calc-charge-work limits work-budget 1)
+           (vector-push-extend row-index data-rows)))))
+    ;; NIL denotes a table without a rule, whose rows are all data rows.
     (unless after-first-rule
-      (setf data-rows (loop for row in rows for index from 1 collect index)
-            header nil))
-    (let ((indexed-rows (make-array 0 :adjustable t :fill-pointer 0)))
-      (dolist (row rows indexed-rows)
-        (vector-push-extend
-         (table-recalculate-row-cells row limits work-budget)
-         indexed-rows))
-      (values indexed-rows data-rows header))))
+      (setf header nil))
+    (values rows data-rows header)))
 
 (defun table-recalculate-cell (standard-rows row column)
   (let ((row-node
@@ -257,13 +256,17 @@
         (unless (and (integerp column) (<= 1 column column-count))
           (table-recalculate-signal-error
            target :invalid-reference "Column formula target is outside the table"))
-        (dolist (row data-rows)
-          (table-calc-charge-work limits work-budget 1)
-          (when (table-recalculate-cell standard-rows row column)
-            (push (make-table-recalculate-entry
-                   :assignment assignment :row row :column column :owner owner)
-                  entries)
-            (incf owner)))))
+        (labels ((plan-row (row)
+                   (table-calc-charge-work limits work-budget 1)
+                   (when (table-recalculate-cell standard-rows row column)
+                     (push (make-table-recalculate-entry
+                            :assignment assignment :row row :column column :owner owner)
+                           entries)
+                     (incf owner))))
+          (if data-rows
+              (loop for row across data-rows do (plan-row row))
+              (loop for row from 1 to (length standard-rows)
+                    do (plan-row row))))))
     (values (nreverse entries) owner)))
 
 (defun table-recalculate-plan-field-assignments
