@@ -84,6 +84,26 @@
         (expect (document-text document) :to-equal source)))))
 
 (describe "headline subtree edits"
+  (it "trims CRLF terminators while preserving a bare trailing CR"
+    (let* ((lf (string #\Newline))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (bare-cr (string #\Return)))
+      (with-soft-assertions
+        (expect (org-kit::edit-subtree-trim-final-line-endings "")
+                :to-equal "")
+        (expect
+         (org-kit::edit-subtree-trim-final-line-endings
+          (concatenate 'string "text" lf))
+         :to-equal "text")
+        (expect
+         (org-kit::edit-subtree-trim-final-line-endings
+          (concatenate 'string "text" crlf crlf))
+         :to-equal "text")
+        (expect
+         (org-kit::edit-subtree-trim-final-line-endings
+          (concatenate 'string "text" bare-cr))
+         :to-equal (concatenate 'string "text" bare-cr)))))
+
   (it "inserts a last child and changes only the requested canonical subtree"
     (let* ((source (format nil "* Parent~%Body~%* Peer~%Peer body~%"))
            (document (parse-org source))

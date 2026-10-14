@@ -158,6 +158,16 @@
       (after (string #\Newline))
       (t (string #\Newline)))))
 
+(defun edit-subtree-trim-final-line-endings (text)
+  (let ((end (length text)))
+    (loop while (and (plusp end)
+                     (char= (char text (1- end)) #\Newline))
+          do (decf end)
+             (when (and (plusp end)
+                        (char= (char text (1- end)) #\Return))
+               (decf end)))
+    (subseq text 0 end)))
+
 (defun edit-subtree-join-fragment (document offset raw-subtree suffix-p
                                   &optional line-ending)
   (let* ((source (document-text document))

@@ -216,6 +216,25 @@
                 :to-equal (format nil "* P~%** A~%** B"))
         (expect (document-text document) :to-equal source))))
 
+  (it "preserves a bare CR at EOF when sorting children"
+    (let* ((bare-cr (string #\Return))
+           (source (concatenate 'string
+                                (format nil "* P~%** B~%** A~%** Z")
+                                bare-cr))
+           (document (parse-org source))
+           (result (sort-subtree-children document
+                                          (edit-sort-test-parent document)
+                                          :alpha))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (concatenate 'string
+                                       (format nil "* P~%** A~%** B~%** Z")
+                                       bare-cr))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent updated))
+                :to-equal (list "A" "B" (concatenate 'string "Z" bare-cr))))))
+
   (it "keeps parent section content while sorting its headline children"
     (let* ((source
              (format nil

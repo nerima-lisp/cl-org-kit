@@ -251,7 +251,7 @@
                                              #\Newline)))
                         (write-string line-ending stream))))))
     (if (and final-span-p (not (document-final-newline-p document)))
-        (string-right-trim '(#\Return #\Newline) replacement)
+        (edit-subtree-trim-final-line-endings replacement)
         replacement)))
 
 (defun sort-subtree-children (document heading key
