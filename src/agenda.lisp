@@ -789,22 +789,15 @@ after the later of VIEW's date and the reference date."
 
 (defun agenda (documents start-date end-date
                &key time-context
-                 ((:warning-days warning-days-option) nil warning-days-supplied-p)
-                 ((:scheduled-delay scheduled-delay-option) nil
-                  scheduled-delay-supplied-p)
-                 ((:future-repeats future-repeats-option) nil
-                  future-repeats-supplied-p))
+                 (warning-days 14)
+                 (scheduled-delay 0)
+                 (future-repeats :all))
   "Return agenda rows for inclusive START-DATE through END-DATE.
 TIME-CONTEXT is required and is the only source of reference time."
   (let* ((documents (agenda-normalize-documents documents))
          (time-context (agenda-require-time-context time-context))
          (start-date (agenda-require-date start-date))
          (end-date (agenda-require-date end-date))
-         (warning-days (if warning-days-supplied-p warning-days-option 14))
-         (scheduled-delay (if scheduled-delay-supplied-p
-                              scheduled-delay-option 0))
-         (future-repeats (if future-repeats-supplied-p
-                             future-repeats-option :all))
          (start-local (agenda-local-date start-date))
          (end-local (agenda-local-date end-date))
          (limits (agenda-operation-limits documents)))
