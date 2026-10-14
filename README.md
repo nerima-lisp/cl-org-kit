@@ -12,7 +12,8 @@ targets SBCL.
 - Query headings with structured selectors, path-and-filter strings, or Org
   tag/property match syntax.
 - Make format-preserving edits to TODO keywords, headings, properties,
-  planning data, subtrees, checkboxes, clocks, and Org pipe tables.
+  planning data, subtrees, checkboxes, clocks, and Org pipe tables. Cycle or
+  transition TODO states through configured workflow sequences.
 - Build TODO lists and date-range agendas from one or more documents.
 - Start and stop clocks, summarize clock time, and create clocktable data.
 - Format, edit, and stably sort Org pipe tables, and recalculate supported

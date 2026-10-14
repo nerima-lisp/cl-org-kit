@@ -33,11 +33,50 @@ document remains unchanged.
     (org-kit:write-org updated)))
 ~~~
 
-There is no public helper that advances to the next TODO state. Choose and pass
-the state explicitly.
-
 An unknown keyword, invalid target, or conflicting edit signals
 `org-edit-error`.
+
+## Transition a TODO state
+
+`transition-heading-todo` sets a heading to a configured state, while
+`cycle-heading-todo` advances or reverses through a configured TODO sequence.
+Both functions return two values: an `edit-result` and a `transition-result`.
+The `edit-result` contains the updated document; the `transition-result`
+describes the previous and new states, log events, repeater rescheduling, and
+any `CLOSED` timestamp.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(labels ((first-node-of-type (document wanted-type)
+           (let ((found nil))
+             (org-kit:map-nodes
+              (lambda (node)
+                (when (and (null found)
+                           (eq (org-kit:node-type node) wanted-type))
+                  (setf found node)))
+              (org-kit:document-root document))
+             found)))
+  (let* ((document
+           (org-kit:parse-org
+            (format nil "#+TODO: TODO | DONE~%~%* TODO Prepare release~%")))
+         (heading (first-node-of-type document :headline)))
+    (multiple-value-bind (edit transition)
+        (org-kit:transition-heading-todo
+         document heading "DONE" :at "2025-01-01T09:00:00")
+      (list
+       (org-kit:write-org (org-kit:edit-result-updated-document edit))
+       (org-kit:transition-result-previous-state transition)
+       (org-kit:transition-result-new-state transition)
+       (org-kit:transition-result-log-events transition)))))
+~~~
+
+An unknown state, invalid heading, or conflicting edit signals
+`org-edit-error`; invalid or ambiguous time input signals `org-time-error`.
+When a repeater transition catches up missed occurrences, expansion is bounded
+by the document's `:max-future-repeats` limit, which defaults to 10,000. An
+exceeded limit signals `org-resource-limit-error`.
 
 ## Build a TODO list and agenda
 

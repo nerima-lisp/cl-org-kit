@@ -13,6 +13,12 @@ are implementation details. Symbols from runtime dependencies are not part of
 the `cl-org-kit` API. The 0.1.0 exports have no separately designated
 experimental subset.
 
+TODO workflow changes are part of the 0.1.0 public API. Use
+`cycle-heading-todo` to advance or reverse through a configured sequence, or
+`transition-heading-todo` to select a state directly. The [TODO and Agenda
+guide](../guides/todo-agenda.md) documents their return values, conditions, and
+repeater limit.
+
 ## Compatibility
 
 Version 0.1.0 defines the supported interface for that release. While the
