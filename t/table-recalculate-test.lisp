@@ -324,6 +324,18 @@
                   assignment 2 2 (make-hash-table :test #'equal) table)))
               :to-equal '(:table :invalid-reference))))
 
+  (it "rejects a non-integer field target row during normalization"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "@2$1=1"))
+           (reference (org-kit::table-calc-assignment-target assignment)))
+      (setf (org-kit::table-calc-reference-row-value reference) :invalid)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-normalize-assignment-target
+                  assignment 2 2 (make-hash-table :test #'equal) table)))
+              :to-equal '(:table :invalid-reference))))
+
   (it "rejects non-current row targets for column formulas"
     (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
            (table (table-recalculate-test-find-node (document-root document) :table))
@@ -347,6 +359,40 @@
                   (list assignment) nil #() 2 table
                   (make-limits) (org-kit::make-table-calc-work-budget))))
               :to-equal '(:table :invalid-reference))))
+
+  (it "rejects non-integer column targets during column planning"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "$1=1")))
+      (setf (org-kit::table-calc-reference-column-value
+             (org-kit::table-calc-assignment-target assignment))
+            :invalid)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-plan-column-assignments
+                  (list assignment) nil #() 2 table
+                  (make-limits) (org-kit::make-table-calc-work-budget))))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects non-integer and out-of-range coordinates during field planning"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (dolist (case '((:row :invalid) (:row 0) (:column :invalid)))
+        (let* ((assignment (table-recalculate-test-assignment "@2$1=1"))
+               (reference (org-kit::table-calc-assignment-target assignment)))
+          (ecase (first case)
+            (:row
+             (setf (org-kit::table-calc-reference-row-value reference)
+                   (second case)))
+            (:column
+             (setf (org-kit::table-calc-reference-column-value reference)
+                   (second case))))
+          (expect (table-recalculate-test-condition
+                   (lambda ()
+                     (org-kit::table-recalculate-plan-field-assignments
+                      (list assignment) #(#(t)) 1 2 table
+                      (make-limits) (org-kit::make-table-calc-work-budget))))
+                  :to-equal '(:table :invalid-reference))))))
 
   (it "detects duplicate targets expressed by a name and a number"
     (let* ((document (parse-org
@@ -671,6 +717,12 @@
         (expect (typep condition 'org-table-error) :to-be t)
         (when (typep condition 'org-table-error)
           (expect (org-table-error-target condition) :to-equal "table")))))
+
+  (it "returns no cell for non-integer row or column indexes"
+    (let ((rows #(#(t))))
+      (with-soft-assertions
+        (expect (org-kit::table-recalculate-cell rows :invalid 1) :to-be nil)
+        (expect (org-kit::table-recalculate-cell rows 1 :invalid) :to-be nil))))
 
   (it "preserves CRLF and untouched source text when patching cell spans"
     (let* ((source (format nil "#+TITLE: Keep~C~%| a | b |~C~%|---+---|~C~%| 1 | 8 |~C~%#+TBLFM: @2$2=$1+1~C~%" #\Return #\Return #\Return #\Return #\Return))
