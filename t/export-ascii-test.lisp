@@ -17,6 +17,15 @@
       (some (lambda (child) (export-ascii-test-find-node child type))
             (node-children root))))
 
+(defun export-ascii-test-view (node source-document &optional children)
+  (org-kit::%make-export-view :node node :source-document source-document
+                              :children children))
+
+(defun export-ascii-test-preparation (document root-views &optional options)
+  (org-kit::%make-export-preparation
+   :document document :backend :ascii :metadata nil :options options
+   :root-views root-views :toc nil :footnotes nil :allow-raw-html nil))
+
 (defun export-ascii-test-link-nodes (document)
   (let ((links nil))
     (map-nodes (lambda (node)
@@ -122,6 +131,562 @@
         (expect first-output :to-equal expected)
         (expect second-output :to-equal first-output))))
 
+  (it "renders list state, nested descriptions, and list-to-paragraph gaps"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              "Before list."
+              "- [X] checked"
+              "- [ ] unchecked"
+              "- [-] partial"
+              "Between lists."
+              "+ Term :: Definition with"
+              "  continuation"
+              "  - nested item"
+              "+ :: Anonymous description"
+              "+ Empty ::"
+              "After list."))
+           (document (parse-org source))
+           (tagged-item
+             (let ((item nil))
+               (map-nodes
+                (lambda (node)
+                  (when (and (eq (node-type node) :item)
+                             (<= (node-begin node) (search "Term" source))
+                             (< (search "Term" source) (node-end node)))
+                    (setf item node)))
+                (document-root document))
+               item))
+           ;; Reader object preparation consumes this range into :tag; restore
+           ;; the source range to exercise the ASCII renderer's tag extraction.
+           (tag-start (search "Term" source))
+           (output
+             (progn
+               (setf (node-property tagged-item :reader-tag-range)
+                     (cons tag-start (+ tag-start (length "Term"))))
+               (export-org document :ascii)))
+           (expected
+             (export-ascii-test-lines
+              "Before list."
+              ""
+              "  - [X] checked"
+              "  - [ ] unchecked"
+              "  - [-] partial"
+              "Between lists."
+              ""
+              "  Term :: "
+              "        Definition with continuation"
+              ""
+              "          - nested item"
+              "  :: "
+              "        :: Anonymous description"
+              "  :: "
+              "After list."
+              "")))
+      (with-soft-assertions
+        (expect tagged-item :not :to-be nil)
+        (expect tag-start :not :to-be nil)
+        (expect output :to-equal expected))))
+
+  (it "renders dynamic blocks and inline object fallbacks"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              "#+BEGIN: clocktable :scope file"
+              "dynamic body"
+              "#+END:"
+              "------"
+              "Inline source: src_emacs-lisp[:results raw]{(+ 1 2)}."
+              "Target <<anchor>> and stats [2/5]."
+              "Timestamp <2026-10-14 Wed>."
+              "Citation [cite: see;@key note]."
+              "Math \\(x + 1\\) and \\[y=2\\]."))
+           (document (parse-org source))
+           (output (export-org document :ascii))
+           (expected
+             (export-ascii-test-lines
+              "#+BEGIN: clocktable :scope file"
+              "dynamic body"
+              "#+END:"
+              ""
+              ""
+              "------------------------------------------------------------------------"
+              ""
+              "Inline source: (+ 1 2). Target and stats [2/5]. Timestamp <2026-10-14"
+              "Wed>. Citation [cite: see;@key note]. Math \\(x + 1\\) and \\[y=2\\]."
+              "")))
+      (with-soft-assertions
+        (expect (export-ascii-test-find-node (document-root document) :dynamic-block)
+                :not :to-be nil)
+        (expect (export-ascii-test-find-node (document-root document) :inline-src-block)
+                :not :to-be nil)
+        (expect (export-ascii-test-find-node (document-root document) :target)
+                :not :to-be nil)
+        (expect (export-ascii-test-find-node (document-root document) :statistics-cookie)
+                :not :to-be nil)
+        (expect (export-ascii-test-find-node (document-root document) :timestamp)
+                :not :to-be nil)
+        (expect (export-ascii-test-find-node (document-root document) :latex-fragment)
+                :not :to-be nil)
+        (expect output :to-equal expected))))
+
+  (it "preserves Babel calls and citations without evaluating them"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              "#+CALL: foo()"
+              "Inline call: call_sum(1, 2). Citation [cite/t: see;@smith2024]."))
+           (document (parse-org source))
+           (output (export-org document :ascii)))
+      (with-soft-assertions
+        (expect (export-ascii-test-find-node (document-root document) :babel-call)
+                :not :to-be nil)
+        (expect (export-ascii-test-find-node
+                 (document-root document) :inline-babel-call)
+                :not :to-be nil)
+        (expect (export-ascii-test-find-node (document-root document) :citation)
+                :not :to-be nil)
+        (expect output
+                :to-equal
+                (export-ascii-test-source
+                 "#+CALL: foo()"
+                 ""
+                 ""
+                 "Inline call: call_sum(1, 2). Citation [cite/t: see;@smith2024].")))))
+
+  (it "renders source-only width, link, code, and entity cases"
+    (let* ((text (concatenate 'string (make-string 69 :initial-element #\a) " b"))
+           (document (parse-org text))
+           (plain-three (make-node :plain-text :begin 0 :end (length text)))
+           (plain-four (make-node :plain-text :begin 0 :end (length text)))
+           (paragraph-three (make-node :paragraph :children (list plain-three)))
+           (paragraph-four (make-node :paragraph :children (list plain-four)))
+           (headline-three
+             (make-node :headline :properties '(:level 3 :raw-value "Three")
+                        :children (list paragraph-three)))
+           (headline-four
+             (make-node :headline :properties '(:level 4 :raw-value "Four")
+                        :children (list paragraph-four)))
+           (target
+             (make-node :headline :properties '(:level 1 :raw-value "Target")))
+           (entity-span (make-node :entity :begin 0 :end 5))
+           (root (make-node :org-data
+                            :children (list headline-three headline-four target
+                                            entity-span)))
+           (target-view (export-ascii-test-view target document))
+           (preparation
+             (export-ascii-test-preparation
+              document (list target-view) '((:num . nil))))
+           (view-three
+             (export-ascii-test-view
+              paragraph-three document
+              (list (export-ascii-test-view plain-three document))))
+           (view-four
+             (export-ascii-test-view
+              paragraph-four document
+              (list (export-ascii-test-view plain-four document))))
+           (ascii-links
+             (list
+              (export-ascii-test-view
+               (make-node :link :properties
+                          '(:type "https" :path "//fallback.test/path"))
+               document)
+              (export-ascii-test-view
+               (make-node :link :properties '(:path "assets/topic:v2"))
+               document)
+              (export-ascii-test-view
+               (make-node :link :properties '(:path "x")) document)
+              (export-ascii-test-view
+               (make-node :link :properties
+                          '(:type "custom-id" :path "missing-target"))
+               document)))
+           ;; A leading # here is a deliberate synthetic path-normalization
+           ;; case; parsed fuzzy links store the path without the marker.
+           (target-link
+             (export-ascii-test-view
+              (make-node :link :properties '(:type "fuzzy" :path "#Target"))
+              document))
+           (ordinary-target-link
+             (export-ascii-test-view
+              (make-node :link :properties '(:type "fuzzy" :path "Target"))
+              document))
+           (empty-fuzzy-link
+             (export-ascii-test-view
+              (make-node :link :properties '(:type "fuzzy" :path ""))
+              document))
+           (missing-fuzzy-path
+             (make-node :link :properties '(:type "fuzzy")))
+           (external-link
+             (make-node :link :properties '(:type "https" :path "//target")))
+           (utf8-entity
+             (export-ascii-test-view
+              (make-node :entity :properties '(:utf8 "UTF8")) document))
+           (ascii-entity
+             (export-ascii-test-view
+              (make-node :entity :properties '(:ascii "ASCII")) document))
+           (empty-entity
+             (export-ascii-test-view (make-node :entity) document))
+           (span-entity (export-ascii-test-view entity-span document))
+           (fixed-width
+             (export-ascii-test-view
+              (make-node :fixed-width :properties '(:value ":  left")) document))
+           (empty-example
+             (export-ascii-test-view
+              (make-node :example-block :properties '(:value "")) document))
+           (root-view
+             (export-ascii-test-view root document (list target-view)))
+           (entity-text (make-string 5 :initial-element #\a)))
+      ;; Direct paragraph children of a headline are a renderer-supported
+      ;; synthetic AST shape; public preparation wraps them in a section.
+      (setf (document-root document) root)
+      (with-soft-assertions
+        (expect (org-kit::export-ascii-render-view view-three preparation)
+                :to-equal (format nil "~A~%b" (make-string 69 :initial-element #\a)))
+        (expect (org-kit::export-ascii-render-view view-four preparation)
+                :to-equal text)
+        (expect (mapcar (lambda (view)
+                          (org-kit::export-ascii-render-view view preparation))
+                        ascii-links)
+                :to-equal '("<https://fallback.test/path>"
+                            "<assets/topic:v2>"
+                            "<x>"
+                            "missing-target"))
+        (expect (org-kit::export-ascii-render-view target-link preparation)
+                :to-equal "Target")
+        (expect (org-kit::export-ascii-render-view ordinary-target-link
+                                                    preparation)
+                :to-equal "Target")
+        (expect (org-kit::export-ascii-render-view empty-fuzzy-link preparation)
+                :to-equal "")
+        (expect (org-kit::export-ascii-local-heading
+                 missing-fuzzy-path preparation)
+                :to-be nil)
+        (expect (org-kit::export-ascii-local-heading external-link preparation)
+                :to-be nil)
+        (expect (org-kit::export-ascii-render-view root-view preparation)
+                :to-equal (format nil "Target~%======"))
+        (expect (org-kit::export-ascii-render-view utf8-entity preparation)
+                :to-equal "UTF8")
+        (expect (org-kit::export-ascii-render-view ascii-entity preparation)
+                :to-equal "ASCII")
+        (expect (org-kit::export-ascii-render-view empty-entity preparation)
+                :to-equal "")
+        (expect (org-kit::export-ascii-render-view span-entity preparation)
+                :to-equal entity-text)
+        (expect (org-kit::export-ascii-render-view fixed-width preparation)
+                :to-equal (format nil ",----~%| left~%`----"))
+        (expect (org-kit::export-ascii-render-view empty-example preparation)
+                :to-equal "")
+        ;; Left justification leaves both short and over-width source text intact.
+        (expect (org-kit::export-ascii-justify-line "Title" 10 :left)
+                :to-equal "Title")
+        (expect (org-kit::export-ascii-justify-line "Title" 3 :left)
+                :to-equal "Title")
+        (expect (org-kit::export-ascii-destination-safe-p
+                 "https://safe.test/path"
+                 (format nil "https://safe.test/~C" #\Tab))
+                :to-be nil)
+        (expect (org-kit::export-ascii-destination-safe-p "raw" nil)
+                :to-be nil)
+        (expect (org-kit::export-ascii-destination-safe-p "" "")
+                :to-be nil)
+        (expect (org-kit::export-ascii-destination-safe-p "x" "x")
+                :to-be t)
+        (expect (org-kit::export-ascii-destination-safe-p
+                 "//cdn.test/path" "//cdn.test/path")
+                :to-be nil)
+        ;; Ordinary rows pass through while colon-prefixed rows trim their marker.
+        (expect (org-kit::export-ascii-fixed-width-value
+                 (format nil "ordinary~%:  fixed~%"))
+                :to-equal (format nil "ordinary~%fixed~%"))
+        (expect (org-kit::export-ascii-fixed-width-value "")
+                :to-equal ""))))
+
+  (it "tracks included heading levels and blank sections in prepared views"
+    (let* ((source (parse-org "aaaaaaaaaa"))
+           (fragment (parse-org "included"))
+           (body-text (make-node :plain-text :begin 0 :end 4))
+           (tail-text (make-node :plain-text :begin 5 :end 9))
+           (body (make-node :paragraph :children (list body-text)))
+           (tail (make-node :paragraph :children (list tail-text)))
+           (section (make-node :section :children (list body)))
+           (deep-heading
+             (make-node :headline :properties '(:level 2 :raw-value "Deep")))
+           (shallow-heading
+             (make-node :headline :properties '(:level 1 :raw-value "Shallow")))
+           (root (make-node :org-data
+                            :children (list section tail deep-heading shallow-heading)))
+           (included-heading
+             (make-node :headline :properties '(:level 1 :raw-value "Included")))
+           (fragment-root (make-node :org-data :children (list included-heading))))
+      (setf (document-root source) root
+            (document-root fragment) fragment-root)
+      (let* ((included-view (export-ascii-test-view included-heading fragment))
+             (body-view
+               (export-ascii-test-view
+                body source (list (export-ascii-test-view body-text source))))
+             (tail-view
+               (export-ascii-test-view
+                tail source (list (export-ascii-test-view tail-text source))))
+             (section-view
+               (export-ascii-test-view section source (list body-view)))
+             (deep-view (export-ascii-test-view deep-heading source))
+             (shallow-view (export-ascii-test-view shallow-heading source))
+             (empty-section
+               (export-ascii-test-view
+                (make-node :section :post-blank 1) source))
+             (section-child (make-node :paragraph :post-blank 2))
+             (nonempty-section
+               (export-ascii-test-view
+                (make-node :section :children (list section-child)) source
+                (list (export-ascii-test-view section-child source))))
+             (preparation (export-ascii-test-preparation source nil))
+             (included-preparation
+               (export-ascii-test-preparation source
+                                              (list included-view deep-view shallow-view)))
+             (included-body
+               (org-kit::export-ascii-render-views
+                (list included-view section-view tail-view) preparation))
+             (deeper-after-include
+               (org-kit::export-ascii-render-views
+                (list included-view deep-view tail-view) included-preparation))
+             (same-level-after-include
+               (org-kit::export-ascii-render-views
+                (list included-view shallow-view tail-view) included-preparation)))
+        (with-soft-assertions
+          (expect (org-kit::export-ascii-view-gap empty-section tail-view)
+                  :to-equal (org-kit::export-ascii-newlines 2))
+          (expect (org-kit::export-ascii-view-gap nonempty-section tail-view)
+                  :to-equal (org-kit::export-ascii-newlines 3))
+          (expect included-body
+                  :to-equal (format nil "Included~%========~%~%aaaa~%~%  aaaa"))
+          (expect deeper-after-include
+                  :to-equal
+                  (format nil "1 Included~%==========~%~%~%1.1 Deep~%~A~%~%  aaaa"
+                          "~~~~~~~~"))
+          (expect same-level-after-include
+                  :to-equal
+                  (format nil "1 Included~%==========~%~%~%2 Shallow~%=========~%~%aaaa"))))))
+
+  (it "omits heading tags only from TOC titles when requested"
+    (let* ((document (parse-org (export-ascii-test-source "* Tagged :note:")))
+           (heading (export-ascii-test-find-node
+                     (document-root document) :headline))
+           (view (export-ascii-test-view heading document))
+           (preparation
+             (export-ascii-test-preparation
+              document (list view) '((:num . nil) (:tags . :not-in-toc))))
+           (numbers (org-kit::export-ascii-numbering preparation)))
+      (with-soft-assertions
+        (expect (org-kit::export-ascii-heading-title
+                 view preparation numbers 72 nil t)
+                :to-equal "Tagged")
+        (expect (org-kit::export-ascii-heading-title
+                 view preparation numbers 72 nil nil)
+                :to-equal
+                (concatenate 'string "Tagged"
+                             (make-string 60 :initial-element #\Space)
+                             ":note:")))))
+
+  (it "limits heading numbering and TODO titles at their option boundaries"
+    (let* ((document
+             (parse-org
+              (export-ascii-test-source
+               "#+TODO: TODO | DONE"
+               "* TODO Top"
+               "** Child"
+               "*** Deep")))
+           (headings
+             (let ((found nil))
+               (map-nodes (lambda (node)
+                            (when (eq (node-type node) :headline)
+                              (push node found)))
+                          (document-root document))
+               (nreverse found)))
+           (views (mapcar (lambda (node)
+                            (export-ascii-test-view node document))
+                          headings))
+           (default-preparation
+             (export-ascii-test-preparation document views))
+           (bounded-preparation
+             (export-ascii-test-preparation document views '((:num . 2))))
+           (disabled-preparation
+             (export-ascii-test-preparation document views '((:num . nil))))
+           (default-numbers
+             (org-kit::export-ascii-numbering default-preparation))
+           (bounded-numbers
+             (org-kit::export-ascii-numbering bounded-preparation))
+           (disabled-numbers
+             (org-kit::export-ascii-numbering disabled-preparation))
+           (todo-disabled-preparation
+             (export-ascii-test-preparation
+              document views '((:num . nil) (:todo . nil))))
+           (todo-disabled-numbers
+             (org-kit::export-ascii-numbering todo-disabled-preparation)))
+      (with-soft-assertions
+        (expect (mapcar (lambda (view)
+                          (org-kit::export-ascii-heading-title
+                           view default-preparation default-numbers 72 nil))
+                        views)
+                :to-equal '("1 TODO Top" "1.1 Child" "1.1.1 Deep"))
+        (expect (mapcar (lambda (view)
+                          (org-kit::export-ascii-heading-title
+                           view bounded-preparation bounded-numbers 72 nil))
+                        views)
+                :to-equal '("1 TODO Top" "1.1 Child" "Deep"))
+        (expect (mapcar (lambda (view)
+                          (org-kit::export-ascii-heading-title
+                           view disabled-preparation disabled-numbers 72 nil))
+                        views)
+                :to-equal '("TODO Top" "Child" "Deep"))
+        (expect (org-kit::export-ascii-heading-first-part
+                 (first views) todo-disabled-preparation todo-disabled-numbers)
+                :to-equal "Top"))))
+
+  (it "leaves headings unnumbered for invalid prepared numbering values"
+    (let* ((document (parse-org (export-ascii-test-source "* Title")))
+           (heading (export-ascii-test-find-node
+                     (document-root document) :headline))
+           (view (export-ascii-test-view heading document))
+           ;; Public option parsing rejects non-integer num values. This
+           ;; prepared view isolates the renderer's fallback for malformed
+           ;; internal preparation state.
+           (preparation
+             (export-ascii-test-preparation
+              document (list view) '((:num . :invalid))))
+           (numbers (org-kit::export-ascii-numbering preparation))
+           (invalid-option
+             (export-ascii-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org
+                  (export-ascii-test-source "#+OPTIONS: num:invalid" "* Title"))
+                 :ascii)))))
+      (with-soft-assertions
+        (expect (org-kit::export-ascii-heading-title
+                 view preparation numbers 72 nil)
+                :to-equal "Title")
+        (expect (typep invalid-option 'org-export-unsupported-syntax) :to-be t)
+        (when (typep invalid-option 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-backend invalid-option)
+                  :to-be :ascii)
+          (expect (org-export-unsupported-syntax-feature invalid-option)
+                  :to-be :invalid-option)))))
+
+  (it "indents non-paragraph list item bodies under their marker"
+    (let* ((document (parse-org "value"))
+           (text (make-node :plain-text :begin 0 :end 5))
+           (unmarked-text (make-node :plain-text :begin 0 :end 5))
+           (item (make-node :item :properties '(:bullet "- ")
+                            :children (list text)))
+           (unmarked-item (make-node :item :children (list unmarked-text)))
+           (list (make-node :plain-list :properties '(:type :unordered)
+                            :children (list item unmarked-item)))
+           (root (make-node :org-data :children (list list)))
+           (item-view
+             (export-ascii-test-view
+              item document (list (export-ascii-test-view text document))))
+           (unmarked-item-view
+             (export-ascii-test-view
+              unmarked-item document
+              (list (export-ascii-test-view unmarked-text document))))
+           (preparation (export-ascii-test-preparation document nil)))
+      (setf (document-root document) root)
+      (with-soft-assertions
+        (expect (org-kit::export-ascii-render-item item-view preparation 1)
+                :to-equal (format nil "- ~%  value"))
+        (expect (org-kit::export-ascii-render-item unmarked-item-view
+                                                   preparation 1)
+                :to-equal (format nil "- ~%  value")))))
+
+  (it "renders heading depth, metadata flags, inline objects, and ASCII blocks"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:2 pri:t \\n:t"
+              "#+TODO: TODO | DONE"
+              "* TODO [#A] Top"
+              "** Child"
+              "*** Third"
+              "**** Deep"
+              "***** deeper"
+              "Paragraph *bold* /italic/ +strike+ _under_ ^sup _{sub} ~code~ =verbatim= \\alpha [2/5] <2026-10-12 Mon>\\\\"
+              "next"
+              "#+BEGIN_EXPORT ascii"
+              "literal ascii"
+              "#+END_EXPORT"
+              "#+BEGIN_EXPORT html"
+              "hidden html"
+              "#+END_EXPORT"
+              "@@ascii:snippet@@ @@html:hidden@@"
+              "#+BEGIN_CENTER"
+              "centered"
+              "#+END_CENTER"
+              "#+BEGIN_QUOTE"
+              "quoted"
+              "#+END_QUOTE"
+              "#+BEGIN_VERSE"
+              "verse"
+              "#+END_VERSE"
+              ":drawer:"
+              "inside"
+              ":end:"
+              "#+BEGIN_EXAMPLE"
+              "example"
+              "#+END_EXAMPLE"
+              ": fixed width"))
+           (document (parse-org source))
+           (output (export-org document :ascii))
+           (expected
+             (export-ascii-test-lines
+              "1 TODO (##65) Top"
+              "================="
+              ""
+              "1.1 Child"
+              "~~~~~~~~~"
+              ""
+              "Third"
+              "-----"
+              ""
+              "* Deep"
+              ""
+              "  + deeper"
+              ""
+              "    Paragraph *bold* /italic/ strike under ^sup _{sub} `' `' α [2/5]"
+              "    <2026-10-12 Mon>"
+              "    next"
+              ""
+              "    literal ascii"
+              ""
+              ""
+              "    snippet"
+              ""
+              "    centered"
+              ""
+              "          quoted"
+              ""
+              "          verse"
+              ""
+              ""
+              "    inside"
+              ""
+              "    ,----"
+              "    | example"
+              "    `----"
+              ""
+              "    ,----"
+              "    | fixed width"
+              "    `----"
+              "")))
+      (with-soft-assertions
+        (expect (node-property
+                 (export-ascii-test-find-node
+                  (document-root document) :headline)
+                 :priority)
+                :to-be 65)
+        (expect output :to-equal expected)
+        (expect (search "hidden html" output) :to-be nil)
+        (expect (search "snippet" output) :not :to-be nil))))
+
   (it "aligns a Unicode table with the shared width and cell helpers"
     (let* ((source
              (export-ascii-test-source
@@ -152,6 +717,39 @@
           (expect (org-kit::table-format-cell "é" (aref widths 1) :left)
                   :to-equal " é     ")
           (expect output :to-equal expected)))))
+
+  (it "renders blank cells and table.el source tables"
+    (let* ((blank-source
+             (export-ascii-test-source
+              "| alpha | |"
+              "|-------+---|"
+              "| value | x |"))
+           (legacy-source
+             (export-ascii-test-source
+              "+---+---+"
+              "| 1 | 2 |"
+              "+---+---+"
+              "#+TBLFM: $2=$1+1"))
+           (blank-document (parse-org blank-source))
+           (legacy-document (parse-org legacy-source))
+           (blank-output (export-org blank-document :ascii))
+           (legacy-output (export-org legacy-document :ascii))
+           (legacy-table
+             (export-ascii-test-find-node (document-root legacy-document) :table)))
+      (with-soft-assertions
+        (expect blank-output
+                :to-equal
+                (export-ascii-test-source
+                 "| alpha |   |"
+                 "+-------+---+"
+                 "| value | x |"))
+        (expect (node-property legacy-table :type) :to-be :table.el)
+        (expect legacy-output
+                :to-equal
+                (export-ascii-test-source
+                 "+---+---+"
+                 "| 1 | 2 |"
+                 "+---+---+")))))
 
   (it "honors caller metadata without changing the document"
     (let* ((source
@@ -278,6 +876,34 @@
         (expect (search "[Internal] See section 1" output) :not :to-be nil)
         (expect (search "Target" output) :not :to-be nil))))
 
+  (it "resolves parser-generated fuzzy links through the public API"
+    (let* ((document
+             (parse-org
+              (export-ascii-test-source
+               "#+OPTIONS: toc:nil num:nil"
+               "* Target"
+               "* Links"
+               "[[Target][Internal]]")))
+           (link (first (export-ascii-test-link-nodes document)))
+           (output (export-org document :ascii))
+           (expected
+             (export-ascii-test-source
+              "Target"
+              "======"
+              ""
+              ""
+              "Links"
+              "====="
+              ""
+              "  [Internal]"
+              ""
+              ""
+              "[Internal] See section Target")))
+      (with-soft-assertions
+        (expect (list (node-property link :type) (node-property link :path))
+                :to-equal '("fuzzy" "Target"))
+        (expect output :to-equal expected))))
+
   (it "rejects unsafe link destinations and keeps relative colon paths safe"
     (let* ((source
              (export-ascii-test-source
@@ -383,6 +1009,65 @@
       (with-soft-assertions
         (expect (length links) :to-be 1)
         (expect output :to-equal (export-ascii-test-source "[Anchor]")))))
+
+  (it "extracts angle and plain link destinations from source spans"
+    (let* ((source
+             (export-ascii-test-source
+              "<https://angle.test/path> https://plain.test/path"))
+           (document (parse-org source))
+           (links (export-ascii-test-link-nodes document))
+           (output (export-org document :ascii)))
+      (with-soft-assertions
+        (expect (mapcar (lambda (link) (node-property link :format)) links)
+                :to-equal '(:angle :plain))
+        (expect output
+                :to-equal
+                (export-ascii-test-source
+                 "<https://angle.test/path> <https://plain.test/path>")))))
+
+  (it "renders unresolved custom-id and unsafe links without descriptions"
+    (let* ((source
+             (export-ascii-test-source
+              "[[#not-exported]] [[javascript:alert(1)]]"))
+           (output (export-org (parse-org source) :ascii)))
+      (expect output
+              :to-equal
+              (export-ascii-test-source "not-exported javascript:alert(1)"))))
+
+  (it "separates multiple named footnote definitions"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              "* First section"
+              "Reference [fn:first]."
+              "[fn:first] first note."
+              "* Second section"
+              "Reference [fn:second]."
+              "[fn:second] second note."))
+           (output (export-org (parse-org source) :ascii))
+           (expected
+             (export-ascii-test-lines
+              "First section"
+              "============="
+              ""
+              "  Reference [1]."
+              ""
+              ""
+              "Second section"
+              "=============="
+              ""
+              "  Reference [2]."
+              ""
+              ""
+              ""
+              "Footnotes"
+              "_________"
+              ""
+              "[1] first note."
+              ""
+              "[2] second note."
+              "")))
+      (expect output :to-equal expected)))
 
   (it "resolves included custom-id links and collects a root-level link note"
     (let* ((source
