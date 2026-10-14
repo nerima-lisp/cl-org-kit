@@ -75,6 +75,7 @@
    #:statistics-cookie-update-p #:statistics-cookie-update-node
    #:statistics-cookie-update-old-value #:statistics-cookie-update-new-value
    #:update-statistics-cookies
+   #:table-recalculate
    ;; Format-preserving subtree edits
    #:insert-subtree #:delete-subtree #:replace-subtree
    #:promote-subtree #:demote-subtree
