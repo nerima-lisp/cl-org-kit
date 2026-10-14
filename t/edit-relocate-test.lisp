@@ -211,6 +211,36 @@
                  (edit-relocate-test-headline updated "Child") :level)
                 :to-be 1))))
 
+  (it "moves the immediately following sibling beneath its predecessor"
+    (let* ((source-text
+             (format nil
+                     "* Parent~%** A~%A body~%** B~%B body~%** C~%C body~%"))
+           (document (parse-org source-text))
+           (a (edit-relocate-test-headline document "A"))
+           (b (edit-relocate-test-headline document "B"))
+           (result (refile-subtree document b document a))
+           (source-edit (relocation-result-source-edit result))
+           (target-edit (relocation-result-target-edit result))
+           (updated-source (edit-result-updated-document source-edit))
+           (updated-target (edit-result-updated-document target-edit)))
+      (with-soft-assertions
+        (expect (document-text document) :to-equal source-text)
+        (expect (document-text updated-target)
+                :to-equal
+                (format nil
+                        "* Parent~%** A~%A body~%*** B~%B body~%** C~%C body~%"))
+        (expect updated-source :to-be updated-target)
+        (expect (relocation-result-source-path result)
+                :to-equal '((:title "Parent" :index 1)
+                            (:title "B" :index 1)))
+        (expect (relocation-result-target-path result)
+                :to-equal '((:title "Parent" :index 1)
+                            (:title "A" :index 1)
+                            (:title "B" :index 1)))
+        (expect (node-property
+                 (edit-relocate-test-headline updated-target "B") :level)
+                :to-be 3))))
+
   (it "keeps a later root target path when moving across root parents"
     (let* ((source-text
              (format nil
