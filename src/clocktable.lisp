@@ -118,17 +118,13 @@
 
 (defun clocktable-heading-relations (headings matching-headings)
   (let ((children (make-hash-table :test #'eq))
-        (matching-p (make-hash-table :test #'eq))
-        (included (make-hash-table :test #'eq)))
+        (matching-p (make-hash-table :test #'eq)))
     (dolist (heading matching-headings)
       (setf (gethash heading matching-p) t))
     (dolist (heading headings)
       (let ((parent (query-nearest-parent-headline heading)))
-        (push heading (gethash parent children))
-        (when (or (gethash heading matching-p)
-                  (gethash parent included))
-          (setf (gethash heading included) t))))
-    (values children matching-p included)))
+        (push heading (gethash parent children))))
+    (values children matching-p)))
 
 (defun clocktable-matching-heading-minutes (headings children matching-p
                                             direct-minutes)
@@ -150,7 +146,8 @@
 
 RANGE is clipped as the half-open interval from its start to its end. MATCH is
 an Org match string or NIL. MAX-DEPTH limits emitted absolute reduced outline
-levels; TIME-CONTEXT supplies the explicit time zone and relative-match reference."
+levels; TIME-CONTEXT supplies the explicit time zone and relative-match
+reference. Running CLOCK rows are excluded."
   (clock-check-heading document heading)
   (clocktable-validate-options options)
   (clock-check-document-node-count document)
@@ -168,13 +165,13 @@ levels; TIME-CONTEXT supplies the explicit time zone and relative-match referenc
     (let* ((headings (clocktable-subtree-headings heading))
            (matching-headings
              (clocktable-matching-headings document headings match time-context)))
-      (multiple-value-bind (children matching-p included)
+      (multiple-value-bind (children matching-p)
           (clocktable-heading-relations headings matching-headings)
         (multiple-value-bind (summary direct-minutes)
             (clock-collect-range heading
                                  (org-time-range-start range)
                                  (org-time-range-end range)
-                                 time-context nil t included)
+                                 time-context nil t matching-p)
           (declare (ignore summary))
           (let ((matched-minutes
                   (clocktable-matching-heading-minutes

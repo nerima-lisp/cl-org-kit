@@ -372,6 +372,74 @@
                                             malformed-clock-line
                                             "Malformed CLOCK entry"))))
 
+  (it "does not inspect malformed CLOCK rows below unmatched headings"
+    (let* ((document
+             (parse-org
+              (format nil "* Scope~%CLOCK: => 0:10~%** Child~%CLOCK: => x:10")))
+           (heading (clocktable-test-heading-path document '("Scope")))
+           (from (make-org-time-value "2026-10-12T09:00:00"))
+           (to (make-org-time-value "2026-10-12T10:00:00"))
+           (range (make-time-range from to))
+           (context (make-time-context :reference-time from
+                                       :zone (make-fixed-time-zone 0)
+                                       :dst-policy :compatible))
+           (result (clocktable-data document heading :range range
+                                    :match "+LEVEL=1"
+                                    :time-context context)))
+      (with-soft-assertions
+        (expect (clocktable-result-total-minutes result) :to-be 10)
+        (expect (mapcar #'clocktable-row-title
+                        (clocktable-result-rows result))
+                :to-equal '("Scope"))
+        (expect (clocktable-row-minutes
+                 (first (clocktable-result-rows result)))
+                :to-be 10))))
+
+  (it "excludes running CLOCK rows"
+    (let* ((document (parse-org
+                      (format nil "* Scope~%CLOCK: [2026-10-12 Mon 09:00]")))
+           (heading (clocktable-test-heading-path document '("Scope")))
+           (from (make-org-time-value "2026-10-12T09:00:00"))
+           (to (make-org-time-value "2026-10-12T10:00:00"))
+           (range (make-time-range from to))
+           (context (make-time-context :reference-time to
+                                       :zone (make-fixed-time-zone 0)
+                                       :dst-policy :compatible))
+           (result (clocktable-data document heading :range range
+                                    :time-context context)))
+      (with-soft-assertions
+        (expect (clocktable-result-total-minutes result) :to-be 0)
+        (expect (clocktable-result-rows result) :to-equal nil))))
+
+  (it "checks heading depth for manually built documents"
+    (let* ((source "** Scope")
+           (document (make-document
+                      source :limits (make-limits :max-heading-depth 1)))
+           (heading (make-node :headline :begin 0 :end (length source)
+                               :properties '(:raw-value "Scope" :level 2)))
+           (root (make-node :org-data :begin 0 :end (length source)
+                            :contents-begin 0 :contents-end (length source)
+                            :children (list heading)))
+           (from (make-org-time-value "2026-10-12T09:00:00"))
+           (to (make-org-time-value "2026-10-12T10:00:00"))
+           (range (make-time-range from to))
+           (context (make-time-context :reference-time from
+                                       :zone (make-fixed-time-zone 0)
+                                       :dst-policy :compatible)))
+      (setf (document-root document) root)
+      (let ((condition
+              (clocktable-test-capture-condition
+               (lambda ()
+                 (clocktable-data document heading :range range
+                                  :time-context context)))))
+        (with-soft-assertions
+          (expect (typep condition 'org-resource-limit-error) :to-be t)
+          (when (typep condition 'org-resource-limit-error)
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-heading-depth)
+            (expect (org-resource-limit-error-limit condition) :to-be 1)
+            (expect (org-resource-limit-error-actual condition) :to-be 2))))))
+
   (it "checks the document node limit below, at, and above its boundary"
     (let* ((source (format nil "* ~%CLOCK: => 0:02"))
            (baseline (parse-org source))
