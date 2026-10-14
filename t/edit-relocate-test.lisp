@@ -212,6 +212,30 @@
         (expect (count #\Return updated-text) :to-be 1)
         (expect (count #\Newline updated-text) :to-be 3))))
 
+  (it "preserves a trailing body carriage return while adding the target newline"
+    (let* ((standalone-cr (string #\Return))
+           (source-text
+             (concatenate 'string (format nil "* Parent~%** Child~%body")
+                          standalone-cr))
+           (target-text (format nil "* Target~%"))
+           (source (parse-org source-text))
+           (target (parse-org target-text))
+           (result
+             (refile-subtree source
+                             (edit-relocate-test-headline source "Child")
+                             target nil))
+           (updated-target (edit-result-updated-document
+                            (relocation-result-target-edit result)))
+           (updated-text (document-text updated-target)))
+      (with-soft-assertions
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text)
+        (expect updated-text
+                :to-equal
+                (concatenate 'string (format nil "* Target~%* Child~%body")
+                             standalone-cr (string #\Newline)))
+        (expect (count #\Return updated-text) :to-be 1))))
+
   (it "uses LF separators when refiling into a nonempty target without an EOL"
     (let* ((crlf (format nil "~C~C" #\Return #\Newline))
            (source-text (format nil "* Parent~A** Child~Abody~A"
