@@ -1089,15 +1089,14 @@
                        do (cond
                             ((eq (node-type node) :src-block)
                              (check-limit limits :max-element-depth element-depth)
-                             (let* ((mode (export-src-export-mode node backend))
-                                        (results-node (first remaining))
-                                        (adjacent-p
-                                          (export-results-adjacent-p
-                                           node results-node))
-                                        (result-views nil))
-                                   (when (and adjacent-p
-                                              (member mode '(:results :both)
-                                                      :test #'eq))
+                             (let* ((requested-mode
+                                      (export-src-export-mode node backend))
+                                    (results-node (first remaining))
+                                    (adjacent-p
+                                      (export-results-adjacent-p
+                                       node results-node))
+                                    (result-views nil))
+                                   (when adjacent-p
                                      (multiple-value-bind (prepared descendant-p)
                                          (prepare-node results-node source-document
                                                        selected-scope depth
@@ -1111,7 +1110,9 @@
                                    (push (%make-export-view
                                           :node node
                                           :children result-views
-                                          :payload (list :exports mode
+                                          :payload (list :exports :both
+                                                         :requested-exports
+                                                         requested-mode
                                                          :adjacent-results
                                                          adjacent-p)
                                           :source-document source-document)

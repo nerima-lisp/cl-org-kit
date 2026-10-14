@@ -736,15 +736,13 @@
     (if (eq table-type :table.el)
         (export-ascii-trim-trailing-newlines
          (or (node-property node :value) ""))
-        (let* ((row-nodes (mapcar #'export-view-node
-                                  (remove-if
-                                   (lambda (row)
-                                     (eq (node-property
-                                          (export-view-node row) :type)
-                                         :rule))
-                                   rows)))
-               (column-count (loop for row in row-nodes
-                                   maximize (length (node-children row))
+        (let* ((row-views
+                 (remove-if
+                  (lambda (row)
+                    (eq (node-property (export-view-node row) :type) :rule))
+                  rows))
+               (column-count (loop for row in row-views
+                                   maximize (length (export-view-children row))
                                      into maximum
                                    finally (return (or maximum 0))))
                (maximum-width
@@ -753,7 +751,16 @@
                    (export-preparation-document preparation))
                   :max-output-length)))
           (multiple-value-bind (widths alignments)
-              (table-column-layout row-nodes column-count maximum-width)
+              (table-column-layout
+               row-views column-count maximum-width
+               (lambda (row)
+                 (mapcar
+                  (lambda (cell)
+                    (if (export-view-children cell)
+                        (export-ascii-inline-views
+                         (export-view-children cell) preparation)
+                        (or (node-property (export-view-node cell) :value) "")))
+                  (export-view-children row))))
             (export-ascii-join
              (mapcar (lambda (row)
                        (export-ascii-table-row row widths alignments preparation))

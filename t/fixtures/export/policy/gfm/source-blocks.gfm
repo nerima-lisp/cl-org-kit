@@ -14,13 +14,40 @@ preexisting both result
 ~~~
 
 
+~~~emacs-lisp
+(error "Results-only block was not evaluated")
+~~~
+
 ~~~
 preexisting results-only output
 ~~~
 
 
 ~~~emacs-lisp
+(error "Hidden block was not evaluated")
+~~~
+
+~~~
+hidden preexisting output
+~~~
+
+
+~~~emacs-lisp
+(error "Adjacent hidden results block was not evaluated")
+~~~
+
+~~~
+adjacent hidden output
+~~~
+
+
+~~~emacs-lisp
 (error "Default source block was not evaluated")
+~~~
+
+
+~~~emacs-lisp
+(error "Non-adjacent results source block was not evaluated")
 ~~~
 
 

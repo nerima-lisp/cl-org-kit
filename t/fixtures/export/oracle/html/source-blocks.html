@@ -214,12 +214,40 @@ preexisting both result
 </code></pre>
 </div>
 
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(error "Results-only block was not evaluated")
+</code></pre>
+</div>
+
 <pre class="example">
 preexisting results-only output
 </pre>
 
 <div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(error "Hidden block was not evaluated")
+</code></pre>
+</div>
+
+<pre class="example">
+hidden preexisting output
+</pre>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(error "Adjacent hidden results block was not evaluated")
+</code></pre>
+</div>
+
+<pre class="example">
+adjacent hidden output
+</pre>
+
+<div class="org-src-container">
 <pre class="src src-emacs-lisp"><code>(error "Default source block was not evaluated")
+</code></pre>
+</div>
+
+<div class="org-src-container">
+<pre class="src src-emacs-lisp"><code>(error "Non-adjacent results source block was not evaluated")
 </code></pre>
 </div>
 

@@ -45,8 +45,21 @@ preexisting result
 ~~~
 
 
+~~~text
+body hidden by results mode
+~~~
+
 ~~~
 preexisting results-only result
+~~~
+
+
+~~~text
+hidden source and result
+~~~
+
+~~~
+hidden result
 ~~~
 
 
