@@ -706,7 +706,12 @@
               "+------+-------+"
               "| 日本 | é     |")))
       (multiple-value-bind (widths alignments)
-          (org-kit::table-column-layout rows 2 72)
+          (org-kit::table-column-layout
+           rows 2 72
+           (lambda (row)
+             (mapcar (lambda (cell)
+                       (or (node-property cell :value) ""))
+                     (node-children row))))
         (with-soft-assertions
           (expect (coerce widths 'list) :to-equal '(4 5))
           (expect (coerce alignments 'list) :to-equal '(:left :left))
