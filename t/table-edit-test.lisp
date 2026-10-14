@@ -510,7 +510,7 @@
         (expect (document-text row-document) :to-equal source)
         (expect (document-text column-document) :to-equal source))))
 
-  (it "maps unsupported formula syntax to an edit error"
+  (it "maps unsupported formula syntax to an Org table error"
     (let* ((source (format nil
                            "| A |~%| x |~%#+TBLFM: $1=#.(progn 1)~%"))
            (document (parse-org source))
@@ -519,7 +519,7 @@
              (table-edit-test-condition
               (lambda () (table-insert-column document table 1)))))
       (with-soft-assertions
-        (expect (first condition) :to-be :edit)
+        (expect (first condition) :to-be :table)
         (expect (second condition) :to-equal
                 "TBLFM syntax reader-eval at position 3 cannot be remapped")
         (expect (third condition) :to-be :uneditable-structure)
