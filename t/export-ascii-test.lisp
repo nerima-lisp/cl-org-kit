@@ -26,6 +26,44 @@
    :document document :backend :ascii :metadata nil :options options
    :root-views root-views :toc nil :footnotes nil :allow-raw-html nil))
 
+(defun export-ascii-test-output (preparation function)
+  (let ((output (org-kit::export-ascii-output-for-preparation preparation)))
+    (funcall function output)
+    (org-kit::export-ascii-output-string output)))
+
+(defun export-ascii-test-render-view (view preparation)
+  (export-ascii-test-output
+   preparation
+   (lambda (output)
+     (org-kit::export-ascii-output-render-view output view preparation))))
+
+(defun export-ascii-test-render-views (views preparation)
+  (export-ascii-test-output
+   preparation
+   (lambda (output)
+     (org-kit::export-ascii-output-write-views output views preparation))))
+
+(defun export-ascii-test-render-list-item (view preparation ordinal)
+  (export-ascii-test-output
+   preparation
+   (lambda (output)
+     (org-kit::export-ascii-output-render-list-item
+      output view preparation ordinal))))
+
+(defun export-ascii-test-render-gap (previous current preparation)
+  (export-ascii-test-output
+   preparation
+   (lambda (output)
+     (org-kit::export-ascii-output-write-gap output previous current))))
+
+(defun export-ascii-test-render-heading-title
+    (view preparation numbers text-width &optional underline toc)
+  (export-ascii-test-output
+   preparation
+   (lambda (output)
+     (org-kit::export-ascii-output-write-heading-title
+      output view preparation numbers text-width :underline underline :toc toc))))
+
 (defun export-ascii-test-link-nodes (document)
   (let ((links nil))
     (map-nodes (lambda (node)
@@ -330,6 +368,15 @@
            (fixed-width
              (export-ascii-test-view
               (make-node :fixed-width :properties '(:value ":  left")) document))
+           (fixed-width-rows
+             (export-ascii-test-view
+              (make-node :fixed-width
+                         :properties
+                         (list :value (format nil "ordinary~%:  fixed~%")))
+              document))
+           (empty-fixed-width
+             (export-ascii-test-view
+              (make-node :fixed-width :properties '(:value "")) document))
            (empty-example
              (export-ascii-test-view
               (make-node :example-block :properties '(:value "")) document))
@@ -340,48 +387,43 @@
       ;; synthetic AST shape; public preparation wraps them in a section.
       (setf (document-root document) root)
       (with-soft-assertions
-        (expect (org-kit::export-ascii-render-view view-three preparation)
+        (expect (export-ascii-test-render-view view-three preparation)
                 :to-equal (format nil "~A~%b" (make-string 69 :initial-element #\a)))
-        (expect (org-kit::export-ascii-render-view view-four preparation)
+        (expect (export-ascii-test-render-view view-four preparation)
                 :to-equal text)
         (expect (mapcar (lambda (view)
-                          (org-kit::export-ascii-render-view view preparation))
+                          (export-ascii-test-render-view view preparation))
                         ascii-links)
                 :to-equal '("<https://fallback.test/path>"
                             "<assets/topic:v2>"
                             "<x>"
                             "missing-target"))
-        (expect (org-kit::export-ascii-render-view target-link preparation)
+        (expect (export-ascii-test-render-view target-link preparation)
                 :to-equal "Target")
-        (expect (org-kit::export-ascii-render-view ordinary-target-link
+        (expect (export-ascii-test-render-view ordinary-target-link
                                                     preparation)
                 :to-equal "Target")
-        (expect (org-kit::export-ascii-render-view empty-fuzzy-link preparation)
+        (expect (export-ascii-test-render-view empty-fuzzy-link preparation)
                 :to-equal "")
         (expect (org-kit::export-ascii-local-heading
                  missing-fuzzy-path preparation)
                 :to-be nil)
         (expect (org-kit::export-ascii-local-heading external-link preparation)
                 :to-be nil)
-        (expect (org-kit::export-ascii-render-view root-view preparation)
+        (expect (export-ascii-test-render-view root-view preparation)
                 :to-equal (format nil "Target~%======"))
-        (expect (org-kit::export-ascii-render-view utf8-entity preparation)
+        (expect (export-ascii-test-render-view utf8-entity preparation)
                 :to-equal "UTF8")
-        (expect (org-kit::export-ascii-render-view ascii-entity preparation)
+        (expect (export-ascii-test-render-view ascii-entity preparation)
                 :to-equal "ASCII")
-        (expect (org-kit::export-ascii-render-view empty-entity preparation)
+        (expect (export-ascii-test-render-view empty-entity preparation)
                 :to-equal "")
-        (expect (org-kit::export-ascii-render-view span-entity preparation)
+        (expect (export-ascii-test-render-view span-entity preparation)
                 :to-equal entity-text)
-        (expect (org-kit::export-ascii-render-view fixed-width preparation)
+        (expect (export-ascii-test-render-view fixed-width preparation)
                 :to-equal (format nil ",----~%| left~%`----"))
-        (expect (org-kit::export-ascii-render-view empty-example preparation)
+        (expect (export-ascii-test-render-view empty-example preparation)
                 :to-equal "")
-        ;; Left justification leaves both short and over-width source text intact.
-        (expect (org-kit::export-ascii-justify-line "Title" 10 :left)
-                :to-equal "Title")
-        (expect (org-kit::export-ascii-justify-line "Title" 3 :left)
-                :to-equal "Title")
         (expect (org-kit::export-ascii-destination-safe-p
                  "https://safe.test/path"
                  (format nil "https://safe.test/~C" #\Tab))
@@ -395,11 +437,9 @@
         (expect (org-kit::export-ascii-destination-safe-p
                  "//cdn.test/path" "//cdn.test/path")
                 :to-be nil)
-        ;; Ordinary rows pass through while colon-prefixed rows trim their marker.
-        (expect (org-kit::export-ascii-fixed-width-value
-                 (format nil "ordinary~%:  fixed~%"))
-                :to-equal (format nil "ordinary~%fixed~%"))
-        (expect (org-kit::export-ascii-fixed-width-value "")
+        (expect (export-ascii-test-render-view fixed-width-rows preparation)
+                :to-equal (format nil ",----~%| ordinary~%| fixed~%`----"))
+        (expect (export-ascii-test-render-view empty-fixed-width preparation)
                 :to-equal ""))))
 
   (it "tracks included heading levels and blank sections in prepared views"
@@ -445,19 +485,21 @@
                (export-ascii-test-preparation source
                                               (list included-view deep-view shallow-view)))
              (included-body
-               (org-kit::export-ascii-render-views
+               (export-ascii-test-render-views
                 (list included-view section-view tail-view) preparation))
              (deeper-after-include
-               (org-kit::export-ascii-render-views
+               (export-ascii-test-render-views
                 (list included-view deep-view tail-view) included-preparation))
              (same-level-after-include
-               (org-kit::export-ascii-render-views
+               (export-ascii-test-render-views
                 (list included-view shallow-view tail-view) included-preparation)))
         (with-soft-assertions
-          (expect (org-kit::export-ascii-view-gap empty-section tail-view)
-                  :to-equal (org-kit::export-ascii-newlines 2))
-          (expect (org-kit::export-ascii-view-gap nonempty-section tail-view)
-                  :to-equal (org-kit::export-ascii-newlines 3))
+          (expect (export-ascii-test-render-gap
+                   empty-section tail-view preparation)
+                  :to-equal (format nil "~%~%"))
+          (expect (export-ascii-test-render-gap
+                   nonempty-section tail-view preparation)
+                  :to-equal (format nil "~%~%~%"))
           (expect included-body
                   :to-equal (format nil "Included~%========~%~%aaaa~%~%  aaaa"))
           (expect deeper-after-include
@@ -478,10 +520,10 @@
               document (list view) '((:num . nil) (:tags . :not-in-toc))))
            (numbers (org-kit::export-ascii-numbering preparation)))
       (with-soft-assertions
-        (expect (org-kit::export-ascii-heading-title
+        (expect (export-ascii-test-render-heading-title
                  view preparation numbers 72 nil t)
                 :to-equal "Tagged")
-        (expect (org-kit::export-ascii-heading-title
+        (expect (export-ascii-test-render-heading-title
                  view preparation numbers 72 nil nil)
                 :to-equal
                 (concatenate 'string "Tagged"
@@ -525,22 +567,22 @@
              (org-kit::export-ascii-numbering todo-disabled-preparation)))
       (with-soft-assertions
         (expect (mapcar (lambda (view)
-                          (org-kit::export-ascii-heading-title
+                          (export-ascii-test-render-heading-title
                            view default-preparation default-numbers 72 nil))
                         views)
                 :to-equal '("1 TODO Top" "1.1 Child" "1.1.1 Deep"))
         (expect (mapcar (lambda (view)
-                          (org-kit::export-ascii-heading-title
+                          (export-ascii-test-render-heading-title
                            view bounded-preparation bounded-numbers 72 nil))
                         views)
                 :to-equal '("1 TODO Top" "1.1 Child" "Deep"))
         (expect (mapcar (lambda (view)
-                          (org-kit::export-ascii-heading-title
+                          (export-ascii-test-render-heading-title
                            view disabled-preparation disabled-numbers 72 nil))
                         views)
                 :to-equal '("TODO Top" "Child" "Deep"))
-        (expect (org-kit::export-ascii-heading-first-part
-                 (first views) todo-disabled-preparation todo-disabled-numbers)
+        (expect (export-ascii-test-render-heading-title
+                 (first views) todo-disabled-preparation todo-disabled-numbers 72)
                 :to-equal "Top"))))
 
   (it "leaves headings unnumbered for invalid prepared numbering values"
@@ -563,7 +605,7 @@
                   (export-ascii-test-source "#+OPTIONS: num:invalid" "* Title"))
                  :ascii)))))
       (with-soft-assertions
-        (expect (org-kit::export-ascii-heading-title
+        (expect (export-ascii-test-render-heading-title
                  view preparation numbers 72 nil)
                 :to-equal "Title")
         (expect (typep invalid-option 'org-export-unsupported-syntax) :to-be t)
@@ -593,9 +635,9 @@
            (preparation (export-ascii-test-preparation document nil)))
       (setf (document-root document) root)
       (with-soft-assertions
-        (expect (org-kit::export-ascii-render-item item-view preparation 1)
+        (expect (export-ascii-test-render-list-item item-view preparation 1)
                 :to-equal (format nil "- ~%  value"))
-        (expect (org-kit::export-ascii-render-item unmarked-item-view
+        (expect (export-ascii-test-render-list-item unmarked-item-view
                                                    preparation 1)
                 :to-equal (format nil "- ~%  value")))))
 
@@ -779,6 +821,65 @@
         (expect (search "2030-01-02" output) :not :to-be nil)
         (expect (search "2026-10-14" output) :to-be nil)
         (expect (export-ascii-test-document-snapshot document) :to-equal before))))
+
+  (it "checks the ASCII table output budget before allocating padded rows"
+    (let* ((cell-text (make-string 500 :initial-element #\x))
+           (source
+             (with-output-to-string (stream)
+               (format stream "#+OPTIONS: toc:nil num:nil~%")
+               (format stream "|<999999999999999999999999>|~A|~%"
+                       cell-text)
+               (format stream "|---+---|~%")
+               (loop repeat 20
+                     do (format stream "|~A|~A|~%"
+                                 cell-text cell-text))))
+           (document
+             (parse-org source
+                        :limits (make-limits :max-output-length 1000)))
+           (preparation (org-kit::export-prepare document :ascii))
+           (input-length (length source))
+           (condition
+             (handler-case
+                 (progn (org-kit::export-ascii-render-preparation preparation) nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (> input-length 20000) :to-be t)
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit condition) :to-be 1000)
+          (expect (org-resource-limit-error-actual condition) :to-be 1008)))))
+
+  (it "checks ASCII link output before allocating a large destination"
+    (let* ((path (make-string (* 2 1024 1024) :initial-element #\x))
+           (source
+             (concatenate 'string "[[https://budget.test/" path "]]"))
+           (document
+             (parse-org source
+                        :limits (make-limits :max-output-length 128)))
+           (preparation (org-kit::export-prepare document :ascii))
+           (input-length (length source))
+           (before (progn
+                     (sb-ext:gc :full t)
+                     (sb-ext:get-bytes-consed)))
+           (condition
+             (handler-case
+                 (progn
+                   (org-kit::export-ascii-render-preparation preparation)
+                   nil)
+               (org-resource-limit-error (condition) condition)))
+           (allocated (- (sb-ext:get-bytes-consed) before)))
+      (with-soft-assertions
+        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit condition) :to-be 128)
+          (expect (> (org-resource-limit-error-actual condition) 128)
+                  :to-be t))
+        (expect (< allocated (floor input-length 2)) :to-be t))))
 
   (it "uses explicit metadata defaults without consulting ambient values"
     (let* ((empty-output
@@ -1257,4 +1358,387 @@
            (second-output (export-org document :ascii)))
       (with-soft-assertions
         (expect first-output :to-equal second-output)
-        (expect (export-ascii-test-document-snapshot document) :to-equal before)))))
+        (expect (export-ascii-test-document-snapshot document) :to-equal before))))
+
+  (it "covers buffered output, visible widths, and bracket path escapes"
+    (let* ((document (parse-org "body"))
+           (preparation (export-ascii-test-preparation document nil))
+           (output (org-kit::export-ascii-output-for-preparation preparation))
+           (trimmed (org-kit::export-ascii-output-for-preparation preparation))
+           (empty-trimmed
+             (org-kit::export-ascii-output-for-preparation preparation))
+           (trimmed-range
+             (org-kit::export-ascii-output-for-preparation preparation))
+           (centered (org-kit::export-ascii-output-for-preparation preparation))
+           (path-output (org-kit::export-ascii-output-for-preparation preparation))
+           (trailing-space-path-output
+             (org-kit::export-ascii-output-for-preparation preparation))
+           (path (concatenate 'string "  a" (string #\Newline)
+                              "   b\\[c\\z  "))
+           (trailing-space-path
+             (concatenate 'string "a" (string #\Newline) "  "))
+           (controls (concatenate 'string (string (code-char #x85))
+                                  (string (code-char #x7f)))))
+      (setf (org-kit::export-ascii-output-indent output) 2)
+      (org-kit::export-ascii-output-write-char output #\A)
+      (org-kit::export-ascii-output-write-char output #\Newline)
+      (org-kit::export-ascii-output-write-repeat output #\Space 1)
+      (org-kit::export-ascii-output-write-string
+       trimmed (format nil "x~%~%"))
+      (org-kit::export-ascii-output-trim-newlines trimmed)
+      (org-kit::export-ascii-output-trim-newlines empty-trimmed)
+      (org-kit::export-ascii-output-write-trimmed-newlines
+       trimmed-range (format nil "y~%~%"))
+      (org-kit::export-ascii-output-write-centered-buffer centered "title" 10)
+      (org-kit::export-ascii-output-write-bracket-path-range
+       path-output path 0 (length path))
+      (org-kit::export-ascii-output-write-bracket-path-range
+       trailing-space-path-output trailing-space-path 0
+       (length trailing-space-path))
+      (with-soft-assertions
+        (expect (org-kit::export-ascii-output-string output)
+                :to-equal (format nil "  A~%   "))
+        (expect (org-kit::export-ascii-output-range-width
+                 controls 0 (length controls))
+                :to-be 10)
+        (expect (org-kit::export-ascii-output-string trimmed) :to-equal "x")
+        (expect (org-kit::export-ascii-output-string empty-trimmed) :to-equal "")
+        (expect (org-kit::export-ascii-output-string trimmed-range) :to-equal "y")
+        (expect (org-kit::export-ascii-output-string centered)
+                :to-equal "  title")
+        (expect (org-kit::export-ascii-output-string path-output)
+                :to-equal "  a b[c\\z  ")
+        (expect (org-kit::export-ascii-output-string trailing-space-path-output)
+                :to-equal "a "))))
+
+  (it "covers table alignment, raw link paths, abbreviations, and tagged headings"
+    (let* ((source-document (make-document "x"))
+           (text-node (make-node :plain-text :begin 0 :end 1))
+           (plain-cell-node (make-node :table-cell :children (list text-node)))
+           (root (make-node :org-data :children (list plain-cell-node)))
+           (document (parse-org "body"))
+           (preparation (export-ascii-test-preparation document nil))
+           (output (org-kit::export-ascii-output-for-preparation preparation))
+           (plain-cell
+             (export-ascii-test-view
+              plain-cell-node source-document
+              (list (export-ascii-test-view text-node source-document))))
+           (empty-cell (export-ascii-test-view (make-node :table-cell) document))
+           (nontext-child-cell
+             (export-ascii-test-view
+              (make-node :table-cell) document
+              (list (export-ascii-test-view (make-node :entity) document))))
+           (empty-text-child-cell
+             (export-ascii-test-view
+              (make-node :table-cell) document
+              (list (export-ascii-test-view
+                     (make-node :plain-text) document))))
+           (right-cell-node (make-node :table-cell :properties '(:value "<r>")))
+           (center-cell-node (make-node :table-cell :properties '(:value "<c>")))
+           (right-row
+             (export-ascii-test-view
+              (make-node :table-row :properties '(:type :standard))
+              document (list (export-ascii-test-view right-cell-node document))))
+           (center-row
+             (export-ascii-test-view
+              (make-node :table-row :properties '(:type :standard))
+              document (list (export-ascii-test-view center-cell-node document))))
+           (rule-row
+             (export-ascii-test-view
+              (make-node :table-row :properties '(:type :rule)) document))
+           (cell-node (make-node :table-cell :properties '(:value "x")))
+           (cell (export-ascii-test-view cell-node document))
+           (center-output
+             (org-kit::export-ascii-output-for-preparation preparation))
+           (right-output
+             (org-kit::export-ascii-output-for-preparation preparation))
+           (link-document (parse-org ""))
+           (link-preparation
+             (export-ascii-test-preparation link-document nil))
+           (link-output
+             (org-kit::export-ascii-output-for-preparation link-preparation))
+           (link-node
+             (make-node :link
+                        :properties '(:type "fuzzy" :path "web::manual"
+                                      :format :bracket :raw-link "web::manual")))
+           (bracket-link (export-ascii-test-view link-node link-document))
+           (single-colon-link-node
+             (make-node :link
+                        :properties '(:type "fuzzy" :path "web:manual"
+                                      :format :bracket :raw-link "web:manual")))
+           (single-colon-link
+             (export-ascii-test-view single-colon-link-node link-document))
+           (plain-link-node
+             (make-node :link
+                        :properties '(:type "fuzzy" :path "web::manual"
+                                      :format :plain :raw-link "web::manual")))
+           (plain-link (export-ascii-test-view plain-link-node link-document))
+           (tagged (export-org (parse-org "* Tagged :one:two:") :ascii)))
+      (setf (document-root source-document) root
+            (getf (document-settings link-document) :link-abbrevs)
+            '(("web" . "https://docs.example/")))
+      (multiple-value-bind (widths alignments)
+          (org-kit::export-ascii-output-table-layout
+           output (list rule-row right-row center-row) 1 preparation)
+        (declare (ignore widths))
+        (org-kit::export-ascii-output-write-table-cell
+         center-output cell 3 :center preparation)
+        (org-kit::export-ascii-output-write-table-cell
+         right-output cell 3 :right preparation)
+        (multiple-value-bind (bracket-path ignored-safe)
+            (org-kit::export-ascii-output-link-path
+             link-output bracket-link link-preparation)
+          (declare (ignore ignored-safe))
+          (with-soft-assertions
+            (expect (org-kit::export-ascii-output-cell-cookie-value plain-cell)
+                    :to-equal "x")
+            (expect (org-kit::export-ascii-output-cell-cookie-value empty-cell)
+                    :to-be nil)
+            (expect (org-kit::export-ascii-output-cell-cookie-value
+                     nontext-child-cell)
+                    :to-be nil)
+            (expect (org-kit::export-ascii-output-cell-cookie-value
+                     empty-text-child-cell)
+                    :to-be nil)
+            (expect (org-kit::export-ascii-destination-source-safe-p "path" 0 4)
+                    :to-be t)
+            (expect (org-kit::export-ascii-destination-source-safe-p
+                     "unsafe\\path" 0 11)
+                    :to-be nil)
+            (expect (org-kit::export-ascii-destination-source-safe-p nil 0 0)
+                    :to-be nil)
+            (expect (org-kit::export-ascii-destination-safe-p "raw" "expanded")
+                    :to-be t)
+            (expect (org-kit::export-ascii-destination-safe-p nil "expanded")
+                    :to-be nil)
+            (expect (org-kit::export-ascii-destination-safe-p "raw" "")
+                    :to-be nil)
+            (expect (coerce alignments 'list) :to-equal '(:right))
+            (expect (org-kit::export-ascii-output-string center-output)
+                    :to-equal "  x  ")
+            (expect (org-kit::export-ascii-output-string right-output)
+                    :to-equal "   x ")
+            (expect (org-kit::export-ascii-output-string bracket-path)
+                    :to-equal "https://docs.example/manual")
+            (expect (multiple-value-bind (single-colon-path ignored-safe)
+                        (org-kit::export-ascii-output-link-path
+                         link-output single-colon-link link-preparation)
+                      (declare (ignore ignored-safe))
+                      (org-kit::export-ascii-output-string single-colon-path))
+                    :to-equal "https://docs.example/manual")
+            (expect (multiple-value-bind (plain-path ignored-safe)
+                        (org-kit::export-ascii-output-link-path
+                         link-output plain-link link-preparation)
+                      (declare (ignore ignored-safe))
+                      (org-kit::export-ascii-output-string plain-path))
+                    :to-equal "https://docs.example/manual")
+            (expect (search ":one:two:" tagged) :not :to-be nil))))))
+
+  (it "covers source export modes and trims padded ASCII footnotes"
+    (let* ((document (parse-org "body"))
+           (preparation (export-ascii-test-preparation document nil))
+           (source-node (make-node :src-block :properties '(:value "code")))
+           (code-view
+             (org-kit::%make-export-view
+              :node source-node :payload '(:exports :code)))
+           (results-view
+             (org-kit::%make-export-view
+              :node source-node :payload '(:exports :results)))
+           (code-output (export-ascii-test-output
+                         preparation
+                         (lambda (output)
+                           (org-kit::export-ascii-output-render-source-block
+                            output code-view preparation))))
+           (results-output (export-ascii-test-output
+                            preparation
+                            (lambda (output)
+                              (org-kit::export-ascii-output-render-source-block
+                               output results-view preparation))))
+           (footnote-document (make-document "   note   "))
+           (footnote-text (make-node :plain-text :begin 0 :end 10))
+           (footnote-node
+             (make-node :footnote-definition :children (list footnote-text)))
+           (footnote-root
+             (make-node :org-data :children (list footnote-node)))
+           (footnote-view
+             (progn
+               (setf (document-root footnote-document) footnote-root)
+               (export-ascii-test-view
+                footnote-node footnote-document
+                (list (export-ascii-test-view footnote-text footnote-document)))))
+           (footnote-preparation
+             (org-kit::%make-export-preparation
+              :document footnote-document :backend :ascii :metadata nil
+              :options nil :root-views nil :toc nil
+              :footnotes (list (list :number 1 :definition footnote-view))
+              :allow-raw-html nil))
+           (footnote-output
+             (export-ascii-test-output
+              footnote-preparation
+              (lambda (output)
+                (org-kit::export-ascii-output-write-footnotes
+                 output footnote-preparation)))))
+      (with-soft-assertions
+        (expect (search "code" code-output) :not :to-be nil)
+        (expect results-output :to-equal "")
+        (expect (search "[1] note" footnote-output) :not :to-be nil))))
+
+  (it "trims whitespace and a trailing block newline from list item content"
+    (let* ((document (make-document "first"))
+           (text-node (make-node :plain-text :begin 0 :end 5))
+           (paragraph-node (make-node :paragraph :children (list text-node)))
+           (export-node
+             (make-node :export-block
+                        :properties (list :type "ASCII"
+                                          :value (format nil "tail~%"))))
+           (item-node
+             (make-node :item :properties '(:bullet "- ")
+                        :children (list paragraph-node export-node)))
+           (list-node
+             (make-node :plain-list :properties '(:type :unordered)
+                        :children (list item-node)))
+           (root (make-node :org-data :children (list list-node)))
+           (paragraph-view
+             (export-ascii-test-view
+              paragraph-node document
+              (list (export-ascii-test-view text-node document))))
+           (export-view (export-ascii-test-view export-node document))
+           (item-view
+             (export-ascii-test-view
+              item-node document (list paragraph-view export-view)))
+           (preparation (export-ascii-test-preparation document nil)))
+      (setf (document-root document) root)
+      (with-soft-assertions
+        (expect (export-ascii-test-render-list-item item-view preparation 1)
+                :to-equal (format nil "- first~%  ~%  tail")))))
+
+  (it "trims trailing newlines from an ASCII source block"
+    (let* ((document (parse-org "body"))
+           (preparation (export-ascii-test-preparation document nil))
+           (node (make-node :src-block
+                            :properties (list :value (format nil "code~%~%"))))
+           (view (org-kit::%make-export-view
+                  :node node :payload '(:exports :code)))
+           (output
+             (export-ascii-test-output
+              preparation
+              (lambda (buffer)
+                (org-kit::export-ascii-output-render-source-block
+                 buffer view preparation)))))
+      (expect output :to-equal (format nil ",----~%| code~%`----"))))
+
+  (it "renders an empty programmatic table.el node through the public API"
+    (let* ((document (make-document ""))
+           (table (make-node :table :properties '(:type :table.el :value "")))
+           (section (make-node :section :children (list table)))
+           (root (make-node :org-data :children (list section))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (string #\Newline))))
+
+  (it "expands an abbreviation link whose path ends at its colon"
+    (let* ((document
+             (parse-org "[[bare:][Empty tail]]"
+                        :link-abbrevs '(("bare" . "https://bare.test/%s"))))
+           (output (export-org document :ascii)))
+      (expect (search "<https://bare.test/>" output)
+              :not :to-be nil)))
+
+  (it "trims an all-whitespace paragraph through the public API"
+    (let* ((document (make-document "   "))
+           (text (make-node :plain-text :begin 0 :end 3))
+           (paragraph (make-node :paragraph :children (list text)))
+           (section (make-node :section :children (list paragraph)))
+           (root (make-node :org-data :children (list section))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (string #\Newline))))
+
+  (it "trims newline-only content from a list item through the public API"
+    (let* ((document (make-document " "))
+           (text (make-node :plain-text :begin 0 :end 1))
+           (paragraph (make-node :paragraph :children (list text)))
+           (block (make-node :export-block
+                             :properties (list :type "ASCII"
+                                               :value (string #\Newline))))
+           (item (make-node :item :properties '(:bullet "- ")
+                            :children (list paragraph block)))
+           (list (make-node :plain-list :properties '(:type :unordered)
+                            :children (list item)))
+           (section (make-node :section :children (list list)))
+           (root (make-node :org-data :children (list section))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (format nil "  - ~%"))))
+
+  (it "trims a newline-only ASCII source block through the public API"
+    (let* ((document
+             (parse-org (format nil "#+begin_src text~%~%#+end_src~%"))))
+      (expect (export-org document :ascii) :to-equal (string #\Newline))))
+
+  (it "covers empty code-box, link-note, and paragraph boundaries"
+    (let* ((document (make-document "  trim  "))
+           (text-node (make-node :plain-text :begin 0 :end 8))
+           (paragraph-node (make-node :paragraph :children (list text-node)))
+           (root (make-node :org-data :children (list paragraph-node)))
+           (paragraph-view
+             (export-ascii-test-view
+              paragraph-node document
+              (list (export-ascii-test-view text-node document))))
+           (preparation (export-ascii-test-preparation document nil))
+           (paragraph-output
+             (progn
+               (setf (document-root document) root)
+               (export-ascii-test-render-view paragraph-view preparation)))
+           (box-output
+             (export-ascii-test-output
+              preparation
+              (lambda (output)
+                (org-kit::export-ascii-output-write-code-box
+                 output ":" :fixed-width-p t))))
+           (target-view (export-ascii-test-view (make-node :target) document))
+           (link-view
+             (export-ascii-test-view
+              (make-node :link :properties '(:type "radio")) document
+              (list target-view)))
+           (link-output (org-kit::export-ascii-output-for-preparation preparation))
+           (link-note
+             (org-kit::export-ascii-output-link-note
+              link-output link-view preparation)))
+      (with-soft-assertions
+        (expect paragraph-output :to-equal "trim")
+        (expect box-output :to-equal (format nil ",----~%| ~%`----"))
+        (expect link-note :to-be nil))))
+
+  (it "trims all whitespace from an ASCII footnote definition"
+    (let* ((document (make-document "   "))
+           (text-node (make-node :plain-text :begin 0 :end 3))
+           (definition (make-node :footnote-definition :children (list text-node)))
+           (root (make-node :org-data :children (list definition)))
+           (view
+             (export-ascii-test-view
+              definition document
+              (list (export-ascii-test-view text-node document))))
+           (preparation
+             (org-kit::%make-export-preparation
+              :document document :backend :ascii :metadata nil :options nil
+              :root-views nil :toc nil
+              :footnotes (list (list :number 1 :definition view))
+              :allow-raw-html nil))
+           (output
+             (progn
+               (setf (document-root document) root)
+               (export-ascii-test-output
+                preparation
+                (lambda (buffer)
+                  (org-kit::export-ascii-output-write-footnotes
+                   buffer preparation))))))
+      (expect (search "[1]" output) :not :to-be nil)))
+
+  (it "indents continued paragraph lines inside list items"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil \\n:t"
+              "- first line"
+              "  second line"))
+           (output (export-org (parse-org source) :ascii)))
+      (with-soft-assertions
+        (expect (search (format nil "first line~%    second line") output)
+                :not :to-be nil)))))
