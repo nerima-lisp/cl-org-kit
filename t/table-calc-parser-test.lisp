@@ -209,14 +209,14 @@
         (expect (org-kit::table-calc-reference-column-start reference) :to-be 12)
         (expect (org-kit::table-calc-reference-column-end reference) :to-be 14))))
 
-  (it "preserves INVALID as a named column and parses deleted-row references"
-    (let* ((formula "$1=@3$INVALID::$INVALID=@INVALID$1")
+  (it "preserves named columns and parses deleted-row references"
+    (let* ((formula "$1=@3$INVALID::$name=@INVALID$1")
            (assignments (org-kit::table-calc-program-assignments
                          (org-kit::table-calc-parse-formula formula)))
            (qualified-reference
              (org-kit::table-calc-expression-value
               (org-kit::table-calc-assignment-expression (first assignments))))
-           (named-target
+           (target
              (org-kit::table-calc-assignment-target (second assignments)))
            (invalid-row-reference
              (org-kit::table-calc-expression-value
@@ -236,14 +236,47 @@
                 :to-be 6)
         (expect (org-kit::table-calc-reference-column-end qualified-reference)
                 :to-be 13)
-        (expect (org-kit::table-calc-reference-column-kind named-target)
+        (expect (org-kit::table-calc-reference-column-kind target)
                 :to-be :name)
-        (expect (org-kit::table-calc-reference-column-value named-target)
-                :to-equal "INVALID")
+        (expect (org-kit::table-calc-reference-column-value target)
+                :to-equal "name")
         (expect (org-kit::table-calc-reference-row-kind invalid-row-reference)
                 :to-be :invalid)
         (expect (org-kit::table-calc-reference-column-kind invalid-row-reference)
                 :to-be :absolute))))
+
+  (it "parses first, last, and hline-anchor row references as formula targets and values"
+    (let* ((formula "@<$2=@I$2::@>$2=vsum(@I$2..@II$2)")
+           (assignments
+             (org-kit::table-calc-program-assignments
+              (org-kit::table-calc-parse-formula formula)))
+           (first-assignment (first assignments))
+           (last-assignment (second assignments))
+           (first-target (org-kit::table-calc-assignment-target first-assignment))
+           (last-target (org-kit::table-calc-assignment-target last-assignment))
+           (first-value
+             (org-kit::table-calc-expression-value
+              (org-kit::table-calc-assignment-expression first-assignment)))
+           (range
+             (first (org-kit::table-calc-expression-children
+                     (org-kit::table-calc-assignment-expression last-assignment))))
+           (range-references
+             (mapcar #'org-kit::table-calc-expression-value
+                     (org-kit::table-calc-expression-children range))))
+      (with-soft-assertions
+        (expect (mapcar #'org-kit::table-calc-assignment-kind assignments)
+                :to-equal '(:field :field))
+        (expect (org-kit::table-calc-reference-row-kind first-target)
+                :to-be :first)
+        (expect (org-kit::table-calc-reference-row-kind last-target)
+                :to-be :last)
+        (expect (org-kit::table-calc-reference-row-kind first-value)
+                :to-be :hline-anchor)
+        (expect (org-kit::table-calc-reference-row-value first-value) :to-be 1)
+        (expect (mapcar #'org-kit::table-calc-reference-row-kind range-references)
+                :to-equal '(:hline-anchor :hline-anchor))
+        (expect (mapcar #'org-kit::table-calc-reference-row-value range-references)
+                :to-equal '(1 2)))))
 
   (it "keeps the exact case of named column references"
     (let* ((formula "$1=$INVALID+$invalid")
@@ -371,12 +404,13 @@
               (expect (org-table-unsupported-syntax-position condition) :to-be (second case))
               (expect (org-table-unsupported-syntax-feature condition) :to-be (third case))))))))
 
-  (it "accepts a terminal formula separator without adding an empty assignment"
-    (let* ((formula "$1=1::$2=$1::")
-           (program (org-kit::table-calc-parse-formula formula)))
-      (with-soft-assertions
-        (expect (org-kit::table-calc-program-source program) :to-equal formula)
-        (expect (length (org-kit::table-calc-program-assignments program)) :to-be 2))))
+  (it "accepts and preserves a trailing separator without adding an empty assignment"
+    (dolist (formula '("$1=1::" "$1=1::$2=$1::"))
+      (let ((program (org-kit::table-calc-parse-formula formula)))
+        (with-soft-assertions
+          (expect (org-kit::table-calc-program-source program) :to-equal formula)
+          (expect (length (org-kit::table-calc-program-assignments program))
+                  :to-be (if (string= formula "$1=1::") 1 2))))))
 
   (it "does not evaluate quoted forms or reader dispatch payloads"
     (let ((quoted (table-calc-test-condition "'(progn (error \"executed\"))"))

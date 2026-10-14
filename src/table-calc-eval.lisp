@@ -34,9 +34,40 @@
          (row-value (table-calc-reference-row-value reference))
          (column-value (table-calc-reference-column-value reference)))
     (bounded-text
-     (if (eql row-kind :current)
-         (format nil "$~A" column-value)
-         (format nil "@~A$~A" row-value column-value)))))
+     (cond
+       ((eql row-kind :current)
+        (format nil "$~A" column-value))
+       ((eql row-kind :first)
+        (format nil "@<$~A" column-value))
+       ((eql row-kind :last)
+        (format nil "@>$~A" column-value))
+       ((eql row-kind :hline-anchor)
+        (format nil "@~A$~A" (if (= row-value 1) "I" "II") column-value))
+       ((eql row-kind :invalid)
+        (format nil "@INVALID$~A" column-value))
+       (t
+        (format nil "@~A$~A" row-value column-value))))))
+
+(defun table-calc-validate-assignment-target (assignment target)
+  (let* ((reference (table-calc-assignment-target assignment))
+         (row-kind (table-calc-reference-row-kind reference))
+         (column-kind (table-calc-reference-column-kind reference)))
+    (cond
+      ((eql row-kind :invalid)
+       (table-calc-evaluation-error :invalid-target target))
+      ((eql column-kind :name)
+       (table-calc-evaluation-error :unsupported-target target)))))
+
+(defun table-calc-reference-position
+    (reference reference-position-function target)
+  (when (eql (table-calc-reference-row-kind reference) :invalid)
+    (table-calc-evaluation-error :invalid-reference target))
+  (multiple-value-bind (row column)
+      (funcall reference-position-function reference)
+    (unless (and (integerp row) (plusp row)
+                 (integerp column) (plusp column))
+      (table-calc-evaluation-error :unsupported-reference target))
+    (values row column)))
 
 (defun table-calc-decimal-digit-count (integer)
   (length (write-to-string (abs integer) :base 10 :radix nil)))
@@ -247,15 +278,18 @@
                 (otherwise
                  (table-calc-evaluation-error :invalid-number target))))))))
 
-(defun table-calc-resolve-range (expression reference-position-function limits budget)
+(defun table-calc-resolve-range
+    (expression reference-position-function limits budget target)
   (let* ((children (table-calc-expression-children expression))
          (first-reference (table-calc-expression-value (first children)))
          (last-reference (table-calc-expression-value (second children))))
     (table-calc-charge-work limits budget 2)
     (multiple-value-bind (first-row first-column)
-        (funcall reference-position-function first-reference)
+        (table-calc-reference-position
+         first-reference reference-position-function target)
       (multiple-value-bind (last-row last-column)
-          (funcall reference-position-function last-reference)
+          (table-calc-reference-position
+           last-reference reference-position-function target)
         (%make-table-calc-range-value
          (min first-row last-row) (max first-row last-row)
          (min first-column last-column) (max first-column last-column))))))
@@ -320,9 +354,10 @@
 
 (defun table-calc-reference-value (reference reference-position-function
                                    cell-value-function mode limits budget target)
+  (table-calc-charge-work limits budget 1)
   (multiple-value-bind (row column)
-      (funcall reference-position-function reference)
-    (table-calc-charge-work limits budget 1)
+      (table-calc-reference-position
+       reference reference-position-function target)
     (table-calc-cell-number (funcall cell-value-function row column)
                             mode nil limits target)))
 
@@ -369,7 +404,7 @@
                             values))
                      (:range
                       (push (table-calc-resolve-range
-                             node reference-position-function limits budget)
+                             node reference-position-function limits budget target)
                             values))
                      (:unary
                       (push (cons node :finish) frames)
@@ -462,11 +497,11 @@ REFERENCE-POSITION-FUNCTION maps a reference to absolute 1-based row and column
 values. CELL-VALUE-FUNCTION maps those indices to the raw cell string. Reuse
 WORK-BUDGET across assignments in one table recalculation."
   (let* ((budget (or work-budget (make-table-calc-work-budget)))
-         (target (table-calc-assignment-target-description assignment))
-         (value (table-calc-evaluate-expression
-                 (table-calc-assignment-expression assignment)
-                 reference-position-function cell-value-function
-                 (table-calc-assignment-mode assignment) limits budget target)))
-    (table-calc-format-result value
-                              (table-calc-assignment-format-precision assignment)
-                              limits target)))
+         (target (table-calc-assignment-target-description assignment)))
+    (table-calc-validate-assignment-target assignment target)
+    (let ((value (table-calc-evaluate-expression
+                  (table-calc-assignment-expression assignment)
+                  reference-position-function cell-value-function
+                  (table-calc-assignment-mode assignment) limits budget target)))
+      (table-calc-format-result
+       value (table-calc-assignment-format-precision assignment) limits target))))

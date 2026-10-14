@@ -167,6 +167,10 @@
                     (single-token :divide))
                    ((char= character #\@)
                     (single-token :at))
+                   ((and (char= character #\<)
+                         (> position 0)
+                         (char= (char formula (1- position)) #\@))
+                    (single-token :less))
                    ((char= character #\>)
                     (single-token :greater))
                    ((char= character #\$)
@@ -255,6 +259,11 @@
       ((eql (table-calc-current-kind parser) :at)
        (table-calc-advance parser)
        (cond
+         ((eql (table-calc-current-kind parser) :less)
+          (let ((token (table-calc-advance parser)))
+            (setf row-kind :first
+                  row-start (table-calc-token-start token)
+                  row-end (table-calc-token-end token))))
          ((eql (table-calc-current-kind parser) :greater)
           (table-calc-advance parser)
           (setf row-kind :last))
@@ -277,9 +286,19 @@
             (setf row-kind :invalid
                   row-start (table-calc-token-start token)
                   row-end (table-calc-token-end token))))
+         ((and (eql (table-calc-current-kind parser) :identifier)
+               (member (table-calc-token-value
+                        (table-calc-current-token parser))
+                       '("I" "II") :test #'string=))
+          (let* ((token (table-calc-advance parser))
+                 (name (table-calc-token-value token)))
+            (setf row-kind :hline-anchor
+                  row-value (if (string= name "I") 1 2)
+                  row-start (table-calc-token-start token)
+                  row-end (table-calc-token-end token))))
          (t
           (table-calc-fail formula (table-calc-position parser) :invalid-reference)))
-       (if (and (eql row-kind :last)
+       (if (and (member row-kind '(:first :last))
                 (not (eql (table-calc-current-kind parser) :dollar)))
            (setf column-kind :current)
            (progn
@@ -479,9 +498,15 @@
       ((and (eql row-kind :absolute)
             (member column-kind '(:absolute :name)))
        (values :field reference))
+      ((and (member row-kind '(:first :last))
+            (member column-kind '(:absolute :name)))
+       (values :field reference))
       ((and (eql row-kind :current)
             (member column-kind '(:absolute :name)))
        (values :column reference))
+      ((and (eql row-kind :hline-anchor)
+            (member column-kind '(:absolute :name)))
+       (values :field reference))
       ((eql row-kind :invalid)
        (values :invalid reference))
       (t

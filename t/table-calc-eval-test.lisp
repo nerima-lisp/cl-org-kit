@@ -9,15 +9,19 @@
     (or assignment (error "No table formula assignment at index ~D." index))))
 
 (defun table-calc-eval-test-position-function
-    (base-row base-column last-row named-columns)
+    (base-row base-column last-row named-columns &optional hline-anchors)
   (lambda (reference)
     (values
      (case (org-kit::table-calc-reference-row-kind reference)
        (:current base-row)
        (:absolute (org-kit::table-calc-reference-row-value reference))
        (:relative (+ base-row (org-kit::table-calc-reference-row-value reference)))
+       (:first 1)
        (:last last-row)
-       (otherwise (error "Unsupported reference row kind in evaluator test.")))
+       (:hline-anchor
+        (cdr (assoc (org-kit::table-calc-reference-row-value reference)
+                    hline-anchors)))
+       (:invalid nil))
      (case (org-kit::table-calc-reference-column-kind reference)
        (:current base-column)
        (:absolute (org-kit::table-calc-reference-column-value reference))
@@ -46,13 +50,13 @@
 (defun table-calc-eval-test-evaluate
     (formula &key (assignment-index 0) (base-row 1) (base-column 1)
                   (last-row 1) (named-columns nil) (cells nil)
-                  (limits (make-limits)) work-budget)
+                  (limits (make-limits)) work-budget hline-anchors)
   (let ((assignment (table-calc-eval-test-assignment
                      formula assignment-index limits)))
     (org-kit::table-calc-evaluate-assignment
      assignment
      (table-calc-eval-test-position-function
-      base-row base-column last-row named-columns)
+      base-row base-column last-row named-columns hline-anchors)
      (table-calc-eval-test-cell-value-function cells)
      :limits limits
      :work-budget (or work-budget
@@ -107,6 +111,12 @@
       (expect (org-resource-limit-error-limit-name condition) :to-be name)
       (expect (org-resource-limit-error-limit condition) :to-be limit)
       (expect (org-resource-limit-error-actual condition) :to-be actual))))
+
+(defun table-calc-eval-test-find-node (root type)
+  (or (when (eq (node-type root) type) root)
+      (some (lambda (child)
+              (table-calc-eval-test-find-node child type))
+            (node-children root))))
 
 (defun table-calc-eval-test-oracle-rows-at
     (name base-row base-column last-row cells)
@@ -285,6 +295,56 @@
               (table-calc-eval-test-cell-value-function
                (table-calc-eval-test-cell-map)))))
       (expect result :to-equal "7")))
+
+  (it "rejects invalid and named targets before evaluation formats them"
+    (dolist (case '(("@INVALID$2=1" :invalid-target "@INVALID$2")
+                    ("$name=1" :unsupported-target "$name")))
+      (let ((condition (table-calc-eval-test-condition (first case))))
+        (table-calc-eval-test-expect-table-error condition (second case))
+        (expect (org-table-error-target condition) :to-equal (third case))))
+    (let ((condition
+            (table-calc-eval-test-condition
+             "@1$1=@INVALID$2" :cells (table-calc-eval-test-cell-map))))
+      (table-calc-eval-test-expect-table-error condition :invalid-reference)
+      (expect (org-table-error-target condition) :to-equal "@1$1")))
+
+  (it "evaluates hline-anchor ranges across inserted rows"
+    (let ((before-insertion
+            (table-calc-eval-test-evaluate
+             "@1$3=vsum(@I$2..@II$2)"
+             :base-row 1 :base-column 3 :last-row 5
+             :hline-anchors '((1 . 3) (2 . 4))
+             :cells (table-calc-eval-test-cell-map
+                     '(3 2 "10") '(4 2 "20"))))
+          (after-insertion
+            (table-calc-eval-test-evaluate
+             "@1$3=vsum(@I$2..@II$2)"
+             :base-row 1 :base-column 3 :last-row 6
+             :hline-anchors '((1 . 3) (2 . 5))
+             :cells (table-calc-eval-test-cell-map
+                     '(3 2 "10") '(4 2 "") '(5 2 "20")))))
+      (expect before-insertion :to-equal "30")
+      (expect after-insertion :to-equal "30"))
+    (let ((condition
+            (table-calc-eval-test-condition
+             "@1$3=vsum(@I$2..@II$2)"
+             :cells (table-calc-eval-test-cell-map '(1 2 "10")))))
+      (table-calc-eval-test-expect-table-error condition :unsupported-reference)))
+
+  (it "preserves invalid and named targets through the public table edit API"
+    (let* ((formula "@INVALID$2=1::$name=2")
+           (source (format nil
+                           "| A | B |~%|---+---|~%| x | y |~%#+TBLFM: ~A~%"
+                           formula))
+           (document (parse-org source))
+           (table (table-calc-eval-test-find-node (document-root document) :table))
+           (result (table-insert-row document table 2))
+           (updated (document-text (edit-result-updated-document result))))
+      (with-soft-assertions
+        (expect (edit-result-p result) :to-be t)
+        (expect (search (format nil "#+TBLFM: ~A" formula) updated)
+                :not :to-be nil)
+        (expect (document-text document) :to-equal source))))
 
   (it "preserves signed zero through unary, addition, and multiplication"
     (dolist (case '(("@1$1=--0" . "0")
