@@ -56,14 +56,13 @@
             do (setf width (min maximum-width (+ (* width 10) digit)))
             finally (return width)))))
 
-(defun table-column-layout (rows column-count maximum-width)
+(defun table-column-layout (rows column-count maximum-width row-values)
   (let ((widths (make-array column-count :initial-element 1))
         (width-hints (make-array column-count :initial-element 0))
         (alignments (make-array column-count :initial-element nil)))
     (dolist (row rows)
-      (loop for cell in (node-children row)
+      (loop for value in (funcall row-values row)
             for column from 0
-            for value = (node-property cell :value)
             do (setf (aref widths column)
                      (max (aref widths column) (table-string-width value)))
                (let ((alignment (table-cell-alignment-cookie value))
@@ -329,7 +328,10 @@
       (multiple-value-bind (widths alignments)
           (table-column-layout
            standard-rows column-count
-           (1+ (limit-value (document-limits document) :max-output-length)))
+           (1+ (limit-value (document-limits document) :max-output-length))
+           (lambda (row)
+             (mapcar (lambda (cell) (node-property cell :value))
+                     (node-children row))))
         (let* ((source (document-text document))
                (first-row (first rows))
                (first-bar

@@ -12,34 +12,28 @@
   source edits kept-assignments assignments removed-p terminal-p
   value-start value-end output-length)
 
-(defun table-edit-signal-error (target reason message)
-  (error 'org-table-error
-         :message message
-         :target (edit-target-description target)
-         :reason reason))
-
 (defun table-edit-resolve-table (document target)
   (let ((table (edit-resolve-node document target '(:table))))
     (unless (eq (node-property table :type) :org)
-      (table-edit-signal-error table :unsupported-table-type
-                               "Only Org pipe tables can be edited"))
+      (table-align-signal-error table :unsupported-table-type
+                                "Only Org pipe tables can be edited"))
     table))
 
 (defun table-edit-proper-values (values target maximum)
   (let ((count (edit-proper-list-length values)))
     (unless count
-      (table-edit-signal-error target :invalid-value
-                               "Table values must be a proper list"))
+      (table-align-signal-error target :invalid-value
+                                "Table values must be a proper list"))
     (when (> count maximum)
-      (table-edit-signal-error target :invalid-value
-                               "Too many values for the table structure"))
+      (table-align-signal-error target :invalid-value
+                                "Too many values for the table structure"))
     (dolist (value values)
       (unless (and (stringp value)
                    (not (find-if (lambda (character)
                                   (find character '(#\Return #\Newline)))
                                 value)))
-        (table-edit-signal-error target :invalid-value
-                                 "Table values must be single-line strings")))
+        (table-align-signal-error target :invalid-value
+                                  "Table values must be single-line strings")))
     values))
 
 (defun table-edit-escaped-pipe-count (value)
@@ -200,8 +194,8 @@
 
 (defun table-edit-check-index (table index maximum &key insertion-p)
   (unless (table-edit-index-valid-p index maximum :insertion-p insertion-p)
-    (table-edit-signal-error table :invalid-index
-                             "Table row or column index is out of range")))
+    (table-align-signal-error table :invalid-index
+                              "Table row or column index is out of range")))
 
 (defun table-edit-validate-move-indexes (table from to maximum)
   (table-edit-check-index table from maximum)
@@ -1455,7 +1449,10 @@
             (table-edit-column-name-survives-delete-p
              table "INVALID" (getf operation :index))))
     (multiple-value-bind (widths alignments)
-        (table-edit-row-width-layout normalized-models width)
+        (table-column-layout
+         normalized-models width
+         (1+ (limit-value (document-limits document) :max-output-length))
+         #'%table-edit-row-values)
       (let ((row-output-length
               (table-edit-output-rows-length
                normalized-models (length prefix) widths newline-length
@@ -1498,21 +1495,6 @@
               (push (edit-make-patch row-start row-end row-output table) patches))
             (edit-apply-patches-result document (nreverse patches)
                                        :target table :expected expected))))))))
-
-(defun table-edit-row-width-layout (models width)
-  (let ((widths (make-array width :initial-element 1))
-        (alignments (make-array width :initial-element nil)))
-    (dolist (row models)
-      (when (eq (%table-edit-row-kind row) :standard)
-        (loop for value in (%table-edit-row-values row)
-              for column from 0
-              do (setf (aref widths column)
-                       (max (aref widths column) (table-string-width value)))
-                 (let ((alignment (table-cell-alignment-cookie value)))
-                   (when (and alignment (null (aref alignments column)))
-                     (setf (aref alignments column) alignment))))))
-    (values widths
-            (map 'vector (lambda (alignment) (or alignment :left)) alignments))))
 
 (defun table-edit-run (document target action index &key from to values)
   (let* ((table (table-edit-resolve-table document target))
@@ -1572,8 +1554,8 @@
              (unless (= from to)
                (unless (= (%table-edit-row-section source-row)
                           (%table-edit-row-section target-row))
-                 (table-edit-signal-error table :invalid-range
-                                          "A row cannot move across an hline boundary")))
+        (table-align-signal-error table :invalid-range
+                                  "A row cannot move across an hline boundary")))
              (table-edit-operation-result
               document table (table-edit-move-row-models models from to)
               width operation original-ragged-p)))

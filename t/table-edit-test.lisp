@@ -1385,7 +1385,11 @@
                 (format nil
                         "| <r> | <c> |~%|     |     |~%|   x |  y  |~%"))
         (expect (document-text (edit-result-updated-document width-result))
-                :to-equal (format nil "| <10> |~%|      |~%| x    |~%"))
+                :to-equal
+                (format nil "| <10>~A|~%|~A|~%| x~A|~%"
+                        (make-string 7 :initial-element #\Space)
+                        (make-string 12 :initial-element #\Space)
+                        (make-string 10 :initial-element #\Space)))
         (expect (document-text hline-document) :to-equal hline-source)
         (expect (document-text sibling-document) :to-equal sibling-source)
         (expect (document-text alignment-document) :to-equal alignment-source)
