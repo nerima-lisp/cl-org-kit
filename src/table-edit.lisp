@@ -597,64 +597,69 @@
             (table-edit-column-name-survives-delete-p
              table "INVALID" (getf operation :index))))
     (when (> (length formulas) 1)
-      (edit-signal-error table :uneditable-structure
-                         "Multiple TBLFM directives cannot be remapped safely"))
+      (table-align-signal-error
+       table :uneditable-structure
+       "Multiple TBLFM directives cannot be remapped safely"))
     (loop for formula in formulas
           for range in ranges
           for value-range = (table-edit-formula-value-range source range)
           collect
-          (if (zerop (length formula))
-              (%make-table-edit-formula
-               :source formula :edits nil :kept-assignments nil
-               :assignments nil :removed-p nil :terminal-p nil
-               :value-start (car value-range) :value-end (cdr value-range)
-               :output-length 0)
-              (let* ((program
-                       (handler-case
-                           (table-calc-parse-formula
-                            formula (document-limits (node-document table)))
-                         (org-table-unsupported-syntax (condition)
-                           (edit-signal-error
-                            table :uneditable-structure
-                            (format nil
-                                    "TBLFM syntax ~A at position ~D cannot be remapped"
-                                    (string-downcase
-                                     (symbol-name
-                                      (org-table-unsupported-syntax-feature
-                                       condition)))
-                                    (org-table-unsupported-syntax-position
-                                     condition))))))
-                     (assignments (table-calc-program-assignments program))
-                     (last-assignment (car (last assignments)))
-                     (kept-pairs nil)
-                     (all-edits nil)
-                     (removed-p nil)
-                     (removed-tail-p nil))
-                (dolist (assignment assignments)
-                  (if (table-edit-deleted-target-p assignment operation)
-                      (setf removed-p t
-                            removed-tail-p
-                            (or removed-tail-p (eq assignment last-assignment)))
-                      (let ((edits (table-edit-assignment-reference-edits
-                                    assignment operation formula)))
-                        (push (list assignment edits) kept-pairs)
-                        (dolist (edit edits) (push edit all-edits)))))
-                (setf kept-pairs (nreverse kept-pairs)
-                      all-edits (nreverse all-edits))
-                (let* ((terminal-p
-                         (and kept-pairs
-                              (or (table-edit-formula-terminal-p formula)
-                                  removed-tail-p)))
-                       (output-length
-                         (table-edit-formula-output-length
-                          formula kept-pairs removed-p terminal-p)))
-                  (%make-table-edit-formula
-                   :source formula :edits all-edits
-                   :kept-assignments kept-pairs :assignments assignments
-                   :removed-p removed-p
-                   :terminal-p terminal-p
-                   :value-start (car value-range) :value-end (cdr value-range)
-                   :output-length output-length)))))))
+          (multiple-value-bind (value-start value-end)
+              (table-edit-formula-value-boundaries source range)
+            (if (zerop (length formula))
+                (%make-table-edit-formula
+                 :source formula :edits nil :kept-assignments nil
+                 :assignments nil :removed-p nil :terminal-p nil
+                 :value-start value-start :value-end value-end
+                 :output-length 0)
+                (let* ((program
+                         (handler-case
+                             (table-calc-parse-formula
+                              formula (document-limits (node-document table)))
+                           (org-table-unsupported-syntax (condition)
+                             (table-align-signal-error
+                              table :uneditable-structure
+                              (format nil
+                                      "TBLFM syntax ~A at position ~D cannot be remapped"
+                                      (string-downcase
+                                       (symbol-name
+                                        (org-table-unsupported-syntax-feature
+                                         condition)))
+                                      (org-table-unsupported-syntax-position
+                                       condition))))))
+                       (assignments (table-calc-program-assignments program))
+                       (last-assignment (car (last assignments)))
+                       (kept-pairs nil)
+                       (all-edits nil)
+                       (removed-p nil)
+                       (removed-tail-p nil))
+                  (dolist (assignment assignments)
+                    (if (table-edit-deleted-target-p assignment operation)
+                        (setf removed-p t
+                              removed-tail-p
+                              (or removed-tail-p
+                                  (eq assignment last-assignment)))
+                        (let ((edits
+                                (table-edit-assignment-reference-edits
+                                 assignment operation formula)))
+                          (push (list assignment edits) kept-pairs)
+                          (dolist (edit edits) (push edit all-edits)))))
+                  (setf kept-pairs (nreverse kept-pairs)
+                        all-edits (nreverse all-edits))
+                  (let* ((terminal-p
+                           (and kept-pairs
+                                (or (table-edit-formula-terminal-p formula)
+                                    removed-tail-p)))
+                         (output-length
+                           (table-edit-formula-output-length
+                            formula kept-pairs removed-p terminal-p)))
+                    (%make-table-edit-formula
+                     :source formula :edits all-edits
+                     :kept-assignments kept-pairs :assignments assignments
+                     :removed-p removed-p
+                     :terminal-p terminal-p
+                     :value-start value-start :value-end value-end
+                     :output-length output-length))))))))
 
 (defun table-edit-render-row (row prefix widths alignments terminal-p)
   (or (%table-edit-row-raw-content row)

@@ -111,6 +111,12 @@
             (org-kit-error-message condition)
             (org-table-error-reason condition)
             (org-table-error-target condition)))
+    (org-table-unsupported-syntax (condition)
+      (list :unsupported
+            (org-kit-error-message condition)
+            (org-table-unsupported-syntax-feature condition)
+            (org-table-unsupported-syntax-position condition)
+            (org-table-unsupported-syntax-formula condition)))
     (org-edit-error (condition)
       (list :edit
             (org-kit-error-message condition)
@@ -528,7 +534,7 @@
              (table-edit-test-condition
               (lambda () (table-insert-row document table 1)))))
       (with-soft-assertions
-        (expect (first condition) :to-be :edit)
+        (expect (first condition) :to-be :table)
         (expect (third condition) :to-be :uneditable-structure)
         (expect (fourth condition) :to-equal "table")
         (expect (document-text document) :to-equal source))))
@@ -542,7 +548,7 @@
              (table-edit-test-condition
               (lambda () (table-insert-row document table 1)))))
       (with-soft-assertions
-        (expect (first condition) :to-be :edit)
+        (expect (first condition) :to-be :table)
         (expect (second condition) :to-equal
                 "Multiple TBLFM directives cannot be remapped safely")
         (expect (third condition) :to-be :uneditable-structure)
