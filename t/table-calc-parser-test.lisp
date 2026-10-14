@@ -245,7 +245,7 @@
         (expect (org-kit::table-calc-reference-column-kind invalid-row-reference)
                 :to-be :absolute))))
 
-  (it "parses first, last, and hline-anchor row references as formula targets and values"
+  (it "parses first and last row targets with hline-anchor value references"
     (let* ((formula "@<$2=@I$2::@>$2=vsum(@I$2..@II$2)")
            (assignments
              (org-kit::table-calc-program-assignments
@@ -376,6 +376,7 @@
                   (list "@1.5$1=1" 1 :invalid-reference)
                   (list "$1=@>$" 6 :invalid-reference)
                   (list "@+1$-1=1" 0 :unsupported-formula-target)
+                  (list "@I$1=1" 0 :unsupported-formula-target)
                   (list "@2$1=$1..1" 9 :invalid-range)
                   (list "$1=.5" 3 :unsupported-character)
                   (list "$1=1+." 5 :unsupported-character)
@@ -541,6 +542,8 @@
 
   (it "parses bounded signed decimals with default and explicit limits"
     (let* ((default-limits (org-kit::parse-safe-decimal "1"))
+           (bounded-decimal
+             (org-kit::parse-safe-decimal "x1y" :start 1 :end 2))
            (negative-zero (table-calc-test-decimal "-0.000e0"))
            (normalized (table-calc-test-decimal "0012.300e1"))
            (precision-limit (make-limits :max-formula-precision 2))
@@ -555,6 +558,7 @@
                (org-resource-limit-error (condition) condition))))
       (with-soft-assertions
         (expect (org-kit::safe-decimal-coefficient default-limits) :to-be 1)
+        (expect (org-kit::safe-decimal-coefficient bounded-decimal) :to-be 1)
         (expect (org-kit::safe-decimal-negative-zero-p negative-zero) :to-be t)
         (expect (org-kit::safe-decimal-coefficient normalized) :to-be 123)
         (expect (org-kit::safe-decimal-exponent normalized) :to-be 0)

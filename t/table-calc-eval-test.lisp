@@ -306,6 +306,10 @@
             (table-calc-eval-test-condition
              "@1$1=@INVALID$2" :cells (table-calc-eval-test-cell-map))))
       (table-calc-eval-test-expect-table-error condition :invalid-reference)
+      (expect (org-table-error-target condition) :to-equal "@1$1"))
+    (let ((condition
+            (table-calc-eval-test-condition "@1$1=@0$1")))
+      (table-calc-eval-test-expect-table-error condition :unsupported-reference)
       (expect (org-table-error-target condition) :to-equal "@1$1")))
 
   (it "evaluates hline-anchor ranges across inserted rows"
@@ -427,6 +431,11 @@
     (table-calc-eval-test-expect-table-error
      (table-calc-eval-test-condition "@1$1=1/0")
      :division-by-zero)
+    (dolist (case '(("@<$1=1/0" . "@<$1")
+                    ("@>$1=1/0" . "@>$1")))
+      (let ((condition (table-calc-eval-test-condition (car case))))
+        (table-calc-eval-test-expect-table-error condition :division-by-zero)
+        (expect (org-table-error-target condition) :to-equal (cdr case))))
     (table-calc-eval-test-expect-table-error
      (table-calc-eval-test-condition
       "@1$2=@1$1" :base-row 1 :base-column 2

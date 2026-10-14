@@ -41,8 +41,6 @@
         (format nil "@<$~A" column-value))
        ((eql row-kind :last)
         (format nil "@>$~A" column-value))
-       ((eql row-kind :hline-anchor)
-        (format nil "@~A$~A" (if (= row-value 1) "I" "II") column-value))
        ((eql row-kind :invalid)
         (format nil "@INVALID$~A" column-value))
        (t

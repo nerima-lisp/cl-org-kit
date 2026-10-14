@@ -504,9 +504,6 @@
       ((and (eql row-kind :current)
             (member column-kind '(:absolute :name)))
        (values :column reference))
-      ((and (eql row-kind :hline-anchor)
-            (member column-kind '(:absolute :name)))
-       (values :field reference))
       ((eql row-kind :invalid)
        (values :invalid reference))
       (t
