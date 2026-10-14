@@ -706,10 +706,15 @@
         (expect (document-text delete-document) :to-equal source)
         (expect (document-text move-document) :to-equal source))))
 
-  (it "recalculates column widths when deleting the widest row"
+  (it "preserves aligned column widths when deleting the widest row"
     (let* ((source
-             (format nil "| Heading |~%| widest row value |~%| x |~%"))
-           (expected (format nil "| Heading |~%| x |~%"))
+             (format nil "| Heading~A|~%| widest row value |~%| x~A|~%"
+                     (make-string 10 :initial-element #\Space)
+                     (make-string 16 :initial-element #\Space)))
+           (expected
+             (format nil "| Heading~A|~%| x~A|~%"
+                     (make-string 10 :initial-element #\Space)
+                     (make-string 16 :initial-element #\Space)))
            (document (parse-org source))
            (table (table-edit-test-find-node (document-root document) :table))
            (result (table-delete-row document table 2)))
