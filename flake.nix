@@ -154,8 +154,14 @@
         ./scripts
         ./t/fixtures
       ];
+      # The package's default and coverage checks inherit these build inputs.
+      # cl-date-kit reads zoneinfo from TZDIR inside the Linux build sandbox.
       packageArgs = ctx: {
-        nativeBuildInputs = [ ctx.pkgs.perl ];
+        nativeBuildInputs = [
+          ctx.pkgs.perl
+          ctx.pkgs.tzdata
+        ];
+        TZDIR = "${ctx.pkgs.tzdata}/share/zoneinfo";
       };
 
       timeoutSeconds = 600;
