@@ -1,7 +1,7 @@
 # Export
 
-`export-org` renders a parsed document as HTML or GitHub Flavored Markdown
-(GFM). The default output type is a string.
+`export-org` renders a parsed document as HTML, GitHub Flavored Markdown (GFM),
+or ASCII. The default output type is a string.
 
 ~~~lisp
 (require :asdf)
@@ -14,12 +14,13 @@
   (list
    (org-kit:export-org document :html :context context)
    (org-kit:export-org document :gfm :context context)
+   (org-kit:export-org document :ascii :context context)
    (org-kit:export-org document :gfm
                        :context context :output-type :octets)))
 ~~~
 
-The first two calls return strings. `:output-type :octets` returns a UTF-8
-octet vector. With `:output-type :stream`, supply an output stream with
+The HTML, GFM, and ASCII calls return strings. `:output-type :octets` returns a
+UTF-8 octet vector. With `:output-type :stream`, supply an output stream with
 `:stream`. Character streams receive text; streams whose element type is
 `(unsigned-byte 8)` receive UTF-8 octets. Other stream element types are
 rejected, and a successful call returns the stream.
@@ -27,8 +28,6 @@ rejected, and a successful call returns the stream.
 `make-export-context` supplies optional title, author, date, language, and time
 context values. Non-NIL context metadata overrides the corresponding Org
 keywords such as `#+TITLE`; NIL leaves the in-document value in effect.
-
-ASCII export is not available in version 0.1.0.
 
 ## Errors and limits
 
