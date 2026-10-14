@@ -80,6 +80,7 @@
     "STATISTICS-COOKIE-UPDATE-P" "STATISTICS-COOKIE-UPDATE-NODE"
     "STATISTICS-COOKIE-UPDATE-OLD-VALUE" "STATISTICS-COOKIE-UPDATE-NEW-VALUE"
     "UPDATE-STATISTICS-COOKIES"
+    "TABLE-RECALCULATE"
     ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
@@ -236,6 +237,8 @@ docs/src/reference/node-model.md.")
               :to-equal "Delete a column by its one-based table position and remap supported references.")
       (expect (documentation 'table-move-column 'function)
               :to-equal "Move a column between one-based positions and remap supported references.")
+      (expect (documentation 'table-recalculate 'function)
+              :to-equal "Recalculate a pipe table's TBLFM formulas and return its validated edit result.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.
