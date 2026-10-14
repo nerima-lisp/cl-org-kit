@@ -891,6 +891,10 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
                                   (query-evaluation-state-reference-time state)))
            (t nil)))
         ((member operator '(:matches :not-matches))
+         (when (and (member name '("FILE" "CATEGORY") :test #'string=)
+                    (stringp actual))
+           (check-limit (query-evaluation-state-limits state)
+                        :max-input-length (length actual)))
          (let ((matched (query-regex-match-p expected actual state)))
            (if (eq operator :matches) matched (not matched))))
         (t

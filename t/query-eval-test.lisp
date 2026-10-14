@@ -21,8 +21,9 @@
 (defun query-eval-test-public-list (text form &rest options)
   (apply #'org-kit:query-list (parse-org text) form options))
 
-(defun query-eval-test-programmatic-document (properties &key settings source-name)
-  (let* ((document (org-kit:make-document "" :source-name source-name))
+(defun query-eval-test-programmatic-document (properties &key settings source-name limits)
+  (let* ((document (org-kit:make-document "" :source-name source-name
+                                          :limits (or limits (make-limits))))
          (headline (org-kit:make-node :headline :properties properties))
          (root (org-kit:make-node :org-data :children (list headline))))
     (setf (org-kit:document-root document) root
@@ -269,6 +270,23 @@
                   :context context))
                 :to-equal
                 '("Entry")))))
+
+  (it "enforces document input limits on FILE and CATEGORY regex candidates"
+    (let* ((document
+             (query-eval-test-programmatic-document
+              nil :limits (make-limits :max-input-length 8)))
+           (context
+             (org-kit:make-query-context
+              :file "filename-too-long.org"
+              :category "category-too-long")))
+      (signals org-resource-limit-error
+        (org-kit:query-list
+         document '(:property "FILE" :matches (:regex "x"))
+         :context context))
+      (signals org-resource-limit-error
+        (org-kit:query-list
+         document '(:property "CATEGORY" :matches (:regex "x"))
+         :context context))))
 
   (it "compiles a bounded Emacs regex subset with case folding and intervals"
     (let* ((limits (make-limits))
