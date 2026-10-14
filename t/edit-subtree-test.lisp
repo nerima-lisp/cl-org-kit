@@ -95,6 +95,8 @@
          (org-kit::edit-subtree-trim-final-line-endings
           (concatenate 'string "text" lf))
          :to-equal "text")
+        (expect (org-kit::edit-subtree-trim-final-line-endings lf)
+                :to-equal "")
         (expect
          (org-kit::edit-subtree-trim-final-line-endings
           (concatenate 'string "text" crlf crlf))
