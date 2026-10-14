@@ -9,7 +9,14 @@
          :target (edit-target-description target)
          :reason reason))
 
-(defun table-recalculate-standard-rows (table)
+(defun table-recalculate-row-cells (row limits work-budget)
+  (let ((cells (make-array 0 :adjustable t :fill-pointer 0)))
+    (table-calc-charge-work limits work-budget 1)
+    (dolist (cell (node-children row) cells)
+      (table-calc-charge-work limits work-budget 1)
+      (vector-push-extend cell cells))))
+
+(defun table-recalculate-standard-rows (table limits work-budget)
   (let ((rows nil)
         (after-first-rule nil)
         (header nil)
@@ -32,7 +39,12 @@
     (unless after-first-rule
       (setf data-rows (loop for row in rows for index from 1 collect index)
             header nil))
-    (values (coerce rows 'vector) data-rows header)))
+    (let ((indexed-rows (make-array 0 :adjustable t :fill-pointer 0)))
+      (dolist (row rows indexed-rows)
+        (vector-push-extend
+         (table-recalculate-row-cells row limits work-budget)
+         indexed-rows))
+      (values indexed-rows data-rows header))))
 
 (defun table-recalculate-cell (standard-rows row column)
   (let ((row-node
@@ -41,8 +53,8 @@
                (aref standard-rows (1- row)))))
     (when (and row-node
                (integerp column)
-               (<= 1 column (length (node-children row-node))))
-      (nth (1- column) (node-children row-node)))))
+               (<= 1 column (length row-node)))
+      (aref row-node (1- column)))))
 
 (defun table-recalculate-cell-value (standard-rows row column)
   (let ((cell (table-recalculate-cell standard-rows row column)))
@@ -86,11 +98,11 @@
                   target :invalid-reference "Formula reference has an invalid row"))
                 (:hline-anchor
                  (table-recalculate-signal-error
-                  target :unsupported-reference
+                  target :invalid-reference
                   "Hline-anchored formula references are unsupported"))
                 (otherwise
                  (table-recalculate-signal-error
-                  target :unsupported-reference
+                  target :invalid-reference
                   "Formula reference has an unsupported row kind"))))
          (column
            (case column-kind
@@ -103,7 +115,7 @@
                column-value header-columns target))
              (otherwise
               (table-recalculate-signal-error
-               target :unsupported-reference
+               target :invalid-reference
                "Formula reference has an unsupported column kind")))))
     (unless (and (integerp row) (<= 1 row row-count)
                  (integerp column) (<= 1 column column-count))
@@ -158,10 +170,10 @@
     (:field :field)
     (:invalid
      (table-recalculate-signal-error
-      target :invalid-target "Formula assignment has an invalid target"))
+      target :invalid-reference "Formula assignment has an invalid target"))
     (otherwise
      (table-recalculate-signal-error
-      target :unsupported-target-kind
+      target :invalid-reference
       "Formula assignment has an unsupported target kind"))))
 
 (defun table-recalculate-target-column (reference header-columns target)
@@ -172,7 +184,7 @@
             header-columns target))
     (otherwise
      (table-recalculate-signal-error
-      target :invalid-target "Formula assignment has an invalid column target"))))
+      target :invalid-reference "Formula assignment has an invalid column target"))))
 
 (defun table-recalculate-target-row (reference row-count target)
   (case (table-calc-reference-row-kind reference)
@@ -181,7 +193,7 @@
     (:last row-count)
     (otherwise
      (table-recalculate-signal-error
-      target :invalid-target "Formula assignment has an invalid row target"))))
+      target :invalid-reference "Formula assignment has an invalid row target"))))
 
 (defun table-recalculate-normalize-assignment-target
     (assignment row-count column-count header-columns target)
@@ -194,7 +206,7 @@
                 (table-recalculate-target-row reference row-count target))))
     (when (and (eq kind :column) (not (eq row-kind :current)))
       (table-recalculate-signal-error
-       target :invalid-target "Column formula has a non-current row target"))
+       target :invalid-reference "Column formula has a non-current row target"))
     (unless (and (integerp column) (<= 1 column column-count))
       (table-recalculate-signal-error
        target :invalid-reference "Formula assignment column is outside the table"))
@@ -359,7 +371,7 @@
         (table-recalculate-cell-value standard-rows row column))))
 
 (defun table-recalculate-evaluate-entries
-    (entries standard-rows row-count column-count header-columns limits work-budget
+    (entries row-count column-count header-columns limits work-budget
      work-map cell-value-function target)
   (dolist (entry entries)
     (let* ((row (table-recalculate-entry-row entry))
@@ -440,11 +452,10 @@
              (parsed-assignments (table-calc-program-assignments program))
              (work-budget (make-table-calc-work-budget)))
         (multiple-value-bind (standard-rows data-rows header-row)
-            (table-recalculate-standard-rows table)
+            (table-recalculate-standard-rows table limits work-budget)
           (let* ((row-count (length standard-rows))
                  (column-count
-                   (reduce #'max standard-rows
-                           :key (lambda (row) (length (node-children row)))
+                   (reduce #'max standard-rows :key #'length
                            :initial-value 0))
                  (header-columns (table-recalculate-header-columns header-row))
                  (assignments
@@ -485,14 +496,14 @@
                  (table-recalculate-entry-target-map field-entries)
                  row-count column-count header-columns table limits work-budget)
                 (table-recalculate-evaluate-entries
-                 column-entries standard-rows row-count column-count
+                 column-entries row-count column-count
                  header-columns limits work-budget column-values
                  (lambda (work-map row column)
                    (table-recalculate-work-map-cell-value
                     work-map standard-rows row column))
                  table)
                 (table-recalculate-evaluate-entries
-                 field-entries standard-rows row-count column-count
+                 field-entries row-count column-count
                  header-columns limits work-budget field-values
                  (lambda (work-map row column)
                    (declare (ignore work-map))

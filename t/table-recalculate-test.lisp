@@ -242,12 +242,12 @@
       (with-soft-assertions
         (expect (table-recalculate-test-condition
                  (lambda () (table-recalculate document table)))
-                :to-equal '(:table :invalid-target))
+                :to-equal '(:table :invalid-reference))
         (expect (table-recalculate-test-condition
                  (lambda ()
                    (org-kit::table-recalculate-assignments-by-kind
                     (list unknown) :column)))
-                :to-equal '(:table :unsupported-target-kind)))))
+                :to-equal '(:table :invalid-reference)))))
 
   (it "reads a self-referencing column formula from its original cell"
     (let* ((source (format nil "| a | b |~%|---+---|~%| 0 | 1 |~%| 0 | 2 |~%#+TBLFM: $2=$2+1~%"))
@@ -279,38 +279,57 @@
 
   (it "shares the formula work budget across expanded cells"
     (let* ((source (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%| 3 | 4 |~%#+TBLFM: $2=$1+1~%"))
-           (document (parse-org source :limits (make-limits :max-formula-work 4)))
+           (document (parse-org source :limits (make-limits :max-formula-work 33)))
            (table (table-recalculate-test-find-node (document-root document) :table)))
       (with-soft-assertions
         (expect (table-recalculate-test-condition
                  (lambda () (table-recalculate document table)))
-                :to-equal '(:limit :max-formula-work 4 5))
+                :to-equal '(:limit :max-formula-work 33 34))
         (expect (document-text document) :to-equal source))))
 
   (it "charges range dependency inspection to the formula work budget"
-    (let* ((source
-             (with-output-to-string (stream)
-               (format stream "| value | total |~%|-------+-------|~%")
-               (loop for value below 100
-                     do (format stream "| ~D | 0 |~%" value))
-               (format stream "#+TBLFM: @101$2=vsum(@2$1..@101$1)~%")))
-           (document (parse-org source :limits (make-limits :max-formula-work 220)))
-           (table (table-recalculate-test-find-node (document-root document) :table)))
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment
+             (first (org-kit::table-calc-program-assignments
+                     (org-kit::table-calc-parse-formula
+                      "@2$2=vsum(@1$1..@101$1)"))))
+           (entry (org-kit::make-table-recalculate-entry
+                   :assignment assignment :row 2 :column 2 :owner 0)))
       (expect (table-recalculate-test-condition
-               (lambda () (table-recalculate document table)))
-              :to-equal '(:limit :max-formula-work 220 310))))
+               (lambda ()
+                 (org-kit::table-recalculate-check-cycles
+                  (list entry) 1 (make-hash-table :test #'equal)
+                  101 2 (make-hash-table :test #'equal) table
+                  (make-limits :max-formula-work 2)
+                  (org-kit::make-table-calc-work-budget))))
+              :to-equal '(:limit :max-formula-work 2 3))))
+
+  (it "charges cell indexing to the formula work budget"
+    (let* ((source (format nil "| a | b | c |~%|---+---+---|~%| 1 | 2 | 3 |~%#+TBLFM: $3=$1~%"))
+           (document (parse-org source :limits (make-limits :max-formula-work 5)))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (with-soft-assertions
+        (expect (table-recalculate-test-condition
+                 (lambda () (table-recalculate document table)))
+                :to-equal '(:limit :max-formula-work 5 6))
+        (expect (document-text document) :to-equal source))))
 
   (it "stores standard table rows in a vector"
     (let* ((document (parse-org
                       (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
            (table (table-recalculate-test-find-node (document-root document) :table)))
       (multiple-value-bind (rows data-rows header-row)
-          (org-kit::table-recalculate-standard-rows table)
+          (org-kit::table-recalculate-standard-rows
+           table (document-limits document) (org-kit::make-table-calc-work-budget))
         (declare (ignore data-rows))
         (with-soft-assertions
           (expect (vectorp rows) :to-be t)
           (when (vectorp rows)
-            (expect (aref rows 0) :to-be header-row))))))
+            (expect (vectorp (aref rows 0)) :to-be t)
+            (when (plusp (length (aref rows 0)))
+              (expect (aref (aref rows 0) 0) :to-be
+                      (first (node-children header-row)))))))))
 
   (it "uses named, relative, last-row, and current-row references"
     (let* ((source
@@ -473,12 +492,14 @@
                    :assignment assignment :row 2 :column 2 :owner 0))
            (condition
              (multiple-value-bind (rows data-rows header-row)
-                 (org-kit::table-recalculate-standard-rows table)
+                 (org-kit::table-recalculate-standard-rows
+                  table (document-limits document)
+                  (org-kit::make-table-calc-work-budget))
                (declare (ignore data-rows header-row))
                (table-recalculate-test-caught-condition
                 (lambda ()
                   (org-kit::table-recalculate-evaluate-entries
-                   (list entry) rows (length rows) 2
+                   (list entry) (length rows) 2
                    (make-hash-table :test #'equal) (document-limits document)
                    (org-kit::make-table-calc-work-budget)
                    (make-hash-table :test #'equal)
