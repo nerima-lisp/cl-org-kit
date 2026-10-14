@@ -97,9 +97,16 @@
                (setf current 0))
         finally (return longest)))
 
-(defun export-gfm-code-span (value)
-  (let* ((text (substitute #\Space #\Newline
-                           (export-gfm-normalize-newlines value)))
+(defun export-gfm-code-span (value &key table-cell-p)
+  (let* ((normalized-text (substitute #\Space #\Newline
+                                      (export-gfm-normalize-newlines value)))
+         (text (if (and table-cell-p (find #\| normalized-text))
+                   (with-output-to-string (output)
+                     (loop for character across normalized-text
+                           do (when (char= character #\|)
+                                (write-char #\\ output))
+                              (write-char character output)))
+                   normalized-text))
          (delimiter (make-string (1+ (export-gfm-longest-run text #\`))
                                  :initial-element #\`))
          (pad-p (and (plusp (length text))
@@ -343,7 +350,7 @@
     (export-gfm-escape-literal text :table-cell-p table-cell-p
                                :soft-newline-p (not table-cell-p))))
 
-(defun export-gfm-serialize-destination (destination)
+(defun export-gfm-serialize-destination (destination &key table-cell-p)
   (with-output-to-string (output)
     (write-char #\< output)
     (loop for character across destination
@@ -351,6 +358,9 @@
                (#\Space (write-string "%20" output))
                (#\< (write-string "%3C" output))
                (#\> (write-string "%3E" output))
+               (#\| (if table-cell-p
+                        (write-string "%7C" output)
+                        (write-char character output)))
                ;; Preserve literal URI ampersands after Markdown entity decoding.
                (#\& (write-string "&amp;" output))
                (t (write-char character output))))
@@ -386,7 +396,7 @@
         (link-object-expand-abbreviation document raw-path)
         raw-path)))
 
-(defun export-gfm-link-destination (state node)
+(defun export-gfm-link-destination (state node &key table-cell-p)
   (when (export-gfm-link-source-control-p node)
     (let* ((type (node-property node :type))
            (path (node-property node :path))
@@ -413,7 +423,8 @@
                  (not (export-gfm-scheme-obfuscation-p raw-destination))
                  (not (export-gfm-scheme-obfuscation-p destination))
                  (export-safe-url-p raw-destination destination))
-        (export-gfm-serialize-destination destination)))))
+        (export-gfm-serialize-destination
+         destination :table-cell-p table-cell-p)))))
 
 (defun export-gfm-image-path-p (path)
   (and (stringp path)
@@ -425,7 +436,8 @@
 
 (defun export-gfm-render-link (state view &key table-cell-p)
   (let* ((node (export-view-node view))
-         (destination (export-gfm-link-destination state node))
+         (destination (export-gfm-link-destination
+                       state node :table-cell-p table-cell-p))
          (image-p (export-gfm-image-path-p (node-property node :path)))
          (label (export-gfm-link-label view :table-cell-p table-cell-p)))
     (if destination
@@ -459,7 +471,8 @@
       (:subscript (format nil "<sub>~A</sub>" (funcall content)))
       (:superscript (format nil "<sup>~A</sup>" (funcall content)))
       ((:code :verbatim :inline-src-block)
-       (export-gfm-code-span (export-gfm-inline-code-value node)))
+       (export-gfm-code-span (export-gfm-inline-code-value node)
+                             :table-cell-p table-cell-p))
       (:entity
        (export-gfm-escape-literal
         (or (node-property node :utf-8) (node-property node :unicode)

@@ -236,6 +236,19 @@
           (expect (member type (export-gfm-test-node-types branch-document))
                   :to-be-truthy)))))
 
+  (it "protects table cells when macro-expanded code spans and link destinations contain pipes"
+    (let* ((source
+             (format nil
+                     "#+MACRO: code ~~a|<img src=x onerror=alert(1)>~~~%#+MACRO: link [[https://ok/a|b][x]]~%| {{{code}}} | {{{link}}} |~%"))
+           (output (export-org (parse-org source) :gfm))
+           (outside-table-output
+             (export-org (parse-org "[[https://ok/a|b][x]]") :gfm)))
+      (expect outside-table-output :to-equal "[x](<https://ok/a|b>)")
+      (expect output
+              :to-equal
+              (format nil
+                      "| `a\\|<img src=x onerror=alert(1)>` | [x](<https://ok/a%7Cb>) |~%| --- | --- |"))))
+
   (it "escapes table-cell newlines and collapses ordinary soft newlines"
     (let ((table-literal
             (concatenate 'string "left|first" (string #\Newline) "second"))
