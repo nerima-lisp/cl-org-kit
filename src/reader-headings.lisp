@@ -795,7 +795,10 @@
            (raw-line-end
             (if (and (< line-end (length text))
                      (char= (char text line-end) #\Return))
-                (1+ line-end)
+                (if (char= (char text (1- line-end)) #\Return)
+                    ;; In CRCRLF, keep the data CR and exclude the delimiter CR.
+                    line-end
+                    (1+ line-end))
                 line-end))
            (position
             (reader-heading-skip-horizontal-space text

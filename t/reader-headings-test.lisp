@@ -93,6 +93,18 @@
                        (first (reader-headings-test-elements document :headline))))
                 (expect (node-property headline :raw-value)
                         :to-equal (concatenate 'string "Item" (string #\Return)))))
+          (it "keeps a data CR and excludes the CRLF delimiter in headline titles"
+              (let* ((source
+                      (format nil "* Item~C~C~C~%"
+                              #\Return #\Return #\Newline))
+                     (document (parse-org source))
+                     (headline
+                       (first (reader-headings-test-elements document :headline)))
+                     (bare-cr (string #\Return)))
+                (expect (node-property headline :raw-value)
+                        :to-equal (concatenate 'string "Item" bare-cr))
+                (expect (node-property headline :title)
+                        :to-equal (list (concatenate 'string "Item" bare-cr)))))
           (it
            "collects custom TODO sequences and lets explicit settings override them"
            (let* ((source

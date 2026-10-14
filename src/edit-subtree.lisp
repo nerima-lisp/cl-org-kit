@@ -30,6 +30,23 @@
                (document-root document))
     (nreverse headlines)))
 
+(defun edit-subtree-trailing-headline-cr-p (document start end)
+  (let* ((source (document-text document))
+         (newline (position #\Newline source :start start :end end
+                            :from-end t))
+         (line-start (if newline (1+ newline) start)))
+    (and (< start end)
+         (char= (char source (1- end)) #\Return)
+         (find line-start (edit-subtree-headlines document)
+               :key #'node-post-affiliated :test #'=))))
+
+(defun edit-subtree-fragment-separator (line-ending bare-cr-before-p)
+  (if (and bare-cr-before-p
+           (char= (char line-ending 0) #\Newline))
+      ;; A space keeps the data CR distinct from the CRLF delimiter.
+      (format nil " ~C" #\Newline)
+      line-ending))
+
 (defun edit-subtree-next-boundary (document headline)
   "Return the next same-or-shallower headline and its safe source boundary."
   (multiple-value-bind (start end stars)
@@ -143,7 +160,9 @@
       (edit-signal-error target :invalid-value
                          "Subtree text must contain exactly one headline"))
     (values fragment headline
-            (first (getf (edit-canonical-document fragment) :children)))))
+            (first (getf (edit-canonical-document fragment) :children))
+            (edit-subtree-trailing-headline-cr-p
+             fragment 0 (length raw-subtree)))))
 
 (defun edit-subtree-line-ending (document offset)
   (let* ((source (document-text document))
@@ -170,7 +189,8 @@
     (subseq text 0 end)))
 
 (defun edit-subtree-join-fragment (document offset raw-subtree suffix-p
-                                  &optional line-ending)
+                                  &optional line-ending
+                                    trailing-headline-cr-p)
   (let* ((source (document-text document))
          (newline (or line-ending
                       (edit-subtree-line-ending document offset)))
@@ -179,9 +199,16 @@
          (raw-final-newline-p
            (char= (char raw-subtree (1- (length raw-subtree))) #\Newline)))
     (concatenate 'string
-                 (if prefix-p newline "")
+                 (if prefix-p
+                     (edit-subtree-fragment-separator
+                      newline
+                      (char= (char source (1- offset)) #\Return))
+                     "")
                  raw-subtree
-                 (if (and suffix-p (not raw-final-newline-p)) newline ""))))
+                 (if (and suffix-p (not raw-final-newline-p))
+                     (edit-subtree-fragment-separator
+                      newline trailing-headline-cr-p)
+                     ""))))
 
 (defun edit-subtree-canonical-children (canonical path)
   (getf (edit-canonical-node-at-path canonical path) :children))
@@ -209,7 +236,8 @@
     (unless (member position '(:first-child :last-child))
       (edit-signal-error parent-target :invalid-value
                          "Subtree position must be :FIRST-CHILD or :LAST-CHILD"))
-    (multiple-value-bind (fragment fragment-headline canonical-fragment)
+    (multiple-value-bind (fragment fragment-headline canonical-fragment
+                          trailing-headline-cr-p)
         (edit-subtree-fragment document raw-subtree parent-target)
       (multiple-value-bind (parent-start parent-end parent-stars)
           (edit-subtree-marker document parent)
@@ -246,7 +274,8 @@
         (let* ((suffix-p (or (< offset (length source))
                              (document-final-newline-p document)))
                (replacement (edit-subtree-join-fragment document offset
-                                                        raw-subtree suffix-p))
+                                                        raw-subtree suffix-p nil
+                                                        trailing-headline-cr-p))
                (expected (edit-canonical-copy (edit-canonical-document document)))
                (children (edit-subtree-canonical-children expected parent-path))
                (index (if (eq position :first-child)
@@ -285,7 +314,8 @@
     (error 'type-error :datum document :expected-type 'document))
   (let* ((headline (edit-resolve-node document target '(:headline)))
          (path (edit-node-path document headline target)))
-    (multiple-value-bind (fragment fragment-headline canonical-fragment)
+    (multiple-value-bind (fragment fragment-headline canonical-fragment
+                          trailing-headline-cr-p)
         (edit-subtree-fragment document raw-subtree target)
       (unless (and (= (node-property headline :level)
                       (node-property fragment-headline :level)))
@@ -308,7 +338,8 @@
                  (suffix-p (or (< end (length source))
                                (document-final-newline-p document)))
                  (replacement (edit-subtree-join-fragment document start
-                                                          raw-subtree suffix-p))
+                                                          raw-subtree suffix-p nil
+                                                          trailing-headline-cr-p))
                  (expected (edit-canonical-copy (edit-canonical-document document)))
                  (children (edit-subtree-canonical-children expected parent-path)))
             (edit-canonical-set-children

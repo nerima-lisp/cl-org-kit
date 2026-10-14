@@ -134,21 +134,56 @@
                                                 (1- (length second-slice)))
                                            #\Newline)
                                     ""
-                                    (edit-subtree-line-ending document
-                                                              first-start))
+                                    (edit-subtree-fragment-separator
+                                     (edit-subtree-line-ending document
+                                                               first-start)
+                                     (edit-subtree-trailing-headline-cr-p
+                                      document second-start second-end)))
                                 first-slice))
+                 (final-crlf-p
+                   (and (>= (length first-slice) 2)
+                        (char= (char first-slice
+                                     (- (length first-slice) 2))
+                               #\Return)
+                        (char= (char first-slice
+                                     (1- (length first-slice)))
+                               #\Newline)))
+                 (preserved-trailing-headline
+                   (and (= second-end (length source))
+                        (not (document-final-newline-p document))
+                        final-crlf-p
+                        (edit-relocate-final-fragment-headline
+                         document first-start first-end)))
                  (replacement
                    (if (and (= second-end (length source))
                             (not (document-final-newline-p document)))
-                       (string-right-trim '(#\Return #\Newline)
-                                          untrimmed-replacement)
-                       untrimmed-replacement)))
+                       (if (and preserved-trailing-headline
+                                (null (node-property
+                                       preserved-trailing-headline :tags)))
+                           ;; Retain the CR because Org includes it in an untagged CRLF title.
+                           (subseq untrimmed-replacement
+                                   0 (1- (length untrimmed-replacement)))
+                           (string-right-trim '(#\Return #\Newline)
+                                              untrimmed-replacement))
+                       untrimmed-replacement))
+                 (patch
+                   (edit-make-patch first-start second-end replacement heading)))
             (edit-canonical-set-children
              expected path
              (edit-relocate-swap-children children first-index second-index))
+            (when (and preserved-trailing-headline
+                       (null (node-property
+                              preserved-trailing-headline :tags)))
+              (let* ((original-path
+                       (edit-node-path document preserved-trailing-headline))
+                     (trailing-path
+                       (append path (list second-index)
+                               (nthcdr (1+ (length path)) original-path))))
+                (edit-relocate-sync-trailing-headline-properties
+                 expected document source patch trailing-path heading)))
             (edit-apply-patches-result
              document
-             (list (edit-make-patch first-start second-end replacement heading))
+             (list patch)
              :target heading :expected expected)))))))
 
 (defun edit-relocate-check-todo-compatibility (source-document heading
@@ -405,6 +440,25 @@
       (edit-subtree-line-ending target-document target-offset)
       (edit-subtree-line-ending source-document source-offset)))
 
+(defun edit-relocate-final-fragment-headline (document start end)
+  (let* ((source (document-text document))
+         (previous-newline
+           (position #\Newline source :start start :end (- end 2)
+                     :from-end t))
+         (line-start (if previous-newline (1+ previous-newline) start)))
+    (find line-start (edit-subtree-headlines document)
+          :key #'node-post-affiliated :test #'=)))
+
+(defun edit-relocate-sync-trailing-headline-properties
+    (expected document source patch path target)
+  (let* ((updated-source (edit-splice-source source (list patch)))
+         (updated-document (edit-reparse-source document updated-source target))
+         (updated-headline (edit-relocate-node-at-path updated-document path)))
+    (dolist (property '(:raw-value :title))
+      (edit-canonical-set-property expected path property
+                                   (node-property updated-headline property)))
+    expected))
+
 (defun edit-relocate-target-boundary (document target-heading target)
   (if target-heading
       (multiple-value-bind (next offset)
@@ -498,14 +552,18 @@
                  source-document source-heading source-start source-end
                  target-document target-heading archive-p heading)
                 line-ending))
-             (fragment-canonical
-               (nth-value 2 (edit-subtree-fragment target-document raw heading)))
+             (fragment-info
+               (multiple-value-list
+                (edit-subtree-fragment target-document raw heading)))
+             (fragment-canonical (third fragment-info))
+             (trailing-headline-cr-p (fourth fragment-info))
              (destination-source (document-text target-document))
              (suffix-p (or (< target-offset (length destination-source))
                            (document-final-newline-p target-document)))
              (target-replacement
                (edit-subtree-join-fragment target-document target-offset raw
-                                           suffix-p line-ending))
+                                           suffix-p line-ending
+                                           trailing-headline-cr-p))
              (source-patches
                (when (eq mode :move)
                  (list (edit-make-patch source-start source-end "" heading))))

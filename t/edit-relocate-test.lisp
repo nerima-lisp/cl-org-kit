@@ -236,6 +236,232 @@
                              standalone-cr (string #\Newline)))
         (expect (count #\Return updated-text) :to-be 1))))
 
+  (it "preserves a bare carriage return in an EOF headline when moving it up"
+    (let* ((bare-cr (string #\Return))
+           (source-text (format nil "* A~%* B~C" #\Return))
+           (document (parse-org source-text))
+           (result
+             (move-subtree document
+                           (edit-relocate-test-headline
+                            document (concatenate 'string "B" bare-cr))
+                           :direction :up))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* B~C ~%* A" #\Return))
+        (expect (node-property
+                 (edit-relocate-test-headline
+                  updated (concatenate 'string "B" bare-cr))
+                 :raw-value)
+                :to-equal (concatenate 'string "B" bare-cr))
+        (expect (node-property
+                 (edit-relocate-test-headline
+                  updated (concatenate 'string "B" bare-cr))
+                 :title)
+                :to-equal (list (concatenate 'string "B" bare-cr))))))
+
+  (it "preserves CRLF and a bare carriage return when moving an EOF headline"
+    (let* ((bare-cr (string #\Return))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text (format nil "* A~A* B~C" crlf #\Return))
+           (document (parse-org source-text))
+           (result
+             (move-subtree document
+                           (edit-relocate-test-headline
+                            document (concatenate 'string "B" bare-cr))
+                           :direction :up))
+           (updated (edit-result-updated-document result))
+           (moved (edit-relocate-test-headline
+                   updated (concatenate 'string "B" bare-cr))))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* B~C~A* A~C"
+                                  #\Return crlf #\Return))
+        (expect (node-property moved :raw-value)
+                :to-equal (concatenate 'string "B" bare-cr))
+        (expect (node-property moved :title)
+                :to-equal (list (concatenate 'string "B" bare-cr)))
+        (expect (node-property
+                 (edit-relocate-test-headline
+                  updated (concatenate 'string "A" bare-cr))
+                 :raw-value)
+                :to-equal (concatenate 'string "A" bare-cr))
+        (expect (node-property
+                 (edit-relocate-test-headline
+                  updated (concatenate 'string "A" bare-cr))
+                 :title)
+                :to-equal (list (concatenate 'string "A" bare-cr))))))
+
+  (it "preserves trailing spaces before CRLF when the headline becomes EOF"
+    (let* ((bare-cr (string #\Return))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text
+             (format nil "* A  ~A* B~C" crlf #\Return))
+           (document (parse-org source-text))
+           (result
+             (move-subtree document
+                           (edit-relocate-test-headline
+                            document (concatenate 'string "B" bare-cr))
+                           :direction :up))
+           (updated (edit-result-updated-document result))
+           (last-heading
+             (edit-relocate-test-headline
+              updated (concatenate 'string "A  " bare-cr))))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* B~C~A* A  ~C"
+                                  #\Return crlf #\Return))
+        (expect (node-property last-heading :raw-value)
+                :to-equal (concatenate 'string "A  " bare-cr)))))
+
+  (it "preserves a data CR before CRLF when the headline becomes EOF"
+    (let* ((bare-cr (string #\Return))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text
+             (format nil "* A~C~A* B~C" #\Return crlf #\Return))
+           (document (parse-org source-text))
+           (result
+             (move-subtree document
+                           (edit-relocate-test-headline
+                            document (concatenate 'string "B" bare-cr))
+                           :direction :up))
+           (updated (edit-result-updated-document result))
+           (last-title (concatenate 'string "A" bare-cr bare-cr))
+           (last-heading (edit-relocate-test-headline updated last-title)))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* B~C~A* A~C~C"
+                                  #\Return crlf #\Return #\Return))
+        (expect (node-property last-heading :raw-value) :to-equal last-title)
+        (expect (node-property last-heading :title) :to-equal (list last-title)))))
+
+  (it "preserves a nested CRLF headline when it becomes the final subtree"
+    (let* ((bare-cr (string #\Return))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text
+             (format nil "* Parent~A** Child~A* B~C"
+                     crlf crlf #\Return))
+           (document (parse-org source-text))
+           (result
+             (move-subtree document
+                           (edit-relocate-test-headline
+                            document (concatenate 'string "B" bare-cr))
+                           :direction :up))
+           (updated (edit-result-updated-document result))
+           (child (edit-relocate-test-headline
+                   updated (concatenate 'string "Child" bare-cr))))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal
+                (format nil "* B~C~A* Parent~A** Child~C"
+                        #\Return crlf crlf #\Return))
+        (expect (node-property child :raw-value)
+                :to-equal (concatenate 'string "Child" bare-cr))
+        (expect (node-property child :title)
+                :to-equal (list (concatenate 'string "Child" bare-cr))))))
+
+  (it "keeps tags when a tagged CRLF headline becomes the final sibling"
+    (let* ((bare-cr (string #\Return))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text
+             (format nil "* A :tag:~A* B~C" crlf #\Return))
+           (document (parse-org source-text))
+           (result
+             (move-subtree document
+                           (edit-relocate-test-headline
+                            document (concatenate 'string "B" bare-cr))
+                           :direction :up))
+           (updated (edit-result-updated-document result))
+           (last-heading (edit-relocate-test-headline updated "A")))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* B~C~A* A :tag:"
+                                  #\Return crlf))
+        (expect (node-property last-heading :raw-value) :to-equal "A")
+        (expect (node-property last-heading :title) :to-equal '("A"))
+        (expect (node-property last-heading :tags) :to-equal '("tag")))))
+
+  (it "preserves a bare carriage return in an EOF headline when refiling"
+    (let* ((bare-cr (string #\Return))
+           (source-text (format nil "* B~C" #\Return))
+           (target-text (format nil "* Target~%"))
+           (source (parse-org source-text))
+           (target (parse-org target-text))
+           (result
+             (refile-subtree source
+                             (edit-relocate-test-headline
+                              source (concatenate 'string "B" bare-cr))
+                             target nil))
+           (updated (edit-result-updated-document
+                     (relocation-result-target-edit result))))
+      (with-soft-assertions
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text)
+        (expect (document-text updated)
+                :to-equal
+                (format nil "* Target~%* B~C ~%" #\Return))
+        (expect (node-property
+                 (edit-relocate-test-headline
+                  updated (concatenate 'string "B" bare-cr))
+                 :raw-value)
+                :to-equal (concatenate 'string "B" bare-cr))
+        (expect (node-property
+                 (edit-relocate-test-headline
+                  updated (concatenate 'string "B" bare-cr))
+                 :title)
+                :to-equal (list (concatenate 'string "B" bare-cr))))))
+
+  (it "preserves a bare target carriage return when refiling"
+    (let* ((bare-cr (string #\Return))
+           (source-text (format nil "* Child~%"))
+           (target-text (concatenate 'string "* Target" bare-cr))
+           (source (parse-org source-text))
+           (target (parse-org target-text))
+           (result
+             (refile-subtree source
+                             (edit-relocate-test-headline source "Child")
+                             target
+                             (edit-relocate-test-headline
+                              target (concatenate 'string "Target" bare-cr))))
+           (updated (edit-result-updated-document
+                     (relocation-result-target-edit result)))
+           (target-heading
+             (edit-relocate-test-headline
+              updated (concatenate 'string "Target" bare-cr)))
+           (child (edit-relocate-test-headline updated "Child")))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* Target~C ~%** Child~%" #\Return))
+        (expect (node-property target-heading :raw-value)
+                :to-equal (concatenate 'string "Target" bare-cr))
+        (expect (node-property child :raw-value) :to-equal "Child"))))
+
+  (it "preserves target CRLF and a bare carriage return when refiling"
+    (let* ((bare-cr (string #\Return))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (source-text (format nil "* B~C" #\Return))
+           (target-text (format nil "* Target~A" crlf))
+           (source (parse-org source-text))
+           (target (parse-org target-text))
+           (result
+             (refile-subtree source
+                             (edit-relocate-test-headline
+                              source (concatenate 'string "B" bare-cr))
+                             target
+                             (edit-relocate-test-headline target "Target")))
+           (updated (edit-result-updated-document
+                     (relocation-result-target-edit result)))
+           (moved (edit-relocate-test-headline
+                   updated (concatenate 'string "B" bare-cr))))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* Target~A** B~C~A"
+                                  crlf #\Return crlf))
+        (expect (node-property moved :raw-value)
+                :to-equal (concatenate 'string "B" bare-cr))
+        (expect (node-property moved :title)
+                :to-equal (list (concatenate 'string "B" bare-cr))))))
+
   (it "uses LF separators when refiling into a nonempty target without an EOL"
     (let* ((crlf (format nil "~C~C" #\Return #\Newline))
            (source-text (format nil "* Parent~A** Child~Abody~A"
