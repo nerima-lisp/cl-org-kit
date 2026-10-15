@@ -3,28 +3,27 @@
 
 (defstruct (export-ascii-output
              (:constructor %make-export-ascii-output
-                 (&key preparation limits output (base-count 0) (indent 0)
-                       (line-start-p t) (visible-controls-p t))))
+                 (preparation limits output count base-count indent
+                  downstream-indent line-start-p visible-controls-p display-width)))
   preparation
   limits
   output
-  (count 0)
+  count
   base-count
   indent
+  downstream-indent
   line-start-p
   visible-controls-p
-  (display-width 0))
+  display-width)
 
-(defun export-ascii-output-for-preparation (preparation &key (base-count 0)
-                                                        (measure-only-p nil)
-                                                        (visible-controls-p t))
+(defun export-ascii-output-for-preparation
+    (preparation base-count measure-only-p downstream-indent visible-controls-p)
   (%make-export-ascii-output
-   :preparation preparation
-   :limits (document-limits (export-preparation-document preparation))
-   :output (unless measure-only-p
-             (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
-   :base-count base-count
-   :visible-controls-p visible-controls-p))
+   preparation
+   (document-limits (export-preparation-document preparation))
+   (unless measure-only-p
+     (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
+   0 base-count 0 downstream-indent t visible-controls-p 0))
 
 (defun export-ascii-visible-character-length (output character)
   (if (and (export-ascii-output-visible-controls-p output)
@@ -36,7 +35,8 @@
   (let* ((next-count (+ (export-ascii-output-count output) additional-length))
          (next-length (+ (export-ascii-output-base-count output) next-count))
          (limits (export-ascii-output-limits output)))
-    (check-limit limits :max-output-length next-length)
+    (when (plusp additional-length)
+      (check-limit limits :max-output-length next-length))
     (setf (export-ascii-output-count output) next-count)
     (let ((buffer (export-ascii-output-output output)))
       (when (and buffer (> next-count (array-total-size buffer)))
@@ -205,15 +205,18 @@
   (export-ascii-output-range-width text 0 (length text)))
 
 (defun export-ascii-output-scratch
-    (output &key measure-only-p
+    (output additional-base-count &key measure-only-p
                  (visible-controls-p
                    (export-ascii-output-visible-controls-p output)))
   (export-ascii-output-for-preparation
    (export-ascii-output-preparation output)
-   :base-count (+ (export-ascii-output-base-count output)
-                  (export-ascii-output-count output))
-   :measure-only-p measure-only-p
-   :visible-controls-p visible-controls-p))
+   (+ (export-ascii-output-base-count output)
+      (export-ascii-output-count output)
+      additional-base-count)
+   measure-only-p
+   (+ (export-ascii-output-downstream-indent output)
+      (export-ascii-output-indent output))
+   visible-controls-p))
 
 (defun export-ascii-output-trim-newlines (output)
   (let ((buffer (export-ascii-output-output output)))
@@ -440,24 +443,6 @@
             (setf found view))))
     found)))
 
-(defun export-ascii-scheme-colon (text)
-  (let ((colon (position #\: text)))
-    (when (and colon
-               (plusp colon)
-               (let ((first (char text 0)))
-                 (or (<= (char-code #\A) (char-code first) (char-code #\Z))
-                     (<= (char-code #\a) (char-code first) (char-code #\z))))
-               (loop for index from 1 below colon
-                     for character = (char text index)
-                     always (or (<= (char-code #\A) (char-code character)
-                                    (char-code #\Z))
-                                (<= (char-code #\a) (char-code character)
-                                    (char-code #\z))
-                                (<= (char-code #\0) (char-code character)
-                                    (char-code #\9))
-                                (find character "+.-"))))
-      colon)))
-
 (defun export-ascii-destination-source-safe-p (text start end)
   (and (stringp text)
        (loop for index from start below end
@@ -465,24 +450,100 @@
              never (or (export-control-character-p character)
                        (char= character #\\)))))
 
+(defun export-ascii-destination-part-length (part)
+  (if (and (consp part) (eq (first part) :range))
+      (- (fourth part) (third part))
+      (length part)))
+
+(defun export-ascii-destination-part-character (part index)
+  (if (and (consp part) (eq (first part) :range))
+      (elt (second part) (+ (third part) index))
+      (elt part index)))
+
+(defun export-ascii-destination-parts-length (parts)
+  (loop for part in parts sum (export-ascii-destination-part-length part)))
+
+(defun export-ascii-destination-parts-character (parts index)
+  (loop with remaining = index
+        for part in parts
+        for part-length = (export-ascii-destination-part-length part)
+        when (< remaining part-length)
+          do (return (export-ascii-destination-part-character part remaining))
+        do (decf remaining part-length)))
+
+(defun export-ascii-destination-parts-position (parts predicate)
+  (loop for index below (export-ascii-destination-parts-length parts)
+        for character = (export-ascii-destination-parts-character parts index)
+        when (funcall predicate character) return index))
+
+(defun export-ascii-destination-parts-prefix-equal-p (parts prefix)
+  (and (>= (export-ascii-destination-parts-length parts) (length prefix))
+       (loop for index below (length prefix)
+             always (char= (export-ascii-destination-parts-character parts index)
+                           (char prefix index)))))
+
+(defun export-ascii-destination-parts-explicit-scheme-end (parts)
+  (loop with position = 0
+        with valid-p = t
+        for part in parts
+        do (loop for index below (export-ascii-destination-part-length part)
+                 for character = (export-ascii-destination-part-character
+                                  part index)
+                 do (cond
+                      ((char= character #\:)
+                       (return-from
+                           export-ascii-destination-parts-explicit-scheme-end
+                         (and (plusp position) valid-p position)))
+                      ((zerop position)
+                       (unless (export-ascii-alpha-p character)
+                         (setf valid-p nil)))
+                      ((not (export-ascii-scheme-character-p character))
+                       (setf valid-p nil)))
+                    (incf position))))
+
+(defun export-ascii-destination-parts-allowed-scheme-p (parts end)
+  (loop for scheme in '("http" "https" "mailto")
+        thereis (and (= (length scheme) end)
+                     (loop for index below end
+                           always (char-equal
+                                   (export-ascii-destination-parts-character
+                                    parts index)
+                                   (char scheme index))))))
+
+(defun export-ascii-destination-parts-safe-p (parts)
+  (and (plusp (export-ascii-destination-parts-length parts))
+       (not (export-ascii-destination-parts-position
+             parts #'export-control-character-p))
+       (not (export-ascii-destination-parts-position
+             parts (lambda (character) (char= character #\\))))
+       (not (export-whitespace-character-p
+             (export-ascii-destination-parts-character parts 0)))
+       (not (export-ascii-destination-parts-prefix-equal-p parts "//"))
+       (let ((scheme-end
+               (export-ascii-destination-parts-explicit-scheme-end parts)))
+         (or (null scheme-end)
+             (export-ascii-destination-parts-allowed-scheme-p
+              parts scheme-end)))))
+
+(defun export-ascii-destination-range-safe-p (text start end)
+  (export-ascii-destination-parts-safe-p
+   (list (list :range text start end))))
+
+(defun export-ascii-link-file-path-p (path)
+  (and (plusp (length path))
+       (or (char= (char path 0) #\/)
+           (and (>= (length path) 2)
+                (string= "./" path :end2 2))
+           (and (>= (length path) 3)
+                (string= "../" path :end2 3)))))
+
 (defun export-ascii-destination-safe-p
     (raw expanded &optional (raw-start 0) raw-end)
   (let ((raw-end (or raw-end (and (stringp raw) (length raw)))))
     (and raw-end
          (export-ascii-destination-source-safe-p raw raw-start raw-end)
          (stringp expanded)
-         (plusp (length expanded))
-         (not (some #'export-control-character-p expanded))
-         (not (find #\\ expanded))
-         (not (find (char expanded 0) '(#\Space #\Tab)))
-         (not (and (>= (length expanded) 2)
-                   (string= "//" expanded :end1 2 :end2 2)))
-         (let ((colon (export-ascii-scheme-colon expanded)))
-           (or (null colon)
-               (loop for scheme in '("http" "https" "mailto")
-                     thereis (and (= colon (length scheme))
-                                  (string-equal expanded scheme
-                                                :end1 colon))))))))
+         (export-ascii-destination-parts-safe-p (list expanded)))))
 
 (defun export-ascii-link-source-path-range (node)
   (let* ((document (node-document node))
@@ -551,6 +612,31 @@
                       (string= raw key :end1 key-end))))
              abbreviations)))
 
+(defun export-ascii-output-link-source-unsafe-p (node)
+  (let ((source-path (node-property node :raw-link)))
+    (multiple-value-bind (text start end)
+        (if (stringp source-path)
+            (values source-path 0 (length source-path))
+            (export-ascii-link-source-path-range node))
+      (when text
+        (or (not (export-ascii-destination-source-safe-p text start end))
+            (let* ((type (node-property node :type))
+                   (path (node-property node :path))
+                   (parts
+                     (and (stringp path)
+                          (if (and (stringp type)
+                                   (member type *org-link-object-types*
+                                           :test #'string=)
+                                   (not (and (string= type "file")
+                                             (export-ascii-link-file-path-p
+                                              path))))
+                              (list type ":" path)
+                              (list path)))))
+              (if parts
+                  (not (export-ascii-destination-parts-safe-p parts))
+                  (not (export-ascii-destination-range-safe-p
+                        text start end)))))))))
+
 (defun export-ascii-output-expand-link-abbreviation
     (output raw-output document)
   (let* ((raw (export-ascii-output-output raw-output))
@@ -569,7 +655,7 @@
                              1))))
                (placeholder (search "%s" replacement))
                (expanded (export-ascii-output-scratch
-                          output :visible-controls-p nil)))
+                          output 0 :visible-controls-p nil)))
           (if placeholder
               (progn
                 (export-ascii-output-write-range
@@ -586,14 +672,15 @@
                    expanded raw tail-start (length raw)))))
           expanded))))
 
-(defun export-ascii-output-link-path (output view preparation)
+(defun export-ascii-output-link-path
+    (output view preparation)
   (let* ((node (export-view-node view))
          (type (node-property node :type))
          (path (node-property node :path))
          (source-path (node-property node :raw-link))
          (format (node-property node :format))
          (raw-output (export-ascii-output-scratch
-                      output :visible-controls-p nil))
+                      output 0 :visible-controls-p nil))
          (raw-text nil)
          (raw-start 0)
          (raw-end nil))
@@ -678,21 +765,60 @@
 
 
 
-(defun export-ascii-output-write-gap (output previous current)
+(defun export-ascii-output-gap-length (previous current)
   (let ((previous-type (node-type (export-view-node previous)))
         (current-type (node-type (export-view-node current))))
-    (export-ascii-output-newlines
-     output
-     (cond
-       ((member current-type '(:headline :inlinetask) :test #'eq) 3)
-       ((eq previous-type :plain-list) 1)
-       (t (max 2 (1+ (export-ascii-view-blank-count previous))))))))
+    (cond
+      ((member current-type '(:headline :inlinetask) :test #'eq) 3)
+      ((eq previous-type :plain-list) 1)
+      (t (max 2 (1+ (export-ascii-view-blank-count previous)))))))
+
+(defun export-ascii-output-write-gap (output previous current)
+  (export-ascii-output-newlines
+   output (export-ascii-output-gap-length previous current)))
 
 (defun export-ascii-output-write-inline-views (output views preparation)
   (dolist (view views)
     (export-ascii-output-render-view output view preparation)
     (export-ascii-output-write-repeat
      output #\Space (node-post-blank (export-view-node view))))
+  output)
+
+(defun export-ascii-output-write-trimmed-plain-text-view
+    (output view trim-leading-p trim-trailing-p)
+  (let* ((node (export-view-node view))
+         (document (node-document node))
+         (start (node-begin node))
+         (end (node-end node)))
+    (when (and start end)
+      (let ((text (document-text document)))
+        (when trim-leading-p
+          (loop while (and (< start end)
+                           (find (char text start)
+                                 '(#\Space #\Tab #\Newline #\Return)))
+                do (incf start)))
+        (when trim-trailing-p
+          (loop while (and (> end start)
+                           (find (char text (1- end))
+                                 '(#\Space #\Tab #\Newline #\Return)))
+                do (decf end)))
+        (export-ascii-output-write-range
+         output text start end :substitute-tab-p t)))))
+
+(defun export-ascii-output-write-trimmed-inline-views
+    (output views preparation)
+  (loop with last-index = (1- (length views))
+        for view in views
+        for index from 0
+        for node = (export-view-node view)
+        for boundary-p = (or (zerop index) (= index last-index))
+        do (if (and boundary-p (eq (node-type node) :plain-text))
+               (export-ascii-output-write-trimmed-plain-text-view
+                output view (zerop index) (= index last-index))
+               (export-ascii-output-render-view output view preparation))
+           (unless (= index last-index)
+             (export-ascii-output-write-repeat
+              output #\Space (node-post-blank node))))
   output)
 
 (defun export-ascii-output-write-views (output views preparation)
@@ -711,7 +837,11 @@
                     (and included-heading-level
                          (> level included-heading-level)
                          included-heading-level))))
-        (let ((rendered (export-ascii-output-scratch output)))
+        (let ((rendered
+                (export-ascii-output-scratch
+                 output (if previous
+                            (export-ascii-output-gap-length previous view)
+                            0))))
           (if (and included-heading-level
                    (not heading-p)
                    (not (eq type :section)))
@@ -728,30 +858,74 @@
             (setf previous view)))))
   output))
 
+(defun export-ascii-output-measure-text-range
+    (output text start end &key substitute-tab-p)
+  (loop with output-length = 0
+        with display-width = 0
+        for index from start below end
+        for source-character = (char text index)
+        for character = (if (and substitute-tab-p (char= source-character #\Tab))
+                            #\Space
+                            source-character)
+        for visible-length = (export-ascii-visible-character-length
+                              output character)
+        do (incf output-length visible-length)
+           (incf display-width
+                 (if (and (export-ascii-output-visible-controls-p output)
+                          (export-ascii-visible-control-character-p character))
+                     visible-length
+                     (table-character-width character)))
+        finally (return (values display-width output-length))))
+
 (defun export-ascii-output-measure-table-cell (output cell preparation)
-  (let ((measurement (export-ascii-output-scratch output :measure-only-p t))
-        (children (export-view-children cell)))
-    (if children
-        (export-ascii-output-write-inline-views measurement children preparation)
-        (export-ascii-output-write-string
-         measurement (or (node-property (export-view-node cell) :value) "")))
-    (values (export-ascii-output-display-width measurement)
-            (export-ascii-output-count measurement))))
+  (let* ((children (export-view-children cell))
+         (node (export-view-node cell)))
+    (cond
+      ((null children)
+       (export-ascii-output-measure-text-range
+        output (or (node-property node :value) "") 0
+        (length (or (node-property node :value) ""))))
+      ((and (= (length children) 1)
+            (eq (node-type (export-view-node (first children))) :plain-text)
+            (node-document (export-view-node (first children)))
+            (node-begin (export-view-node (first children)))
+            (node-end (export-view-node (first children))))
+       (let* ((child (export-view-node (first children)))
+              (text (document-text (node-document child))))
+         (multiple-value-bind (display-width output-length)
+             (export-ascii-output-measure-text-range
+              output text (node-begin child) (node-end child)
+              :substitute-tab-p t)
+           (let ((post-blank (node-post-blank child)))
+             (values (+ display-width post-blank)
+                     (+ output-length post-blank))))))
+      (t
+       (let ((measurement
+               (export-ascii-output-scratch output 0 :measure-only-p t)))
+         (export-ascii-output-write-inline-views
+          measurement children preparation)
+         (values (export-ascii-output-display-width measurement)
+                 (export-ascii-output-count measurement)))))))
 
 (defun export-ascii-output-check-table-width-budget (output widths width-hints)
   (let ((minimum-line-length
-          (1+ (loop for column below (length widths)
-                    sum (+ 3 (max 1 (aref widths column)
-                                  (aref width-hints column)))))))
+          (+ (export-ascii-output-indent output)
+             (export-ascii-output-downstream-indent output)
+             1
+             (loop for column below (length widths)
+                   sum (+ 3 (max 1 (aref widths column)
+                                 (aref width-hints column)))))))
     (check-limit (export-ascii-output-limits output) :max-output-length
                  (+ (export-ascii-output-base-count output)
                     (export-ascii-output-count output)
                     minimum-line-length))))
 
 (defun export-ascii-output-write-table-cell
-    (output cell width alignment preparation)
-    (multiple-value-bind (cell-width ignored-length)
-      (export-ascii-output-measure-table-cell output cell preparation)
+    (output cell width alignment preparation &optional cell-metric)
+  (multiple-value-bind (cell-width ignored-length)
+      (if cell-metric
+          (values (aref cell-metric 0) (aref cell-metric 1))
+          (export-ascii-output-measure-table-cell output cell preparation))
     (declare (ignore ignored-length))
     (let* ((extra (max 0 (- width cell-width)))
            (left-padding (case alignment
@@ -784,6 +958,7 @@
   (let* ((widths (make-array column-count :initial-element 1))
          (width-hints (make-array column-count :initial-element 0))
          (alignments (make-array column-count :initial-element nil))
+         (row-metrics nil)
          (maximum-width
            (max 1 (- (limit-value (export-ascii-output-limits output)
                                  :max-output-length)
@@ -791,36 +966,71 @@
                      (export-ascii-output-count output)))))
     (dolist (row rows)
       (unless (eq (node-property (export-view-node row) :type) :rule)
-        (loop for cell in (export-view-children row)
-              for column from 0 below column-count
-              do (let* ((candidate
-                          (export-ascii-output-cell-cookie-value cell))
-                        (alignment (and candidate
-                                        (table-cell-alignment-cookie candidate)))
-                        (width-hint
-                          (and candidate
-                               (table-cell-width-cookie candidate maximum-width))))
-                   (when (and alignment (null (aref alignments column)))
-                     (setf (aref alignments column) alignment))
-                   (when width-hint
-                     (setf (aref width-hints column)
-                           (max (aref width-hints column) width-hint))
-                     (export-ascii-output-check-table-width-budget
-                      output widths width-hints))
-                   (multiple-value-bind (cell-width ignored-length)
-                       (export-ascii-output-measure-table-cell
-                        output cell preparation)
-                     (declare (ignore ignored-length))
-                     (setf (aref widths column)
-                           (max (aref widths column) cell-width)))))))
+        (let* ((cells (export-view-children row))
+               (metrics (make-array (length cells))))
+          (loop for cell in cells
+                for column from 0 below column-count
+                do (let* ((candidate
+                            (export-ascii-output-cell-cookie-value cell))
+                          (alignment (and candidate
+                                          (table-cell-alignment-cookie candidate)))
+                          (width-hint
+                            (and candidate
+                                 (table-cell-width-cookie candidate maximum-width))))
+                     (when (and alignment (null (aref alignments column)))
+                       (setf (aref alignments column) alignment))
+                     (when width-hint
+                       (setf (aref width-hints column)
+                             (max (aref width-hints column) width-hint))
+                       (export-ascii-output-check-table-width-budget
+                        output widths width-hints))
+                     (multiple-value-bind (cell-width cell-length)
+                         (export-ascii-output-measure-table-cell
+                          output cell preparation)
+                       (setf (aref widths column)
+                             (max (aref widths column) cell-width)
+                             (aref metrics column)
+                             (vector cell-width cell-length)))))
+          (push metrics row-metrics))))
     (loop for column below column-count
           do (setf (aref widths column)
                    (max (aref widths column) (aref width-hints column))))
     (values widths
-            (map 'vector (lambda (alignment) (or alignment :left)) alignments))))
+            (map 'vector (lambda (alignment) (or alignment :left)) alignments)
+            (coerce (nreverse row-metrics) 'vector))))
+
+(defun export-ascii-output-table-row-length (row widths metrics)
+  (if (eq (node-property (export-view-node row) :type) :rule)
+      (+ 1 (loop for width across widths
+                 sum (1+ (max 3 (+ width 2)))))
+      (+ 1 (loop for metric across metrics
+                 for column from 0
+                 sum (+ 3
+                        (max 0 (- (aref widths column) (aref metric 0)))
+                        (aref metric 1))))))
+
+(defun export-ascii-output-check-table-output-budget
+    (output rows widths row-metrics)
+  (let ((row-length
+          (* (+ (export-ascii-output-indent output)
+                (export-ascii-output-downstream-indent output))
+             (length rows)))
+        (metric-index 0))
+    (dolist (row rows)
+      (let* ((rule-p (eq (node-property (export-view-node row) :type) :rule))
+             (metrics (unless rule-p
+                        (prog1 (aref row-metrics metric-index)
+                          (incf metric-index)))))
+        (incf row-length
+              (export-ascii-output-table-row-length row widths metrics))))
+    (check-limit (export-ascii-output-limits output) :max-output-length
+                 (+ (export-ascii-output-base-count output)
+                    (export-ascii-output-count output)
+                    row-length
+                    (max 0 (1- (length rows)))))))
 
 (defun export-ascii-output-write-table-row
-    (output row widths alignments preparation)
+    (output row widths alignments preparation &optional cell-metrics)
   (if (eq (node-property (export-view-node row) :type) :rule)
       (progn
         (export-ascii-output-write-char output #\+)
@@ -834,7 +1044,7 @@
               for column from 0
               do (export-ascii-output-write-table-cell
                   output cell (aref widths column) (aref alignments column)
-                  preparation)
+                  preparation (and cell-metrics (aref cell-metrics column)))
                  (export-ascii-output-write-char output #\|))))
   output)
 
@@ -854,15 +1064,23 @@
                  (loop for row in row-views
                        maximize (length (export-view-children row)) into maximum
                        finally (return (or maximum 0)))))
-          (multiple-value-bind (widths alignments)
+          (multiple-value-bind (widths alignments row-metrics)
               (export-ascii-output-table-layout
                output row-views column-count preparation)
-            (loop for row in rows
+            (export-ascii-output-check-table-output-budget
+             output rows widths row-metrics)
+            (loop with metric-index = 0
+                  for row in rows
                   for first-p = t then nil
+                  for rule-p = (eq (node-property (export-view-node row) :type)
+                                   :rule)
+                  for cell-metrics = (unless rule-p
+                                       (prog1 (aref row-metrics metric-index)
+                                         (incf metric-index)))
                   do (unless first-p
                        (export-ascii-output-newlines output 1))
                      (export-ascii-output-write-table-row
-                      output row widths alignments preparation))))))
+                      output row widths alignments preparation cell-metrics))))))
   output)
 
 (defun export-ascii-output-write-code-box
@@ -944,28 +1162,56 @@
        output (nth (1- level) '(#\= #\~ #\-)) first-width)))
   output)
 
-(defun export-ascii-output-render-paragraph (output view preparation)
-  (let ((inline (export-ascii-output-scratch output)))
-    (export-ascii-output-write-inline-views
-     inline (export-view-children view) preparation)
-    (let* ((buffer (export-ascii-output-output inline))
-           (start 0)
-           (end (fill-pointer buffer)))
+(defun export-ascii-output-write-plain-text-paragraph
+    (output node preparation width)
+  (let* ((document (node-document node))
+         (text (and document (document-text document)))
+         (start (node-begin node))
+         (end (node-end node)))
+    (when (and text start end)
       (loop while (and (< start end)
-                       (find (char buffer start)
+                       (find (char text start)
                              '(#\Space #\Tab #\Newline #\Return)))
             do (incf start))
       (loop while (and (> end start)
-                       (find (char buffer (1- end))
+                       (find (char text (1- end))
                              '(#\Space #\Tab #\Newline #\Return)))
             do (decf end))
       (export-ascii-output-write-wrapped-range
-       output buffer start end (export-ascii-current-width
-                                (export-view-node view))
+       output text start end width
        :preserve-breaks
        (cdr (assoc :preserve-breaks
-                   (export-preparation-options preparation))))))
-  output)
+                   (export-preparation-options preparation))))
+      t)))
+
+(defun export-ascii-output-render-paragraph (output view preparation)
+  (let* ((children (export-view-children view))
+         (child (first children))
+         (width (export-ascii-current-width (export-view-node view))))
+    (unless (and (= (length children) 1)
+                 (eq (node-type (export-view-node child)) :plain-text)
+                 (export-ascii-output-write-plain-text-paragraph
+                  output (export-view-node child) preparation width))
+      (let ((inline (export-ascii-output-scratch output 0)))
+        (export-ascii-output-write-trimmed-inline-views
+         inline children preparation)
+        (let* ((buffer (export-ascii-output-output inline))
+               (start 0)
+               (end (fill-pointer buffer)))
+          (loop while (and (< start end)
+                           (find (char buffer start)
+                                 '(#\Space #\Tab #\Newline #\Return)))
+                do (incf start))
+          (loop while (and (> end start)
+                           (find (char buffer (1- end))
+                                 '(#\Space #\Tab #\Newline #\Return)))
+                do (decf end))
+          (export-ascii-output-write-wrapped-range
+           output buffer start end width
+           :preserve-breaks
+           (cdr (assoc :preserve-breaks
+                       (export-preparation-options preparation)))))))
+  output))
 
 (defun export-ascii-output-render-list-item
     (output view preparation ordinal)
@@ -981,7 +1227,7 @@
          (bullet (or (node-property node :bullet) "- "))
          (tag-range (node-property node :reader-tag-range))
          (ordered-p (export-ascii-item-ordered-p node))
-         (prefix-output (export-ascii-output-scratch output)))
+         (prefix-output (export-ascii-output-scratch output 0)))
     (cond
       (ordered-p
        (let* ((counter (node-property node :counter))
@@ -1002,7 +1248,7 @@
            (export-ascii-output-write-string prefix-output ":: ")))
       (t (export-ascii-output-write-string prefix-output bullet)))
     (export-ascii-output-write-string prefix-output checkbox)
-    (let ((content (export-ascii-output-scratch output)))
+    (let ((content (export-ascii-output-scratch output 0)))
       (export-ascii-output-write-views content children preparation)
       (cond
         ((zerop (export-ascii-output-count content))
@@ -1064,7 +1310,7 @@
                       (string (nth (mod (- level 4) 3) '(#\* #\+ #\-)))
                       " ")
                      ""))
-         (body (export-ascii-output-scratch output)))
+         (body (export-ascii-output-scratch output 0)))
     (export-ascii-output-write-views
      body (export-view-children view) preparation)
     (export-ascii-output-write-string output prefix)
@@ -1088,8 +1334,13 @@
          (target-view
            (and (member type '("custom-id" "fuzzy") :test #'string=)
                 (export-ascii-local-heading node preparation))))
+    (when (and children
+               (not target-view)
+               (not (member type '("radio" "custom-id") :test #'string=))
+               (export-ascii-output-link-source-unsafe-p node))
+      (return-from export-ascii-output-link-note nil))
     (when children
-      (let ((description (export-ascii-output-scratch output)))
+      (let ((description (export-ascii-output-scratch output 0)))
         (export-ascii-output-write-inline-views
          description children preparation)
         (when (plusp (export-ascii-output-count description))
@@ -1099,8 +1350,8 @@
              (let* ((target (export-view-node target-view))
                     (numbers (export-ascii-numbering preparation))
                     (numbering (gethash target-view numbers))
-                    (label-output (export-ascii-output-scratch output))
-                    (note (export-ascii-output-scratch output)))
+                    (label-output (export-ascii-output-scratch output 0))
+                    (note (export-ascii-output-scratch output 0)))
                (if (and numbering
                         (export-ascii-numbering-enabled-p
                          (export-preparation-options preparation)
@@ -1119,7 +1370,7 @@
              (multiple-value-bind (expanded safe-p)
                  (export-ascii-output-link-path output view preparation)
                (when safe-p
-                 (let ((note (export-ascii-output-scratch output)))
+                 (let ((note (export-ascii-output-scratch output 0)))
                    (export-ascii-output-write-char note #\[)
                    (export-ascii-output-write-buffer note description)
                    (export-ascii-output-write-string note "] <")
@@ -1173,7 +1424,7 @@
          (source (or (node-property node :value) ""))
          (source-p (not (member mode '(:none :results) :test #'eq)))
          (results-p (not (member mode '(:none :code) :test #'eq)))
-         (results (and results-p (export-ascii-output-scratch output))))
+         (results (and results-p (export-ascii-output-scratch output 0))))
     (when results-p
       (export-ascii-output-write-views
        results (export-view-children view) preparation))
@@ -1351,7 +1602,7 @@
               (line-width
                 (min 72 (+ 2 (max title-width
                                   (export-ascii-output-text-width author)))))
-              (block (export-ascii-output-scratch output)))
+              (block (export-ascii-output-scratch output 0)))
          (export-ascii-output-write-repeat block #\_ line-width)
          (export-ascii-output-newlines block 2)
          (export-ascii-output-write-wrapped-range
@@ -1421,8 +1672,8 @@
             for number = (getf definition :number)
             for view = (getf definition :definition)
             do (unless first-p (export-ascii-output-newlines output 2))
-               (let ((content (export-ascii-output-scratch output))
-                     (line (export-ascii-output-scratch output)))
+               (let ((content (export-ascii-output-scratch output 0))
+                     (line (export-ascii-output-scratch output 0)))
                  (export-ascii-output-write-views
                   content (export-view-children view) preparation)
                  (let* ((buffer (export-ascii-output-output content))
@@ -1446,7 +1697,9 @@
   output)
 
 (defun export-ascii-render-preparation (preparation)
-  (let* ((output (export-ascii-output-for-preparation preparation))
+  ;; Reserve the final newline while nested views preflight their output.
+  (let* ((output (export-ascii-output-for-preparation
+                  preparation 1 nil 0 t))
          (numbers (export-ascii-numbering preparation)))
     (export-ascii-output-write-document-title output preparation)
     (export-ascii-output-write-toc output preparation numbers)
@@ -1454,6 +1707,8 @@
      output (export-preparation-root-views preparation) preparation)
     (export-ascii-output-write-footnotes output preparation)
     (export-ascii-output-trim-newlines output)
+    ;; The reserved character becomes the newline written below.
+    (decf (export-ascii-output-base-count output))
     (export-ascii-output-newlines output 1)
     (export-ascii-output-string output)))
 

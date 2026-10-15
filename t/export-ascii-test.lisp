@@ -26,8 +26,14 @@
    :document document :backend :ascii :metadata nil :options options
    :root-views root-views :toc nil :footnotes nil :allow-raw-html nil))
 
+(defun export-ascii-test-output-state
+    (preparation &key (base-count 0) (measure-only-p nil)
+                     (downstream-indent 0) (visible-controls-p t))
+  (org-kit::export-ascii-output-for-preparation
+   preparation base-count measure-only-p downstream-indent visible-controls-p))
+
 (defun export-ascii-test-output (preparation function)
-  (let ((output (org-kit::export-ascii-output-for-preparation preparation)))
+  (let ((output (export-ascii-test-output-state preparation)))
     (funcall function output)
     (org-kit::export-ascii-output-string output)))
 
@@ -851,6 +857,456 @@
           (expect (org-resource-limit-error-limit condition) :to-be 1000)
           (expect (org-resource-limit-error-actual condition) :to-be 1008)))))
 
+  (it "limits long ASCII table cookies before padded output allocation"
+    (labels ((find-table-view (views)
+               (loop for view in views
+                     for found =
+                       (if (eq (node-type (org-kit::export-view-node view))
+                               :table)
+                           view
+                           (find-table-view
+                            (org-kit::export-view-children view)))
+                     when found return found)))
+      (let* ((cookie (make-string 32 :initial-element #\9))
+             (source
+               (format nil "| <~A> |~%~{~A~%~}"
+                       cookie (make-list 20 :initial-element "| x |")))
+             (document
+               (parse-org source
+                          :limits (make-limits :max-output-length 1000)))
+             (preparation (org-kit::export-prepare document :ascii))
+             (table-view
+               (find-table-view
+                (org-kit::export-preparation-root-views preparation)))
+             (public-condition
+               (handler-case
+                   (progn (export-org document :ascii) nil)
+                 (org-resource-limit-error (condition) condition)))
+             (warmup-output
+               (export-ascii-test-output-state preparation))
+             (warmup-condition
+               (handler-case
+                   (progn
+                     (org-kit::export-ascii-output-write-table
+                      warmup-output table-view preparation)
+                     nil)
+                 (org-resource-limit-error (condition) condition)))
+             (table-output
+               (export-ascii-test-output-state preparation))
+             (at-signal nil)
+             (before (progn (sb-ext:gc :full t) (sb-ext:get-bytes-consed)))
+             (table-condition
+               (catch 'ascii-table-limit
+                 (handler-bind
+                     ((org-resource-limit-error
+                        (lambda (condition)
+                          (setf at-signal
+                                (- (sb-ext:get-bytes-consed) before))
+                          (throw 'ascii-table-limit condition))))
+                   (org-kit::export-ascii-output-write-table
+                    table-output table-view preparation))))
+             (buffer (org-kit::export-ascii-output-output table-output)))
+        (with-soft-assertions
+          (expect (search (format nil "<~A>" cookie) source)
+                  :to-be-truthy)
+          (expect (> (length source) 100) :to-be t)
+          (expect (= (count #\Newline source) 21) :to-be t)
+          (expect (eq (node-type (org-kit::export-view-node table-view))
+                      :table)
+                  :to-be t)
+          (expect (typep public-condition 'org-resource-limit-error) :to-be t)
+          (expect (typep warmup-condition 'org-resource-limit-error) :to-be t)
+          (expect (typep table-condition 'org-resource-limit-error) :to-be t)
+          (when (typep public-condition 'org-resource-limit-error)
+            (expect (org-resource-limit-error-limit-name public-condition)
+                    :to-be :max-output-length)
+            (expect (org-resource-limit-error-limit public-condition)
+                    :to-be 1000))
+          (expect (= (fill-pointer buffer) 0) :to-be t)
+          (expect (<= (array-total-size buffer) 1000) :to-be t)
+          (expect (> at-signal 0) :to-be t)
+          (expect (< at-signal (* 48 1000)) :to-be t)))))
+
+  (it "preflights all ASCII table rows before writing padded output"
+    (let* ((source
+             (with-output-to-string (stream)
+               (format stream "| <45> |~%")
+               (loop repeat 20 do (format stream "| x |~%"))))
+           (document
+             (parse-org source :limits (make-limits :max-output-length 1000)))
+           (condition
+             (handler-case
+                 (progn (export-org document :ascii) nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (> (length source) 100) :to-be t)
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit condition) :to-be 1000)
+          (expect (org-resource-limit-error-actual condition) :to-be 1050)))))
+
+  (it "includes the preceding view gap in the ASCII table preflight"
+    (let* ((source
+             (with-output-to-string (stream)
+               (format stream "0123456789abc~%~%| <42> |~%")
+               (loop repeat 20 do (format stream "| x |~%"))))
+           (condition
+             (handler-case
+                 (progn
+                   (export-org
+                    (parse-org source
+                               :limits (make-limits :max-output-length 1000))
+                    :ascii)
+                   nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit condition) :to-be 1000)
+          (expect (org-resource-limit-error-actual condition) :to-be 1002)))))
+
+  (it "includes downstream indentation in the ASCII table preflight"
+    (let* ((source
+             (format nil "#+begin_quote~%| <20> |~%#+end_quote"))
+           (document
+             (parse-org source :limits (make-limits :max-output-length 29)))
+           (condition
+             (handler-case
+                 (progn (export-org document :ascii) nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit condition) :to-be 29)
+          (expect (org-resource-limit-error-actual condition) :to-be 31)))))
+
+  (it "reserves the final newline before preflighting ASCII table output"
+    (labels ((find-table-view (views)
+               (loop for view in views
+                     for found =
+                       (if (eq (node-type (org-kit::export-view-node view))
+                               :table)
+                           view
+                           (find-table-view
+                            (org-kit::export-view-children view)))
+                     when found return found)))
+      (let* ((source "| x |")
+             (baseline (export-org (parse-org source) :ascii))
+             (final-output-length (length baseline))
+             (table-body-length (1- final-output-length))
+             (document
+               (parse-org source
+                          :limits
+                          (make-limits :max-output-length table-body-length)))
+             (preparation (org-kit::export-prepare document :ascii))
+             (table-view
+               (find-table-view
+                (org-kit::export-preparation-root-views preparation)))
+             (public-condition
+               (handler-case
+                   (progn (export-org document :ascii) nil)
+                 (org-resource-limit-error (condition) condition)))
+             (output
+               (export-ascii-test-output-state preparation :base-count 1))
+             (table-output (org-kit::export-ascii-output-scratch output 0))
+             (table-condition
+               (handler-case
+                   (progn
+                     (org-kit::export-ascii-output-write-table
+                      table-output table-view preparation)
+                     nil)
+                 (org-resource-limit-error (condition) condition)))
+             (buffer (org-kit::export-ascii-output-output table-output)))
+        (with-soft-assertions
+          (expect (char= (char baseline (1- final-output-length)) #\Newline)
+                  :to-be t)
+          (expect (eq (node-type (org-kit::export-view-node table-view))
+                      :table)
+                  :to-be t)
+          (expect (typep public-condition 'org-resource-limit-error) :to-be t)
+          (expect (typep table-condition 'org-resource-limit-error) :to-be t)
+          (when (typep public-condition 'org-resource-limit-error)
+            (expect (org-resource-limit-error-limit-name public-condition)
+                    :to-be :max-output-length)
+            (expect (org-resource-limit-error-limit public-condition)
+                    :to-be table-body-length)
+            (expect (org-resource-limit-error-actual public-condition)
+                    :to-be final-output-length))
+          (when (typep table-condition 'org-resource-limit-error)
+            (expect (org-resource-limit-error-limit-name table-condition)
+                    :to-be :max-output-length)
+            (expect (org-resource-limit-error-limit table-condition)
+                    :to-be table-body-length)
+            (expect (org-resource-limit-error-actual table-condition)
+                    :to-be final-output-length))
+          (expect (fill-pointer buffer) :to-be 0)
+          (expect (array-total-size buffer) :to-be 0)))))
+
+  (it "applies ASCII output limits to the final trimmed text"
+    (let* ((source " x ")
+           (boundary-document
+             (parse-org source
+                        :limits (make-limits :max-output-length 2)))
+           (boundary-output (export-org boundary-document :ascii))
+           (below-document
+             (parse-org source
+                        :limits (make-limits :max-output-length 1)))
+           (below-condition
+             (handler-case
+                 (progn (export-org below-document :ascii) nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect boundary-output :to-equal (format nil "x~%"))
+        (expect (typep below-condition 'org-resource-limit-error) :to-be t)
+        (when (typep below-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below-condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit below-condition) :to-be 1)
+          (expect (>= (org-resource-limit-error-actual below-condition) 2)
+                  :to-be t)))))
+
+  (it "trims formatted paragraph edges before applying the ASCII output limit"
+    (let* ((source "  *bold*  ")
+           (baseline (export-org (parse-org source) :ascii))
+           (limit (length baseline))
+           (at-limit
+             (export-org
+              (parse-org source :limits (make-limits :max-output-length limit))
+              :ascii)))
+      (with-soft-assertions
+        (expect at-limit :to-equal baseline)
+        (expect baseline :to-equal (format nil "*bold*~%")))))
+
+  (it "trims formatted ASCII footnote edges before applying the output limit"
+    (let* ((spaces (make-string 2000 :initial-element #\Space))
+           (source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%Before [fn:x]~%~%[fn:x] ~A*note*~A"
+                     spaces spaces))
+           (baseline (export-org (parse-org source) :ascii))
+           (limit (length baseline))
+           (at-limit
+             (export-org
+              (parse-org source :limits (make-limits :max-output-length limit))
+              :ascii)))
+      (with-soft-assertions
+        (expect at-limit :to-equal baseline)
+        (expect (search "[1] *note*" baseline) :not :to-be nil))))
+
+  (it "ignores discarded unsafe destinations in the ASCII output budget"
+    (let* ((source "[[javascript:alert(1)][label]]")
+           (boundary-document
+             (parse-org source
+                        :limits (make-limits :max-output-length 8)))
+           (boundary-output (export-org boundary-document :ascii))
+           (below-document
+             (parse-org source
+                        :limits (make-limits :max-output-length 7)))
+           (below-condition
+             (handler-case
+                 (progn (export-org below-document :ascii) nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect boundary-output :to-equal (format nil "[label]~%"))
+        (expect (typep below-condition 'org-resource-limit-error) :to-be t)
+        (when (typep below-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below-condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit below-condition) :to-be 7)
+          (expect (> (org-resource-limit-error-actual below-condition) 7)
+                  :to-be t)))))
+
+  (it "checks the expanded ASCII abbreviation before budgeting a discarded link"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: joined java%s:~%[[joined:script][l]]"))
+           (at-limit
+             (export-org
+              (parse-org source :limits (make-limits :max-output-length 4))
+              :ascii)))
+      (expect at-limit :to-equal (format nil "[l]~%"))))
+
+  (it "rejects an unsafe large ASCII abbreviation before copying its path"
+    (let* ((payload (make-string (* 2 1024 1024) :initial-element #\x))
+           (source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
+                     payload))
+           (document
+             (parse-org source :limits (make-limits :max-output-length 8)))
+           (input-length (length source)))
+      (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
+      (sb-ext:gc :full t)
+      (let* ((before (sb-ext:get-bytes-consed))
+             (actual (export-org document :ascii))
+             (allocated (- (sb-ext:get-bytes-consed) before)))
+        (with-soft-assertions
+          (expect actual :to-equal (format nil "[label]~%"))
+          (expect (> input-length (* 1024 1024)) :to-be t)
+          (expect (< allocated (floor input-length 2)) :to-be t)))))
+
+  (it "checks an ASCII abbreviation without a placeholder before discarding it"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: bare https://docs.example/~%[[bare:topic][Bare]]"))
+           (output (export-org (parse-org source) :ascii)))
+      (expect (search "[Bare] <https://docs.example/topic>" output)
+              :to-be-truthy)))
+
+  (it "expands a double-colon ASCII abbreviation without retaining its separator"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: web https://docs.example/~%[[web::manual][Manual]]"))
+           (output (export-org (parse-org source) :ascii)))
+      (expect (search "[Manual] <https://docs.example/manual>" output)
+              :to-be-truthy)))
+
+  (it "renders relative file path forms through export-org"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%[[file:./chapter.org][Dot]]; [[file:../chapter.org][Parent]]; [[file:x][Short]]; [[file:][Empty]]"))
+           (output (export-org (parse-org source) :ascii)))
+      (expect output :to-equal
+              (format nil "[Dot]; [Parent]; [Short]; [Empty]~%"))))
+
+  (it "checks empty and safe ASCII abbreviation prefixes through export-org"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: empty %s~%#+LINK: safe https://docs.example/%s~%[[empty:javascript:alert][Bad]]; [[empty:chapter][Relative]]; [[safe:chapter][Remote]]"))
+           (output (export-org (parse-org source) :ascii)))
+      (expect output :to-equal
+              (format nil
+                      "[Bad]; [Relative]; [Remote]~%~%~%[Relative] <chapter>~%~%[Remote] <https://docs.example/chapter>~%"))))
+
+  (it "keeps unsafe raw destinations as labels through export-org"
+    (let* ((document (make-document "label"))
+           (label (make-node :plain-text :begin 0 :end 5))
+           (link
+             (make-node :link
+                        :properties '(:type "javascript" :path "alert(1)"
+                                      :format :bracket
+                                      :raw-link "javascript:alert(1)")
+                        :children (list label)))
+           (paragraph (make-node :paragraph :children (list link)))
+           (section (make-node :section :children (list paragraph)))
+           (root (make-node :org-data :children (list section))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))))
+
+  (it "uses a raw ASCII link source when the programmatic node has no path"
+    (let* ((document (make-document "label"))
+           (label (make-node :plain-text :begin 0 :end 5))
+           (link
+             (make-node :link
+                        :properties '(:type "https" :format :bracket
+                                      :raw-link "https://docs.test/x")
+                        :children (list label)))
+           (paragraph (make-node :paragraph :children (list link)))
+           (section (make-node :section :children (list paragraph)))
+           (root (make-node :org-data :children (list section))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii)
+              :to-equal (format nil "[label]~%~%~%[label] <https://docs.test/x>~%"))))
+
+  (it "rejects an unsafe raw ASCII link source when the node has no path"
+    (let* ((document (make-document "label"))
+           (label (make-node :plain-text :begin 0 :end 5))
+           (link
+             (make-node :link
+                        :properties '(:type "javascript" :format :bracket
+                                      :raw-link "javascript:alert(1)")
+                        :children (list label)))
+           (paragraph (make-node :paragraph :children (list link)))
+           (section (make-node :section :children (list paragraph)))
+           (root (make-node :org-data :children (list section))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))))
+
+  (it "exports attached plain-text nodes without source offsets"
+    (let* ((document (make-document ""))
+           (text-node (make-node :plain-text))
+           (paragraph-node (make-node :paragraph :children (list text-node)))
+           (root (make-node :org-data :children (list paragraph-node))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (format nil "~%"))))
+
+  (it "trims edge whitespace emitted by non-plain ASCII paragraph objects"
+    (let* ((document (make-document ""))
+           (inline-node
+             (make-node :inline-src-block :properties '(:value "  body  ")))
+           (paragraph-node
+             (make-node :paragraph :children (list inline-node)))
+           (root (make-node :org-data :children (list paragraph-node))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (format nil "body~%"))))
+
+  (it "trims an empty non-plain ASCII paragraph object"
+    (let* ((document (make-document ""))
+           (inline-node (make-node :inline-src-block :properties '(:value "")))
+           (paragraph-node
+             (make-node :paragraph :children (list inline-node)))
+           (root (make-node :org-data :children (list paragraph-node))))
+      (setf (document-root document) root)
+      (expect (export-org document :ascii) :to-equal (format nil "~%"))))
+
+  (it "substitutes tabs while measuring and writing ASCII table text"
+    (let* ((document (parse-org ""))
+           (preparation (export-ascii-test-preparation document nil))
+           (output (export-ascii-test-output-state preparation))
+           (hidden-output
+             (export-ascii-test-output-state
+              preparation :measure-only-p t :visible-controls-p nil))
+           (text (format nil "a~Cb" #\Tab))
+           (control (string (code-char 27))))
+      (multiple-value-bind (display-width output-length)
+          (org-kit::export-ascii-output-measure-text-range
+           output text 0 (length text) :substitute-tab-p t)
+        (multiple-value-bind (control-width control-length)
+            (org-kit::export-ascii-output-measure-text-range
+             output control 0 (length control))
+          (multiple-value-bind (hidden-width hidden-length)
+              (org-kit::export-ascii-output-measure-text-range
+               hidden-output control 0 (length control))
+            (org-kit::export-ascii-output-write-range
+             output text 0 (length text) :substitute-tab-p t)
+            (with-soft-assertions
+              (expect display-width :to-be 3)
+              (expect output-length :to-be 3)
+              (expect control-width :to-be 4)
+              (expect control-length :to-be 4)
+              (expect hidden-length :to-be 1)
+              (expect hidden-width :to-be
+                      (org-kit::table-character-width (char control 0)))
+              (expect (org-kit::export-ascii-output-string output)
+                      :to-equal "a b")))))))
+
+  (it "discards unsafe control and whitespace destinations before output budgeting"
+    (let* ((esc (string (code-char 27)))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (sources
+             (list (format nil "[[https://safe.~Apath][l]]" esc)
+                   (format nil "[[https://safe.~Apath][l]]" crlf)
+                   "[[ https://safe.test][l]]"
+                   (format nil "[[~Chttps://safe.test][l]]" #\Tab)
+                   (format nil "[[~%https://safe.test][l]]")))
+           (outputs
+             (loop for source in sources
+                   collect (export-org
+                            (parse-org source
+                                       :limits
+                                       (make-limits :max-output-length 4))
+                            :ascii))))
+      (with-soft-assertions
+        (expect outputs
+                :to-equal (make-list (length sources)
+                                     :initial-element (format nil "[l]~%"))))))
+
   (it "checks ASCII link output before allocating a large destination"
     (let* ((path (make-string (* 2 1024 1024) :initial-element #\x))
            (source
@@ -1363,16 +1819,16 @@
   (it "covers buffered output, visible widths, and bracket path escapes"
     (let* ((document (parse-org "body"))
            (preparation (export-ascii-test-preparation document nil))
-           (output (org-kit::export-ascii-output-for-preparation preparation))
-           (trimmed (org-kit::export-ascii-output-for-preparation preparation))
+           (output (export-ascii-test-output-state preparation))
+           (trimmed (export-ascii-test-output-state preparation))
            (empty-trimmed
-             (org-kit::export-ascii-output-for-preparation preparation))
+             (export-ascii-test-output-state preparation))
            (trimmed-range
-             (org-kit::export-ascii-output-for-preparation preparation))
-           (centered (org-kit::export-ascii-output-for-preparation preparation))
-           (path-output (org-kit::export-ascii-output-for-preparation preparation))
+             (export-ascii-test-output-state preparation))
+           (centered (export-ascii-test-output-state preparation))
+           (path-output (export-ascii-test-output-state preparation))
            (trailing-space-path-output
-             (org-kit::export-ascii-output-for-preparation preparation))
+             (export-ascii-test-output-state preparation))
            (path (concatenate 'string "  a" (string #\Newline)
                               "   b\\[c\\z  "))
            (trailing-space-path
@@ -1418,7 +1874,7 @@
            (root (make-node :org-data :children (list plain-cell-node)))
            (document (parse-org "body"))
            (preparation (export-ascii-test-preparation document nil))
-           (output (org-kit::export-ascii-output-for-preparation preparation))
+           (output (export-ascii-test-output-state preparation))
            (plain-cell
              (export-ascii-test-view
               plain-cell-node source-document
@@ -1428,11 +1884,19 @@
              (export-ascii-test-view
               (make-node :table-cell) document
               (list (export-ascii-test-view (make-node :entity) document))))
+           (nontext-child-measurement
+             (multiple-value-list
+              (org-kit::export-ascii-output-measure-table-cell
+               output nontext-child-cell preparation)))
            (empty-text-child-cell
              (export-ascii-test-view
               (make-node :table-cell) document
               (list (export-ascii-test-view
                      (make-node :plain-text) document))))
+           (empty-text-child-measurement
+             (multiple-value-list
+              (org-kit::export-ascii-output-measure-table-cell
+               output empty-text-child-cell preparation)))
            (right-cell-node (make-node :table-cell :properties '(:value "<r>")))
            (center-cell-node (make-node :table-cell :properties '(:value "<c>")))
            (right-row
@@ -1449,14 +1913,14 @@
            (cell-node (make-node :table-cell :properties '(:value "x")))
            (cell (export-ascii-test-view cell-node document))
            (center-output
-             (org-kit::export-ascii-output-for-preparation preparation))
+             (export-ascii-test-output-state preparation))
            (right-output
-             (org-kit::export-ascii-output-for-preparation preparation))
+             (export-ascii-test-output-state preparation))
            (link-document (parse-org ""))
            (link-preparation
              (export-ascii-test-preparation link-document nil))
            (link-output
-             (org-kit::export-ascii-output-for-preparation link-preparation))
+             (export-ascii-test-output-state link-preparation))
            (link-node
              (make-node :link
                         :properties '(:type "fuzzy" :path "web::manual"
@@ -1497,9 +1961,11 @@
             (expect (org-kit::export-ascii-output-cell-cookie-value
                      nontext-child-cell)
                     :to-be nil)
+            (expect nontext-child-measurement :to-equal '(0 0))
             (expect (org-kit::export-ascii-output-cell-cookie-value
                      empty-text-child-cell)
                     :to-be nil)
+            (expect empty-text-child-measurement :to-equal '(0 0))
             (expect (org-kit::export-ascii-destination-source-safe-p "path" 0 4)
                     :to-be t)
             (expect (org-kit::export-ascii-destination-source-safe-p
@@ -1509,6 +1975,8 @@
                     :to-be nil)
             (expect (org-kit::export-ascii-destination-safe-p "raw" "expanded")
                     :to-be t)
+            (expect (org-kit::export-ascii-destination-safe-p "raw" " leading")
+                    :to-be nil)
             (expect (org-kit::export-ascii-destination-safe-p nil "expanded")
                     :to-be nil)
             (expect (org-kit::export-ascii-destination-safe-p "raw" "")
@@ -1698,7 +2166,7 @@
              (export-ascii-test-view
               (make-node :link :properties '(:type "radio")) document
               (list target-view)))
-           (link-output (org-kit::export-ascii-output-for-preparation preparation))
+           (link-output (export-ascii-test-output-state preparation))
            (link-note
              (org-kit::export-ascii-output-link-note
               link-output link-view preparation)))
