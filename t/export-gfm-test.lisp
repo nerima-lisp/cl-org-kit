@@ -57,8 +57,11 @@
 
 (defun export-gfm-test-state (&optional (source "Body"))
   (let* ((preparation (org-kit::export-prepare (parse-org source) :gfm))
-         (state (org-kit::%make-export-gfm-state :preparation preparation)))
+         (state (org-kit::export-gfm-state-for-preparation preparation)))
     (org-kit::export-gfm-index-state state)))
+
+(defun export-gfm-test-state-for-preparation (preparation)
+  (org-kit::export-gfm-state-for-preparation preparation))
 
 (defun export-gfm-test-policy-source (name)
   (export-gfm-test-read-text (concatenate 'string "policy/gfm/" name)))
@@ -465,7 +468,7 @@
              (org-kit::%make-export-preparation
               :backend :gfm :root-views (list heading paragraph empty-heading)
               :toc nil :footnotes nil))
-           (state (org-kit::%make-export-gfm-state :preparation preparation)))
+           (state (export-gfm-test-state-for-preparation preparation)))
       (org-kit::export-gfm-index-state state)
       (with-soft-assertions
         (expect (org-kit::export-gfm-heading-reference state
@@ -488,7 +491,7 @@
     (let* ((preparation
              (org-kit::%make-export-preparation
               :backend :gfm :root-views nil :toc nil :footnotes nil))
-           (state (org-kit::%make-export-gfm-state :preparation preparation))
+           (state (export-gfm-test-state-for-preparation preparation))
            (custom-heading
              (make-node :headline
                         :properties '(:custom-id "Explicit-ID"
@@ -501,10 +504,6 @@
              (make-node :headline
                         :properties '(:custom-id "" :raw-value "Heading fallback")))
            (missing-title (make-node :headline))
-           (literal-link
-             (export-gfm-test-view
-              :link :properties '(:path "fallback/path")))
-           (empty-literal-link (export-gfm-test-view :link))
            (path-only-link
              (export-gfm-test-attached-node
               :link "[[https://example.test/fallback]]"
@@ -543,10 +542,6 @@
                 :to-equal "org-heading-fallback")
         (expect (org-kit::export-gfm-heading-reference state missing-title)
                 :to-equal "org-section")
-        (expect (org-kit::export-gfm-link-label literal-link)
-                :to-equal "fallback\\/path")
-        (expect (org-kit::export-gfm-link-label empty-literal-link)
-                :to-equal "")
         (expect (org-kit::export-gfm-link-destination state path-only-link)
                 :to-equal "<https://example.test/fallback>")
         (expect (org-kit::export-gfm-link-destination state unaddressable-link)
@@ -576,6 +571,19 @@
                 :to-equal "<a id=\"org-orphan-target\"></a>")
         (expect (org-kit::export-gfm-render-target state empty-target)
                 :to-equal "<a id=\"org-section\"></a>"))))
+
+  (it "renders GFM link labels without destinations through export-org"
+    (let* ((source
+             (format nil "#+OPTIONS: toc:nil num:nil~%[[javascript:alert]]"))
+           (unsafe-output (export-org (parse-org source) :gfm))
+           (document (make-document ""))
+           (link (make-node :link :properties '(:format :bracket :type "fuzzy")))
+           (paragraph (make-node :paragraph :children (list link)))
+           (root (make-node :org-data :children (list paragraph))))
+      (setf (document-root document) root)
+      (with-soft-assertions
+        (expect unsafe-output :to-equal "javascript\\:alert")
+        (expect (export-org document :gfm) :to-equal ""))))
 
   (it "rejects malformed bracket sources while extracting link paths"
     (let ((state (export-gfm-test-state))
@@ -700,7 +708,7 @@
              (org-kit::%make-export-preparation
               :backend :gfm :root-views nil :toc nil
               :footnotes (list entry second-entry)))
-           (state (org-kit::%make-export-gfm-state :preparation preparation))
+           (state (export-gfm-test-state-for-preparation preparation))
            (reference
              (export-gfm-test-view
               :footnote-reference
@@ -740,48 +748,52 @@
                  (export-gfm-test-state))
                 :to-be nil))))
 
-  (it "covers split terminal newlines and detached literal fallbacks"
+  (it "trims split terminal newlines from escaped GFM literal parts"
     (let* ((first-part (format nil "body~%"))
            (last-part (string #\Newline))
            (parts (list (list first-part 0 (length first-part))
                         (list last-part 0 (length last-part))))
            (nonterminal-parts
              (list (list first-part 0 (length first-part))
-                   (list "tail" 0 4)))
-           (literal-link
-             (export-gfm-test-view :link :properties '(:path "fallback/path")))
-           (code-node (make-node :code))
-           (detached-link (make-node :link)))
-      (multiple-value-bind (source start end)
-          (org-kit::export-gfm-node-source-range detached-link)
-        (multiple-value-bind (code code-start code-end)
-            (org-kit::export-gfm-inline-code-value-range code-node)
-          (with-soft-assertions
-            (expect (org-kit::export-gfm-escape-literal-parts
-                     parts :trim-terminal-newline-p t)
-                    :to-equal "body")
-            (expect (org-kit::export-gfm-escape-literal-parts
-                     nonterminal-parts :trim-terminal-newline-p t)
-                    :to-equal (format nil "body~%tail"))
-            (expect (org-kit::export-gfm-link-label literal-link)
-                    :to-equal "fallback\\/path")
-            (expect (list code code-start code-end) :to-equal (list "" 0 0))
-            (expect (list source start end) :to-equal (list nil 0 nil)))))))
+                   (list "tail" 0 4))))
+      (with-soft-assertions
+        (expect (org-kit::export-gfm-escape-literal-parts
+                 parts :trim-terminal-newline-p t)
+                :to-equal "body")
+        (expect (org-kit::export-gfm-escape-literal-parts
+                 nonterminal-parts :trim-terminal-newline-p t)
+                :to-equal (format nil "body~%tail")))))
 
-  (it "rejects bracket path preflight when the path has a backslash"
-    (let* ((safe (export-gfm-test-attached-node
+  (it "validates the complete explicit URL for bracket destinations"
+    (let* ((state (export-gfm-test-state))
+           (safe (export-gfm-test-attached-node
                   :link "[[https://example.test/path]]"
-                  :properties '(:type "https" :path "//example.test/path")))
+                  :properties '(:type "https" :path "//example.test/path"
+                                :format :bracket)))
            (escaped (export-gfm-test-attached-node
                      :link "[[https://example.test/a\\b]]"
                      :properties
-                     '(:type "https" :path "//example.test/a\\b"))))
+                     '(:type "https" :path "//example.test/a\\b"
+                       :format :bracket))))
       (with-soft-assertions
-        (expect (org-kit::export-gfm-bracket-path-safe-p
-                 "https" (node-property safe :path) nil)
-                :to-be-truthy)
-        (expect (org-kit::export-gfm-bracket-path-safe-p
-                 "https" (node-property escaped :path) nil)
+        (expect (org-kit::export-gfm-source-range-matches-parts-p
+                 "https://example.test/path" 0 25
+                 '("https" ":" "//example.test/path"))
+                :to-be t)
+        (expect (org-kit::export-gfm-source-range-matches-parts-p
+                 "https://example.test/paths" 0 26
+                 '("https" ":" "//example.test/path"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-source-range-matches-parts-p
+                 "https://example.test/docs" 0 25
+                 '("https" ":" "//example.test/path"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-source-range-matches-parts-p
+                 "" 0 0 nil)
+                :to-be t)
+        (expect (org-kit::export-gfm-link-destination state safe)
+                :to-equal "<https://example.test/path>")
+        (expect (org-kit::export-gfm-link-destination state escaped)
                 :to-be nil))))
 
   (it "checks URL, target, and destination boundaries with backslashes and entities"
@@ -823,31 +835,82 @@
             (node-property expansion-link :path) "payload"
             (node-property expansion-link :format) :bracket)
       (with-soft-assertions
-        (expect (org-kit::export-gfm-bracket-path-safe-p "https" nil nil)
+        (expect (org-kit::export-gfm-destination-parts-character
+                 '("a" "bc") 2)
+                :to-be #\c)
+        (expect (org-kit::export-gfm-destination-parts-position
+                 '("safe" "x&") (lambda (character) (char= character #\&)))
+                :to-equal 5)
+        (expect (org-kit::export-gfm-destination-parts-explicit-scheme-end
+                 '("https" ":" "path"))
+                :to-equal 5)
+        (expect (org-kit::export-gfm-destination-parts-explicit-scheme-end
+                 '(":" "path"))
                 :to-be nil)
-        (expect (org-kit::export-gfm-bracket-path-safe-p
-                 "https" "//safe.test/path" nil)
-                :to-be-truthy)
-        (expect (org-kit::export-gfm-bracket-path-safe-p
-                 "https" "&colon;alert(1)" nil)
+        (expect (org-kit::export-gfm-destination-parts-explicit-scheme-end
+                 '("bad scheme" ":" "path"))
                 :to-be nil)
-        (expect (org-kit::export-gfm-bracket-path-safe-p
-                 "custom-id" "target" "safe-target")
-                :to-be-truthy)
-        (expect (org-kit::export-gfm-bracket-path-safe-p
-                 "custom-id" "target" unsafe-target-id)
+        (expect (org-kit::export-gfm-destination-parts-prefix-equal-p
+                 '("//host") "//")
+                :to-be t)
+        (expect (org-kit::export-gfm-destination-parts-prefix-equal-p
+                 '("/") "//")
                 :to-be nil)
-        (expect (org-kit::export-gfm-bracket-path-safe-p
-                 "custom-id" "target" control-target-id)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 '("safe") '("safe"))
+                :to-be t)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 (list control-target-id) '("safe"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 '("safe") (list control-target-id))
+                :to-be nil)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 '("safe") '(""))
+                :to-be nil)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 '(" path") '(" path"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 '("//host") '("//host"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 '("https" ":" "\\path") '("https" ":" "\\path"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-destination-parts-safe-url-p
+                 '("ftp" ":" "//host") '("ftp" ":" "//host"))
                 :to-be nil)
         (expect (org-kit::export-gfm-preflight-link-destination
-                 "https" "safe/path" nil nil nil)
+                 "https" "safe/path" nil nil
+                 '("safe/path") '("safe/path"))
                 :to-be-truthy)
         (expect (org-kit::export-gfm-preflight-link-destination
-                 "https" unsafe-http-path nil nil nil)
+                 "https" unsafe-http-path nil nil
+                 (list unsafe-http-path) (list unsafe-http-path))
                 :to-be nil)
         (expect (org-kit::export-gfm-preflight-link-destination
-                 "https" "&colon;alert(1)" nil nil nil)
+                 "https" "&colon;alert(1)" nil nil
+                 '("&colon;alert(1)") '("&colon;alert(1)"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-preflight-link-destination
+                 "https" "a&colon;b" nil nil
+                 '("https" ":" "a&colon;b")
+                 '("https" ":" "a&colon;b"))
+                :to-be-truthy)
+        (expect (org-kit::export-gfm-preflight-link-destination
+                 "custom-id" nil "section" nil
+                 '("#" "section") '("#" "section"))
+                :to-be-truthy)
+        (expect (org-kit::export-gfm-preflight-link-destination
+                 "custom-id" nil unsafe-target-id nil
+                 '("#" "unsafe\\target") '("#" "unsafe\\target"))
+                :to-be nil)
+        (expect (org-kit::export-gfm-preflight-link-destination
+                 "fuzzy" nil control-target-id nil
+                 (list "#" control-target-id) (list "#" control-target-id))
+                :to-be nil)
+        (expect (org-kit::export-gfm-preflight-link-destination
+                 "fuzzy" nil nil nil '("plain") '("plain"))
                 :to-be nil)
         (expect (org-kit::export-gfm-link-destination state safe-link)
                 :to-equal "<safe/path>")
@@ -864,6 +927,50 @@
         (expect (org-kit::export-gfm-link-destination
                  expansion-state expansion-link)
                 :to-be nil))))
+
+  (it "preserves entity text in a path after an allowed URL scheme"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%[[https:a&colon;b][x]]"))
+           (actual (export-org (parse-org source) :gfm)))
+      (expect actual :to-equal "[x](<https:a&amp;colon;b>)")))
+
+  (it "preserves dot-relative file links"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%[[./chapter.org][dot]] [[../chapter.org][parent]]"))
+           (actual (export-org (parse-org source) :gfm)))
+      (expect actual :to-equal
+              "[dot](<./chapter.org>) [parent](<../chapter.org>)")))
+
+  (it "keeps programmatic GFM links without a destination as labels"
+    (let ((outputs
+            (loop for properties in
+                  '((:format :bracket :type "fuzzy")
+                    (:format :bracket :type "file" :path "" :raw-link "file:"))
+                  collect
+                  (let* ((source "[[file:][x]]")
+                         (document (make-document source))
+                         (label (make-node :plain-text :begin 9 :end 10))
+                         (link (make-node :link :begin 0 :end 12
+                                          :properties properties
+                                          :children (list label)))
+                         (paragraph (make-node :paragraph
+                                               :children (list link)))
+                         (section (make-node :section
+                                             :children (list paragraph)))
+                         (root (make-node :org-data :children (list section))))
+                    (setf (document-root document) root)
+                    (export-org document :gfm)))))
+      (expect outputs :to-equal '("x" "x"))))
+
+  (it "exports an empty programmatic inline code node through export-org"
+    (let* ((document (make-document ""))
+           (code (make-node :code))
+           (paragraph (make-node :paragraph :children (list code)))
+           (root (make-node :org-data :children (list paragraph))))
+      (setf (document-root document) root)
+      (expect (export-org document :gfm) :to-equal "``")))
 
   (it "dispatches list, table, source, and uncommon view branches"
     (let* ((state (export-gfm-test-state))
@@ -1138,6 +1245,77 @@
         (expect (typep stream-limit-error 'org-resource-limit-error)
                 :to-be t)
         (expect (get-output-stream-string failed-stream) :to-equal ""))))
+
+  (it "uses final output length for a GFM link with a rejected destination"
+    (let* ((source (format nil
+                           "#+OPTIONS: toc:nil num:nil~%[[file:a][x]]"))
+           (baseline (export-org (parse-org source) :gfm))
+           (at-limit
+             (export-org
+              (parse-org source
+                         :limits (make-limits :max-output-length 1))
+              :gfm))
+           (below-limit
+             (export-gfm-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org source
+                            :limits (make-limits :max-output-length 0))
+                 :gfm)))))
+      (with-soft-assertions
+        (expect baseline :to-equal "x")
+        (expect at-limit :to-equal baseline)
+        (expect (typep below-limit 'org-resource-limit-error) :to-be t)
+        (when (typep below-limit 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below-limit)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-actual below-limit)
+                  :to-be 1)))))
+
+  (it "does not budget a rejected expanded GFM abbreviation"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript&colon;%s~%[[danger:alert][x]]"))
+           (actual
+             (export-org
+              (parse-org source :limits (make-limits :max-output-length 1))
+              :gfm)))
+      (expect actual :to-equal "x")))
+
+  (it "rejects an unsafe large GFM abbreviation before copying its path"
+    (let* ((payload (make-string (* 2 1024 1024) :initial-element #\x))
+           (source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][x]]"
+                     payload))
+           (document
+             (parse-org source :limits (make-limits :max-output-length 1)))
+           (input-length (length source)))
+      (expect (export-org document :gfm) :to-equal "x")
+      (sb-ext:gc :full t)
+      (let* ((before (sb-ext:get-bytes-consed))
+             (actual (export-org document :gfm))
+             (allocated (- (sb-ext:get-bytes-consed) before)))
+        (with-soft-assertions
+          (expect actual :to-equal "x")
+          (expect (> input-length (* 1024 1024)) :to-be t)
+          (expect (< allocated (floor input-length 2)) :to-be t)))))
+
+  (it "uses a safe GFM heading ID when a custom ID has unsafe characters"
+    (let* ((document (make-document ""))
+           (heading
+             (make-node :headline
+                        :properties '(:custom-id "unsafe\\id"
+                                      :raw-value "Unsafe ID" :level 1)))
+           (root (make-node :org-data :children (list heading))))
+      (setf (document-root document) root)
+      (let ((actual (export-org document :gfm)))
+        (with-soft-assertions
+          (expect (search "- [Unsafe ID](<#org-unsafe-id>)" actual)
+                  :to-be-truthy)
+          (expect (search "<a id=\"org-unsafe-id\"></a>" actual)
+                  :to-be-truthy)
+          (expect (find #\\ actual) :to-be nil)))))
 
   (it "reports invalid output, invalid raw mode, encoding, and unsupported syntax"
     (let* ((invalid-output

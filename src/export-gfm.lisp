@@ -1,15 +1,30 @@
 ;;;; src/export-gfm.lisp
 (in-package #:org-kit)
 
-(defstruct (export-gfm-state (:constructor %make-export-gfm-state))
+(defstruct (export-gfm-state
+             (:constructor %make-export-gfm-state
+                 (preparation limits heading-ids heading-targets anchored-headings
+                  reference-ids used-ids footnote-reference-counts)))
   preparation
   limits
-  (heading-ids (make-hash-table :test #'eq))
-  (heading-targets (make-hash-table :test #'equal))
-  (anchored-headings (make-hash-table :test #'eq))
-  (reference-ids (make-hash-table :test #'equalp))
-  (used-ids (make-hash-table :test #'equalp))
-  (footnote-reference-counts (make-hash-table :test #'equal)))
+  heading-ids
+  heading-targets
+  anchored-headings
+  reference-ids
+  used-ids
+  footnote-reference-counts)
+
+(defun export-gfm-state-for-preparation (preparation)
+  (let ((document (export-preparation-document preparation)))
+    (%make-export-gfm-state
+     preparation
+     (and document (document-limits document))
+     (make-hash-table :test #'eq)
+     (make-hash-table :test #'equal)
+     (make-hash-table :test #'eq)
+     (make-hash-table :test #'equalp)
+     (make-hash-table :test #'equalp)
+     (make-hash-table :test #'equal))))
 
 (defvar *export-gfm-output-limits* nil)
 (defvar *export-gfm-output-prefix-length* 0)
@@ -352,6 +367,12 @@
           t)
     id))
 
+(defun export-gfm-target-id-safe-p (target-id)
+  (and (stringp target-id)
+       (notany #'export-control-character-p target-id)
+       (notany #'export-whitespace-character-p target-id)
+       (not (position (code-char 92) target-id))))
+
 (defun export-gfm-register-reference (state name id)
   (when (and (stringp name) (plusp (length name)))
     (setf (gethash name (export-gfm-state-reference-ids state))
@@ -361,7 +382,8 @@
   (or (gethash node (export-gfm-state-heading-ids state))
       (let ((custom-id (node-property node :custom-id)))
         (export-gfm-unique-id
-         state (if (and (stringp custom-id) (plusp (length custom-id)))
+         state (if (and (stringp custom-id) (plusp (length custom-id))
+                        (export-gfm-target-id-safe-p custom-id))
                    custom-id
                    (export-gfm-slug (or (node-property node :raw-value) "")))))))
 
@@ -408,7 +430,8 @@
            (let* ((custom-id (node-property node :custom-id))
                   (title (node-property node :raw-value))
                   (candidate
-                    (if (and (stringp custom-id) (plusp (length custom-id)))
+                    (if (and (stringp custom-id) (plusp (length custom-id))
+                             (export-gfm-target-id-safe-p custom-id))
                         custom-id
                         (export-gfm-slug (or title ""))))
                   (id (export-gfm-unique-id state candidate)))
@@ -596,20 +619,6 @@
                         (t (write-char character output)))))
     (write-char #\> output)))
 
-(defun export-gfm-serialize-destination (destination &key table-cell-p)
-  (export-gfm-serialize-destination-parts
-   (list destination) :table-cell-p table-cell-p))
-
-;; GFM expands character references before browsers interpret the destination.
-(defun export-gfm-scheme-obfuscation-p (destination)
-  (let ((entity (position #\& destination))
-        (boundary (position-if (lambda (character)
-                                 (find character "/?#"))
-                               destination)))
-    (and entity
-         (null (export-explicit-url-scheme-end destination))
-         (or (null boundary) (< entity boundary)))))
-
 (defun export-gfm-node-source-range (node)
   (let* ((document (node-document node))
          (source (and document (document-text document)))
@@ -629,52 +638,115 @@
                always (not (export-control-character-p
                             (char source position)))))))
 
-(defun export-gfm-bracket-path-safe-p (type path target-id)
-  (and (stringp path)
-       (notany #'export-control-character-p path)
-       (cond
-         ((and (stringp type)
-               (member type '("http" "https" "mailto")
-                       :test #'string-equal))
-          (and (not (find #\\ path))
-               (not (export-gfm-scheme-obfuscation-p path))))
-         ((and target-id (stringp type)
-               (member type '("custom-id" "fuzzy" "radio")
-                       :test #'string-equal))
-          (and (notany #'export-control-character-p target-id)
-               (not (find #\\ target-id))))
-         (t (and (not (export-gfm-scheme-obfuscation-p path))
-                 (export-safe-url-p path path))))))
+(defun export-gfm-destination-parts-length (parts)
+  (loop for part in parts sum (length part)))
+
+(defun export-gfm-destination-parts-character (parts index)
+  (loop with remaining = index
+        for part in parts
+        when (< remaining (length part))
+          do (return (char part remaining))
+        do (decf remaining (length part))))
+
+(defun export-gfm-destination-parts-position (parts predicate)
+  (loop with position = 0
+        for part in parts
+        do (loop for character across part
+                 when (funcall predicate character)
+                   do (return-from export-gfm-destination-parts-position
+                        position)
+                 do (incf position)))
+  nil)
+
+(defun export-gfm-destination-parts-explicit-scheme-end (parts)
+  (loop with position = 0
+        with valid-p = t
+        for part in parts
+        do (loop for character across part
+                 do (progn
+                      (cond
+                        ((char= character #\:)
+                         (return-from
+                             export-gfm-destination-parts-explicit-scheme-end
+                           (and (plusp position) valid-p position)))
+                        ((zerop position)
+                         (unless (export-ascii-alpha-p character)
+                           (setf valid-p nil)))
+                        ((not (export-ascii-scheme-character-p character))
+                         (setf valid-p nil)))
+                      (incf position)))))
+
+(defun export-gfm-destination-parts-scheme-obfuscation-p (parts)
+  (let ((entity (export-gfm-destination-parts-position
+                 parts (lambda (character) (char= character #\&))))
+        (boundary (export-gfm-destination-parts-position
+                   parts (lambda (character) (find character "/?#")))))
+    (and entity
+         (null (export-gfm-destination-parts-explicit-scheme-end parts))
+         (or (null boundary) (< entity boundary)))))
+
+(defun export-gfm-destination-parts-prefix-equal-p (parts prefix)
+  (and (>= (export-gfm-destination-parts-length parts) (length prefix))
+       (loop for index below (length prefix)
+             always (char= (export-gfm-destination-parts-character
+                            parts index)
+                           (char prefix index)))))
+
+(defun export-gfm-destination-parts-allowed-scheme-p (parts end)
+  (member-if (lambda (scheme)
+               (and (= (length scheme) end)
+                    (export-gfm-destination-parts-prefix-equal-p
+                     parts scheme)))
+             '("http" "https" "mailto")))
+
+(defun export-gfm-destination-parts-safe-url-p (raw-parts destination-parts)
+  (and (not (export-gfm-destination-parts-position
+             raw-parts #'export-control-character-p))
+       (not (export-gfm-destination-parts-position
+             destination-parts #'export-control-character-p))
+       (plusp (export-gfm-destination-parts-length destination-parts))
+       (not (export-whitespace-character-p
+             (export-gfm-destination-parts-character destination-parts 0)))
+       (not (export-gfm-destination-parts-position
+             destination-parts
+             (lambda (character) (char= character #\\))))
+       (not (export-gfm-destination-parts-prefix-equal-p
+             destination-parts "//"))
+       (let ((scheme-end
+               (export-gfm-destination-parts-explicit-scheme-end
+                destination-parts)))
+         (or (null scheme-end)
+             (export-gfm-destination-parts-allowed-scheme-p
+              destination-parts scheme-end)))))
+
+(defun export-gfm-link-destination-safe-p
+    (type target-id raw-parts destination-parts)
+  (and (if (and target-id (stringp type)
+                (member type '("custom-id" "fuzzy" "radio")
+                        :test #'string-equal))
+           (export-gfm-target-id-safe-p target-id)
+           t)
+       (not (export-gfm-destination-parts-scheme-obfuscation-p raw-parts))
+       (not (export-gfm-destination-parts-scheme-obfuscation-p
+             destination-parts))
+       (export-gfm-destination-parts-safe-url-p
+        raw-parts destination-parts)))
 
 (defun export-gfm-preflight-link-destination
-    (type path format target-id table-cell-p)
-  (when (stringp path)
-    (cond
-      ((and (eq format :bracket)
-            (export-gfm-bracket-path-safe-p type path target-id))
-       (export-gfm-check-total-output-length
-        (export-gfm-serialized-destination-parts-output-length
-         (cond
-           ((and (stringp type)
-                 (member type '("http" "https" "mailto")
-                         :test #'string-equal))
-            (list type ":" path))
-           ((and target-id (stringp type)
-                 (member type '("custom-id" "fuzzy" "radio")
-                         :test #'string-equal))
-            (list "#" target-id))
-           (t (list path)))
-         :table-cell-p table-cell-p)))
-      ((and (stringp type)
-            (member type '("http" "https" "mailto") :test #'string-equal)
-            (not (find #\\ path))
-            (notany #'export-control-character-p path)
-            (not (export-gfm-scheme-obfuscation-p path)))
-       (export-gfm-check-total-output-length
-        (export-gfm-serialized-destination-parts-output-length
-         (list type ":" path) :table-cell-p table-cell-p))))))
+    (type path target-id table-cell-p raw-parts destination-parts)
+  (when (and raw-parts destination-parts
+             (or (stringp path)
+                 (and target-id (stringp type)
+                      (member type '("custom-id" "fuzzy" "radio")
+                              :test #'string-equal)))
+             (export-gfm-link-destination-safe-p
+              type target-id raw-parts destination-parts))
+    (export-gfm-check-total-output-length
+     (export-gfm-serialized-destination-parts-output-length
+      destination-parts :table-cell-p table-cell-p))
+    t))
 
-(defun export-gfm-raw-bracket-link-path (node)
+(defun export-gfm-bracket-link-path-range (node)
   (multiple-value-bind (source start end)
       (export-gfm-node-source-range node)
     (when (and (stringp source)
@@ -682,58 +754,129 @@
                (string= "[[" source :start2 start :end2 (+ start 2)))
       (let ((close (link-object-bracket-close source (+ start 2) end)))
         (when close
-          (link-object-normalize-bracket-path
-           (link-object-unescape-path (subseq source (+ start 2) close))))))))
+          (values source (+ start 2) close))))))
+
+(defun export-gfm-raw-bracket-link-path (node)
+  (multiple-value-bind (source start end)
+      (export-gfm-bracket-link-path-range node)
+    (when source
+      (link-object-normalize-bracket-path
+       (link-object-unescape-path (subseq source start end))))))
 
 (defun export-gfm-expanded-bracket-path (node raw-path)
-  (let ((document (node-document node)))
-    (if document
-        (link-object-expand-abbreviation document raw-path)
-        raw-path)))
+  (link-object-expand-abbreviation (node-document node) raw-path))
 
-(defun export-gfm-link-destination (state node &key table-cell-p)
-  (when (export-gfm-link-source-control-p node)
+(defun export-gfm-link-parsed-destination-unsafe-p (state node)
+  (when (eq (node-property node :format) :bracket)
     (let* ((type (node-property node :type))
            (path (node-property node :path))
-           (format (node-property node :format))
            (target-id (export-gfm-link-target-id state node))
-           (preflight (export-gfm-preflight-link-destination
-                       type path format target-id table-cell-p))
-           (bracket-path-safe-p
-             (and (eq format :bracket)
-                  (export-gfm-bracket-path-safe-p type path target-id)))
            (internal-target-p
              (and target-id (stringp type)
                   (member type '("custom-id" "fuzzy" "radio")
                           :test #'string-equal)))
-           (raw-path (and bracket-path-safe-p (not internal-target-p)
-                          (export-gfm-raw-bracket-link-path node)))
-           (raw-destination (or raw-path (if internal-target-p target-id path)))
-           (expanded-path (and raw-path
-                               (export-gfm-expanded-bracket-path node raw-path)))
-           (destination
-             (cond
-               (internal-target-p
-                (export-gfm-check-total-output-length
-                 (export-gfm-serialized-destination-parts-output-length
-                  (list "#" target-id) :table-cell-p table-cell-p))
-                (concatenate 'string "#" target-id))
-               ((eq format :bracket) expanded-path)
-               ((and (stringp type) (stringp path)
-                     (member type '("http" "https" "mailto")
-                             :test #'string-equal)
-                     (not (find #\\ path)))
-                (concatenate 'string type ":" path))
-               ((and (stringp type) (stringp path)) nil)
-               ((stringp path) path))))
-      (declare (ignore preflight))
-      (when (and (stringp raw-destination)
-                 (stringp destination)
-                 (not (export-gfm-scheme-obfuscation-p raw-destination))
-                 (not (export-gfm-scheme-obfuscation-p destination))
-                 (export-safe-url-p raw-destination destination))
-        (export-gfm-serialize-destination
-         destination :table-cell-p table-cell-p)))))
+           (parts
+             (and (stringp path)
+                  (cond
+                    (internal-target-p (list "#" target-id))
+                    ((and (stringp type)
+                          (member type *org-link-object-types*
+                                  :test #'string=)
+                          (not (and (string-equal type "file")
+                                    (or (and (plusp (length path))
+                                             (char= (char path 0) #\/))
+                                        (and (>= (length path) 2)
+                                             (string= "./" path :end2 2))
+                                        (and (>= (length path) 3)
+                                             (string= "../" path :end2 3))))))
+                     (list type ":" path))
+                    (t (list path))))))
+      (and parts
+           (not (export-gfm-link-destination-safe-p
+                 type target-id parts parts))))))
+
+(defun export-gfm-source-range-matches-parts-p (source start end parts)
+  (and (= (- end start) (export-gfm-destination-parts-length parts))
+       (loop with position = start
+             for part in parts
+             always (loop for character across part
+                          always (and (char= character (char source position))
+                                      (progn (incf position) t)))
+             finally (return (= position end)))))
+
+(defun export-gfm-direct-bracket-link-destination
+    (node type path table-cell-p)
+  (when (and (eq (node-property node :format) :bracket)
+             (stringp type)
+             (stringp path)
+             (member type '("http" "https" "mailto")
+                     :test #'string-equal))
+    (let ((parts (list type ":" path)))
+      (multiple-value-bind (source start end)
+          (export-gfm-bracket-link-path-range node)
+        (when (and source
+                   (export-gfm-source-range-matches-parts-p
+                    source start end parts))
+          (values
+           t
+           (export-gfm-serialize-destination-parts
+            parts :table-cell-p table-cell-p)))))))
+
+(defun export-gfm-link-destination-candidates (state node)
+  (let* ((type (node-property node :type))
+         (path (node-property node :path))
+         (format (node-property node :format))
+         (explicit-url-p
+           (and (stringp type) (stringp path)
+                (member type '("http" "https" "mailto")
+                        :test #'string-equal)))
+         (target-id (export-gfm-link-target-id state node))
+         (internal-target-p
+           (and target-id (stringp type)
+                (member type '("custom-id" "fuzzy" "radio")
+                        :test #'string-equal)))
+         (raw-path (and (eq format :bracket) (not internal-target-p)
+                        (export-gfm-raw-bracket-link-path node)))
+         (raw-destination (or raw-path (if internal-target-p target-id path)))
+         (raw-parts
+           (cond
+             (internal-target-p (list target-id))
+             (raw-path (list raw-path))
+             (explicit-url-p (list type ":" path))
+             (raw-destination (list raw-destination))))
+         (destination-parts
+           (cond
+             (internal-target-p (list "#" target-id))
+             ((eq format :bracket)
+              (let ((expanded-path
+                      (and raw-path
+                           (export-gfm-expanded-bracket-path node raw-path))))
+                (and expanded-path (list expanded-path))))
+             (explicit-url-p (list type ":" path))
+             ((and (stringp type) (stringp path)) nil)
+             ((stringp path) (list path)))))
+    (values type path target-id raw-parts destination-parts)))
+
+(defun export-gfm-link-destination (state node &key table-cell-p)
+  (when (and (export-gfm-link-source-control-p node)
+             (not (export-gfm-link-parsed-destination-unsafe-p state node)))
+    (multiple-value-bind (type path)
+        (values (node-property node :type)
+                (node-property node :path))
+      (multiple-value-bind (handled-p destination)
+          (export-gfm-direct-bracket-link-destination
+           node type path table-cell-p)
+        (if handled-p
+            destination
+            (multiple-value-bind (type path target-id raw-parts
+                                  destination-parts)
+                (export-gfm-link-destination-candidates state node)
+              (when (and destination-parts
+                         (export-gfm-preflight-link-destination
+                          type path target-id table-cell-p
+                          raw-parts destination-parts))
+                (export-gfm-serialize-destination-parts
+                 destination-parts :table-cell-p table-cell-p))))))))
 
 (defun export-gfm-image-path-p (path)
   (and (stringp path)
@@ -1320,10 +1463,7 @@
 
 (defmethod export-render-preparation
     ((preparation export-preparation) (backend (eql :gfm)))
-  (let* ((state (%make-export-gfm-state
-                 :preparation preparation
-                 :limits (document-limits
-                          (export-preparation-document preparation))))
+  (let* ((state (export-gfm-state-for-preparation preparation))
          (*export-gfm-output-limits* (export-gfm-state-limits state))
          (*export-gfm-output-prefix-length* 0))
     (export-gfm-index-state state)
