@@ -1301,6 +1301,29 @@
           (expect (> input-length (* 1024 1024)) :to-be t)
           (expect (< allocated (floor input-length 2)) :to-be t)))))
 
+  (it "preserves safe entity fragments and custom-id fuzzy links"
+    (let ((fragment-cases
+            '(("a&b" "[x](<#a&amp;b>)")
+              ("a&colon;b" "[x](<#a&amp;colon;b>)")
+              ("a&amp;b" "[x](<#a&amp;amp;b>)"))))
+      (with-soft-assertions
+        (dolist (case fragment-cases)
+          (destructuring-bind (target expected) case
+            (let* ((source
+                     (format nil
+                             "#+OPTIONS: toc:nil num:nil~%[[#~A][x]]"
+                             target))
+                   (actual (export-org (parse-org source) :gfm)))
+              (expect actual :to-equal expected))))))
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%* Fuzzy heading~%:PROPERTIES:~%:CUSTOM_ID: a&b~%:END:~%~%[[#a&b][custom]] [[Fuzzy heading][fuzzy]]"))
+           (actual (export-org (parse-org source) :gfm)))
+      (with-soft-assertions
+        (expect (search "[custom](<#a&amp;b>)" actual) :to-be-truthy)
+        (expect (search "[fuzzy](<#org-fuzzy-heading>)" actual)
+                :to-be-truthy))))
+
   (it "uses a safe GFM heading ID when a custom ID has unsafe characters"
     (let* ((document (make-document ""))
            (heading

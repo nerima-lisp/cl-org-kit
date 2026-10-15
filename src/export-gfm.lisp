@@ -840,7 +840,7 @@
          (raw-destination (or raw-path (if internal-target-p target-id path)))
          (raw-parts
            (cond
-             (internal-target-p (list target-id))
+             (internal-target-p (list "#" target-id))
              (raw-path (list raw-path))
              (explicit-url-p (list type ":" path))
              (raw-destination (list raw-destination))))
