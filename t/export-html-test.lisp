@@ -1159,19 +1159,69 @@ paragraph" table-list) :not :to-be nil))))
                 :to-equal 1)
         (expect (org-kit::export-html-escaped-output-length
                  :attribute (string #\") 0 1)
-                :to-equal 6)
-        (expect (progn
-                  (org-kit::export-html-check-escaped-parts
-                   state :text (list (list "plain" 0)))
-                  t)
-                :to-be t))))
+                :to-equal 6))))
+
+  (it "checks escaped HTML parts at their exact output boundary"
+    (let* ((text (string #\"))
+           (parts (list (list text 0)))
+           (state (org-kit::%make-export-html-state
+                   :limits (make-limits :max-output-length 6)))
+           (below-state (org-kit::%make-export-html-state
+                         :limits (make-limits :max-output-length 5)))
+           (accepted-length
+             (prog1 (org-kit::export-html-check-escaped-parts
+                     state :attribute parts)
+               (org-kit::export-html-escape-to-output-range
+                state :attribute text 0 1)))
+           (output (coerce (org-kit::export-html-state-output state) 'string))
+           (below
+             (export-html-test-catch-error
+              (lambda ()
+                (org-kit::export-html-check-escaped-parts
+                 below-state :attribute parts)))))
+      (with-soft-assertions
+        (expect accepted-length :to-equal 6)
+        (expect output :to-equal "&quot;")
+        (expect (typep below 'org-resource-limit-error) :to-be t)
+        (when (typep below 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit below) :to-be 5)
+          (expect (org-resource-limit-error-actual below) :to-be 6)))))
 
 (describe "HTML export budget regressions"
-  (it "returns an empty source range for a detached literal object"
-    (multiple-value-bind (source start end)
-        (org-kit::export-html-literal-object-value-range (make-node :code))
+  (it "enforces exact character output limits through export-org"
+    (let* ((source "Body")
+           (expected (export-org (parse-org source) :html))
+           (length (length expected))
+           (below
+             (export-html-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org source :limits
+                            (make-limits :max-output-length (1- length)))
+                 :html))))
+           (at (export-org (parse-org source :limits
+                                      (make-limits :max-output-length length))
+                           :html)))
       (with-soft-assertions
-        (expect (list source start end) :to-equal (list "" 0 0)))))
+        (expect (typep below 'org-resource-limit-error) :to-be t)
+        (when (typep below 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit below) :to-be (1- length))
+          (expect (> (org-resource-limit-error-actual below) (1- length))
+                  :to-be t))
+        (expect at :to-equal expected))))
+
+  (it "exports a programmatic inline code node without source offsets"
+    (let* ((document (make-document ""))
+           (code (make-node :code))
+           (paragraph (make-node :paragraph :children (list code)))
+           (root (make-node :org-data :children (list paragraph))))
+      (setf (document-root document) root)
+      (expect (search "<code></code>" (export-org document :html))
+              :to-be-truthy)))
 
   (it "renders empty and unterminated dynamic source ranges"
     (let* ((nonempty-document (make-document "x"))
