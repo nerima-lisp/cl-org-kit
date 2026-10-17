@@ -1209,6 +1209,28 @@
                 :to-be t)
         (expect (export-core-test-document-snapshot source) :to-equal before))))
 
+  (it "accepts only restricted relative file paths"
+    (with-soft-assertions
+      (expect (org-kit::export-safe-relative-file-path-p "figure_1.png")
+              :to-be t)
+      (expect (org-kit::export-safe-relative-file-path-p "assets/figure.png")
+              :to-be t)
+      (expect (org-kit::export-safe-relative-file-path-p nil) :to-be nil)
+      (expect (org-kit::export-safe-relative-file-path-p "") :to-be nil)
+      (expect (org-kit::export-safe-relative-file-path-p "/etc/passwd.png")
+              :to-be nil)
+      (expect (org-kit::export-safe-relative-file-path-p "../secret.png")
+              :to-be nil)
+      (expect (org-kit::export-safe-relative-file-path-p "assets/../secret.png")
+              :to-be nil)
+      (expect (org-kit::export-safe-relative-file-path-p "bad path.png")
+              :to-be nil)
+      (expect (org-kit::export-safe-relative-file-path-p "bad\\path.png")
+              :to-be nil)
+      (expect (org-kit::export-safe-relative-file-path-p
+               (format nil "line~Cbreak.png" (code-char 10)))
+              :to-be nil)))
+
   (it "validates preparation inputs and requires a parsed document"
     (let* ((document (parse-org "Body"))
            (invalid-document
@@ -1234,7 +1256,15 @@
         (when (typep invalid-backend 'org-export-error)
           (expect (org-export-error-reason invalid-backend) :to-be :unknown-backend))
         (expect (typep invalid-resolver 'type-error) :to-be t)
-        (expect (typep invalid-raw-html 'type-error) :to-be t)
+        (expect
+         (and (typep invalid-raw-html 'type-error)
+              (typep
+               (export-core-test-catch-error
+                (lambda ()
+                  (org-kit::export-prepare
+                   document :html :allow-raw-latex :invalid)))
+               'type-error))
+         :to-be t)
         (expect (typep unparsed 'type-error) :to-be t)))))
 
 (describe "E1 export resource boundaries"

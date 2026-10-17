@@ -12,7 +12,9 @@
    "#+LATEX_CLASS: article"
    "#+LATEX_CLASS_OPTIONS: [12pt]"
    "#+LATEX_HEADER: \\usepackage{amsmath}"
+   "#+LATEX_HEADER: \\input{/etc/passwd}"
    "#+LATEX: \\typeout{raw #$%&_{}~^}"
+   "#+LATEX: \\immediate\\write18{echo review}"
    "#+MACRO: hello Hello $1"
    "#+OPTIONS: toc:nil num:nil"
    "* TODO [#A] All node types :fixture:"
@@ -31,7 +33,7 @@
    "Inline Babel call call_sum(1) and source src_emacs-lisp{(+ 1 2)}."
    "Statistics [50%] and timestamp <2026-10-17 Sat>."
    "A hard line break follows this text\\\\"
-   "and continues here."
+   "[continued] and continues here."
    "#+ATTR_LATEX: :width 0.5\\textwidth :options [scale=1.1]"
    "[[file:figure.png]]"
    "- [X] checked item"
@@ -98,12 +100,13 @@
 (defun export-latex-test-full-expected ()
   (format nil "~{~A~%~}"
           '("\\documentclass[12pt]{article}"
-            "\\usepackage{amsmath}"
             "\\usepackage[utf8]{inputenc}"
             "\\usepackage[T1]{fontenc}"
             "\\usepackage[normalem]{ulem}"
             "\\usepackage{graphicx}"
             "\\usepackage{hyperref}"
+            "\\usepackage{amsmath}"
+            "\\input{/etc/passwd}"
             ""
             "\\title{Export \\#\\$\\%\\&\\_\\{\\}\\textasciitilde{}\\textasciicircum{}}"
             "\\author{Fixture Author}"
@@ -112,6 +115,7 @@
             "\\begin{document}"
             "\\maketitle"
             "\\typeout{raw #$%&_{}~^}"
+            "\\immediate\\write18{echo review}"
             ""
             "\\section*{TODO All node types \\texttt{[fixture]}}\\label{org:all-node-types}"
             ""
@@ -124,10 +128,10 @@
             "Target \\label{org:local-target} and radio target \\label{org:radio-phrase}radio phrase."
             "Macro Hello world; footnotes \\footnote{Footnote definition text."
             "} and \\footnote{inline note}."
-            "Inline Babel call call\\_sum(1)  and source \\texttt{(+ 1 2)}."
-            "Statistics [50\\%]  and timestamp <2026-10-17 Sat>."
-            "A hard line break follows this text\\\\"
-            "and continues here."
+            "Inline Babel call call\\_sum(1) and source \\texttt{(+ 1 2)}."
+            "Statistics [50\\%] and timestamp <2026-10-17 Sat>."
+            "A hard line break follows this text\\\\{}"
+            "[continued] and continues here."
             ""
             ""
             "% ATTR_LATEX: :width 0.5\\textwidth :options [scale=1.1]"
@@ -135,7 +139,7 @@
             ""
             ""
             "\\begin{itemize}"
-            "\\item [X] checked item"
+            "\\item{} [X] checked item"
             ""
             "\\item unchecked item"
             ""
@@ -240,8 +244,10 @@
   (handler-case (progn (funcall function) nil)
     (error (condition) condition)))
 
-(defun export-latex-test-state (document)
-  (let* ((preparation (org-kit::export-prepare document :latex))
+(defun export-latex-test-state (document &key allow-raw-latex)
+  (let* ((preparation
+           (org-kit::export-prepare
+            document :latex :allow-raw-latex allow-raw-latex))
          (state (org-kit::%make-export-latex-state
                  :preparation preparation :limits (document-limits document))))
     (org-kit::export-latex-index-references state)
@@ -257,7 +263,7 @@
   (it "matches the complete fixed expected fixture through the public API"
     (let* ((source (export-latex-test-full-source))
            (document (parse-org source))
-           (actual (export-org document :latex))
+           (actual (export-org document :latex :allow-raw-latex t))
            (expected (export-latex-test-full-expected)))
       (with-soft-assertions
         (expect (plusp (length source)) :to-be t)
@@ -300,14 +306,140 @@
         (expect (search "backslash fallback" output) :to-be-truthy)
         (expect (search "https://example.test/back" output) :to-be nil))))
 
-  (it "preserves raw LaTeX constructs and falls back for unsafe links"
+  (it "compares every raw LaTeX channel exactly with and without opt-in"
+    (flet ((render (source allow-raw)
+             (export-org (parse-org source) :latex
+                         :allow-raw-latex allow-raw))
+           (expected-document (body)
+             (format nil "~{~A~%~}"
+                     (append
+                      '("\\documentclass[11pt]{article}"
+                        "\\usepackage[utf8]{inputenc}"
+                        "\\usepackage[T1]{fontenc}"
+                        "\\usepackage[normalem]{ulem}"
+                        "\\usepackage{graphicx}"
+                        "\\usepackage{hyperref}"
+                        ""
+                        "\\date{}"
+                        ""
+                        "\\begin{document}")
+                      (when body (list body))
+                      (if body (quote ("" "\\end{document}")) (quote ("" "" "\\end{document}")))))))
+      (let* ((default-expected (expected-document nil))
+             (header-source
+               (export-latex-test-lines
+                "#+LATEX_CLASS: report"
+                "#+LATEX_CLASS_OPTIONS: 10pt"
+                "#+LATEX_HEADER: \\usepackage{amsmath}"
+                "#+LATEX_HEADER: \\input{/etc/passwd}"))
+             (header-expected
+               (format nil "~{~A~%~}"
+                       '("\\documentclass[10pt]{report}"
+                         "\\usepackage[utf8]{inputenc}"
+                         "\\usepackage[T1]{fontenc}"
+                         "\\usepackage[normalem]{ulem}"
+                         "\\usepackage{graphicx}"
+                         "\\usepackage{hyperref}"
+                         "\\usepackage{amsmath}"
+                         "\\input{/etc/passwd}"
+                         ""
+                         "\\date{}"
+                         ""
+                         "\\begin{document}"
+                         ""
+                         ""
+                         "\\end{document}")))
+             (raw-cases
+               (list
+                (list "#+LATEX: \\catcode65=12" "\\catcode65=12")
+                (list (format nil
+                              "#+BEGIN_EXPORT latex~%\\input{/etc/passwd}~%#+END_EXPORT")
+                      (format nil "\\input{/etc/passwd}~%"))
+                (list (format nil
+                              "#+BEGIN_EXPORT tex~%\\write18{echo review}~%#+END_EXPORT")
+                      (format nil "\\write18{echo review}~%"))
+                (list "@@latex:\\end{verbatim}@@" "\\end{verbatim}")
+                (list "$\\input{/etc/passwd}$"
+                      "$\\input{/etc/passwd}$")
+                (let ((environment
+                        (format nil
+                                "\\begin{equation}~%\\input{/etc/passwd}~%\\end{equation}")))
+                  (list environment environment)))))
+        (with-soft-assertions
+          (expect (render header-source nil) :to-equal default-expected)
+          (expect (render header-source t) :to-equal header-expected)
+          (dolist (case raw-cases)
+            (expect (render (first case) nil) :to-equal default-expected)
+            (expect (render (first case) t)
+                    :to-equal (expected-document (second case))))))))
+  (it "defaults to safe output and preserves raw LaTeX only when opted in"
     (let* ((source (export-latex-test-full-source))
-           (output (export-org (parse-org source) :latex)))
+           (tex-source
+             (format nil "#+BEGIN_EXPORT tex~%\\textit{tex export}~%#+END_EXPORT"))
+           (tex-document (parse-org tex-source))
+           (tex-default-output (export-org tex-document :latex))
+           (tex-output
+             (export-org tex-document :latex :allow-raw-latex t))
+           (tex-expected
+             (format nil "~{~A~%~}"
+                     '("\\documentclass[11pt]{article}"
+                       "\\usepackage[utf8]{inputenc}"
+                       "\\usepackage[T1]{fontenc}"
+                       "\\usepackage[normalem]{ulem}"
+                       "\\usepackage{graphicx}"
+                       "\\usepackage{hyperref}"
+                       ""
+                       "\\date{}"
+                       ""
+                       "\\begin{document}"
+                       "\\textit{tex export}"
+                       ""
+                       ""
+                       "\\end{document}")))
+           (document (parse-org source))
+           (default-output (export-org document :latex))
+           (output (export-org document :latex :allow-raw-latex t))
+           (empty-output (export-org (parse-org "") :latex))
+           (empty-expected
+             (format nil "~{~A~%~}"
+                     '("\\documentclass[11pt]{article}"
+                       "\\usepackage[utf8]{inputenc}"
+                       "\\usepackage[T1]{fontenc}"
+                       "\\usepackage[normalem]{ulem}"
+                       "\\usepackage{graphicx}"
+                       "\\usepackage{hyperref}"
+                       ""
+                       "\\date{}"
+                       ""
+                       "\\begin{document}"
+                       ""
+                       ""
+                       "\\end{document}"))))
       (with-soft-assertions
+        (expect empty-output :to-equal empty-expected)
+        (expect tex-output :to-equal tex-expected)
+        (expect (search "\\textit{tex export}" tex-default-output)
+                :to-be nil)
+        (expect (search "\\documentclass[11pt]{article}" default-output)
+                :to-be-truthy)
+        (expect (search "\\documentclass[12pt]{article}" default-output)
+                :to-be nil)
+        (expect (search "\\usepackage{amsmath}" default-output) :to-be nil)
+        (expect (and (null (search "\\typeout{raw #$%&_{}~^}" default-output))
+             (null (search "\\input{/etc/passwd}" default-output))
+             (null (search "\\write18" default-output)))
+        :to-be t)
+        (expect (search "\\begin{equation}" default-output) :to-be nil)
+        (expect (search "\\emph{raw #$%&_{}~^}" default-output) :to-be nil)
+        (expect (search "\\textbf{raw export #$%&_{}~^}" default-output)
+                :to-be nil)
         (expect (search "\\documentclass[12pt]{article}" output)
                 :to-be-truthy)
         (expect (search "\\usepackage{amsmath}" output) :to-be-truthy)
-        (expect (search "\\typeout{raw #$%&_{}~^}" output) :to-be-truthy)
+        (expect (and (search "\\typeout{raw #$%&_{}~^}" output)
+             (search "\\input{/etc/passwd}" output)
+             (search "\\write18" output))
+        :to-be-truthy)
         (expect (search "\\begin{equation}" output) :to-be-truthy)
         (expect (search "\\textbf{raw export #$%&_{}~^}" output)
                 :to-be-truthy)
@@ -352,7 +484,7 @@
                 (export-org
                  (parse-org (format nil "#+LATEX_HEADER: ~A" large-value)
                             :limits limits)
-                 :latex))))
+                 :latex :allow-raw-latex t))))
            (attribute-condition
              (export-latex-test-catch-error
               (lambda ()
@@ -368,7 +500,7 @@
         (expect (typep attribute-condition 'org-resource-limit-error)
                 :to-be t))))
 
-  (it "preflights a source block before copying its verbatim body"
+  (it "preflights source blocks and rejects verbatim closing delimiters"
     (let* ((source-body (make-string 256 :initial-element #\x))
            (empty-output (export-org (parse-org "") :latex))
            (limit (+ (length empty-output) 64))
@@ -380,14 +512,49 @@
                 (export-org
                  (parse-org source
                             :limits (make-limits :max-output-length limit))
-                 :latex)))))
+                 :latex))))
+           (unsafe-sources
+             (list
+              (format nil "#+BEGIN_EXAMPLE~%\\\\end{verbatim}~%#+END_EXAMPLE")
+              (format nil "#+BEGIN_SRC text~%\\\\end{verbatim}~%#+END_SRC")
+              ": \\end{verbatim}"
+              (format nil "#+BEGIN: report :scope file~%\\\\end{verbatim}~%#+END:")))
+           (unsafe-conditions
+             (mapcar
+              (lambda (unsafe-source)
+                (export-latex-test-catch-error
+                 (lambda ()
+                   (export-org (parse-org unsafe-source) :latex))))
+              unsafe-sources))
+           (special-block-name
+             (format nil "x}~Cinput{/etc/passwd}~Cbegin{x"
+                     #\Backslash #\Backslash))
+           (special-block-output
+             (export-org
+              (parse-org
+               (format nil "#+BEGIN_~A~%safe body~%#+END_~A"
+                       special-block-name special-block-name))
+              :latex)))
       (with-soft-assertions
         (expect (typep condition 'org-resource-limit-error) :to-be t)
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)
                   :to-be :max-output-length)
           (expect (> (org-resource-limit-error-actual condition) limit)
-                  :to-be t)))))
+                  :to-be t))
+        (expect (= (length unsafe-conditions) 4) :to-be t)
+        (expect
+         (every
+          (lambda (unsafe-condition)
+            (and (typep unsafe-condition 'org-export-error)
+                 (eq (org-export-error-reason unsafe-condition)
+                     :unsafe-verbatim-body)))
+          unsafe-conditions)
+         :to-be t)
+        (expect (search "\\begin{quote}" special-block-output)
+                :to-be-truthy)
+        (expect (search "\\input{" special-block-output) :to-be nil)
+        (expect (search "\\begin{x}" special-block-output) :to-be nil))))
 
   (it "renders default preamble, heading options, and safe link forms"
     (let* ((source
@@ -417,8 +584,8 @@
         (expect (search "\\href{notes.txt}{Readme}" output) :to-be-truthy)
         (expect (search "\\href{mailto:user@example.test}{Mail}" output)
                 :to-be-truthy)
-        (expect (search "\\item [ ] unchecked" output) :to-be-truthy)
-        (expect (search "\\item [-] partial" output) :to-be-truthy)
+        (expect (search "\\item{} [ ] unchecked" output) :to-be-truthy)
+        (expect (search "\\item{} [-] partial" output) :to-be-truthy)
         (expect (search "\\maketitle" output) :to-be nil))))
 
   (it "rejects global LaTeX keywords in included fragments"
@@ -508,13 +675,59 @@
         (expect (search "\\begin{description}"
                         (org-kit::export-latex-render-view state descriptive-list))
                 :to-be-truthy)
-        (expect (search "\\item[Term] [-] \\texttt{definition}"
-                        (org-kit::export-latex-render-view state descriptive-list))
-                :to-be-truthy)
+        (expect (search "\\item[{Term}] [-] \\texttt{definition}"
+                (org-kit::export-latex-render-view state descriptive-list))
+        :to-be-truthy)
         (expect (org-kit::export-latex-render-view state item)
-                :to-equal "\\item [-] \\texttt{definition}")
+                :to-equal "\\item{} [-] \\texttt{definition}")
         (expect radio-output :to-equal "\\label{org:target}target")
-        (expect (typep unresolved-footnote 'org-export-error) :to-be t)
+        (progn
+  (expect (typep unresolved-footnote 'org-export-error) :to-be t)
+  (let* ((recursive-reference
+           (export-latex-test-view
+            document :footnote-reference :properties '(:label "a")))
+         (definition
+           (export-latex-test-view
+            document :footnote-definition
+            :children
+            (list (export-latex-test-view
+                   document :paragraph :children (list recursive-reference)))))
+         (preparation (org-kit::export-latex-state-preparation state)))
+    (setf (org-kit::export-preparation-footnotes preparation)
+          (list (list :label "a" :definition definition)))
+    (expect (org-kit::export-latex-render-view state recursive-reference)
+            :to-equal "\\footnote{\\footnotemark}")
+    (expect (org-kit::export-latex-state-active-footnotes state)
+            :to-be nil))
+  (let* ((limited-document
+           (parse-org "Body"
+                      :limits (make-limits :max-export-expansion-depth 0)))
+         (limited-state (export-latex-test-state limited-document))
+         (recursive-reference
+           (export-latex-test-view
+            limited-document :footnote-reference :properties '(:label "a")))
+         (definition
+           (export-latex-test-view
+            limited-document :footnote-definition
+            :children
+            (list (export-latex-test-view
+                   limited-document :paragraph
+                   :children (list recursive-reference)))))
+         (preparation
+           (org-kit::export-latex-state-preparation limited-state)))
+    (setf (org-kit::export-preparation-footnotes preparation)
+          (list (list :label "a" :definition definition)))
+    (let ((condition
+            (export-latex-test-catch-error
+             (lambda ()
+               (org-kit::export-latex-render-view
+                limited-state recursive-reference)))))
+      (expect (and (typep condition 'org-resource-limit-error)
+                   (eq (org-resource-limit-error-limit-name condition)
+                       :max-export-expansion-depth))
+              :to-be t))
+    (expect (org-kit::export-latex-state-active-footnotes limited-state)
+            :to-be nil)))
         (expect (org-kit::export-latex-source-text
                  (make-node :latex-fragment :properties '(:value "raw")))
                 :to-equal "raw")
@@ -526,7 +739,7 @@
 
   (it "renders title macros, keyword forms, and source result views"
     (let* ((document (parse-org "Body"))
-           (state (export-latex-test-state document))
+           (state (export-latex-test-state document :allow-raw-latex t))
            (macro-node (make-node :macro :post-blank 1))
            (macro-view
              (export-latex-test-view
@@ -583,7 +796,7 @@
 
   (it "expands link abbreviations and preserves default class-option syntax"
     (let* ((document (parse-org "#+LATEX_CLASS_OPTIONS: 10pt"))
-           (preparation (org-kit::export-prepare document :latex))
+           (preparation (org-kit::export-prepare document :latex :allow-raw-latex t))
            (state (org-kit::%make-export-latex-state
                    :preparation preparation :limits (document-limits document))))
       (setf (getf (document-settings document) :link-abbrevs)
@@ -615,7 +828,7 @@
              (parse-org
               (export-latex-test-lines
                "#+OPTIONS: pri:t" "* Character" "* Numeric")))
-           (state (export-latex-test-state document))
+           (state (export-latex-test-state document :allow-raw-latex t))
            (headline-views
              (org-kit::export-collect-views
               (org-kit::export-preparation-root-views
@@ -732,7 +945,7 @@
           (expect (search "\\section{[P] Numeric}"
                           (org-kit::export-latex-render-view state numeric-heading))
                   :to-be-truthy)
-          (expect (search "\\item[\\texttt{Term}]"
+          (expect (search "\\item[{\\texttt{Term}}]"
                           (org-kit::export-latex-render-view state tagged-list))
                   :to-be-truthy)
           (expect (org-kit::export-latex-render-list-item
@@ -742,8 +955,33 @@
                   :to-equal "\\hyperref[org:anchor]{\\texttt{label}}")
           (expect (org-kit::export-latex-render-view state unsafe-file-link)
                   :to-equal "\\texttt{label}")
-          (expect (org-kit::export-latex-render-view state image-link)
-                  :to-equal "\\includegraphics{image.png}")
+          (progn
+            (expect (org-kit::export-latex-render-view state image-link)
+                    :to-equal "\\includegraphics{image.png}")
+            (expect
+             (org-kit::export-latex-render-view
+              state (export-latex-test-view
+                     document :link :properties '(:type "file" :path "/etc/passwd.png")
+                     :children (list label)))
+             :to-equal "\\texttt{label}")
+            (expect
+             (org-kit::export-latex-render-view
+              state (export-latex-test-view
+                     document :link :properties '(:type "file" :path "../../secret.png")
+                     :children (list label)))
+             :to-equal "\\texttt{label}")
+            (expect
+             (org-kit::export-latex-render-view
+              state (export-latex-test-view
+                     document :link :properties '(:type "file" :path "assets/../secret.png")
+                     :children (list label)))
+             :to-equal "\\texttt{label}")
+            (expect
+             (org-kit::export-latex-render-view
+              state (export-latex-test-view
+                     document :link :properties '(:type "file" :path "assets/figure_1.png")
+                     :children (list label)))
+             :to-equal "\\includegraphics{assets/figure_1.png}"))
           (expect (org-kit::export-latex-render-view state untyped-link)
                   :to-equal "\\texttt{label}")
           (expect (org-kit::export-latex-render-object state no-path-link 0)
@@ -822,7 +1060,7 @@
                   :to-equal
                   (format nil "\\begin{verbatim}~%x~%\\end{verbatim}"))))))
 
-  (it "handles duplicate reference aliases and headers ending in a newline"
+  (it "handles duplicate reference aliases and headers after default packages"
     (let* ((output
              (export-org
               (parse-org
@@ -844,17 +1082,16 @@
            (root (make-node :org-data :children
                             (list empty-header-node header-node))))
       (setf (document-root document) root)
-      (let* ((state (export-latex-test-state document))
+      (let* ((state (export-latex-test-state document :allow-raw-latex t))
              (preamble (org-kit::export-latex-preamble state)))
         (with-soft-assertions
           (expect (search "\\label{org:same}" output) :to-be-truthy)
           (expect (search "\\label{org:same-2}" output) :to-be-truthy)
-          (expect (search (concatenate 'string header "\\usepackage[utf8]")
-                          preamble)
-                  :to-be-truthy)
-          (expect (search (concatenate
-                           'string
-                           (format nil "\\documentclass[11pt]{article}~%~%")
-                           header "\\usepackage[utf8]")
+          (expect
+           (< (search "\\usepackage[utf8]{inputenc}" preamble)
+              (search "\\usepackage{hyperref}" preamble)
+              (search header preamble))
+           :to-be t)
+          (expect (search (concatenate 'string header (string #\Newline))
                           preamble)
                   :to-be-truthy))))))

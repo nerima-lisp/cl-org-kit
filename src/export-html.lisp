@@ -811,15 +811,7 @@
                  (push child stack)))))
   state)
 
-(defun export-html-image-path-p (path)
-  (and (stringp path)
-       (let ((extension (position #\. path :from-end t)))
-         (and extension
-              (loop for suffix in '("png" "jpg" "jpeg" "gif" "svg" "webp")
-                    thereis (and (= (length suffix)
-                                    (- (length path) (1+ extension)))
-                                 (string-equal suffix path
-                                               :start2 (1+ extension))))))))
+(defun export-html-image-path-p (path) (export-image-path-p path))
 
 (defun export-html-link-destination (state node)
   (let* ((type (node-property node :type))

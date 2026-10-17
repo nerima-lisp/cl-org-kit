@@ -64,4 +64,5 @@
   root-views
   toc
   footnotes
-  allow-raw-html)
+  allow-raw-html
+  allow-raw-latex)

@@ -878,15 +878,7 @@
                 (export-gfm-serialize-destination-parts
                  destination-parts :table-cell-p table-cell-p))))))))
 
-(defun export-gfm-image-path-p (path)
-  (and (stringp path)
-       (let ((extension (position #\. path :from-end t)))
-         (and extension
-              (loop for suffix in '("png" "jpg" "jpeg" "gif" "svg" "webp")
-                    thereis (and (= (length suffix)
-                                    (- (length path) (1+ extension)))
-                                 (string-equal suffix path
-                                               :start2 (1+ extension))))))))
+(defun export-gfm-image-path-p (path) (export-image-path-p path))
 
 (defun export-gfm-render-link (state view &key table-cell-p)
   (let* ((node (export-view-node view))

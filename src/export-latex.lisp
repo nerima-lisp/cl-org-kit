@@ -5,7 +5,8 @@
   preparation
   limits
   (references (make-hash-table :test #'equal))
-  (reference-ids (make-hash-table :test #'eq)))
+  (reference-ids (make-hash-table :test #'eq))
+  (active-footnotes nil))
 
 (declaim (ftype function export-latex-render-view
                          export-latex-render-object
@@ -109,12 +110,17 @@
           with previous-view = nil
           for view in views
           for separator = (if first-p
-                              ""
-                              (if inline-p
-                                  (make-string (node-post-blank
-                                                (export-view-node previous-view))
-                                               :initial-element #\Space)
-                                  (format nil "~%~%")))
+                                  ""
+                                  (if inline-p
+                                      (make-string (node-post-blank
+                                                    (export-view-node previous-view))
+                                                   :initial-element #\Space)
+                                      (if (and (eq (node-type (export-view-node previous-view))
+                                                   :keyword)
+                                               (eq (node-type (export-view-node view))
+                                                   :keyword))
+                                          (string #\Newline)
+                                          (format nil "~%~%"))))
           for rendered = (export-latex-render-view
                           state view (+ base-count length (length separator)))
           do (when (plusp (length rendered))
@@ -130,11 +136,27 @@
 (defun export-latex-render-inline-views (state views base-count)
   (with-output-to-string (output)
     (loop with length = 0
-          for view in views
+          for tail on views
+          for view = (car tail)
+          for next-view = (cadr tail)
           for rendered = (export-latex-render-view state view
                                                     (+ base-count length))
           for post-blank = (node-post-blank (export-view-node view))
-          for separator = (make-string post-blank :initial-element #\Space)
+          for next-node = (and next-view (export-view-node next-view))
+          for next-text = (and next-node
+                               (member (node-type next-node)
+                                       '(:plain-text :text) :test #'eq)
+                               (node-text next-node))
+          for separator = (if (and (plusp post-blank)
+                                   (or (and (plusp (length rendered))
+                                            (export-whitespace-character-p
+                                             (char rendered (1- (length rendered)))))
+                                       (and (stringp next-text)
+                                            (plusp (length next-text))
+                                            (export-whitespace-character-p
+                                             (char next-text 0)))))
+                              ""
+                              (make-string post-blank :initial-element #\Space))
           do (export-latex-check-length state base-count
                                         (+ length (length rendered)
                                            (length separator)))
@@ -253,15 +275,18 @@
     (with-output-to-string (output)
       (write-string "\\item" output)
       (when (and descriptive-p (node-property node :tag))
-        (write-char #\[ output)
+        (write-string "[{" output)
         (dolist (segment (node-property node :tag))
           (write-string
            (if (node-p segment)
                (export-latex-render-object state segment base-count)
                (export-latex-escape-text state segment base-count))
            output))
-        (write-char #\] output))
-      (write-char #\Space output)
+        (write-string "}]" output))
+      (if (and checkbox
+               (not (and descriptive-p (node-property node :tag))))
+          (write-string "{} " output)
+          (write-char #\Space output))
       (when checkbox
         (write-string (export-latex-escape-text state checkbox
                                                 base-count) output))
@@ -337,34 +362,8 @@
                    (incf length (+ (length separator) (length row-text))))
           (write-string (format nil "~%\\end{tabular}") output)))))
 
-(defun export-latex-abbreviation-entry (raw abbreviations)
-  (let* ((separator (position #\: raw))
-         (key-end (or separator (length raw))))
-    (find-if (lambda (entry)
-               (let ((key (car entry)))
-                 (and (stringp key) (= key-end (length key))
-                      (string= raw key :end1 key-end))))
-             abbreviations)))
-
 (defun export-latex-expand-link-abbreviation (raw document)
-  (let* ((entry (export-latex-abbreviation-entry
-                 raw (getf (document-settings document) :link-abbrevs)))
-         (replacement (and entry (cdr entry))))
-    (if (not (stringp replacement))
-        raw
-        (let* ((separator (position #\: raw))
-               (tail-start (and separator
-                                (+ separator
-                                   (if (and (< (1+ separator) (length raw))
-                                            (char= (char raw (1+ separator)) #\:))
-                                       2 1))))
-               (placeholder (search "%s" replacement)))
-          (if placeholder
-              (concatenate 'string (subseq replacement 0 placeholder)
-                           (if tail-start (subseq raw tail-start) "")
-                           (subseq replacement (+ placeholder 2)))
-              (concatenate 'string replacement
-                           (if tail-start (subseq raw tail-start) "")))))))
+  (link-object-expand-abbreviation document raw))
 
 (defun export-latex-link-source (node)
   (let ((raw (node-property node :raw-link))
@@ -387,14 +386,7 @@
          base-count))))
 
 (defun export-latex-image-path-p (path)
-  (and (stringp path)
-       (let ((extension (position #\. path :from-end t)))
-         (and extension
-              (loop for suffix in '("png" "jpg" "jpeg" "gif" "svg" "pdf")
-                    thereis (and (= (length suffix)
-                                    (- (length path) (1+ extension)))
-                                 (string-equal suffix path
-                                               :start2 (1+ extension))))))))
+  (export-image-path-p path '("png" "jpg" "jpeg" "gif" "svg" "pdf")))
 
 (defun export-latex-internal-link-id (state path)
   (let* ((clean-path (if (and (stringp path) (plusp (length path))
@@ -415,15 +407,14 @@
          (if id (format nil "\\hyperref[~A]{~A}" id label) label)))
       ((and (stringp path)
             (string-equal (or type "") "file"))
-       (let ((expanded (export-latex-expand-link-abbreviation path
-                                                              (export-preparation-document
-                                                               (export-latex-state-preparation
-                                                                state)))))
+       (let ((expanded (export-latex-expand-link-abbreviation
+                        path (export-preparation-document
+                              (export-latex-state-preparation state)))))
          (cond
-           ((and (export-latex-image-path-p path)
-                 (export-safe-url-p path expanded))
-            (format nil "\\includegraphics{~A}"
-                    (export-latex-escape-text state expanded base-count)))
+           ((export-latex-image-path-p expanded)
+            (if (export-safe-relative-file-path-p expanded)
+                (format nil "\\includegraphics{~A}" expanded)
+                label))
            ((export-safe-url-p path expanded)
             (format nil "\\href{~A}{~A}"
                     (export-latex-escape-text state expanded base-count)
@@ -458,17 +449,28 @@
          (entry (and label
                      (export-latex-footnote-entry
                       label (export-latex-state-preparation state))))
-         (content
-           (if entry
-               (let* ((definition (getf entry :definition))
-                      (children (export-view-children definition)))
-                 (export-latex-rendered-views state children base-count))
-               (export-latex-render-inline-views
-                state (export-view-children view) base-count))))
+         (active (export-latex-state-active-footnotes state)))
     (unless (or entry (null label))
       (export-error :latex :unresolved-footnote node
                     "Footnote reference has no selected definition"))
-    (format nil "\\footnote{~A}" content)))
+    (check-limit (export-latex-state-limits state)
+                 :max-export-expansion-depth (length active))
+    (when (and label (member label active :test #'equal))
+      (return-from export-latex-render-footnote "\\footnotemark"))
+    (when active
+      (return-from export-latex-render-footnote "\\footnotemark"))
+    (setf (export-latex-state-active-footnotes state)
+          (cons (or label :inline) active))
+    (unwind-protect
+         (let ((content
+                 (if entry
+                     (let* ((definition (getf entry :definition))
+                            (children (export-view-children definition)))
+                       (export-latex-rendered-views state children base-count))
+                     (export-latex-render-inline-views
+                      state (export-view-children view) base-count))))
+           (format nil "\\footnote{~A}" content))
+      (setf (export-latex-state-active-footnotes state) active))))
 
 (defun export-latex-render-code (state value base-count &optional body-end)
   (let* ((text (or value ""))
@@ -477,10 +479,12 @@
            (length (format nil "\\begin{verbatim}~%~%\\end{verbatim}"))))
     (loop while (and (plusp end) (char= (char text (1- end)) #\Newline))
           do (decf end))
+    (when (search "\\end{verbatim}" text :end2 end)
+      (export-error :latex :unsafe-verbatim-body nil
+                    "Code body contains the verbatim closing delimiter"))
     (export-latex-check-length state base-count (+ wrapper-length end))
-    (let ((rendered (format nil "\\begin{verbatim}~%~A~%\\end{verbatim}"
-                            (subseq text 0 end))))
-      rendered)))
+    (format nil "\\begin{verbatim}~%~A~%\\end{verbatim}"
+            (subseq text 0 end))))
 
 (defun export-latex-render-attr-comment (state value base-count)
   (let ((prefix "% ATTR_LATEX: "))
@@ -557,9 +561,14 @@
                                              (or (node-property node :utf-8)
                                                  (node-property node :unicode)
                                                  (node-text node) "") base-count)))
-      (:latex-fragment (export-latex-source-text node))
+      (:latex-fragment
+       (if (export-preparation-allow-raw-latex
+            (export-latex-state-preparation state))
+           (export-latex-source-text node) ""))
       (:export-snippet
-       (if (string-equal (or (node-property node :back-end) "") "latex")
+       (if (and (export-preparation-allow-raw-latex
+                 (export-latex-state-preparation state))
+                (string-equal (or (node-property node :back-end) "") "latex"))
            (or (node-property node :value) "") ""))
       (:footnote-reference
        (export-latex-render-footnote
@@ -570,7 +579,7 @@
        (format nil "\\texttt{~A}"
                (export-latex-escape-text state (or (node-property node :value) "")
                                          base-count)))
-      (:line-break (format nil "\\\\~%"))
+      (:line-break (format nil "\\\\{}~%"))
       (:link (export-latex-render-link
               state (or view (export-latex-view-for-node node)) base-count))
       (:macro (funcall content))
@@ -619,18 +628,34 @@
               (format nil "\\begin{quote}~%~A~%\\end{quote}"
                       (export-latex-rendered-views state children base-count)))
              (:special-block
-              (let ((environment (or (node-property node :type) "specialblock")))
-                (format nil "\\begin{~A}~%~A~%\\end{~A}"
-                        environment
-                        (export-latex-rendered-views state children base-count)
-                        environment)))
+              (let* ((environment (or (node-property node :type) "specialblock"))
+                     (content (export-latex-rendered-views state children base-count))
+                     (valid-environment-p
+                       (and (stringp environment)
+                            (plusp (length environment))
+                            (alpha-char-p (char environment 0))
+                            (loop for character across environment
+                                  for index from 0
+                                  always
+                                  (or (and (< (char-code character) 128)
+                                           (alpha-char-p character))
+                                      (and (char= character #\*)
+                                           (= index (1- (length environment)))))))))
+                (if valid-environment-p
+                    (format nil "\\begin{~A}~%~A~%\\end{~A}"
+                            environment content environment)
+                    (format nil "\\begin{quote}~%~A~%\\end{quote}"
+                            content))))
              ((:property-drawer :node-property :planning :clock :comment
                :comment-block :footnote-definition)
               "")
              (:keyword
               (let ((key (string-upcase (or (node-property node :key) "")))
                     (value (or (node-property node :value) "")))
-                (cond ((string= key "LATEX") value)
+                (cond ((string= key "LATEX")
+                       (if (export-preparation-allow-raw-latex
+                            (export-latex-state-preparation state))
+                           value ""))
                       ((string= key "ATTR_LATEX")
                        (export-latex-render-attr-comment
                         state value base-count))
@@ -660,10 +685,16 @@
                                             (node-text node) "") base-count))
              (:src-block (export-latex-render-source-block state view base-count))
              (:export-block
-              (if (string-equal (or (node-property node :type) "") "latex")
+              (if (and (export-preparation-allow-raw-latex
+                        (export-latex-state-preparation state))
+                       (member (or (node-property node :type) "")
+                               '("latex" "tex") :test #'string-equal))
                   (or (node-property node :value) "") ""))
              (:horizontal-rule "\\noindent\\rule{\\linewidth}{0.4pt}")
-             (:latex-environment (export-latex-source-text node))
+             (:latex-environment
+              (if (export-preparation-allow-raw-latex
+                   (export-latex-state-preparation state))
+                  (export-latex-source-text node) ""))
              (:verse-block
               (format nil "\\begin{verse}~%~A~%\\end{verse}"
                       (export-latex-rendered-views state children base-count)))
@@ -695,11 +726,18 @@
   (let* ((preparation (export-latex-state-preparation state))
          (document (export-preparation-document preparation))
          (records (export-keyword-records document))
-         (class (nth-value 0 (export-single-keyword-value records
-                                                           "LATEX_CLASS" :latex)))
-         (class-options (nth-value 0 (export-single-keyword-value
-                                      records "LATEX_CLASS_OPTIONS" :latex)))
-         (headers (export-latex-keyword-values document "LATEX_HEADER"))
+         (allow-raw-latex
+           (export-preparation-allow-raw-latex preparation))
+         (class (and allow-raw-latex
+                     (nth-value 0
+                       (export-single-keyword-value records "LATEX_CLASS" :latex))))
+         (class-options
+           (and allow-raw-latex
+                (nth-value 0
+                  (export-single-keyword-value
+                   records "LATEX_CLASS_OPTIONS" :latex))))
+         (headers (and allow-raw-latex
+                       (export-latex-keyword-values document "LATEX_HEADER")))
          (metadata (export-preparation-metadata preparation))
          (title (getf metadata :title))
          (author (getf metadata :author))
@@ -726,13 +764,13 @@
                 (length "{") (length class-text) (length "}") 1))
             (emit (format nil "\\documentclass~A{~A}~%"
                           class-options-text class-text)))
+          (emit (format nil "\\usepackage[utf8]{inputenc}~%\\usepackage[T1]{fontenc}~%\\usepackage[normalem]{ulem}~%\\usepackage{graphicx}~%\\usepackage{hyperref}~%"))
           (dolist (entry headers)
             (let ((header (second entry)))
               (emit header)
               (unless (and (plusp (length header))
                            (char= (char header (1- (length header))) #\Newline))
                 (emit (string #\Newline)))))
-          (emit (format nil "\\usepackage[utf8]{inputenc}~%\\usepackage[T1]{fontenc}~%\\usepackage[normalem]{ulem}~%\\usepackage{graphicx}~%\\usepackage{hyperref}~%"))
           (emit (string #\Newline))
           (when title
             (let ((escaped (export-latex-escape-text state title 0)))

@@ -196,6 +196,33 @@
                (export-explicit-url-scheme-end expanded-destination)))
          (or (null scheme-end)
              (export-allowed-url-scheme-p expanded-destination scheme-end)))))
+(defun export-safe-relative-file-path-p (path)
+  (and (stringp path)
+       (plusp (length path))
+       (not (char= (char path 0) #\/))
+       (notany #'export-control-character-p path)
+       (loop for character across path
+             always (or (export-ascii-alpha-p character)
+                        (find character "0123456789._/-")))
+       (loop with start = 0
+             for end = (position #\/ path :start start)
+             for component = (subseq path start end)
+             do (when (string= component "..")
+                  (return nil))
+                (unless end
+                  (return t))
+                (setf start (1+ end)))))
+(defun export-image-path-p (path &optional
+                                  (extensions '("png" "jpg" "jpeg" "gif"
+                                                "svg" "webp")))
+  (and (stringp path)
+       (let ((extension (position #\. path :from-end t)))
+         (and extension
+              (loop for suffix in extensions
+                    thereis (and (= (length suffix)
+                                    (- (length path) (1+ extension)))
+                                 (string-equal suffix path
+                                               :start2 (1+ extension))))))))
 
 (defun export-utf8-length (text backend)
   (loop with total = 0
@@ -881,7 +908,7 @@
                       (not (export-option-selects-name-p selection todo-keyword)))
                      (t nil)))))))
 
-(defun export-prepare (document backend &key include-resolver allow-raw-html context)
+(defun export-prepare (document backend &key include-resolver allow-raw-html allow-raw-latex context)
   "Prepare a private export view without serializing or modifying DOCUMENT."
   (unless (document-p document)
     (error 'type-error :datum document :expected-type 'document))
@@ -889,8 +916,11 @@
     (export-error backend :unknown-backend nil "Unknown export backend"))
   (unless (or (null include-resolver) (functionp include-resolver))
     (error 'type-error :datum include-resolver :expected-type '(or null function)))
-  (unless (member allow-raw-html '(nil t))
-    (error 'type-error :datum allow-raw-html :expected-type 'boolean))
+  (progn
+    (unless (member allow-raw-html '(nil t))
+      (error 'type-error :datum allow-raw-html :expected-type 'boolean))
+    (unless (member allow-raw-latex '(nil t))
+      (error 'type-error :datum allow-raw-latex :expected-type 'boolean)))
   (let* ((root (document-root document))
          (limits (document-limits document)))
     (unless root
@@ -1184,7 +1214,8 @@
              :document document :backend backend :metadata metadata :options options
              :root-views root-views :toc (export-collect-toc root-views options)
              :footnotes (export-collect-footnotes root-views backend)
-             :allow-raw-html allow-raw-html)))))))
+             :allow-raw-html allow-raw-html
+             :allow-raw-latex allow-raw-latex)))))))
 
 (defun export-collect-views (views)
   (labels ((collect (view)
@@ -1253,12 +1284,13 @@
                 "No renderer is available for this export backend"))
 
 (defun export-org (document backend
-                   &key include-resolver allow-raw-html
+                   &key include-resolver allow-raw-html allow-raw-latex
                      (output-type :string) stream context)
   "Export DOCUMENT with BACKEND and return its requested output representation."
   (let* ((preparation
            (export-prepare document backend :include-resolver include-resolver
-                           :allow-raw-html allow-raw-html :context context))
+                           :allow-raw-html allow-raw-html
+                           :allow-raw-latex allow-raw-latex :context context))
          (text (export-render-preparation preparation backend)))
     (export-write-output text (document-limits document) output-type
                          :stream stream :backend backend)))
