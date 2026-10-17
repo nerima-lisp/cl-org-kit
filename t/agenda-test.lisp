@@ -828,8 +828,9 @@
                         (agenda-entry-todo-state default-entry)
                         (agenda-entry-effective-tags default-entry)
                         (agenda-entry-habit-p default-entry)
+                        (agenda-entry-habit-consistency default-entry)
                         (agenda-entry-source-node default-entry))
-                  :to-equal (list t nil nil nil nil nil nil nil nil nil nil nil))
+                  :to-equal (list t nil nil nil nil nil nil nil nil nil nil nil nil))
           (expect (list (agenda-result-p default-result)
                         (agenda-result-entries default-result)
                         (agenda-result-start-date default-result)
@@ -853,9 +854,10 @@
                         (agenda-entry-todo-state entry)
                         (agenda-entry-effective-tags entry)
                         (agenda-entry-habit-p entry)
+                        (agenda-entry-habit-consistency entry)
                         (agenda-entry-source-node entry))
                   :to-equal (list date :timestamp "Row" path view :due :delayed
-                                  "TODO" '("tag") t timestamp))
+                                  "TODO" '("tag") t nil timestamp))
           (expect (agenda-result-p result) :to-be t)
           (expect (list (agenda-result-entries result)
                         (agenda-result-start-date result)
@@ -869,6 +871,60 @@
                         (agenda-match-entry-line match-entry)
                         (agenda-match-entry-end-line match-entry))
                   :to-equal (list document heading path 1 2))))))
+
+  (it "returns exact daily habit states from repeat dates and DONE log history"
+    (let* ((source
+             (format nil
+                     "* TODO Drink water~%SCHEDULED: <2025-01-02 Thu .+1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-02 Thu]~%- State \"DONE\" from \"TODO\" [2025-01-04 Sat]~%:END:~%"))
+           (document (parse-org source))
+           (entries
+             (agenda-result-entries
+              (agenda (list document)
+                      (make-org-time-value "2025-01-01")
+                      (make-org-time-value "2025-01-06")
+                      :time-context
+                      (agenda-test-context "2025-01-04T12:00:00+00:00")
+                      :future-repeats :none)))
+           (habit-entry (find-if #'agenda-entry-habit-p entries))
+           (consistency
+             (and habit-entry
+                  (mapcar (lambda (day)
+                            (list (org-time-value-iso8601 (getf day :date))
+                                  (getf day :status)))
+                          (agenda-entry-habit-consistency habit-entry)))))
+      (with-soft-assertions
+        (expect (agenda-entry-habit-p habit-entry) :to-be t)
+        (expect consistency
+                :to-equal '(("2025-01-01" :within-schedule)
+                            ("2025-01-02" :completed)
+                            ("2025-01-03" :within-schedule)
+                            ("2025-01-04" :completed)
+                            ("2025-01-05" :within-schedule)
+                            ("2025-01-06" :late)))
+        (expect (every (lambda (entry)
+                         (or (agenda-entry-habit-p entry)
+                             (null (agenda-entry-habit-consistency entry))))
+                       entries)
+                :to-be t))))
+
+  (it "signals a named agenda reason for a habit without a scheduled repeater"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* TODO Drink water~%SCHEDULED: <2025-01-02 Thu>~%:PROPERTIES:~%:STYLE: habit~%:END:~%")))
+           (error-condition
+             (agenda-test-captured-error
+              (lambda ()
+                (agenda (list document)
+                        (make-org-time-value "2025-01-01")
+                        (make-org-time-value "2025-01-03")
+                        :time-context
+                        (agenda-test-context "2025-01-01T12:00:00+00:00"))))))
+      (with-soft-assertions
+        (expect (typep error-condition 'org-agenda-error) :to-be t)
+        (when (typep error-condition 'org-agenda-error)
+          (expect (org-agenda-error-reason error-condition)
+                  :to-be :habit-without-repeater)))))
 
   (it "rejects malformed document lists, invalid contexts and date-time range endpoints"
     (let* ((document (parse-org "* TODO One"))

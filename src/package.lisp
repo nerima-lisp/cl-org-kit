@@ -168,7 +168,8 @@
    #:agenda-entry-heading-path #:agenda-entry-timestamp
    #:agenda-entry-warning-state #:agenda-entry-scheduled-delay-state
    #:agenda-entry-todo-state #:agenda-entry-effective-tags
-   #:agenda-entry-habit-p #:agenda-entry-source-node
+   #:agenda-entry-habit-p #:agenda-entry-habit-consistency
+   #:agenda-entry-source-node
    #:agenda-result #:make-agenda-result #:agenda-result-p
    #:agenda-result-entries #:agenda-result-start-date #:agenda-result-end-date
    #:agenda-result-time-context

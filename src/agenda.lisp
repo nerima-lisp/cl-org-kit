@@ -7,11 +7,12 @@
                          (:predicate %agenda-entry-p))
   "One normalized agenda row associated with a source headline and timestamp."
   date date-order-key kind headline heading-path timestamp warning-state
-  scheduled-delay-state todo-state effective-tags habit-p source-node)
+  scheduled-delay-state todo-state effective-tags habit-p habit-consistency
+  source-node)
 
 (defun make-agenda-entry (&key date kind headline heading-path timestamp
                                warning-state scheduled-delay-state todo-state
-                               effective-tags habit-p source-node)
+                               effective-tags habit-p habit-consistency source-node)
   "Return an agenda row with its date, kind, headline, and source values."
   (let ((date-order-key
           (when (and (org-time-value-p date)
@@ -26,7 +27,8 @@
                         :warning-state warning-state
                         :scheduled-delay-state scheduled-delay-state
                         :todo-state todo-state :effective-tags effective-tags
-                        :habit-p habit-p :source-node source-node)))
+                        :habit-p habit-p :habit-consistency habit-consistency
+                        :source-node source-node)))
 
 (defun agenda-entry-p (object)
   "Return true when OBJECT is an agenda entry."
@@ -71,6 +73,16 @@
 (defun agenda-entry-habit-p (entry)
   "Return true when ENTRY's headline has the habit style."
   (%agenda-entry-habit-p entry))
+
+(defun agenda-entry-habit-consistency (entry)
+  "Return habit consistency rows for ENTRY, or NIL for other agenda rows.
+
+Each row is a plist with :DATE as a date-only ORG-TIME-VALUE and :STATUS as
+:COMPLETED, :WITHIN-SCHEDULE, or :LATE. A DONE state log timestamp, or CLOSED
+on a currently done heading, marks its date completed. The scheduled repeater
+sets the initial due date; a completion advances that date by the repeater for
+restart repeaters, or to the next scheduled repeat date for other modes."
+  (%agenda-entry-habit-consistency entry))
 
 (defun agenda-entry-source-node (entry)
   "Return ENTRY's source timestamp or planning node."
@@ -328,6 +340,148 @@
                                         zone
                                         (org-time-context-dst-policy time-context))
                 shifted-value))))))
+
+(defun agenda-habit-log-keyword (item)
+  "Return the state keyword recorded by ITEM, or NIL for other list items."
+  (let* ((text (node-text item))
+         (state-position (and text (search "State \"" text)))
+         (keyword-start (and state-position (+ state-position 7)))
+         (keyword-end (and keyword-start
+                           (position #\" text :start keyword-start))))
+    (when (and keyword-end (> keyword-end keyword-start))
+      (subseq text keyword-start keyword-end))))
+
+(defun agenda-habit-item-timestamp (item)
+  "Return ITEM's first timestamp descendant, or NIL."
+  (labels ((find-timestamp (node)
+             (if (eq (node-type node) :timestamp)
+                 node
+                 (loop for child in (node-children node)
+                       thereis (find-timestamp child)))))
+    (loop for child in (node-children item)
+          thereis (find-timestamp child))))
+
+(defun agenda-habit-timestamp-date (timestamp)
+  "Return TIMESTAMP's local date, or NIL if it has no concrete date."
+  (let ((start (timestamp-start timestamp)))
+    (when start
+      (if (node-property timestamp :hour-start)
+          (cl-date-kit:local-date-time-date start)
+          start))))
+
+(defun agenda-habit-completion-dates (document heading)
+  "Collect DONE log dates and the CLOSED date of a done HEADING."
+  (let ((dates nil))
+    (labels ((visit (node)
+               (unless (and (eq (node-type node) :headline)
+                            (not (eq node heading)))
+                 (when (eq (node-type node) :item)
+                   (let ((keyword (agenda-habit-log-keyword node)))
+                     (when (and keyword (query-done-keyword-p keyword document))
+                       (let ((timestamp (agenda-habit-item-timestamp node)))
+                         (when timestamp
+                           (let ((date (agenda-habit-timestamp-date timestamp)))
+                             (when date (push date dates))))))))
+                 (dolist (child (node-children node))
+                   (visit child)))))
+      (dolist (child (node-children heading))
+        (visit child)))
+    (when (eq (node-property heading :todo-type) :done)
+      (let* ((planning (agenda-planning-node heading))
+             (closed (or (node-property heading :closed)
+                         (and planning (node-property planning :closed)))))
+        (when (and (node-p closed) (eq (node-type closed) :timestamp))
+          (let ((date (agenda-habit-timestamp-date closed)))
+            (when date (push date dates))))))
+    (sort (remove-duplicates (mapcar #'agenda-date-ordinal dates)) #'<)))
+
+(defun agenda-habit-repeat-dates (view end-date state time-context)
+  "Return scheduled repeat dates from VIEW through END-DATE, inclusive."
+  (let ((amount (org-timestamp-view-repeater-amount view))
+        (unit (org-timestamp-view-repeater-unit view))
+        (current view)
+        (end-ordinal (agenda-date-ordinal end-date))
+        (dates nil))
+    (loop for ordinal = (agenda-date-ordinal (agenda-view-start-date current))
+          do (push ordinal dates)
+             (when (> ordinal end-ordinal)
+               (return))
+             (agenda-build-add-repeat state)
+             (setf current (agenda-shifted-timestamp-view
+                            current amount unit time-context)))
+    (nreverse dates)))
+
+(defun agenda-habit-next-due-ordinal (completion-ordinal view repeat-dates
+                                     time-context)
+  "Return the due date after COMPLETION-ORDINAL for VIEW's repeater mode."
+  (let ((amount (org-timestamp-view-repeater-amount view))
+        (unit (org-timestamp-view-repeater-unit view)))
+    (if (eq (org-timestamp-view-repeater-mode view) :restart)
+        (agenda-date-ordinal
+         (agenda-time-value-date
+          (agenda-add-interval
+           (agenda-date-value
+            (cl-date-kit:local-date-from-epoch-day completion-ordinal))
+           amount unit time-context)))
+        (find-if (lambda (ordinal) (> ordinal completion-ordinal))
+                 repeat-dates))))
+
+(defun agenda-habit-consistency-data (document heading planning start-date
+                                     end-date time-context state)
+  "Return date/status rows for a valid scheduled habit HEADING."
+  (unless (node-property heading :todo-keyword)
+    (agenda-signal-error :habit-not-todo (node-property heading :raw-value)
+                         "Habit consistency requires a TODO heading"))
+  (let* ((scheduled (and planning (node-property planning :scheduled)))
+         (view (and (node-p scheduled)
+                    (eq (node-type scheduled) :timestamp)
+                    (timestamp-view scheduled))))
+    (unless (and view (agenda-active-view-p view))
+      (agenda-signal-error :habit-without-schedule
+                           (node-property heading :raw-value)
+                           "Habit consistency requires an active scheduled timestamp"))
+    (let ((amount (org-timestamp-view-repeater-amount view)))
+      (unless amount
+        (agenda-signal-error :habit-without-repeater
+                             (node-text scheduled)
+                             "Habit consistency requires a scheduled repeater")))
+    (let* ((scheduled-date (agenda-view-start-date view))
+           (scheduled-ordinal (agenda-date-ordinal scheduled-date))
+           (repeat-dates (agenda-habit-repeat-dates view end-date state
+                                                    time-context))
+           (completion-dates (agenda-habit-completion-dates document heading))
+           (completion-dates (remove-if
+                              (lambda (ordinal)
+                                (> ordinal (agenda-date-ordinal end-date)))
+                              completion-dates))
+           (completion-tail completion-dates)
+           (next-due scheduled-ordinal)
+           (rows nil))
+      (loop while (and completion-tail
+                       (< (car completion-tail)
+                          (agenda-date-ordinal start-date)))
+            do (setf next-due
+                     (agenda-habit-next-due-ordinal
+                      (pop completion-tail) view repeat-dates time-context)))
+      (loop for ordinal from (agenda-date-ordinal start-date)
+              to (agenda-date-ordinal end-date)
+            for completed-p = (and completion-tail
+                                   (= (car completion-tail) ordinal))
+            for status = (if completed-p
+                             :completed
+                             (if (or (< ordinal scheduled-ordinal)
+                                     (and next-due (<= ordinal next-due)))
+                                 :within-schedule
+                                 :late))
+            do (when completed-p
+                 (setf next-due
+                       (agenda-habit-next-due-ordinal
+                        (pop completion-tail) view repeat-dates time-context)))
+               (push (list :date (agenda-date-value
+                                  (cl-date-kit:local-date-from-epoch-day ordinal))
+                           :status status)
+                     rows))
+      (nreverse rows))))
 
 (defun agenda-shifted-timestamp-view (view amount unit time-context)
   "Return VIEW advanced by AMOUNT of UNIT, retaining its interval metadata."
@@ -590,7 +744,8 @@ after the later of VIEW's date and the reference date."
                                       view warning-state scheduled-delay-state
                                       source-node)
   "Build one normalized row using precomputed HEADING-DATA."
-  (destructuring-bind (headline path todo-state todo-type tags habit-p)
+  (destructuring-bind (headline path todo-state todo-type tags habit-p
+                       &optional habit-consistency)
       heading-data
     (declare (ignore todo-type))
     (make-agenda-entry
@@ -604,6 +759,7 @@ after the later of VIEW's date and the reference date."
      :todo-state todo-state
      :effective-tags tags
      :habit-p (and (eq kind :scheduled) habit-p)
+     :habit-consistency (and (eq kind :scheduled) habit-p habit-consistency)
      :source-node source-node)))
 
 (defun agenda-add-heading-entry (state heading-data kind date
@@ -822,6 +978,12 @@ TIME-CONTEXT is required and is the only source of reference time."
                      (multiple-value-list
                       (agenda-heading-data document heading indices)))
                    (planning (agenda-planning-node heading)))
+              (when (sixth heading-data)
+                (setf heading-data
+                      (append heading-data
+                              (list (agenda-habit-consistency-data
+                                     document heading planning start-local end-local
+                                     time-context state)))))
               (agenda-build-planning-rows state heading-data
                                           planning start-local end-local
                                           warning-days

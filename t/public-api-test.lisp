@@ -174,7 +174,8 @@
     "AGENDA-ENTRY-HEADING-PATH" "AGENDA-ENTRY-TIMESTAMP"
     "AGENDA-ENTRY-WARNING-STATE" "AGENDA-ENTRY-SCHEDULED-DELAY-STATE"
     "AGENDA-ENTRY-TODO-STATE" "AGENDA-ENTRY-EFFECTIVE-TAGS"
-    "AGENDA-ENTRY-HABIT-P" "AGENDA-ENTRY-SOURCE-NODE"
+    "AGENDA-ENTRY-HABIT-P" "AGENDA-ENTRY-HABIT-CONSISTENCY"
+    "AGENDA-ENTRY-SOURCE-NODE"
     "AGENDA-RESULT" "MAKE-AGENDA-RESULT" "AGENDA-RESULT-P"
     "AGENDA-RESULT-ENTRIES" "AGENDA-RESULT-START-DATE"
     "AGENDA-RESULT-END-DATE" "AGENDA-RESULT-TIME-CONTEXT"
@@ -329,6 +330,17 @@ TARGET describes the addressed table and REASON classifies the table-specific fa
             :to-equal
             "Move a headline priority one step up or down within its PRIORITIES range.
 An unset priority starts at the configured default before the adjustment."))
+
+  (it "pins habit consistency documentation"
+    (expect (documentation 'agenda-entry-habit-consistency 'function)
+            :to-equal
+            "Return habit consistency rows for ENTRY, or NIL for other agenda rows.
+
+Each row is a plist with :DATE as a date-only ORG-TIME-VALUE and :STATUS as
+:COMPLETED, :WITHIN-SCHEDULE, or :LATE. A DONE state log timestamp, or CLOSED
+on a currently done heading, marks its date completed. The scheduled repeater
+sets the initial due date; a completion advances that date by the repeater for
+restart repeaters, or to the next scheduled repeat date for other modes."))
 
   (it "pins the H2 clocktable writer documentation"
     (expect (documentation 'write-clocktable 'function)
