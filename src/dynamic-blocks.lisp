@@ -179,12 +179,13 @@ Only names declared by the registered handler are accepted."
                     (name-end (position-if-not
                                #'dynamic-block-parameter-name-character-p
                                text :start name-start)))
-               (unless (and name-end (> name-end name-start))
-                 (setf name-end (length text)))
-               (when (= name-start name-end)
+               (when (or (= name-start (length text))
+                         (and name-end (= name-end name-start)))
                  (error 'org-dynamic-block-error
                         :message "Malformed dynamic block parameters"
                         :reason :invalid-parameters))
+               (unless name-end
+                 (setf name-end (length text)))
                (let* ((name-text (string-downcase
                                   (subseq text name-start name-end)))
                       (name (find-symbol (string-upcase name-text) :keyword))
