@@ -338,9 +338,10 @@ An unset priority starts at the configured default before the adjustment."))
 
 Each row is a plist with :DATE as a date-only ORG-TIME-VALUE and :STATUS as
 :COMPLETED, :WITHIN-SCHEDULE, or :LATE. A DONE state log timestamp, or CLOSED
-on a currently done heading, marks its date completed. The scheduled repeater
-sets the initial due date; a completion advances that date by the repeater for
-restart repeaters, or to the next scheduled repeat date for other modes."))
+on a currently done heading, marks its date completed. The current SCHEDULED
+timestamp anchors the active occurrence, with its date as the due date.
+Historical due dates are reconstructed from DONE log timestamps according to
+repeater mode. Dates after their due date are :LATE."))
 
   (it "pins the H2 clocktable writer documentation"
     (expect (documentation 'write-clocktable 'function)
