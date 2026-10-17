@@ -341,7 +341,8 @@ Each row is a plist with :DATE as a date-only ORG-TIME-VALUE and :STATUS as
 on a currently done heading, marks its date completed. The current SCHEDULED
 timestamp anchors the active occurrence and sets its due date; this is the due
 date after the latest recorded completion. Earlier due dates are reconstructed
-from completion dates according to repeater mode. Dates after their due date are :LATE."))
+from completion dates according to repeater mode. Dates after their due date
+are :LATE."))
 
   (it "pins the H2 clocktable writer documentation"
     (expect (documentation 'write-clocktable 'function)
