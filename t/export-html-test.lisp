@@ -812,6 +812,21 @@
       (expect (and first-id (search (format nil "href=\"#~A\"" first-id) output))
               :not :to-be nil)))
 
+  (it "resolves ID, custom-ID, fuzzy, and current-file links through the public resolver"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+OPTIONS: toc:nil num:nil~%* Heading~%:PROPERTIES:~%:ID: stored-id~%:CUSTOM_ID: visible-id~%:END:~%[[id:stored-id]] [[#visible-id]] [[Heading]] [[file:::*Heading]]~%")))
+           (output (export-org document :html))
+           (href-count 0)
+           (search-start 0))
+      (loop for position = (search "href=\"#visible-id\"" output
+                                   :start2 search-start)
+            while position
+            do (incf href-count)
+               (setf search-start (+ position (length "href=\"#visible-id\""))))
+      (expect href-count :to-be 4)))
+
   (it "renders nested tables of contents and block footnote children"
     (let* ((toc
              (export-org

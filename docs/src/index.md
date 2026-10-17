@@ -17,6 +17,7 @@ The 0.1.0 public API includes:
 Start with [Getting Started](getting-started.md), then see the
 [TODO and Agenda](guides/todo-agenda.md), [Clock](guides/clock.md),
 [Structure Edits](guides/structure-edits.md), [Tables](guides/tables.md),
-and [Export](guides/export.md) guides. The
+[Links](guides/links.md), [Org IDs](guides/org-id.md), and
+[Export](guides/export.md) guides. The
 [API stability scope](reference/api-stability.md) describes what 0.1.0 treats
 as public. Contributor workflow is in [Development](project/development.md).

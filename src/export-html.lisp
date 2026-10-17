@@ -813,6 +813,37 @@
 
 (defun export-html-image-path-p (path) (export-image-path-p path))
 
+(defun export-html-preparation-documents (preparation)
+  (let ((documents nil)
+        (stack (reverse (export-preparation-root-views preparation))))
+    (loop while stack
+          for view = (pop stack)
+          for document = (export-view-source-document view)
+          do (when (and document (not (member document documents :test #'eq)))
+               (push document documents))
+             (dolist (child (reverse (export-view-children view)))
+               (push child stack)))
+    (nreverse documents)))
+
+(defun export-html-link-resolution-reference (state node)
+  (let* ((preparation (export-html-state-preparation state))
+         (source-documents (if preparation
+                               (export-html-preparation-documents preparation)
+                               (let ((document (node-document node)))
+                                 (if document (list document) nil))))
+         (node-source-document (node-document node))
+         (documents (if (and node-source-document
+                             (not (member node-source-document source-documents
+                                          :test #'eq)))
+                        (append source-documents (list node-source-document))
+                        source-documents))
+         (resolution (resolve-link node documents)))
+    (loop for candidate in (link-resolution-candidates resolution)
+          for reference = (gethash candidate
+                                   (export-html-state-references state))
+          when reference
+            return reference)))
+
 (defun export-html-link-destination (state node)
   (let* ((type (node-property node :type))
          (path (node-property node :path))
@@ -830,14 +861,35 @@
                      (list ":" 0 1)
                      (list path 0 (length path))))
               (concatenate 'string type ":" path))
-             ((and (stringp type) (string-equal type "custom-id"))
-              (when (stringp path)
-                (when (and (notany #'export-control-character-p path)
-                           (not (find #\\ path)))
+             ((and (stringp type) (string-equal type "id"))
+              (let ((reference (export-html-link-resolution-reference state node)))
+                (when reference
                   (export-html-check-escaped-parts
                    state :attribute (list (list "#" 0 1)
-                                          (list path 0 (length path)))))
-                (concatenate 'string "#" path)))
+                                          (list reference 0 (length reference))))
+                  (concatenate 'string "#" reference))))
+             ((and (stringp type) (string-equal type "custom-id"))
+              (when (stringp path)
+                (let ((target
+                        (or (export-html-link-resolution-reference state node)
+                            path)))
+                  (when (and (notany #'export-control-character-p target)
+                             (not (find #\\ target)))
+                    (export-html-check-escaped-parts
+                     state :attribute (list (list "#" 0 1)
+                                            (list target 0 (length target))))
+                    (concatenate 'string "#" target)))))
+             ((and (stringp type)
+                   (string-equal type "file")
+                   (stringp path)
+                   (search "::" path)
+                   (zerop (search "::" path)))
+              (let ((reference (export-html-link-resolution-reference state node)))
+                (when reference
+                  (export-html-check-escaped-parts
+                   state :attribute (list (list "#" 0 1)
+                                          (list reference 0 (length reference))))
+                  (concatenate 'string "#" reference))))
              ((and (stringp type) (string-equal type "file"))
               (when (and (export-html-image-path-p path)
                          (stringp path)
@@ -848,8 +900,9 @@
              ((and (stringp type)
                    (member type '("fuzzy" "radio") :test #'string-equal))
               (let ((target
-                      (gethash path
-                               (export-html-state-reference-targets state))))
+                      (or (export-html-link-resolution-reference state node)
+                          (gethash path
+                                   (export-html-state-reference-targets state)))))
                 (if (and target
                          (notany #'export-control-character-p path)
                          (notany #'export-control-character-p target)

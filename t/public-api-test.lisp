@@ -25,6 +25,11 @@
     "ORG-CALLBACK-ERROR-REASON" "ORG-ELISP-EVALUATOR-ERROR" "ORG-CALLBACK-TIMEOUT-ERROR"
     "ORG-WRITE-PLAN-ERROR" "ORG-WRITE-PLAN-ERROR-PATH"
     "ORG-WRITE-PLAN-ERROR-REASON" "ORG-WRITE-PLAN-ERROR-CAUSE"
+    "ORG-ID-ERROR" "ORG-ID-ERROR-REASON"
+    "ORG-LINK-RESOLUTION-ERROR" "ORG-LINK-RESOLUTION-ERROR-REASON"
+    "ORG-LINK-RESOLUTION-ERROR-CONTEXT"
+    "ORG-STORE-LINK-ERROR" "ORG-STORE-LINK-ERROR-REASON"
+    "ORG-STORE-LINK-ERROR-CONTEXT"
     ;; Clock aggregation
     "ORG-CLOCK-ERROR" "ORG-CLOCK-ERROR-REASON" "ORG-CLOCK-ERROR-CONTEXT"
     "CLOCK-SUMMARY" "MAKE-CLOCK-SUMMARY" "CLOCK-SUMMARY-P"
@@ -174,6 +179,13 @@
     "AGENDA" "AGENDA-TODO-LIST" "AGENDA-MATCH"
     ;; Effective Org semantics
     "EFFECTIVE-HEADING-TAGS" "EFFECTIVE-PROPERTY" "STARTUP-OPTIONS"
+    ;; Org IDs
+    "ORG-ID-INDEX" "MAKE-ORG-ID-INDEX" "ORG-ID-INDEX-P"
+    "ORG-ID-INDEX-CANDIDATES" "GENERATE-ORG-ID" "SET-HEADING-ID"
+    ;; Link resolution and storage
+    "LINK-RESOLUTION" "MAKE-LINK-RESOLUTION" "LINK-RESOLUTION-P"
+    "LINK-RESOLUTION-STATUS" "LINK-RESOLUTION-TARGET"
+    "LINK-RESOLUTION-CANDIDATES" "RESOLVE-LINK" "STORE-LINK"
     ;; Unit E1 export context and conditions
     "EXPORT-CONTEXT" "MAKE-EXPORT-CONTEXT" "EXPORT-CONTEXT-P"
     "EXPORT-CONTEXT-TITLE" "EXPORT-CONTEXT-AUTHOR" "EXPORT-CONTEXT-DATE"
@@ -201,6 +213,12 @@ docs/src/reference/node-model.md.")
     (write-plan-entry-p . write-plan-entry)
     (write-plan-p . write-plan)
     (make-org-workflow-options . org-workflow-options)
+    (org-id-index-p . org-id-index)
+    (make-link-resolution . link-resolution)
+    (link-resolution-p . link-resolution)
+    (link-resolution-status . link-resolution)
+    (link-resolution-target . link-resolution)
+    (link-resolution-candidates . link-resolution)
     (org-workflow-options-p . org-workflow-options)
     (org-workflow-options-log-done . org-workflow-options)
     (org-workflow-options-log-repeat . org-workflow-options)

@@ -13,6 +13,8 @@
             "https"
             "mailto"
             "news"
+            "id"
+            "attachment"
             "shell"
             "shortdoc")
   "Org link protocols understood without user-defined link registrations.")
@@ -169,6 +171,17 @@
              :properties
              (list :value value))))))))
 
+(defun link-object-url-hexify (string)
+  (let ((octets (cl-codec-kit:string-to-octets string :encoding :utf-8)))
+    (with-output-to-string (output)
+      (loop for octet across octets
+            do (if (or (<= 65 octet 90)
+                       (<= 97 octet 122)
+                       (<= 48 octet 57)
+                       (member octet '(45 46 95 126)))
+                   (write-char (code-char octet) output)
+                   (format output "%~2,'0X" octet))))))
+
 (defun link-object-expand-abbreviation (document link)
   (let* ((separator (position #\: link))
          (key
@@ -189,13 +202,25 @@
          (replacement (and entry (cdr entry))))
     (if (not (stringp replacement))
         link
-        (let ((placeholder (search "%s" replacement)))
-          (if placeholder
-              (concatenate 'string
-                           (subseq replacement 0 placeholder)
-                           (or tail "")
-                           (subseq replacement (+ placeholder 2)))
-              (concatenate 'string replacement (or tail "")))))))
+        (if (or (search "%s" replacement)
+                (search "%h" replacement))
+            (with-output-to-string (output)
+              (loop with position = 0
+                    while (< position (length replacement))
+                    do (if (and (char= (char replacement position) #\%)
+                                (< (1+ position) (length replacement))
+                                (find (char replacement (1+ position)) "sh"))
+                           (progn
+                             (if (char= (char replacement (1+ position)) #\s)
+                                 (write-string (or tail "") output)
+                                 (write-string (link-object-url-hexify
+                                                (or tail ""))
+                                               output))
+                             (incf position 2))
+                           (progn
+                             (write-char (char replacement position) output)
+                             (incf position)))))
+            (concatenate 'string replacement (or tail ""))))))
 
 (defun link-object-known-scheme-end (link)
   (let ((colon (position #\: link)))

@@ -17,6 +17,8 @@ nav:
       - Clock: guides/clock.md
       - Structure Edits: guides/structure-edits.md
       - Tables: guides/tables.md
+      - Links: guides/links.md
+      - Org IDs: guides/org-id.md
       - Export: guides/export.md
       - Callbacks and Write Plans: guides/callbacks-and-write-plans.md
   - Reference:

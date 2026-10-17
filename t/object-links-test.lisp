@@ -584,6 +584,36 @@
       (expect (link-test-property match :path)
               :to-equal
               "//example.test/manual")))
+  (it "classifies id and attachment links as known Org protocols"
+    (let* ((links
+             (remove-if-not
+              (lambda (object) (eq (node-type object) :link))
+              (link-test-org-objects
+               "[[id:entry-1]] [[attachment:photo.png]] id:entry-2 attachment:report.pdf"))))
+      (expect (mapcar (lambda (link)
+                        (list (node-property link :type)
+                              (node-property link :path)))
+                      links)
+              :to-equal
+              '(("id" "entry-1")
+                ("attachment" "photo.png")
+                ("id" "entry-2")
+                ("attachment" "report.pdf")))))
+  (it "expands raw and UTF-8 hexified link abbreviation suffixes"
+    (let* ((source
+             (format nil
+                     "#+LINK: raw https://example.test/%s~%#+LINK: hex https://example.test/%h~%[[raw:a b/é]] [[hex:a b/é]]"))
+           (links
+             (remove-if-not
+              (lambda (object) (eq (node-type object) :link))
+              (link-test-org-objects source))))
+      (expect (mapcar (lambda (link)
+                        (list (node-property link :type)
+                              (node-property link :path)))
+                      links)
+              :to-equal
+              '(("https" "//example.test/a b/é")
+                ("https" "//example.test/a%20b%2F%C3%A9")))))
   (it "leaves bracket links unchanged when abbreviations are not a list"
     (let ((link (find :link
                       (link-test-org-objects "[[web:manual]]"

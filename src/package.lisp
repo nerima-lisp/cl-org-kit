@@ -21,6 +21,11 @@
    #:org-callback-error-reason #:org-elisp-evaluator-error #:org-callback-timeout-error
    #:org-write-plan-error #:org-write-plan-error-path #:org-write-plan-error-reason
    #:org-write-plan-error-cause
+   #:org-id-error #:org-id-error-reason
+   #:org-link-resolution-error #:org-link-resolution-error-reason
+   #:org-link-resolution-error-context
+   #:org-store-link-error #:org-store-link-error-reason
+   #:org-store-link-error-context
    ;; Clock aggregation
    #:org-clock-error #:org-clock-error-reason #:org-clock-error-context
    #:clock-summary #:make-clock-summary #:clock-summary-p
@@ -168,6 +173,13 @@
    #:agenda #:agenda-todo-list #:agenda-match
    ;; Effective Org semantics
    #:effective-heading-tags #:effective-property #:startup-options
+   ;; Org IDs
+   #:org-id-index #:make-org-id-index #:org-id-index-p
+   #:org-id-index-candidates #:generate-org-id #:set-heading-id
+   ;; Link resolution and storage
+   #:link-resolution #:make-link-resolution #:link-resolution-p
+   #:link-resolution-status #:link-resolution-target
+   #:link-resolution-candidates #:resolve-link #:store-link
    ;; Unit E1 export context and conditions
    #:export-context #:make-export-context #:export-context-p
    #:export-context-title #:export-context-author #:export-context-date
