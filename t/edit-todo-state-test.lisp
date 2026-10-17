@@ -529,8 +529,7 @@
                  "DONE" :at (make-org-time-value at)
                  :time-context (edit-todo-state-test-context at)))))
            (ancestor-source
-             (format nil
-                     "#+TODO: TODO | DONE~%* Proj~%:PROPERTIES:~%:ORDERED: t~%:END:~%** TODO A~%** TODO B~%*** TODO b1~%"))
+             (format nil "#+TODO: TODO | DONE~%* Proj~%:PROPERTIES:~%:ORDERED: t~%:END:~%** TODO A~%** TODO B~%*** TODO Container~%**** TODO b1~%"))
            (ancestor-document (parse-org ancestor-source))
            (ancestor-condition
              (edit-todo-state-test-error
@@ -538,7 +537,7 @@
                 (transition-heading-todo
                  ancestor-document
                  (edit-todo-state-test-heading-path
-                  ancestor-document '("Proj" "B" "b1"))
+                  ancestor-document '("Proj" "B" "Container" "b1"))
                  "DONE" :at (make-org-time-value at)
                  :time-context (edit-todo-state-test-context at)))))
            (repeat-source
@@ -602,6 +601,18 @@
                  (edit-todo-state-test-heading-path unblocked-document '("Parent"))
                  "DONE" :at (make-org-time-value at)
                  :time-context (edit-todo-state-test-context at))))
+           (ordered-source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Parent~%:PROPERTIES:~%:ORDERED: nil~%:END:~%** TODO First~%** TODO Second~%"))
+           (ordered-document (parse-org ordered-source))
+           (ordered-edit
+             (nth-value
+              0 (transition-heading-todo
+                 ordered-document
+                 (edit-todo-state-test-heading-path ordered-document
+                                                    '("Parent" "Second"))
+                 "DONE" :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at))))
            (checkbox-source
              (format nil "#+TODO: TODO | DONE~%* TODO Parent~%- [ ] Check~%"))
            (checkbox-document (parse-org checkbox-source))
@@ -617,10 +628,15 @@
                 :to-equal
                 (format nil
                         "#+TODO: TODO | DONE~%* DONE Parent~%:PROPERTIES:~%:NOBLOCKING: t~%:END:~%** TODO Child~%"))
+        (expect (document-text (edit-result-updated-document ordered-edit))
+                :to-equal
+                (format nil
+                        "#+TODO: TODO | DONE~%* TODO Parent~%:PROPERTIES:~%:ORDERED: nil~%:END:~%** TODO First~%** DONE Second~%"))
         (expect (document-text (edit-result-updated-document checkbox-edit))
                 :to-equal
                 (format nil "#+TODO: TODO | DONE~%* DONE Parent~%- [ ] Check~%"))
         (expect (document-text unblocked-document) :to-equal unblocked-source)
+        (expect (document-text ordered-document) :to-equal ordered-source)
         (expect (document-text checkbox-document) :to-equal checkbox-source))))
 
   (it "keeps raw set-heading-todo limited to the TODO token"
@@ -1541,7 +1557,7 @@
   (it "updates stale body and headline cookies alongside repeated title timestamps"
     (let* ((source
              (format nil
-                     "#+TODO: TODO | DONE~%* TODO [1/1] <2025-03-01 Sat +1w> Parent~%** TODO Child~%"))
+                     "#+TODO: TODO | DONE~%* TODO [1/1] <2025-03-01 Sat +1w> Parent~%:PROPERTIES:~%:NOBLOCKING: t~%:END:~%** TODO Child~%"))
            (document (parse-org source))
            (heading (edit-todo-state-test-first-heading document)))
       (multiple-value-bind (edit transition)
