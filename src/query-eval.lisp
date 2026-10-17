@@ -798,6 +798,8 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
     ((string= name "PRIORITY")
      (let ((priority (node-property headline :priority)))
        (values (cond ((characterp priority) (string priority))
+                     ((and (integerp priority) (<= 0 priority 64))
+                      (princ-to-string priority))
                      ((and (integerp priority) (<= 0 priority #x10ffff))
                       (let ((character (code-char priority)))
                         (and character (string character))))
@@ -829,8 +831,11 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
     ((string= name "BLOCKED")
      (let* ((provider (query-context-blocked-provider context))
             (provided (and provider (funcall provider headline)))
-            (blocked (or provided (org-todo-blocked-p headline))))
-       (values (if provided provided (and blocked t))
+            (blocked
+              (or provided
+                  (and (org-todo-unfinished-heading-p headline)
+                       (org-todo-blocked-p headline)))))
+       (values (if provided provided (and blocked "t"))
                (not (null blocked)) t)))
     ((string= name "CLOCKSUM")
      (let ((provider (query-context-clock-sum-provider context)))

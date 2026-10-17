@@ -271,7 +271,7 @@
                 :to-equal
                 '("Entry")))))
 
-  (it "computes BLOCKED from TODO dependencies and retains provider results"
+  (it "computes BLOCKED from TODO dependencies and preserves provider results"
     (let* ((document
              (parse-org
               (format nil
@@ -286,7 +286,17 @@
         (expect (query-eval-test-titles
                  (org-kit:query-list document '(:property-exists "BLOCKED")
                                      :context context))
-                :to-equal '("Parent" "Second" "Has child" "External"))
+                :to-equal '("Second" "Has child" "External"))
+        (expect (query-eval-test-titles
+                 (org-kit:query-list document
+                                     '(:property "BLOCKED" := "t")
+                                     :context context))
+                :to-equal '("Second" "Has child"))
+        (expect (query-eval-test-titles
+                 (org-kit:query-list document
+                                     '(:property "BLOCKED" := "T")
+                                     :context context))
+                :to-equal nil)
         (expect (query-eval-test-titles
                  (org-kit:query-list document
                                      '(:property "BLOCKED" := "provided")
@@ -758,6 +768,20 @@
                    (org-kit:query-list
                     string-priority '(:property "PRIORITY" := "A")))
                   :to-equal '("String priority")))
+        (let ((numeric-priority
+                (parse-org
+                 (format nil "#+PRIORITIES: 1 10 5~%* [#5] Number"))))
+          (expect (query-eval-test-titles
+                   (org-kit:query-list
+                    numeric-priority '(:property "PRIORITY" := "5")))
+                  :to-equal '("Number")))
+        (let ((integer-letter-priority
+                (query-eval-test-programmatic-document
+                 '(:raw-value "Integer letter priority" :priority 65))))
+          (expect (query-eval-test-titles
+                   (org-kit:query-list
+                    integer-letter-priority '(:property "PRIORITY" := "A")))
+                  :to-equal '("Integer letter priority")))
         (let ((character-priority
                 (query-eval-test-programmatic-document
                  '(:raw-value "Character priority" :priority #\A))))
