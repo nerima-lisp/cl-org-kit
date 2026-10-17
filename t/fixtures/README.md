@@ -42,10 +42,10 @@ emacs --batch -Q --script scripts/generate-org-fixtures.el \
   t/fixtures/export/oracle/manifest.tsv t/fixtures/export/oracle
 ```
 
-The oracle pins Emacs 31.1, Org 9.8.10, and ox-gfm 20231215.1901. The generator sets
-`org-export-use-babel` to nil; under this Org version that also disables source-block header
-arguments, including `:exports`. The kit follows `:exports` as Org does with Babel enabled and no
-code evaluated, so the oracle has no source-block case; policy tests cover the export modes.
+The oracle pins Emacs 31.1, Org 9.8.10, and ox-gfm 20231215.1901. The generator keeps
+`org-export-use-babel` enabled, so source-block header arguments such as `:exports` apply, and
+makes `org-babel-check-confirm-evaluate` refuse every block, so no code is evaluated. The
+`source-blocks` case records Org's output under that setting.
 
 The `export/oracle/gfm/compatibility/` manifest is a GFM-only subset of the E1 cases. Its four
 source copies preserve metadata and selection pruning, explicit `EXCLUDE_TAGS`, includes, macros,
@@ -59,7 +59,8 @@ outputs were generated with Emacs 31.1, Org 9.8.10, and pinned ox-gfm commit
 
 The `export/policy/gfm/` corpus fixes those differences separately. `links.org` covers angle
 destinations, escaped labels, relative and fragment links, and unsafe URL fallback. `code.org` and
-`source-blocks.org` cover adaptive code delimiters and source export modes.
+`source-blocks.org` cover adaptive code delimiters and source export modes; `source-blocks.org` is
+the policy copy of the E1 source-block case because ox-gfm emits fixed triple-backtick fences.
 `table-structure.org` covers escaped table pipes and rows, prose hard line breaks, headings and TOC,
 lists, quotes, verse, and repeated footnotes. A focused serializer assertion covers a newline within
 a table cell because the Org object parser does not produce line-break objects inside table cells.

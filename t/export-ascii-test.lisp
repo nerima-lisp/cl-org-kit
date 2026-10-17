@@ -113,13 +113,14 @@
   '(("metadata-selection" "metadata-selection.org" nil)
     ("exclude-tags-override" "exclude-tags-override.org" nil)
     ("footnotes-macros-links" "footnotes-macros-links.org" nil)
-    ("include" "include.org" "included/fragment.org")))
+    ("include" "include.org" "included/fragment.org")
+    ("source-blocks" "source-blocks.org" nil)))
 
 (describe "ASCII export"
   (it "matches every checked-in ASCII oracle output through the public API"
     (let ((cases (export-ascii-test-oracle-cases)))
       (with-soft-assertions
-        (expect (length cases) :to-be 4)
+        (expect (length cases) :to-be 5)
         (dolist (case cases)
           (let* ((name (first case))
                  (source-name (second case))

@@ -378,7 +378,7 @@
 (describe "E2 HTML export"
   (it "matches every standard Org HTML compatibility fixture"
     (dolist (name '("metadata-selection" "exclude-tags-override"
-                    "footnotes-macros-links" "include"
+                    "footnotes-macros-links" "include" "source-blocks"
                     "markup-lists-blocks-tables-links" "html-renderer-branches"
                     "html-numbering-enabled"))
       (export-html-test-expect-fixture

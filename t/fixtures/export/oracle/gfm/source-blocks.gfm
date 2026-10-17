@@ -1,0 +1,21 @@
+# Existing results are exported without execution
+
+```emacs-lisp
+(error "Babel must remain disabled")
+```
+
+    preexisting both result
+
+```emacs-lisp
+(error "Code-only block was not evaluated")
+```
+
+    preexisting results-only output
+
+```emacs-lisp
+(error "Default source block was not evaluated")
+```
+
+The paragraph separates the following results from the source block.
+
+    non-adjacent output

@@ -1485,12 +1485,18 @@
             (auto-coding-functions nil)
             (enable-local-variables nil)
             (inhibit-local-variables t)
-            (org-export-use-babel nil)
+            ;; Babel stays enabled so header arguments such as :exports apply, while
+            ;; refusing confirmation keeps every code block from being evaluated.
+            (org-export-use-babel t)
             (org-export-time-stamp-file nil))
+        (require 'ob-core)
         (insert-file-contents source-file)
         (setq buffer-file-name source-file)
         (org-mode)
-        (substring-no-properties (org-export-as backend nil nil nil nil))))))
+        (cl-letf (((symbol-function 'org-babel-check-confirm-evaluate)
+                   (lambda (&rest _arguments) nil)))
+          (substring-no-properties
+           (org-export-as backend nil nil nil nil)))))))
 
 (defun org-fixture--export-output-extension (backend)
   (or (car (cdr (assq backend org-fixture--export-backends)))
@@ -1609,8 +1615,7 @@
   (require 'ox-html)
   (require 'ox-ascii)
   (org-fixture--verify-ox-gfm-pin)
-  (let ((cases (org-fixture--read-export-manifest manifest corpus-directory))
-        (org-export-use-babel nil))
+  (let ((cases (org-fixture--read-export-manifest manifest corpus-directory)))
     (dolist (case cases)
       (org-fixture--generate-export-case case corpus-directory expected-directory))
     (princ (format "Generated %d export oracle cases for html/gfm/ascii.\n"
@@ -3273,19 +3278,6 @@
 (advice-add 'org-fixture--export-buffer
             :around #'org-fixture--html-export-without-native-source-fontification)
 
-(defun org-fixture--html-export-preserves-source-modes-without-evaluation
-    (original backend &rest arguments)
-  (if (eq backend 'html)
-      (let ((org-export-use-babel t))
-        (require 'ob-core)
-        (cl-letf (((symbol-function 'org-babel-check-confirm-evaluate)
-                   (lambda (&rest _arguments) nil)))
-          (apply original backend arguments)))
-    (apply original backend arguments)))
-
-(advice-add 'org-export-as :around
-            #'org-fixture--html-export-preserves-source-modes-without-evaluation)
-
 (defun org-fixture--html-export-metadata (original backend source include
                                                   source-sha include-sha)
   (let ((metadata (funcall original backend source include source-sha include-sha)))
@@ -3307,8 +3299,7 @@
   (require 'ox-ascii)
   (org-fixture--verify-ox-gfm-pin)
   (let* ((cases (org-fixture--read-export-manifest manifest corpus-directory))
-         (temporary-expected (make-temp-file "org-fixture-html-oracle-" t))
-         (org-export-use-babel nil))
+         (temporary-expected (make-temp-file "org-fixture-html-oracle-" t)))
     (unwind-protect
         (progn
           (dolist (case cases)
