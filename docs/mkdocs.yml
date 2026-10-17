@@ -13,6 +13,7 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Guides:
+      - Babel: guides/babel.md
       - TODO and Agenda: guides/todo-agenda.md
       - Clock: guides/clock.md
       - Structure Edits: guides/structure-edits.md
