@@ -240,11 +240,10 @@
 (defun babel-noweb-expand-reference-group (context blocks depth)
   (with-output-to-string (output)
     (let ((length 0)
-          (first-p t))
+          (previous nil))
       (loop for block in blocks
-            for previous = nil then block
             do
-        (unless first-p
+        (when previous
           (let ((separator (or (babel-noweb-parameter
                                 previous "NOWEB-SEP"
                                 (babel-noweb-context-document context))
@@ -255,7 +254,7 @@
               (babel-noweb-write
                context output length
                (babel-noweb-expand-source-block context block depth)))
-        (setf first-p nil)))))
+        (setf previous block)))))
 
 (defun babel-noweb-expand-source-block (context block depth)
   (let* ((document (babel-noweb-context-document context))
@@ -284,33 +283,33 @@
 (defun babel-noweb-expand-text (context block text depth)
   (let* ((document (babel-noweb-context-document context))
          (prefix-enabled
-           (not (string-equal (or (babel-noweb-parameter
-                                   block "NOWEB-PREFIX" document)
-                                  "yes")
-                              "no")))
+          (not (string-equal (or (babel-noweb-parameter
+                                  block "NOWEB-PREFIX" document)
+                                 "yes")
+                             "no")))
          (position 0))
     (with-output-to-string (output)
       (let ((length 0))
         (loop
-          (multiple-value-bind (open close reference)
-              (babel-noweb-delimiters text position)
-            (unless open
-              (return (babel-noweb-write-range
-                       context output length text position (length text)))
-            (setf length
-                  (babel-noweb-write-range
-                   context output length text position open))
-            (let* ((prefix (and prefix-enabled
-                                (babel-noweb-line-prefix text open)))
-                   (replacement
-                     (babel-noweb-resolve-reference context reference depth))
-                   (replacement (if prefix
-                                    (babel-noweb-prefix-later-lines
-                                     context replacement prefix)
-                                    replacement)))
-              (setf length
-                    (babel-noweb-write context output length replacement))
-              (setf position (+ close 2))))))))))
+         (multiple-value-bind (open close reference)
+             (babel-noweb-delimiters text position)
+           (unless open
+             (return (babel-noweb-write-range
+                      context output length text position (length text))))
+           (setf length
+                 (babel-noweb-write-range
+                  context output length text position open))
+           (let* ((prefix (and prefix-enabled
+                               (babel-noweb-line-prefix text open)))
+                  (replacement
+                   (babel-noweb-resolve-reference context reference depth))
+                  (replacement (if prefix
+                                   (babel-noweb-prefix-later-lines
+                                    context replacement prefix)
+                                 replacement)))
+             (setf length
+                   (babel-noweb-write context output length replacement))
+             (setf position (+ close 2)))))))))
 
 (defun babel-noweb-strip-references (context text)
   (with-output-to-string (output)
@@ -329,7 +328,9 @@
                  context output length text position open))
           (setf position (+ close 2)))))))
 
-(defun expand-babel-noweb (document src-block &key (context :eval) result-resolver)
+(defun expand-babel-noweb (document src-block
+                          &key (context nil context-supplied-p)
+                            result-resolver)
   "Expand SRC-BLOCK's noweb references in DOCUMENT for CONTEXT.
 
 CONTEXT is :EVAL, :TANGLE, or :EXPORT. The returned source body has its final
@@ -337,6 +338,8 @@ line ending removed, as in Org Babel. Plain references insert named source text;
 parenthesized references such as <<name()>> use RESULT-RESOLVER, called with the
 executable block name and resolved variable alist. Source code is never run here."
   (validate-babel-source-block document src-block)
+  (unless context-supplied-p
+    (setf context :eval))
   (unless (member context '(:eval :tangle :export) :test #'eq)
     (error 'type-error :datum context :expected-type '(member :eval :tangle :export)))
   (unless (or (null result-resolver) (functionp result-resolver))

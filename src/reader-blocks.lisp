@@ -100,7 +100,14 @@
 (defun reader-blocks-node-property-fields (line)
   "Return the key and value from a property drawer line."
   (when (and (> (length line) 2) (char= (char line 0) #\:))
-    (let ((separator (position #\: line :start 1)))
+    (let ((separator
+            (or (loop for position from 1 below (length line)
+                      when (and (char= (char line position) #\:)
+                                (or (= (1+ position) (length line))
+                                    (char= (char line (1+ position)) #\Space)
+                                    (char= (char line (1+ position)) #\Tab)))
+                        return position)
+                (position #\: line :start 1))))
       (when (and separator (> separator 1))
         (values (string-upcase (subseq line 1 separator))
                 (reader-blocks-trim (subseq line (1+ separator))))))))

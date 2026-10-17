@@ -94,6 +94,12 @@
          (or (plusp integer-digits)
              (plusp fraction-digits)))))
 
+(defun babel-parse-number-result (number end text)
+  (if (and (numberp number)
+           (= end (length text)))
+      (values number t)
+      (values nil nil)))
+
 (defun babel-parse-number (text)
   (when (babel-numeric-token-p text)
     (handler-case
@@ -101,8 +107,7 @@
               (*read-default-float-format* 'double-float)
               (*readtable* (copy-readtable nil)))
           (multiple-value-bind (number end) (read-from-string text nil nil)
-            (when (and (numberp number) (= end (length text)))
-              (values number t))))
+            (babel-parse-number-result number end text)))
       (error () (values nil nil)))))
 
 (defun babel-parse-quoted-string (text)
@@ -185,7 +190,7 @@
                  (t
                   (babel-signal-error :unsupported-result
                                       "Babel resolver returned an unsupported value"
-                                      (type-of object))))))
+                                      (format nil "~A" (type-of object)))))))
       (walk value 0)))
   value)
 
@@ -254,7 +259,7 @@
                          "Named Babel reference is not static data"
                          (or (node-property node :name)
                              (node-property node :results)
-                             (node-type node))))))
+                              (format nil "~A" (node-type node)))))))
 
 (defun babel-with-reference (context name function)
   (let ((active (babel-resolution-context-active-names context)))
@@ -277,12 +282,12 @@
     (dolist (assignment (babel-parameter-variables parameters))
       (let* ((name (car assignment))
              (value (babel-static-scalar context (cdr assignment)
-                                        :resolve-reference t))
+                                         :resolve-reference t))
              (position (position name variables :key #'car :test #'string=)))
         (if position
             (setf (cdr (nth position variables)) value)
-            (setf variables (append variables (list (cons name value))))))
-    variables)))
+          (setf variables (append variables (list (cons name value)))))))
+    variables))
 
 (defun babel-resolve-source-block-result (context block &optional parameters)
   (let* ((block-name (node-property block :name))
@@ -350,7 +355,7 @@
          (otherwise
           (babel-signal-error :unsupported-reference
                               "Named Babel reference has an unsupported node type"
-                              (node-type node))))))))
+                              (format nil "~A" (node-type node)))))))))
 
 (defun resolve-babel-variables (document src-block &key result-resolver)
   "Resolve SRC-BLOCK's :var parameters without evaluating source code.

@@ -137,20 +137,26 @@
   (position name parameters :key #'car :test #'string=))
 
 (defun babel-merge-exclusive-words (old-value new-value groups)
-  (let ((words nil))
-    (dolist (word (append (babel-split-header-list old-value :whitespace)
-                          (babel-split-header-list new-value :whitespace)))
+  (let ((old-words (babel-split-header-list old-value :whitespace))
+        (new-words nil))
+    (dolist (word (babel-split-header-list new-value :whitespace))
       (let ((group (find-if (lambda (values)
                               (member word values :test (function string=)))
                             groups)))
         (when group
-          (setf words
+          (setf old-words
                 (remove-if (lambda (existing)
                              (member existing group :test (function string=)))
-                           words)))
-        (push word words)))
+                           old-words)
+                new-words
+                (remove-if (lambda (existing)
+                             (member existing group :test (function string=)))
+                           new-words))))
+      (setf new-words (append new-words (list word))))
     (format nil "~{~A~^ ~}"
-            (remove-duplicates words :test (function string=) :from-end t))))
+            (remove-duplicates (append new-words old-words)
+                               :test (function string=)
+                               :from-end t))))
 
 (defun babel-merge-var-parameter (parameters value)
   (dolist (assignment (babel-split-header-list value #\,))
@@ -229,31 +235,26 @@
         when (member (node-type current) '(:headline :inlinetask) :test #'eq)
           collect current))
 
-(defun babel-effective-property (document heading name)
+(defun babel-effective-property (heading name)
   (let ((name (string-upcase name))
-        (base nil)
-        (base-found-p nil)
-        (plus-values nil))
-    (dolist (current (when heading (babel-heading-property-chain heading)))
-      (multiple-value-bind (value found-p)
-          (effective-heading-property-value current name)
-        (when found-p
-          (setf base value
-                base-found-p t)
-          (multiple-value-bind (plus plus-found-p)
-              (effective-heading-property-value
-               current (concatenate 'string name "+"))
-            (when plus-found-p (push plus plus-values)))
-          (return)))
-      (multiple-value-bind (plus found-p)
-          (effective-heading-property-value
-           current (concatenate 'string name "+"))
-        (when found-p (push plus plus-values))))
-    (unless base-found-p
-      (multiple-value-setq (base base-found-p)
-        (babel-global-property-value document name)))
-    (when base-found-p
-      (format nil "~{~A~^ ~}" (cons base plus-values)))))
+        (value nil)
+        (found-p nil))
+    (dolist (current (reverse (when heading
+                                (babel-heading-property-chain heading))))
+      (let ((entries (effective-heading-property-entries current name))
+            (plus-entries
+              (effective-heading-property-entries
+               current (format nil "~A+" name))))
+        (when entries
+          (setf value (node-property (first entries) :value)
+                found-p t))
+        (dolist (entry plus-entries)
+          (let ((plus (node-property entry :value)))
+            (setf value (if found-p
+                            (format nil "~A ~A" value plus)
+                            plus)
+                  found-p t)))))
+    (when found-p value)))
 
 (defun validate-babel-source-block (document src-block)
   (unless (document-p document)
@@ -281,15 +282,22 @@ the same variable replacing earlier ones. No source block is executed."
   (validate-babel-source-block document src-block)
   (let* ((language (node-property src-block :language ""))
          (heading (babel-containing-heading src-block))
+         (language-name (format nil "header-args:~A" language))
          (parameters (copy-tree +babel-default-header-arguments+)))
     (setf parameters
           (babel-merge-header-text
-           parameters (babel-effective-property document heading "header-args")))
+           parameters
+           (babel-global-property-value document "header-args")))
     (setf parameters
           (babel-merge-header-text
            parameters
-           (babel-effective-property
-            document heading (format nil "header-args:~A" language))))
+           (babel-global-property-value document language-name)))
+    (setf parameters
+          (babel-merge-header-text
+           parameters (babel-effective-property heading "header-args")))
+    (setf parameters
+          (babel-merge-header-text
+           parameters (babel-effective-property heading language-name)))
     (setf parameters
           (babel-merge-header-text parameters (node-property src-block :header)))
     (setf parameters
