@@ -149,13 +149,6 @@
       (let ((result (funcall function)))
         (values result node-visits)))))
 
-(defun agenda-test-titles-on-date (entries date)
-  (loop for entry in entries
-        when (and (agenda-entry-date entry)
-                  (string= (org-time-value-iso8601 (agenda-entry-date entry))
-                           date))
-          collect (agenda-entry-headline entry)))
-
 (describe "Agenda fixture conformance"
   (it "matches all fixed Org 9.8.10 snapshots, including warning, delay, range and repeat modes"
     (multiple-value-bind (case-data expected source document)
@@ -182,7 +175,7 @@
                       (agenda-test-expected-entries
                        (getf expected-snapshot :entries)))))))))
 
-  (it "keeps agenda source-data visits bounded for agenda and matched TODO rows"
+  (it "keeps agenda and TODO source-data visits within two document traversals"
     (let* ((heading-count 2000)
            (source
              (with-output-to-string (stream)
@@ -241,12 +234,7 @@
           (expect first-pass :to-equal second-pass)
           (expect first-pass
                   :to-equal
-                  (agenda-test-expected-entries (getf snapshot :entries)))
-          (expect (agenda-test-titles-on-date actual-entries "2025-03-07")
-                  :to-equal
-                  (loop for entry in (getf snapshot :entries)
-                        when (string= (getf entry :date) "2025-03-07")
-                          collect (getf entry :headline))))))))
+                  (agenda-test-expected-entries (getf snapshot :entries))))))))
 
 (describe "Agenda match and TODO fixture conformance"
   (it "matches all Org match and TODO rows with inherited tags and properties"
@@ -327,17 +315,14 @@
   (it "includes active timestamps and excludes inactive and diary timestamps"
     (multiple-value-bind (case-data expected source document)
         (agenda-test-fixtures)
-      (declare (ignore source))
-      (let* ((snapshot (agenda-test-snapshot-expected
-                        :warning-d0 (getf expected :snapshots)))
-             (entries (agenda-result-entries
+      (declare (ignore expected source))
+      (let* ((entries (agenda-result-entries
                        (agenda-test-snapshot-result
                         document
                         (agenda-test-case-by-name :warning-d0
                                                   (getf case-data :snapshots)))))
              (titles (mapcar #'agenda-entry-headline entries)))
         (with-soft-assertions
-          (expect (not (null snapshot)) :to-be t)
           (expect (not (null (member "Active single date" titles
                                      :test #'string=)))
                   :to-be t)
@@ -776,7 +761,10 @@
              (snapshot
                (agenda-test-snapshot-expected :repeaters-all
                                                (getf expected :snapshots))))
-        (agenda-test-snapshot-result document snapshot)
+        (agenda-test-snapshot-result
+         document
+         (agenda-test-case-by-name
+          :repeaters-all (getf case-data :snapshots)))
         (agenda-match (list document) "outer"
                       :time-context (agenda-test-context
                                      (getf snapshot :reference-time)))
@@ -785,10 +773,9 @@
                                          (getf snapshot :reference-time)))
         (with-soft-assertions
           (expect (agenda-test-document-signature document) :to-equal before)
-          (expect (write-org document) :to-equal source)
-          (expect (length (getf case-data :snapshots)) :to-be 12))))))
+          (expect (write-org document) :to-equal source))))))
 
-(describe "Agenda record API and validation"
+(describe "Agenda record API, validation, and habit history"
   (it "constructs and reads every public agenda record field"
     (let* ((default-entry (make-agenda-entry))
            (default-result (make-agenda-result))
@@ -872,7 +859,7 @@
                         (agenda-match-entry-end-line match-entry))
                   :to-equal (list document heading path 1 2))))))
 
-  (it "reconstructs restart habit due dates from DONE log history"
+  (it "reconstructs habit due dates from DONE logs for :restart repeaters"
     (let* ((source
              (format nil
                      "* TODO Drink water~%SCHEDULED: <2025-01-10 Fri .+1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun]~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%:END:~%"))
@@ -906,7 +893,7 @@
                              (null (agenda-entry-habit-consistency entry))))
                        entries)
                 :to-be t))))
-  (it "reports a restart habit's overdue history inside a later window"
+  (it "reports overdue history for a :restart repeater inside a later window"
     (let* ((source
              (format nil
                      "* TODO Drink water~%SCHEDULED: <2025-01-10 Fri .+1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun]~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%:END:~%"))

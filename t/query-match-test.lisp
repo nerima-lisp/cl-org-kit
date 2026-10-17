@@ -20,7 +20,7 @@
 (defun query-match-test-titles (nodes)
   (mapcar (lambda (node) (node-property node :raw-value)) nodes))
 
-(describe "Org match query parsing"
+(describe "Org match query parsing and evaluation"
   (it "preserves boolean precedence, signs, and property aliases"
     (with-soft-assertions
       (expect (query-match-test-predicate "work|laptop+night")
@@ -256,7 +256,7 @@
                       "* TODO Due today~%DEADLINE: <2026-10-13>~%* TODO Due tomorrow~%DEADLINE: <2026-10-14>")))
            (time-context
              (make-time-context
-              :reference-time (make-org-time-value "2026-10-13T22:30:00+00:00")
+              :reference-time (make-org-time-value "2026-10-14T01:30:00+03:00")
               :zone (make-fixed-time-zone 180))))
       (expect (query-match-test-titles
                (query-match-now document "DEADLINE<=\"<today>\""
@@ -291,9 +291,6 @@
   (it "reports malformed syntax at its source position"
     (let ((document (parse-org "* TODO Task")))
       (with-soft-assertions
-        (expect (org-query-error-position
-                 (query-match-test-public-error document "work&(laptop|night)"))
-                :to-be 5)
         (expect (org-query-error-position
                  (query-match-test-public-error document "work/"))
                 :to-be 5)

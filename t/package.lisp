@@ -23,8 +23,11 @@
 (defun run-tests ()
   "Run every registered spec and return true only when all of them pass.
 An empty suite counts as a failure so a broken registration cannot pass."
-  (let ((passed (run-all :reporter :spec :pass-with-no-tests nil
-                         :timeout-ms (test-timeout-ms))))
+  ;; Keep specs serial because SBCL allocation and coverage counters are process-wide.
+  (let ((passed (run-all
+                 :reporter :spec :pass-with-no-tests nil
+                 :timeout-ms (test-timeout-ms)
+                 :max-workers 1)))
     (when passed
       (format t "~&cl-org-kit/test: successful completion with 0 failures~%"))
     passed))
