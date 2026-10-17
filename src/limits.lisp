@@ -21,7 +21,9 @@
   (max-formula-ast-depth 0 :read-only t)
   (max-formula-precision 0 :read-only t)
   (max-formula-exponent 0 :read-only t)
-  (max-formula-work 0 :read-only t))
+  (max-formula-work 0 :read-only t)
+  (max-write-plan-entries 0 :read-only t)
+  (max-write-plan-bytes 0 :read-only t))
 
 (defun checked-limit-value (value)
   (unless (typep value '(integer 0))
@@ -45,7 +47,9 @@
                          (max-formula-ast-depth 256)
                          (max-formula-precision 34)
                          (max-formula-exponent 6144)
-                         (max-formula-work 1000000))
+                         (max-formula-work 1000000)
+                         (max-write-plan-entries 100000)
+                         (max-write-plan-bytes (* 256 1024 1024)))
   "Return a LIMITS object whose values are non-negative integers.
 
 Input length counts octets or decoded characters; output length counts Unicode
@@ -54,7 +58,9 @@ depths are measured per document. Agenda entries and repeats count generated
 results per agenda call, and agenda ranges use inclusive days. Export character
 and node budgets count cumulative expansion per export call, with the root at
 depth zero. Formula token, AST-depth, precision, and exponent limits are per
-formula; work is per table recalculation.
+formula; work is per table recalculation. Write-plan entries count files in one
+application, and write-plan bytes count combined UTF-8 string content and
+octet-vector content.
 
 Agenda, repeat, export, and formula limits are definitions pending downstream
 consumers; these definitions do not enforce limits by themselves. Each keyword
@@ -79,7 +85,10 @@ overrides its corresponding default with a non-negative integer."
                 :max-formula-ast-depth (checked-limit-value max-formula-ast-depth)
                 :max-formula-precision (checked-limit-value max-formula-precision)
                 :max-formula-exponent (checked-limit-value max-formula-exponent)
-                :max-formula-work (checked-limit-value max-formula-work)))
+                :max-formula-work (checked-limit-value max-formula-work)
+                :max-write-plan-entries
+                (checked-limit-value max-write-plan-entries)
+                :max-write-plan-bytes (checked-limit-value max-write-plan-bytes)))
 
 (defun limits-p (object)
   "Return true when OBJECT is a LIMITS object."
@@ -106,7 +115,9 @@ overrides its corresponding default with a non-negative integer."
     (:max-formula-ast-depth (%limits-max-formula-ast-depth limits))
     (:max-formula-precision (%limits-max-formula-precision limits))
     (:max-formula-exponent (%limits-max-formula-exponent limits))
-    (:max-formula-work (%limits-max-formula-work limits))))
+    (:max-formula-work (%limits-max-formula-work limits))
+    (:max-write-plan-entries (%limits-max-write-plan-entries limits))
+    (:max-write-plan-bytes (%limits-max-write-plan-bytes limits))))
 
 (defun minimum-limit-value (limits name)
   "Return the minimum value of NAME in LIMITS, or its default when LIMITS is empty.

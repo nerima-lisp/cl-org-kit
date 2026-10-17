@@ -23,6 +23,8 @@
                (:file "types")
                (:file "conditions")
                (:file "limits")
+               (:file "callbacks")
+               (:file "write-plan")
                (:file "input")
                (:file "document")
                (:file "nodes")
@@ -96,6 +98,8 @@
   :serial t
   :components ((:file "package")
                (:file "public-api-test")
+               (:file "callback-registry-test")
+               (:file "write-plan-test")
                (:file "types-test")
                (:file "conditions-test")
                (:file "limits-test")

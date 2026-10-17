@@ -1,4 +1,7 @@
 ;;;; src/package.lisp
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (require :sb-posix))
+
 (defpackage #:org-kit
   (:use #:cl)
   (:export
@@ -17,6 +20,9 @@
    #:org-table-error #:org-table-error-target #:org-table-error-reason
    #:org-resource-limit-error #:org-resource-limit-error-limit-name
    #:org-resource-limit-error-limit #:org-resource-limit-error-actual
+   #:org-callback-error #:org-callback-error-kind #:org-callback-error-name
+   #:org-callback-error-reason #:org-elisp-evaluator-error
+   #:org-write-plan-error #:org-write-plan-error-path #:org-write-plan-error-reason
    ;; Clock aggregation
    #:org-clock-error #:org-clock-error-reason #:org-clock-error-context
    #:clock-summary #:make-clock-summary #:clock-summary-p
@@ -38,6 +44,15 @@
    #:edit-result-updated-document #:edit-result-spans
    ;; Resource limits
    #:limits #:make-limits #:limits-p #:limit-value
+   ;; Explicit callback registry
+   #:callback-registry #:make-callback-registry #:callback-registry-p
+   #:register-callback #:invoke-callback #:evaluate-elisp
+   ;; Write plans
+   #:write-plan-entry #:make-write-plan-entry #:write-plan-entry-p
+   #:write-plan-entry-path #:write-plan-entry-content #:write-plan-entry-mode
+   #:write-plan-entry-create-directories-p
+   #:write-plan #:make-write-plan #:write-plan-p #:write-plan-entries
+   #:apply-write-plan
    ;; Documents
    #:document #:make-document #:document-p #:document-text #:document-encoding
    #:document-bom-p #:document-source-name #:document-limits #:document-settings #:document-root

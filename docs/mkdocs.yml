@@ -17,6 +17,7 @@ nav:
       - Clock: guides/clock.md
       - Tables: guides/tables.md
       - Export: guides/export.md
+      - Callbacks and Write Plans: guides/callbacks-and-write-plans.md
   - Reference:
       - Node Model: reference/node-model.md
       - API Stability: reference/api-stability.md

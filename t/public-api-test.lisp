@@ -21,6 +21,10 @@
     "ORG-TABLE-ERROR" "ORG-TABLE-ERROR-TARGET" "ORG-TABLE-ERROR-REASON"
     "ORG-RESOURCE-LIMIT-ERROR" "ORG-RESOURCE-LIMIT-ERROR-LIMIT-NAME"
     "ORG-RESOURCE-LIMIT-ERROR-LIMIT" "ORG-RESOURCE-LIMIT-ERROR-ACTUAL"
+    "ORG-CALLBACK-ERROR" "ORG-CALLBACK-ERROR-KIND" "ORG-CALLBACK-ERROR-NAME"
+    "ORG-CALLBACK-ERROR-REASON" "ORG-ELISP-EVALUATOR-ERROR"
+    "ORG-WRITE-PLAN-ERROR" "ORG-WRITE-PLAN-ERROR-PATH"
+    "ORG-WRITE-PLAN-ERROR-REASON"
     ;; Clock aggregation
     "ORG-CLOCK-ERROR" "ORG-CLOCK-ERROR-REASON" "ORG-CLOCK-ERROR-CONTEXT"
     "CLOCK-SUMMARY" "MAKE-CLOCK-SUMMARY" "CLOCK-SUMMARY-P"
@@ -54,6 +58,15 @@
     "CYCLE-HEADING-TODO" "TRANSITION-HEADING-TODO"
     ;; Resource limits
     "LIMITS" "MAKE-LIMITS" "LIMITS-P" "LIMIT-VALUE"
+    ;; Explicit callback registry
+    "CALLBACK-REGISTRY" "MAKE-CALLBACK-REGISTRY" "CALLBACK-REGISTRY-P"
+    "REGISTER-CALLBACK" "INVOKE-CALLBACK" "EVALUATE-ELISP"
+    ;; Write plans
+    "WRITE-PLAN-ENTRY" "MAKE-WRITE-PLAN-ENTRY" "WRITE-PLAN-ENTRY-P"
+    "WRITE-PLAN-ENTRY-PATH" "WRITE-PLAN-ENTRY-CONTENT" "WRITE-PLAN-ENTRY-MODE"
+    "WRITE-PLAN-ENTRY-CREATE-DIRECTORIES-P"
+    "WRITE-PLAN" "MAKE-WRITE-PLAN" "WRITE-PLAN-P" "WRITE-PLAN-ENTRIES"
+    "APPLY-WRITE-PLAN"
     ;; Documents
     "DOCUMENT" "MAKE-DOCUMENT" "DOCUMENT-P" "DOCUMENT-TEXT" "DOCUMENT-ENCODING"
     "DOCUMENT-BOM-P" "DOCUMENT-SOURCE-NAME" "DOCUMENT-LIMITS" "DOCUMENT-SETTINGS" "DOCUMENT-ROOT"
@@ -176,7 +189,10 @@ docs/src/reference/node-model.md.")
     names))
 
 (defparameter +generated-structure-function-owners+
-  '((make-org-workflow-options . org-workflow-options)
+  '((callback-registry-p . callback-registry)
+    (write-plan-entry-p . write-plan-entry)
+    (write-plan-p . write-plan)
+    (make-org-workflow-options . org-workflow-options)
     (org-workflow-options-p . org-workflow-options)
     (org-workflow-options-log-done . org-workflow-options)
     (org-workflow-options-log-repeat . org-workflow-options)
@@ -283,6 +299,40 @@ TARGET describes the addressed table and REASON classifies the table-specific fa
     (expect (fboundp 'clocktable-result-rows) :to-be-truthy)
     (expect (fboundp 'clocktable-result-total-minutes) :to-be-truthy)
     (expect (fboundp 'clocktable-result-range) :to-be-truthy))
+
+  (it "pins the P8b callback and write-plan API documentation"
+    (with-soft-assertions
+      (expect (documentation 'make-callback-registry 'function)
+              :to-equal "Return an empty callback registry with no callbacks pre-registered.")
+      (expect (documentation 'register-callback 'function)
+              :to-equal
+              "Register FUNCTION under KIND and NAME in the caller-owned REGISTRY.
+KIND is case-folded to uppercase and NAME to lowercase; a later registration
+for the same key replaces the earlier callback.")
+      (expect (documentation 'invoke-callback 'function)
+              :to-equal
+              "Invoke the callback registered under KIND and NAME with ARGUMENTS.
+Missing callbacks signal ORG-CALLBACK-ERROR. Callback conditions propagate
+unchanged.")
+      (expect (documentation 'evaluate-elisp 'function)
+              :to-equal
+              "Pass EXPRESSION unchanged to the registered Emacs Lisp evaluator.
+The callback is registered as KIND :EVALUATOR and NAME :EMACS-LISP. This
+library does not read or evaluate EXPRESSION.")
+      (expect (documentation 'make-write-plan-entry 'function)
+              :to-equal
+              "Return a write-plan entry without touching the filesystem.
+PATH is relative. String CONTENT is encoded as UTF-8; an octet vector is copied
+and written unchanged. MODE defaults to 0644, and CREATE-DIRECTORIES-P controls
+creation of missing parent directories.")
+      (expect (documentation 'write-plan-entry-content 'function)
+              :to-equal "Return a copy of ENTRY's text string or octet-vector content.")
+      (expect (documentation 'apply-write-plan 'function)
+              :to-equal
+              "Validate PLAN in full, then atomically replace each file below ROOT.
+All paths are relative POSIX paths. Every entry and limit is checked before
+directory or file creation. Each file uses a same-directory temporary file and
+rename; a multi-file plan is not transactional.")))
 
   (it "pins the E public API documentation"
     (with-soft-assertions

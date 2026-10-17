@@ -109,6 +109,35 @@ TARGET describes the addressed table and REASON classifies the table-specific fa
 LIMIT-NAME is the MAKE-LIMITS keyword, LIMIT its value and ACTUAL the measured
 amount that exceeded it."))
 
+(define-condition org-callback-error (org-kit-error)
+  ((kind :initarg :kind)
+   (name :initarg :name)
+   (reason :initarg :reason))
+  (:report (lambda (condition stream)
+             (format stream "~A (~(~A~)/~A, ~(~A~))"
+                     (org-kit-error-message condition)
+                     (org-callback-error-kind condition)
+                     (org-callback-error-name condition)
+                     (org-callback-error-reason condition))))
+  (:documentation "Signalled when a requested callback is not registered.
+KIND and NAME identify it, and REASON classifies the lookup failure."))
+
+(define-condition org-elisp-evaluator-error (org-callback-error)
+  ()
+  (:documentation "Signalled when Emacs Lisp evaluation is requested without a
+registered Emacs Lisp evaluator."))
+
+(define-condition org-write-plan-error (org-kit-error)
+  ((path :initarg :path :initform nil)
+   (reason :initarg :reason :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A (~(~A~))~@[ for ~A~]"
+                     (org-kit-error-message condition)
+                     (org-write-plan-error-reason condition)
+                     (org-write-plan-error-path condition))))
+  (:documentation "Signalled when a write plan is invalid or cannot be applied.
+PATH is a bounded path excerpt and REASON classifies the failure."))
+
 ;; Readers are plain functions rather than :READER options so each carries a
 ;; docstring and is measured by the coverage gate.
 (defun org-kit-error-message (condition)
@@ -183,6 +212,26 @@ otherwise a character index into the document text. NIL when unknown."
 (defun org-resource-limit-error-actual (condition)
   "Return the measured amount that exceeded the limit."
   (slot-value condition 'actual))
+
+(defun org-callback-error-kind (condition)
+  "Return the kind of callback requested by CONDITION."
+  (slot-value condition 'kind))
+
+(defun org-callback-error-name (condition)
+  "Return the name of the callback requested by CONDITION."
+  (slot-value condition 'name))
+
+(defun org-callback-error-reason (condition)
+  "Return the keyword classifying the callback lookup failure."
+  (slot-value condition 'reason))
+
+(defun org-write-plan-error-path (condition)
+  "Return the bounded path excerpt associated with CONDITION, or NIL."
+  (slot-value condition 'path))
+
+(defun org-write-plan-error-reason (condition)
+  "Return the keyword classifying the write-plan failure."
+  (slot-value condition 'reason))
 
 (define-condition org-time-error (org-kit-error)
   ((reason :initarg :reason :initform nil)

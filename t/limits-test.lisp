@@ -19,7 +19,9 @@
     (:max-formula-ast-depth 256)
     (:max-formula-precision 34)
     (:max-formula-exponent 6144)
-    (:max-formula-work 1000000))
+    (:max-formula-work 1000000)
+    (:max-write-plan-entries 100000)
+    (:max-write-plan-bytes 268435456))
   "Expected finite defaults for every resource limit.")
 
 (defun limits-with-sequential-overrides (start)
