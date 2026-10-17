@@ -926,7 +926,8 @@
           (expect (= (fill-pointer buffer) 0) :to-be t)
           (expect (<= (array-total-size buffer) 1000) :to-be t)
           (expect (> at-signal 0) :to-be t)
-          (expect (< at-signal (* 48 1000)) :to-be t)))))
+          (unless *coverage-run-p*
+            (expect (< at-signal (* 48 1000)) :to-be t))))))
 
   (it "preflights all ASCII table rows before writing padded output"
     (let* ((source

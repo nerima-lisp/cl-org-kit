@@ -11,6 +11,8 @@
 
 (in-package #:cl-org-kit/test)
 
+(defvar *coverage-run-p* nil)
+
 (defun test-timeout-ms ()
   "Per-spec wall-clock budget; CL_ORG_TEST_TIMEOUT_MS overrides the default."
   (let ((value (uiop:getenv "CL_ORG_TEST_TIMEOUT_MS")))

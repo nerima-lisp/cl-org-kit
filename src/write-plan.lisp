@@ -181,9 +181,7 @@ creation of missing parent directories."
              (kind (logand (sb-posix:stat-mode stat) #o170000)))
         (unless (= kind #o040000)
           (write-plan-error :root-not-directory canonical))
-        (if (char= (char canonical (1- (length canonical))) #\/)
-            canonical
-            (concatenate 'string canonical "/")))
+        canonical)
     (org-write-plan-error (condition) (error condition))
     (sb-posix:syscall-error (condition)
       (write-plan-error :io-failed (princ-to-string root) condition))
@@ -414,58 +412,61 @@ creation of missing parent directories."
 
 (defun write-plan-apply-record (root-fd record random-state)
   (let ((path (second record))
-        (parent-fd nil))
-    (handler-case
-        (progn
-          (setf parent-fd (write-plan-open-parent-directory root-fd record))
-          (let ((completed-p nil))
-            (unwind-protect
-                 (progn
-                   (multiple-value-bind (temporary-name fd)
-                       (write-plan-open-temporary-file parent-fd path random-state)
-                     (let ((stream nil)
-                           (fd-open-p t)
-                           (stream-closed-p nil)
-                           (renamed-p nil))
-                       (unwind-protect
-                            (progn
-                              (setf stream
-                                    (sb-sys:make-fd-stream
-                                     fd :output t
-                                     :element-type '(unsigned-byte 8)
-                                     :name temporary-name))
-                              (write-sequence (fourth record) stream)
-                              (finish-output stream)
-                              (sb-posix:fchmod fd
-                                               (%write-plan-entry-mode
-                                                (first record)))
-                              (sb-posix:fsync fd)
-                              (close stream)
-                              (setf stream-closed-p t
-                                    fd-open-p nil)
-                              (write-plan-rename-temporary-file
-                               parent-fd temporary-name
-                               (car (last (third record))) path)
-                              (setf renamed-p t))
-                         (unless stream-closed-p
-                           (if stream
-                               (ignore-errors (close stream :abort t))
-                               (when fd-open-p
-                                 (ignore-errors (sb-posix:close fd)))))
-                         (unless renamed-p
-                           (ignore-errors
-                             (write-plan-syscall-result
-                              (%write-plan-unlinkat parent-fd temporary-name 0)
-                              "unlinkat")))))
-                   (setf completed-p t))
-              (if completed-p
-                  (sb-posix:close parent-fd)
-                  (ignore-errors (sb-posix:close parent-fd)))))
-          path))
-      (org-write-plan-error (condition)
-        (error condition))
-      (error (condition)
-        (write-plan-error :io-failed path condition)))))
+        (parent-fd nil)
+        (parent-fd-close-attempted-p nil))
+    (unwind-protect
+         (handler-case
+             (progn
+               (setf parent-fd
+                     (write-plan-open-parent-directory root-fd record))
+               (multiple-value-bind (temporary-name fd)
+                   (write-plan-open-temporary-file
+                    parent-fd path random-state)
+                 (let ((stream nil)
+                       (fd-open-p t)
+                       (stream-closed-p nil)
+                       (renamed-p nil))
+                   (unwind-protect
+                        (progn
+                          (setf stream
+                                (sb-sys:make-fd-stream
+                                 fd :output t
+                                 :element-type '(unsigned-byte 8)
+                                 :name temporary-name))
+                          (write-sequence (fourth record) stream)
+                          (finish-output stream)
+                          (sb-posix:fchmod
+                           fd
+                           (%write-plan-entry-mode (first record)))
+                          (sb-posix:fsync fd)
+                          (close stream)
+                          (setf stream-closed-p t
+                                fd-open-p nil)
+                          (write-plan-rename-temporary-file
+                           parent-fd temporary-name
+                           (car (last (third record))) path)
+                          (setf renamed-p t))
+                     (unless stream-closed-p
+                       (if stream
+                           (ignore-errors (close stream :abort t))
+                           (when fd-open-p
+                             (ignore-errors (sb-posix:close fd)))))
+                     (unless renamed-p
+                       (ignore-errors
+                         (write-plan-syscall-result
+                          (%write-plan-unlinkat
+                           parent-fd temporary-name 0)
+                          "unlinkat"))))))
+               (setf parent-fd-close-attempted-p t)
+               (sb-posix:close parent-fd)
+               path)
+           (org-write-plan-error (condition)
+             (error condition))
+           (error (condition)
+             (write-plan-error :io-failed path condition)))
+      (when (and parent-fd
+                 (not parent-fd-close-attempted-p))
+        (ignore-errors (sb-posix:close parent-fd))))))
 
 (defun apply-write-plan (plan root &key (limits (make-limits)))
   "Validate PLAN in full, then atomically replace each file below ROOT.

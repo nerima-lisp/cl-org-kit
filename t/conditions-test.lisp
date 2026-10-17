@@ -91,6 +91,7 @@
                       (org-resource-limit-error-actual condition))
                 :to-equal '(:max-node-count 10 11))))))
 
+(progn
 (describe "time error reports"
   (it "reports reason and context when present and omits absent slots"
     (let ((full (make-condition 'org-time-error :message "Bad time"
@@ -104,3 +105,82 @@
         (expect (org-time-error-reason bare) :to-be nil)
         (expect (org-time-error-context bare) :to-be nil)
         (expect (report bare) :to-equal "Bad time")))))
+
+
+(describe "callback and write-plan error reports"
+  (it "reports callback and write-plan fields"
+    (let ((callback (make-condition 'org-callback-error
+                                    :message "Callback unavailable"
+                                    :kind :evaluator :name "emacs-lisp"
+                                    :reason :unregistered))
+          (evaluator (make-condition 'org-elisp-evaluator-error
+                                     :message "Evaluator unavailable"
+                                     :kind :evaluator :name "emacs-lisp"
+                                     :reason :unregistered))
+          (write-plan (make-condition 'org-write-plan-error
+                                      :message "Write plan rejected"
+                                      :path "nested/output.txt"
+                                      :reason :invalid-path))
+          (bare (make-condition 'org-write-plan-error :message "Write failed")))
+      (with-soft-assertions
+        (expect (subtypep 'org-callback-error 'org-kit-error) :to-be t)
+        (expect (subtypep 'org-elisp-evaluator-error 'org-callback-error) :to-be t)
+        (expect (report callback)
+                :to-equal "Callback unavailable (evaluator/emacs-lisp, unregistered)")
+        (expect (list (org-callback-error-kind callback)
+                      (org-callback-error-name callback)
+                      (org-callback-error-reason callback))
+                :to-equal '(:evaluator "emacs-lisp" :unregistered))
+        (expect (report evaluator)
+                :to-equal "Evaluator unavailable (evaluator/emacs-lisp, unregistered)")
+        (expect (report write-plan)
+                :to-equal "Write plan rejected (invalid-path) for nested/output.txt")
+        (expect (list (org-write-plan-error-path write-plan)
+                      (org-write-plan-error-reason write-plan)
+                      (org-write-plan-error-cause write-plan))
+                :to-equal '("nested/output.txt" :invalid-path nil))
+        (expect (report bare) :to-equal "Write failed (nil)")
+        (expect (list (org-write-plan-error-path bare)
+                      (org-write-plan-error-reason bare)
+                      (org-write-plan-error-cause bare))
+                :to-equal '(nil nil nil))))))
+
+(describe "agenda and export error reports"
+  (it "reports agenda and export context and exposes their fields"
+    (let ((agenda (make-condition 'org-agenda-error
+                                  :message "Invalid agenda"
+                                  :reason :invalid-option :context "calendar"))
+          (bare-agenda (make-condition 'org-agenda-error :message "Invalid agenda"))
+          (export (make-condition 'org-export-error
+                                  :message "Export failed" :backend :html
+                                  :reason :invalid-source :source "bad"))
+          (bare-export (make-condition 'org-export-error :message "Export failed"))
+          (unsupported (make-condition 'org-export-unsupported-syntax
+                                       :message "Unsupported" :backend :html
+                                       :source "citeproc" :position 7
+                                       :feature :citation))
+          (bare-unsupported
+            (make-condition 'org-export-unsupported-syntax
+                            :message "Unsupported")))
+      (with-soft-assertions
+        (expect (report agenda) :to-equal "Invalid agenda (invalid-option) near \"calendar\"")
+        (expect (list (org-agenda-error-reason agenda)
+                      (org-agenda-error-context agenda))
+                :to-equal '(:invalid-option "calendar"))
+        (expect (report bare-agenda) :to-equal "Invalid agenda")
+        (expect (report export) :to-equal "Export failed (invalid-source) for HTML near \"bad\"")
+        (expect (list (org-export-error-backend export)
+                      (org-export-error-reason export)
+                      (org-export-error-source export))
+                :to-equal '(:html :invalid-source "bad"))
+        (expect (report bare-export) :to-equal "Export failed")
+        (expect (report unsupported)
+                :to-equal "Unsupported (citation) at position 7 near \"citeproc\"")
+        (expect (list (org-export-unsupported-syntax-backend unsupported)
+                      (org-export-unsupported-syntax-source unsupported)
+                      (org-export-unsupported-syntax-position unsupported)
+                      (org-export-unsupported-syntax-feature unsupported))
+                :to-equal '(:html "citeproc" 7 :citation))
+        (expect (report bare-unsupported)
+                :to-equal "Unsupported at position 0")))))
+)

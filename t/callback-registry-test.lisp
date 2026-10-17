@@ -71,4 +71,30 @@
         (when condition
           (expect (org-callback-error-kind condition) :to-equal "BABEL-EXECUTOR")
           (expect (org-callback-error-name condition) :to-equal "unknown")
-          (expect (org-callback-error-reason condition) :to-be :unregistered))))))
+          (expect (org-callback-error-reason condition) :to-be :unregistered)))))
+
+  (it "normalizes callback keys and rejects invalid registrations"
+    (let ((registry (make-callback-registry)))
+      (with-soft-assertions
+        (expect (callback-registry-p nil) :to-be nil)
+        (expect (org-kit::callback-key-part "MiXeD" :upper) :to-equal "MIXED")
+        (expect (org-kit::callback-key-part 'MiXeD :lower) :to-equal "mixed")
+        (expect (handler-case
+                    (progn (org-kit::callback-key-part 12 :lower) nil)
+                  (type-error () t))
+                :to-be t)
+        (expect (handler-case
+                    (progn (register-callback nil :kind :name #'identity) nil)
+                  (type-error () t))
+                :to-be t)
+        (expect (handler-case
+                    (progn (register-callback registry :kind :name 12) nil)
+                  (type-error () t))
+                :to-be t)
+        (expect (handler-case
+                    (progn (invoke-callback nil :kind :name) nil)
+                  (type-error () t))
+                :to-be t)
+        (register-callback registry "KiNd" "NaMe" #'identity)
+        (expect (invoke-callback registry :kind :name "value")
+                :to-equal "value")))))

@@ -176,6 +176,9 @@
     (asdf:operate 'asdf:compile-op "cl-org-kit" :force t)
     (asdf:operate 'asdf:compile-op "cl-org-kit/test" :force t)
     (asdf:load-system "cl-org-kit/test")
+    (setf (symbol-value
+           (uiop:find-symbol* :*coverage-run-p* :cl-org-kit/test))
+          t)
     (let ((passed (handler-case (uiop:symbol-call :cl-org-kit/test :run-tests)
                     (serious-condition (condition)
                       (format *error-output* "~&cl-org-kit test run failed: ~A~%" condition)
