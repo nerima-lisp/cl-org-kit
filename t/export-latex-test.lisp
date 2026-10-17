@@ -1,0 +1,860 @@
+(in-package #:cl-org-kit/test)
+
+(defun export-latex-test-lines (&rest lines)
+  (concatenate 'string (format nil "~{~A~^~%~}" lines)
+               (string #\Newline)))
+
+(defun export-latex-test-full-source ()
+  (export-latex-test-lines
+   "#+TITLE: Export #$%&_{}~^"
+   "#+AUTHOR: Fixture Author"
+   "#+DATE: 2026-10-17"
+   "#+LATEX_CLASS: article"
+   "#+LATEX_CLASS_OPTIONS: [12pt]"
+   "#+LATEX_HEADER: \\usepackage{amsmath}"
+   "#+LATEX: \\typeout{raw #$%&_{}~^}"
+   "#+MACRO: hello Hello $1"
+   "#+OPTIONS: toc:nil num:nil"
+   "* TODO [#A] All node types :fixture:"
+   "SCHEDULED: <2026-10-17 Sat> DEADLINE: <2026-10-18 Sun>"
+   ":PROPERTIES:"
+   ":CUSTOM_ID: all-node-types"
+   ":OWNER: fixture"
+   ":END:"
+   "Text #$%&_{}~^ with *bold*, /italic/, +strike+, _under_, =code=, ~verbatim~, H_2O and x^2."
+   ""
+   "Entity \\alpha{}; fragment $x+y$; snippet @@latex:\\emph{raw #$%&_{}~^}@@."
+   "Citation [cite/t: see;@smith2024;@doe-2025 p. 4;as noted]."
+   "Links [[https://example.test/a_{b}#frag?x=1%20&y=two][safe label]] and [[javascript:alert(1)][unsafe label]]."
+   "Target <<local-target>> and radio target <<<radio phrase>>>."
+   "Macro {{{hello(world)}}}; footnotes [fn:note] and [fn::inline note]."
+   "Inline Babel call call_sum(1) and source src_emacs-lisp{(+ 1 2)}."
+   "Statistics [50%] and timestamp <2026-10-17 Sat>."
+   "A hard line break follows this text\\\\"
+   "and continues here."
+   "#+ATTR_LATEX: :width 0.5\\textwidth :options [scale=1.1]"
+   "[[file:figure.png]]"
+   "- [X] checked item"
+   "- unchecked item"
+   "  - nested item"
+   ""
+   "+ Term :: descriptive definition"
+   ""
+   "| Head | Value |"
+   "|------+-------|"
+   "| Alpha | *bold* |"
+   ""
+   "+---+---+"
+   "| 1 | 2 |"
+   "+---+---+"
+   "#+TBLFM: $2=$1+1"
+   ""
+   "#+BEGIN_CENTER"
+   "centered text"
+   "#+END_CENTER"
+   "#+BEGIN_QUOTE"
+   "quoted text"
+   "#+END_QUOTE"
+   "#+BEGIN_NOTE details"
+   "special block text"
+   "#+END_NOTE"
+   "#+BEGIN_VERSE"
+   "verse line one"
+   "verse line two"
+   "#+END_VERSE"
+   "#+BEGIN_EXAMPLE"
+   "example text #$%&_{}~^"
+   "#+END_EXAMPLE"
+   "#+BEGIN_SRC text :exports code"
+   "source text #$%&_{}~^"
+   "#+END_SRC"
+   "#+BEGIN_EXPORT latex"
+   "\\textbf{raw export #$%&_{}~^}"
+   "#+END_EXPORT"
+   "#+BEGIN_COMMENT"
+   "hidden comment"
+   "#+END_COMMENT"
+   "#+BEGIN: report :scope file"
+   "dynamic block text"
+   "#+END:"
+   "\\begin{equation}"
+   "x + y"
+   "\\end{equation}"
+   "%%(diary-float 10 1 1)"
+   "#+CALL: sum(1, 2)"
+   "# ordinary comment"
+   ": fixed-width line"
+   "-----"
+   "CLOCK: [2026-10-17 Sat 10:00]--[2026-10-17 Sat 11:00] => 1:00"
+   ":NOTES:"
+   "drawer text"
+   ":END:"
+   "* Second heading"
+   "Fuzzy target."
+   "[fn:note] Footnote definition text."
+   "*************** TODO Inline task"
+   "Inline task body."))
+
+(defun export-latex-test-full-expected ()
+  (format nil "~{~A~%~}"
+          '("\\documentclass[12pt]{article}"
+            "\\usepackage{amsmath}"
+            "\\usepackage[utf8]{inputenc}"
+            "\\usepackage[T1]{fontenc}"
+            "\\usepackage[normalem]{ulem}"
+            "\\usepackage{graphicx}"
+            "\\usepackage{hyperref}"
+            ""
+            "\\title{Export \\#\\$\\%\\&\\_\\{\\}\\textasciitilde{}\\textasciicircum{}}"
+            "\\author{Fixture Author}"
+            "\\date{2026-10-17}"
+            ""
+            "\\begin{document}"
+            "\\maketitle"
+            "\\typeout{raw #$%&_{}~^}"
+            ""
+            "\\section*{TODO All node types \\texttt{[fixture]}}\\label{org:all-node-types}"
+            ""
+            "Text \\#\\$\\%\\&\\textsubscript{}\\textasciitilde{}\\textasciicircum{} with \\textbf{bold}, \\emph{italic}, \\sout{strike}, \\uline{under}, \\texttt{code}, \\texttt{verbatim}, H\\textsubscript{2O} and x\\textsuperscript{2}."
+            ""
+            ""
+            "Entity \\alpha; fragment $x+y$; snippet \\emph{raw #$%&_{}~^}."
+            "Citation [cite/t: see;@smith2024;@doe-2025 p. 4;as noted]."
+            "Links \\href{https://example.test/a\\_\\{b\\}\\#frag?x=1\\%20\\&y=two}{safe label} and unsafe label."
+            "Target \\label{org:local-target} and radio target \\label{org:radio-phrase}radio phrase."
+            "Macro Hello world; footnotes \\footnote{Footnote definition text."
+            "} and \\footnote{inline note}."
+            "Inline Babel call call\\_sum(1)  and source \\texttt{(+ 1 2)}."
+            "Statistics [50\\%]  and timestamp <2026-10-17 Sat>."
+            "A hard line break follows this text\\\\"
+            "and continues here."
+            ""
+            ""
+            "% ATTR_LATEX: :width 0.5\\textwidth :options [scale=1.1]"
+            "\\includegraphics{figure.png}"
+            ""
+            ""
+            "\\begin{itemize}"
+            "\\item [X] checked item"
+            ""
+            "\\item unchecked item"
+            ""
+            ""
+            "\\begin{itemize}"
+            "\\item nested item"
+            ""
+            "\\end{itemize}"
+            "\\item descriptive definition"
+            ""
+            "\\end{itemize}"
+            ""
+            "\\begin{tabular}{ll}"
+            ""
+            "Head & Value \\\\"
+            "\\hline"
+            "Alpha & \\textbf{bold} \\\\"
+            "\\end{tabular}"
+            ""
+            "+---+---+"
+            "| 1 | 2 |"
+            "+---+---+"
+            ""
+            ""
+            "\\begin{center}"
+            "centered text"
+            ""
+            "\\end{center}"
+            ""
+            "\\begin{quote}"
+            "quoted text"
+            ""
+            "\\end{quote}"
+            ""
+            "\\begin{note}"
+            "special block text"
+            ""
+            "\\end{note}"
+            ""
+            "\\begin{verse}"
+            "verse line one"
+            "verse line two"
+            ""
+            "\\end{verse}"
+            ""
+            "\\begin{verbatim}"
+            "example text #$%&_{}~^"
+            "\\end{verbatim}"
+            ""
+            "\\begin{verbatim}"
+            "source text #$%&_{}~^"
+            "\\end{verbatim}"
+            ""
+            "\\textbf{raw export #$%&_{}~^}"
+            ""
+            ""
+            "\\begin{verbatim}"
+            "#+BEGIN: report :scope file"
+            "dynamic block text"
+            "#+END:"
+            "\\end{verbatim}"
+            ""
+            "\\begin{equation}"
+            "x + y"
+            "\\end{equation}"
+            ""
+            ""
+            "\\%\\%(diary-float 10 1 1)"
+            ""
+            ""
+            "\\#+CALL: sum(1, 2)"
+            ""
+            ""
+            "\\begin{verbatim}"
+            "fixed-width line"
+            "\\end{verbatim}"
+            ""
+            "\\noindent\\rule{\\linewidth}{0.4pt}"
+            ""
+            "drawer text"
+            ""
+            ""
+            "\\section*{Second heading}\\label{org:second-heading}"
+            ""
+            "Fuzzy target."
+            ""
+            ""
+            "\\subparagraph*{TODO Inline task}\\label{org:inline-task}"
+            ""
+            "Inline task body."
+            ""
+            ""
+            "\\end{document}")))
+
+(defun export-latex-test-node-types (document)
+  (let ((types nil))
+    (map-nodes (lambda (node) (pushnew (node-type node) types :test #'eq))
+               (document-root document))
+    (sort types #'string< :key #'symbol-name)))
+
+(defun export-latex-test-catch-error (function)
+  (handler-case (progn (funcall function) nil)
+    (error (condition) condition)))
+
+(defun export-latex-test-state (document)
+  (let* ((preparation (org-kit::export-prepare document :latex))
+         (state (org-kit::%make-export-latex-state
+                 :preparation preparation :limits (document-limits document))))
+    (org-kit::export-latex-index-references state)
+    state))
+
+(defun export-latex-test-view (document type &key properties children payload
+                                         (post-blank 0))
+  (org-kit::%make-export-view
+   :node (make-node type :properties properties :post-blank post-blank)
+   :children children :payload payload :source-document document))
+
+(describe "LaTeX export"
+  (it "matches the complete fixed expected fixture through the public API"
+    (let* ((source (export-latex-test-full-source))
+           (document (parse-org source))
+           (actual (export-org document :latex))
+           (expected (export-latex-test-full-expected)))
+      (with-soft-assertions
+        (expect (plusp (length source)) :to-be t)
+        (expect (export-latex-test-node-types document)
+                :to-equal
+                (sort (copy-list (node-types)) #'string< :key #'symbol-name))
+        (expect actual :to-equal expected)
+        (expect (search "hidden comment" actual) :to-be nil)
+        (expect (search "javascript:" actual) :to-be nil))))
+
+  (it "escapes every TeX special in text and URL arguments"
+    (let* ((source
+             (export-latex-test-lines
+              "#+TITLE: Specials # $ % & _ { } ~ ^ \\"
+              "#+AUTHOR: Author # $ % & _ { } ~ ^ \\"
+              "#+DATE: Date # $ % & _ { } ~ ^ \\"
+              "#+OPTIONS: toc:nil num:nil"
+              "Text body."
+              ""
+              "[[https://example.test/a$_{b}#frag?x=1%20&y=two~three^four][URL label]]"
+              "[[https://example.test/back\\slash][backslash fallback]]"))
+           (output (export-org (parse-org source) :latex)))
+      (with-soft-assertions
+        (expect (search
+                 "\\title{Specials \\# \\$ \\% \\& \\_ \\{ \\} \\textasciitilde{} \\textasciicircum{} \\textbackslash{}}"
+                 output)
+                :to-be-truthy)
+        (expect (search
+                 "\\author{Author \\# \\$ \\% \\& \\_ \\{ \\} \\textasciitilde{} \\textasciicircum{} \\textbackslash{}}"
+                 output)
+                :to-be-truthy)
+        (expect (search
+                 "\\date{Date \\# \\$ \\% \\& \\_ \\{ \\} \\textasciitilde{} \\textasciicircum{} \\textbackslash{}}"
+                 output)
+                :to-be-truthy)
+        (expect (search
+                 "\\href{https://example.test/a\\$\\_\\{b\\}\\#frag?x=1\\%20\\&y=two\\textasciitilde{}three\\textasciicircum{}four}{URL label}"
+                 output)
+                :to-be-truthy)
+        (expect (search "backslash fallback" output) :to-be-truthy)
+        (expect (search "https://example.test/back" output) :to-be nil))))
+
+  (it "preserves raw LaTeX constructs and falls back for unsafe links"
+    (let* ((source (export-latex-test-full-source))
+           (output (export-org (parse-org source) :latex)))
+      (with-soft-assertions
+        (expect (search "\\documentclass[12pt]{article}" output)
+                :to-be-truthy)
+        (expect (search "\\usepackage{amsmath}" output) :to-be-truthy)
+        (expect (search "\\typeout{raw #$%&_{}~^}" output) :to-be-truthy)
+        (expect (search "\\begin{equation}" output) :to-be-truthy)
+        (expect (search "\\textbf{raw export #$%&_{}~^}" output)
+                :to-be-truthy)
+        (expect (search "% ATTR_LATEX: :width 0.5\\textwidth :options [scale=1.1]"
+                        output)
+                :to-be-truthy)
+        (expect (search "unsafe label" output) :to-be-truthy)
+        (expect (search "javascript:" output) :to-be nil))))
+
+  (it "enforces the configured output-length budget"
+    (let* ((document (parse-org "Body"
+                                :limits (make-limits :max-output-length 80)))
+           (condition (export-latex-test-catch-error
+                       (lambda () (export-org document :latex)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (> (org-resource-limit-error-actual condition) 80)
+                  :to-be t)))))
+
+  (it "accepts output when the budget equals its rendered length"
+    (let* ((source "- list item")
+           (expected (export-org (parse-org source) :latex))
+           (actual (export-org
+                    (parse-org source
+                               :limits (make-limits
+                                        :max-output-length
+                                        (length expected)))
+                    :latex)))
+      (expect actual :to-equal expected)))
+
+  (it "preflights raw LaTeX headers and attributes against the output budget"
+    (let* ((large-value (make-string 256 :initial-element #\x))
+           (empty-output (export-org (parse-org "") :latex))
+           (limits (make-limits :max-output-length
+                                (+ (length empty-output) 64)))
+           (header-condition
+             (export-latex-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org (format nil "#+LATEX_HEADER: ~A" large-value)
+                            :limits limits)
+                 :latex))))
+           (attribute-condition
+             (export-latex-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org
+                  (format nil "#+ATTR_LATEX: ~A~%[[file:image.png]]"
+                          large-value)
+                  :limits limits)
+                 :latex)))))
+      (with-soft-assertions
+        (expect (typep header-condition 'org-resource-limit-error)
+                :to-be t)
+        (expect (typep attribute-condition 'org-resource-limit-error)
+                :to-be t))))
+
+  (it "preflights a source block before copying its verbatim body"
+    (let* ((source-body (make-string 256 :initial-element #\x))
+           (empty-output (export-org (parse-org "") :latex))
+           (limit (+ (length empty-output) 64))
+           (source (format nil "#+BEGIN_SRC text~%~A~%#+END_SRC"
+                           source-body))
+           (condition
+             (export-latex-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org source
+                            :limits (make-limits :max-output-length limit))
+                 :latex)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (> (org-resource-limit-error-actual condition) limit)
+                  :to-be t)))))
+
+  (it "renders default preamble, heading options, and safe link forms"
+    (let* ((source
+             (export-latex-test-lines
+              "#+TITLE: Configured title"
+              "#+OPTIONS: toc:t num:1 title:nil todo:t pri:t tags:t"
+              "* TODO [#A] Main :one:two:"
+              ":PROPERTIES:"
+              ":CUSTOM_ID: main"
+              ":END:"
+              "[[#main][Jump]] [[file:notes.txt][Readme]] [[mailto:user@example.test][Mail]]"
+              "** Child"
+              "- [ ] unchecked"
+              "- [-] partial"))
+           (document (parse-org source))
+           (output (export-org document :latex)))
+      (with-soft-assertions
+        (expect (search "\\documentclass[11pt]{article}" output)
+                :to-be-truthy)
+        (expect (search "\\title{Configured title}" output) :to-be-truthy)
+        (expect (search "\\tableofcontents" output) :to-be-truthy)
+        (expect (search "\\section{TODO [A] Main \\texttt{[one:two]}}"
+                        output)
+                :to-be-truthy)
+        (expect (search "\\subsection*{Child}" output) :to-be-truthy)
+        (expect (search "\\hyperref[org:main]{Jump}" output) :to-be-truthy)
+        (expect (search "\\href{notes.txt}{Readme}" output) :to-be-truthy)
+        (expect (search "\\href{mailto:user@example.test}{Mail}" output)
+                :to-be-truthy)
+        (expect (search "\\item [ ] unchecked" output) :to-be-truthy)
+        (expect (search "\\item [-] partial" output) :to-be-truthy)
+        (expect (search "\\maketitle" output) :to-be nil))))
+
+  (it "rejects global LaTeX keywords in included fragments"
+    (let* ((fragments '("#+LATEX_CLASS: article"
+                        "#+LATEX_CLASS_OPTIONS: [10pt]"
+                        "#+LATEX_HEADER: \\usepackage{amsmath}"))
+           (conditions
+             (mapcar
+              (lambda (fragment)
+                (export-latex-test-catch-error
+                 (lambda ()
+                   (export-org
+                    (parse-org "#+INCLUDE: \"fragment.org\"") :latex
+                    :include-resolver
+                    (lambda (path source-name)
+                      (declare (ignore path source-name))
+                      fragment)))))
+              fragments)))
+      (with-soft-assertions
+        (expect (every (lambda (condition)
+                         (and (typep condition 'org-export-unsupported-syntax)
+                              (eq (org-export-unsupported-syntax-feature condition)
+                                  :fragment-keyword-scope)))
+                       conditions)
+                :to-be t))))
+
+  (it "covers LaTeX renderer fallbacks and inline view separators"
+    (let* ((document (parse-org "Body"))
+           (state (export-latex-test-state document))
+           (first (export-latex-test-view
+                   document :inline-src-block :properties '(:value "left")
+                   :post-blank 2))
+           (second (export-latex-test-view
+                    document :inline-src-block :properties '(:value "right")))
+           (table-cell-a
+             (export-latex-test-view
+              document :table-cell
+              :children (list (export-latex-test-view
+                               document :inline-src-block
+                               :properties '(:value "A")))))
+           (table-cell-b
+             (export-latex-test-view
+              document :table-cell
+              :children (list (export-latex-test-view
+                               document :inline-src-block
+                               :properties '(:value "B")))))
+           (table-row
+             (export-latex-test-view document :table-row
+                                     :children (list table-cell-a table-cell-b)))
+           (item
+             (export-latex-test-view
+              document :item :properties '(:checkbox :trans :tag ("Term"))
+              :children (list (export-latex-test-view
+                               document :inline-src-block
+                               :properties '(:value "definition")))))
+           (ordered-list
+             (export-latex-test-view document :plain-list
+                                     :properties '(:type :ordered)
+                                     :children (list item)))
+           (descriptive-list
+             (export-latex-test-view document :plain-list
+                                     :properties '(:type :descriptive)
+                                     :children (list item)))
+           (radio-target (make-node :radio-target :properties '(:value "target")))
+           (footnote (make-node :footnote-reference :properties '(:label "missing")))
+           (radio-output nil)
+           (unresolved-footnote
+             (export-latex-test-catch-error
+              (lambda ()
+                (org-kit::export-latex-render-object state footnote 0)))))
+      (setf (gethash radio-target
+                     (org-kit::export-latex-state-reference-ids state))
+            "org:target")
+      (setf radio-output
+            (org-kit::export-latex-render-object state radio-target 0))
+      (with-soft-assertions
+        (expect (org-kit::export-latex-rendered-views
+                 state (list first second) 0 t)
+                :to-equal "\\texttt{left}  \\texttt{right}")
+        (expect (org-kit::export-latex-render-view state table-row)
+                :to-equal "\\texttt{A} & \\texttt{B}")
+        (expect (org-kit::export-latex-render-view state table-cell-a)
+                :to-equal "\\texttt{A}")
+        (expect (search "\\begin{enumerate}"
+                        (org-kit::export-latex-render-view state ordered-list))
+                :to-be-truthy)
+        (expect (search "\\begin{description}"
+                        (org-kit::export-latex-render-view state descriptive-list))
+                :to-be-truthy)
+        (expect (search "\\item[Term] [-] \\texttt{definition}"
+                        (org-kit::export-latex-render-view state descriptive-list))
+                :to-be-truthy)
+        (expect (org-kit::export-latex-render-view state item)
+                :to-equal "\\item [-] \\texttt{definition}")
+        (expect radio-output :to-equal "\\label{org:target}target")
+        (expect (typep unresolved-footnote 'org-export-error) :to-be t)
+        (expect (org-kit::export-latex-source-text
+                 (make-node :latex-fragment :properties '(:value "raw")))
+                :to-equal "raw")
+        (expect (org-kit::export-latex-source-text (make-node :latex-fragment))
+                :to-equal "")
+        (expect (org-kit::export-latex-render-code state
+                                                   (format nil "code~%~%") 0)
+                :to-equal (format nil "\\begin{verbatim}~%code~%\\end{verbatim}")))))
+
+  (it "renders title macros, keyword forms, and source result views"
+    (let* ((document (parse-org "Body"))
+           (state (export-latex-test-state document))
+           (macro-node (make-node :macro :post-blank 1))
+           (macro-view
+             (export-latex-test-view
+              document :headline :properties (list :title
+                                                    (list "Title " macro-node
+                                                          (make-node
+                                                           :inline-src-block
+                                                           :properties
+                                                           '(:value "direct"))))
+              :payload (list :title-macros
+                             (list (cons macro-node
+                                         (list (export-latex-test-view
+                                                document :inline-src-block
+                                                :properties '(:value "world"))))))))
+           (source-result
+             (export-latex-test-view
+              document :src-block :properties '(:value "hidden source")
+              :payload '(:requested-exports :results)
+              :children (list (export-latex-test-view
+                               document :inline-src-block
+                               :properties '(:value "result")))))
+           (raw-keyword
+             (export-latex-test-view document :keyword
+                                     :properties '(:key "LATEX" :value "\\raw{}")))
+           (attribute-keyword
+             (export-latex-test-view document :keyword
+                                     :properties '(:key "ATTR_LATEX" :value ":width 2")))
+           (foreign-export
+             (export-latex-test-view document :export-block
+                                     :properties '(:type "html" :value "<b>x</b>")))
+           (fallback-object (make-node :org-data)))
+      (with-soft-assertions
+        (expect (org-kit::export-latex-render-title
+                 state (make-node :headline :properties
+                                  '(:title nil :raw-value "Raw # title")) nil 0)
+                :to-equal "Raw \\# title")
+        (expect (search "\\texttt{world} \\texttt{direct}"
+                        (org-kit::export-latex-render-title state
+                                                            (org-kit::export-view-node
+                                                             macro-view)
+                                                            macro-view 0))
+                :to-be-truthy)
+        (expect (org-kit::export-latex-render-view state source-result)
+                :to-equal "\\texttt{result}")
+        (expect (org-kit::export-latex-render-view state raw-keyword)
+                :to-equal "\\raw{}")
+        (expect (org-kit::export-latex-render-view state attribute-keyword)
+                :to-equal "% ATTR_LATEX: :width 2")
+        (expect (org-kit::export-latex-render-view state foreign-export)
+                :to-equal "")
+        (expect (org-kit::export-latex-render-object
+                 state fallback-object 0)
+                :to-equal ""))))
+
+  (it "expands link abbreviations and preserves default class-option syntax"
+    (let* ((document (parse-org "#+LATEX_CLASS_OPTIONS: 10pt"))
+           (preparation (org-kit::export-prepare document :latex))
+           (state (org-kit::%make-export-latex-state
+                   :preparation preparation :limits (document-limits document))))
+      (setf (getf (document-settings document) :link-abbrevs)
+            '(("docs" . "https://example.test/docs/%s")
+              ("bare" . "https://example.test/base/")))
+      (with-soft-assertions
+        (expect (org-kit::export-latex-expand-link-abbreviation "docs:guide" document)
+                :to-equal "https://example.test/docs/guide")
+        (expect (org-kit::export-latex-expand-link-abbreviation "bare:guide" document)
+                :to-equal "https://example.test/base/guide")
+        (expect (org-kit::export-latex-expand-link-abbreviation "docs::guide" document)
+                :to-equal "https://example.test/docs/guide")
+        (expect (org-kit::export-latex-expand-link-abbreviation "docs::" document)
+                :to-equal "https://example.test/docs/")
+        (expect (org-kit::export-latex-expand-link-abbreviation "docs" document)
+                :to-equal "https://example.test/docs/")
+        (expect (org-kit::export-latex-expand-link-abbreviation "bare" document)
+                :to-equal "https://example.test/base/")
+        (expect (org-kit::export-latex-expand-link-abbreviation "bare:" document)
+                :to-equal "https://example.test/base/")
+        (expect (org-kit::export-latex-expand-link-abbreviation "other:guide" document)
+                :to-equal "other:guide")
+        (expect (search "\\documentclass[10pt]{article}"
+                        (org-kit::export-latex-preamble state))
+                :to-be-truthy))))
+
+  (it "covers LaTeX renderer edge branches"
+    (let* ((document
+             (parse-org
+              (export-latex-test-lines
+               "#+OPTIONS: pri:t" "* Character" "* Numeric")))
+           (state (export-latex-test-state document))
+           (headline-views
+             (org-kit::export-collect-views
+              (org-kit::export-preparation-root-views
+               (org-kit::export-latex-state-preparation state))))
+           (character-heading
+             (find-if
+              (lambda (view)
+                (let ((node (org-kit::export-view-node view)))
+                  (and (eq (node-type node) :headline)
+                       (string= (node-property node :raw-value) "Character"))))
+              headline-views))
+           (numeric-heading
+             (find-if
+              (lambda (view)
+                (let ((node (org-kit::export-view-node view)))
+                  (and (eq (node-type node) :headline)
+                       (string= (node-property node :raw-value) "Numeric"))))
+              headline-views))
+           (tag-node (make-node :code :properties '(:value "~Term~")))
+           (tagged-item
+             (export-latex-test-view
+              document :item :properties (list :tag (list tag-node))))
+           (tagged-list
+             (export-latex-test-view
+              document :plain-list :properties '(:type :descriptive)
+              :children (list tagged-item)))
+           (label
+             (export-latex-test-view
+              document :inline-src-block :properties '(:value "label")))
+           (hash-link
+             (export-latex-test-view
+              document :link :properties '(:type "custom-id" :path "#anchor")
+              :children (list label)))
+           (unsafe-file-link
+             (export-latex-test-view
+              document :link :properties '(:type "file" :path "//unsafe.example")
+              :children (list label)))
+           (image-link
+             (export-latex-test-view
+              document :link :properties '(:type "file" :path "image.png")
+              :children (list label)))
+           (untyped-link
+             (export-latex-test-view document :link :children (list label)))
+           (paragraph
+             (export-latex-test-view document :paragraph :children (list label)))
+           (item-with-empty-child
+             (export-latex-test-view
+              document :item
+              :children (list paragraph
+                              (export-latex-test-view document :comment))))
+           (utf8-entity (make-node :entity :properties '(:utf-8 "U")))
+           (unicode-entity (make-node :entity :properties '(:unicode "N")))
+           (empty-entity (make-node :entity))
+           (plain-code (make-node :code :properties '(:value "plain")))
+           (unclosed-code (make-node :code :properties '(:value "~open")))
+           (empty-code (make-node :code :properties '(:value "")))
+           (inline-babel (make-node :inline-babel-call :properties '(:value "call")))
+           (macro
+             (make-node :macro :children
+                        (list (make-node :inline-src-block
+                                         :properties '(:value "macro")))))
+           (empty-footnote (make-node :footnote-reference))
+           (empty-footnote-view
+             (export-latex-test-view document :footnote-reference))
+           (unknown-keyword
+             (export-latex-test-view
+              document :keyword :properties '(:key "OTHER" :value "ignored")))
+           (empty-source-block
+             (export-latex-test-view
+              document :src-block :properties '(:value "")
+              :payload '(:requested-exports :both)))
+           (latex-snippet
+             (make-node :export-snippet
+                        :properties '(:back-end "latex" :value "\\raw{}")))
+           (foreign-snippet
+             (make-node :export-snippet
+                        :properties '(:back-end "html" :value "<b>x</b>")))
+           (no-path-link (make-node :link :properties '(:type "custom-id")))
+           (external-link
+             (make-node :link :properties '(:type "https" :path "example.test")))
+           (fuzzy-link
+             (make-node :link :properties '(:type "fuzzy" :path "anchor")))
+           (raw-link
+             (make-node :link
+                        :properties '(:type "https" :path "example.test"
+                                      :raw-link "https://example.test")))
+           (source-document (make-document "xe"))
+           (source-example (make-node :example-block :begin 0 :end 1))
+           (source-entity (make-node :entity :begin 1 :end 2))
+           (source-root
+             (make-node :org-data :children (list source-example source-entity))))
+      (setf (document-root source-document) source-root
+            (gethash "anchor" (org-kit::export-latex-state-references state))
+            "org:anchor"
+            (node-property (org-kit::export-view-node character-heading)
+                           :priority)
+            #\B
+            (node-property (org-kit::export-view-node numeric-heading)
+                           :priority)
+            10)
+      (let* ((source-state (export-latex-test-state source-document))
+             (source-example-view
+               (org-kit::%make-export-view
+                :node source-example :source-document source-document)))
+        (with-soft-assertions
+          (expect (search "\\section{[B] Character}\\label{org:character}"
+                          (org-kit::export-latex-render-view state character-heading))
+                  :to-be-truthy)
+          (expect (search "\\section{[10] Numeric}\\label{org:numeric}"
+                          (org-kit::export-latex-render-view state numeric-heading))
+                  :to-be-truthy)
+          (setf (node-property (org-kit::export-view-node numeric-heading) :priority)
+                "P")
+          (expect (search "\\section{[P] Numeric}"
+                          (org-kit::export-latex-render-view state numeric-heading))
+                  :to-be-truthy)
+          (expect (search "\\item[\\texttt{Term}]"
+                          (org-kit::export-latex-render-view state tagged-list))
+                  :to-be-truthy)
+          (expect (org-kit::export-latex-render-list-item
+                   state item-with-empty-child 0)
+                  :to-equal "\\item \\texttt{label}")
+          (expect (org-kit::export-latex-render-view state hash-link)
+                  :to-equal "\\hyperref[org:anchor]{\\texttt{label}}")
+          (expect (org-kit::export-latex-render-view state unsafe-file-link)
+                  :to-equal "\\texttt{label}")
+          (expect (org-kit::export-latex-render-view state image-link)
+                  :to-equal "\\includegraphics{image.png}")
+          (expect (org-kit::export-latex-render-view state untyped-link)
+                  :to-equal "\\texttt{label}")
+          (expect (org-kit::export-latex-render-object state no-path-link 0)
+                  :to-equal "")
+          (expect (org-kit::export-latex-internal-link-id state nil)
+                  :to-be nil)
+          (expect (org-kit::export-latex-internal-link-id state "")
+                  :to-be nil)
+          (expect (org-kit::export-latex-image-path-p nil)
+                  :to-be nil)
+          (expect (org-kit::export-latex-link-source no-path-link) :to-equal "")
+          (expect (org-kit::export-latex-link-source external-link)
+                  :to-equal "https:example.test")
+          (expect (org-kit::export-latex-link-source fuzzy-link)
+                  :to-equal "anchor")
+          (expect (org-kit::export-latex-link-source raw-link)
+                  :to-equal "https://example.test")
+          (expect (org-kit::export-latex-render-object state utf8-entity 0)
+                  :to-equal "U")
+          (expect (org-kit::export-latex-render-object state unicode-entity 0)
+                  :to-equal "N")
+          (expect (org-kit::export-latex-render-object state empty-entity 0)
+                  :to-equal "")
+          (expect (org-kit::export-latex-render-object state plain-code 0)
+                  :to-equal "\\texttt{plain}")
+          (expect (org-kit::export-latex-render-object state unclosed-code 0)
+                  :to-equal "\\texttt{\\textasciitilde{}open}")
+          (expect (org-kit::export-latex-render-object state empty-code 0)
+                  :to-equal "\\texttt{}")
+          (expect (org-kit::export-latex-render-object state inline-babel 0)
+                  :to-equal "call")
+          (expect (org-kit::export-latex-render-object state macro 0)
+                  :to-equal "\\texttt{macro}")
+          (expect (org-kit::export-latex-render-object state empty-footnote 0)
+                  :to-equal "\\footnote{}")
+          (expect (org-kit::export-latex-render-object
+                   state (org-kit::export-view-node empty-footnote-view) 0
+                   empty-footnote-view)
+                  :to-equal "\\footnote{}")
+          (expect (org-kit::export-latex-render-view state unknown-keyword)
+                  :to-equal "")
+          (expect (org-kit::export-latex-render-object state latex-snippet 0)
+                  :to-equal "\\raw{}")
+          (expect (org-kit::export-latex-render-object state foreign-snippet 0)
+                  :to-equal "")
+          (expect (org-kit::export-latex-render-view state empty-source-block)
+                  :to-equal "")
+          (expect (org-kit::export-latex-render-code state "plain" 0)
+                  :to-equal (format nil "\\begin{verbatim}~%plain~%\\end{verbatim}"))
+          (expect (org-kit::export-latex-render-code state "" 0)
+                  :to-equal (format nil "\\begin{verbatim}~%~%\\end{verbatim}"))
+          (expect (org-kit::export-latex-join state 0 (list nil "" "A" "B") ";")
+                  :to-equal "A;B")
+          (expect (org-kit::export-latex-reference-slug "A:B")
+                  :to-equal "a:b")
+          (expect (org-kit::export-latex-reference-slug "text value")
+                  :to-equal "text-value")
+          (expect (org-kit::export-latex-reference-slug "text- value")
+                  :to-equal "text-value")
+          (expect (org-kit::export-latex-reference-slug
+                   (concatenate 'string "-" (string (code-char #xE9))))
+                  :to-equal "")
+          (expect (org-kit::export-latex-reference-slug nil) :to-equal "")
+          (expect (search "\\section*{Undecorated}"
+                          (export-org
+                           (parse-org
+                            (export-latex-test-lines
+                             "#+OPTIONS: todo:nil tags:nil num:nil"
+                             "* TODO [#A] Undecorated :hidden:"))
+                           :latex))
+                  :to-be-truthy)
+          (expect (org-kit::export-latex-render-object source-state source-entity 0)
+                  :to-equal "e")
+          (expect (org-kit::export-latex-render-view
+                   source-state source-example-view)
+                  :to-equal
+                  (format nil "\\begin{verbatim}~%x~%\\end{verbatim}"))))))
+
+  (it "handles duplicate reference aliases and headers ending in a newline"
+    (let* ((output
+             (export-org
+              (parse-org
+               (export-latex-test-lines
+                "* Same"
+                ":PROPERTIES:"
+                ":CUSTOM_ID: Same"
+                ":END:"
+                "* Same"))
+              :latex))
+           (header (format nil "\\usepackage{example}~%"))
+           (document (make-document ""))
+           (empty-header-node
+             (make-node :keyword :properties
+                        '(:key "LATEX_HEADER" :value "")))
+           (header-node
+             (make-node :keyword :properties
+                        (list :key "LATEX_HEADER" :value header)))
+           (root (make-node :org-data :children
+                            (list empty-header-node header-node))))
+      (setf (document-root document) root)
+      (let* ((state (export-latex-test-state document))
+             (preamble (org-kit::export-latex-preamble state)))
+        (with-soft-assertions
+          (expect (search "\\label{org:same}" output) :to-be-truthy)
+          (expect (search "\\label{org:same-2}" output) :to-be-truthy)
+          (expect (search (concatenate 'string header "\\usepackage[utf8]")
+                          preamble)
+                  :to-be-truthy)
+          (expect (search (concatenate
+                           'string
+                           (format nil "\\documentclass[11pt]{article}~%~%")
+                           header "\\usepackage[utf8]")
+                          preamble)
+                  :to-be-truthy))))))

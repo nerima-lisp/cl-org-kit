@@ -81,6 +81,8 @@
                (:file "export-gfm")
                ;; Unit E4 ASCII export
                (:file "export-ascii")
+               ;; Unit E5 LaTeX export
+               (:file "export-latex")
                (:file "agenda"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
@@ -159,7 +161,9 @@
                ;; Unit E3 GFM export
                (:file "export-gfm-test")
                ;; Unit E4 ASCII export
-               (:file "export-ascii-test"))
+               (:file "export-ascii-test")
+               ;; Unit E5 LaTeX export
+               (:file "export-latex-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)

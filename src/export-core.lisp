@@ -2,67 +2,71 @@
 (in-package #:org-kit)
 
 (defparameter *export-node-operations*
-  '((:org-data :root :root :root)
-    (:headline :heading :heading :heading)
-    (:inlinetask :heading :heading :heading)
-    (:section :section :section :section)
-    (:paragraph :paragraph :paragraph :paragraph)
-    (:center-block :centered-block :paragraph :paragraph)
-    (:quote-block :blockquote :blockquote :quote)
-    (:special-block :special-block :children :children)
-    (:drawer :children :children :children)
-    (:property-drawer :omit :omit :omit)
-    (:node-property :omit :omit :omit)
-    (:planning :omit :omit :omit)
-    (:dynamic-block :literal-block :literal-block :literal-block)
+  '((:org-data :root :root :root :root)
+    (:headline :heading :heading :heading :heading)
+    (:inlinetask :heading :heading :heading :heading)
+    (:section :section :section :section :section)
+    (:paragraph :paragraph :paragraph :paragraph :paragraph)
+    (:center-block :centered-block :paragraph :paragraph :centered-block)
+    (:quote-block :blockquote :blockquote :quote :blockquote)
+    (:special-block :special-block :children :children :special-block)
+    (:drawer :children :children :children :children)
+    (:property-drawer :omit :omit :omit :omit)
+    (:node-property :omit :omit :omit :omit)
+    (:planning :omit :omit :omit :omit)
+    (:dynamic-block :literal-block :literal-block :literal-block :literal-block)
     (:footnote-definition :footnote-definition :footnote-definition
-                          :footnote-definition)
-    (:plain-list :list :list :list)
-    (:item :list-item :list-item :list-item)
-    (:table :table :table :table)
-    (:table-row :table-row :table-row :table-row)
-    (:table-cell :table-cell :table-cell :table-cell)
-    (:babel-call :literal :literal :literal)
-    (:inline-babel-call :literal :literal :literal)
-    (:clock :omit :omit :omit)
-    (:comment :omit :omit :omit)
-    (:comment-block :omit :omit :omit)
-    (:diary-sexp :unsupported :unsupported :unsupported)
-    (:example-block :code-block :code-block :code-block)
-    (:fixed-width :code-block :code-block :code-block)
-    (:src-block :source-block :source-block :source-block)
-    (:export-block :export-construct :export-construct :literal)
-    (:export-snippet :export-construct :export-construct :literal)
-    (:horizontal-rule :horizontal-rule :horizontal-rule :horizontal-rule)
-    (:keyword :keyword :keyword :keyword)
-    (:latex-environment :literal :literal :literal)
-    (:latex-fragment :literal :literal :literal)
-    (:verse-block :verse :verse :verse)
-    (:bold :bold :bold :bold)
-    (:italic :italic :italic :italic)
-    (:strike-through :strike-through :strike-through :literal-children)
-    (:underline :underline :underline :literal-children)
-    (:subscript :subscript :subscript :literal-children)
-    (:superscript :superscript :superscript :literal-children)
-    (:code :code :code :quoted-literal)
-    (:verbatim :code :code :quoted-literal)
-    (:citation :literal :literal :literal)
-    (:citation-reference :literal :literal :literal)
-    (:entity :entity :entity :entity)
+                          :footnote-definition :footnote-definition)
+    (:plain-list :list :list :list :list)
+    (:item :list-item :list-item :list-item :list-item)
+    (:table :table :table :table :table)
+    (:table-row :table-row :table-row :table-row :table-row)
+    (:table-cell :table-cell :table-cell :table-cell :table-cell)
+    (:babel-call :literal :literal :literal :literal)
+    (:inline-babel-call :literal :literal :literal :literal)
+    (:clock :omit :omit :omit :omit)
+    (:comment :omit :omit :omit :omit)
+    (:comment-block :omit :omit :omit :omit)
+    (:diary-sexp :unsupported :unsupported :unsupported :literal)
+    (:example-block :code-block :code-block :code-block :code-block)
+    (:fixed-width :code-block :code-block :code-block :code-block)
+    (:src-block :source-block :source-block :source-block :source-block)
+    (:export-block :export-construct :export-construct :literal
+                   :export-construct)
+    (:export-snippet :export-construct :export-construct :literal
+                     :export-construct)
+    (:horizontal-rule :horizontal-rule :horizontal-rule :horizontal-rule
+                      :horizontal-rule)
+    (:keyword :keyword :keyword :keyword :keyword)
+    (:latex-environment :literal :literal :literal :literal)
+    (:latex-fragment :literal :literal :literal :literal)
+    (:verse-block :verse :verse :verse :verse)
+    (:bold :bold :bold :bold :bold)
+    (:italic :italic :italic :italic :italic)
+    (:strike-through :strike-through :strike-through :literal-children
+                     :strike-through)
+    (:underline :underline :underline :literal-children :underline)
+    (:subscript :subscript :subscript :literal-children :subscript)
+    (:superscript :superscript :superscript :literal-children :superscript)
+    (:code :code :code :quoted-literal :code)
+    (:verbatim :code :code :quoted-literal :code)
+    (:citation :literal :literal :literal :literal)
+    (:citation-reference :literal :literal :literal :literal)
+    (:entity :entity :entity :entity :entity)
     (:footnote-reference :footnote-reference :footnote-reference
-                         :footnote-reference)
-    (:inline-src-block :inline-code :inline-code :literal)
-    (:line-break :line-break :line-break :line-break)
-    (:link :link :link :link)
-    (:macro :macro :macro :macro)
-    (:plain-text :text :text :text)
-    (:radio-target :target :target :omit)
-    (:target :target :target :omit)
-    (:statistics-cookie :literal :literal :literal)
-    (:timestamp :timestamp :timestamp :timestamp)))
+                         :footnote-reference :footnote-reference)
+    (:inline-src-block :inline-code :inline-code :literal :inline-code)
+    (:line-break :line-break :line-break :line-break :line-break)
+    (:link :link :link :link :link)
+    (:macro :macro :macro :macro :macro)
+    (:plain-text :text :text :text :text)
+    (:radio-target :target :target :omit :target)
+    (:target :target :target :omit :target)
+    (:statistics-cookie :literal :literal :literal :literal)
+    (:timestamp :timestamp :timestamp :timestamp :timestamp)))
 
 (defun export-backend-p (backend)
-  (member backend '(:html :gfm :ascii) :test #'eq))
+  (member backend '(:html :gfm :ascii :latex) :test #'eq))
 
 (defun export-bounded-source (source)
   (let* ((node (and (node-p source) source))
@@ -126,7 +130,8 @@
             (ecase backend
               (:html (second entry))
               (:gfm (third entry))
-              (:ascii (fourth entry)))))
+              (:ascii (fourth entry))
+              (:latex (fifth entry)))))
       (if (eq operation :unsupported)
           (export-unsupported-syntax backend source
                                      (export-source-position source) :diary-sexp
@@ -790,6 +795,17 @@
     (let ((key (second record))
           (source (first record)))
       (cond
+        ((and (eq backend :latex)
+              (member key '("LATEX_CLASS" "LATEX_CLASS_OPTIONS"
+                             "LATEX_HEADER")
+                      :test #'string=))
+         (when fragment-p
+           (export-unsupported-syntax
+            backend source (export-source-position source) :fragment-keyword-scope
+            "Global export keywords in fragments are unsupported")))
+        ((and (eq backend :latex)
+              (member key '("LATEX" "ATTR_LATEX") :test #'string=))
+         nil)
         ((or (member key '("TITLE" "AUTHOR" "DATE" "LANGUAGE" "OPTIONS"
                            "SELECT_TAGS" "EXCLUDE_TAGS" "MACRO" "ATTR_HTML"
                            "ARCHIVE" "COLUMNS" "PRIORITIES" "CONSTANTS"
@@ -1062,12 +1078,23 @@
                                      element-depth
                                      active-includes active-macros))
                    ((eq type :keyword)
-                    (export-validate-keywords
-                     (list (list node
-                                 (string-upcase (or (node-property node :key) ""))
-                                 (or (node-property node :value) "")))
-                     backend :fragment-p fragment-p)
-                    (values nil nil))
+                    (let ((key (string-upcase
+                                (or (node-property node :key) ""))))
+                      (export-validate-keywords
+                       (list (list node key (or (node-property node :value) "")))
+                       backend :fragment-p fragment-p)
+                      (if (and (eq backend :latex)
+                               (member key '("LATEX" "ATTR_LATEX")
+                                       :test #'string=))
+                          (values
+                           (list (%make-export-view
+                                  :node node :children nil
+                                  :payload
+                                  (list :operation
+                                        (export-node-operation type backend node))
+                                  :source-document source-document))
+                           nil)
+                          (values nil nil))))
                    ((eq type :macro)
                     (prepare-macro node source-document selected-scope depth
                                    element-depth

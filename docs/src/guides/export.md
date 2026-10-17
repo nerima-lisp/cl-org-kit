@@ -1,7 +1,7 @@
 # Export
 
 `export-org` renders a parsed document as HTML, GitHub Flavored Markdown (GFM),
-or ASCII. The default output type is a string.
+ASCII, or LaTeX source. The default output type is a string.
 
 ~~~lisp
 (require :asdf)
@@ -15,13 +15,21 @@ or ASCII. The default output type is a string.
    (org-kit:export-org document :html :context context)
    (org-kit:export-org document :gfm :context context)
    (org-kit:export-org document :ascii :context context)
+   (org-kit:export-org document :latex :context context)
    (org-kit:export-org document :gfm
                        :context context :output-type :octets)))
 ~~~
 
-The HTML, GFM, and ASCII calls return strings. `:output-type :octets` returns a
-UTF-8 octet vector. With `:output-type :stream`, supply an output stream with
-`:stream`. Character streams receive text; streams whose element type is
+The HTML, GFM, ASCII, and LaTeX calls return strings. LaTeX export returns source
+only; it does not invoke a TeX engine or generate a PDF. `#+LATEX_CLASS` selects
+the document class, and `#+LATEX_CLASS_OPTIONS` sets its options. `#+LATEX_HEADER`
+values are inserted into the preamble without escaping. `ATTR_LATEX` values are
+preserved in LaTeX comments. `#+LATEX:` values, LaTeX export blocks, fragments,
+and environments are passed through without text escaping.
+
+With `:output-type :octets`, export returns a UTF-8 octet vector. With
+`:output-type :stream`, supply an output stream with `:stream`. Character streams
+receive text; streams whose element type is
 `(unsigned-byte 8)` receive UTF-8 octets. Other stream element types are
 rejected, and a successful call returns the stream.
 
