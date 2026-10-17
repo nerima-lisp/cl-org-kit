@@ -410,9 +410,17 @@
               (canonical-cell
                 (edit-canonical-node-at-path expected
                                              (edit-node-path document cell)))
-              (properties (getf canonical-cell :properties)))
+              (properties (getf canonical-cell :properties))
+              (value-document
+                (make-document value :limits (document-limits document))))
+         (setf (document-settings value-document)
+               (document-settings document))
          (setf (getf properties :value) value
-               (getf canonical-cell :properties) properties)))
+               (getf canonical-cell :properties) properties
+               (getf canonical-cell :children)
+               (mapcar #'edit-canonical-node
+                       (parse-objects value-document 0 (length value)
+                                      :table-cell)))))
      values)
     expected))
 

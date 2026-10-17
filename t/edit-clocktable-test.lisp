@@ -112,6 +112,14 @@
                 :time-context time-context)))
     (values (document-text (edit-result-updated-document edit)) edit document)))
 
+(defun edit-clocktable-test-update-arguments
+    (arguments &key (prefix "") document-resolver time-context)
+  (edit-clocktable-test-dynamic-update
+   (format nil "~A#+BEGIN: clocktable ~A~%stale~%#+END:~%"
+           prefix arguments)
+   :document-resolver document-resolver
+   :time-context time-context))
+
 (defun edit-clocktable-test-expect-parameter-error
     (condition reason parameter value)
   (expect (typep condition 'org-kit::org-clocktable-parameter-error)
@@ -133,6 +141,22 @@
   (cl-codec-kit:string-to-octets source :encoding :utf-8))
 
 (describe "clocktable body edits"
+  (it "handles the fallback emphasis level and percent formula in body edits"
+    (let* ((case (edit-clocktable-test-case
+                  (getf (edit-clocktable-test-fixture "cases") :cases)
+                  "empty-default-table"))
+           (source-octets (edit-clocktable-test-source-octets
+                           (getf case :source)))
+           (document (parse-org source-octets))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (result (edit-clocktable-test-result case))
+           (edit (write-clocktable document target result :formula "%"))
+           (updated (document-text (edit-result-updated-document edit))))
+      (expect (org-kit::edit-clocktable-emphasize "label" 3 t)
+              :to-equal "label")
+      (expect (edit-result-p edit) :to-be t)
+      (expect (search "0.0" updated) :to-be-truthy)))
+
   (it "matches the H2 policy oracle and patches only the dynamic-block body"
     (let* ((cases (getf (edit-clocktable-test-fixture "cases") :cases))
            (expected (getf (edit-clocktable-test-fixture "expected") :cases)))
@@ -692,10 +716,43 @@
   (it "reports exact unsupported, invalid, and missing-time-context reasons"
     (dolist (case '((":unknown 3" :unsupported-parameter "unknown" "3")
                     (":maxlevel -1" :invalid-value "maxlevel" "-1")
+                    (":block 3" :invalid-value "block" "3")
+                    (":tstart 3" :invalid-value "tstart" "3")
+                    (":tend 2026-10-14" :invalid-value "tstart"
+                     "requires both :tstart and :tend")
+                    (":block 2026-10-12 :tstart 2026-10-12 :tend 2026-10-14"
+                     :invalid-value "block"
+                     "cannot be combined with :tstart and :tend")
                     (":step day" :invalid-value "step"
                      "requires :block or :tstart and :tend")
+                    (":step fortnight" :invalid-value "step" "fortnight")
+                    (":match 3" :invalid-value "match" "3")
+                    (":tags 3" :invalid-value "tags" "3")
+                    (":emphasize 3" :invalid-value "emphasize" "3")
+                    (":scope 3" :invalid-value "scope" "3")
+                    (":scope subtree :block 2026-10-12"
+                     :invalid-value "scope" "subtree")
+                    (":scope tree :block 2026-10-12"
+                     :invalid-value "scope" "tree")
+                    (":scope tree1 :block 2026-10-12"
+                     :invalid-value "scope" "tree1")
+                    (":scope tree0 :block 2026-10-12"
+                     :invalid-value "scope" "tree0")
+                    (":fileskip0 3" :invalid-value "fileskip0" "3")
+                    (":formula \"\"" :invalid-value "formula" "")
+                    (":block 2026-W99" :invalid-value "block" "2026-W99")
+                    (":block 2026-13" :invalid-value "block" "2026-13")
+                    (":block 2026-1A" :invalid-value "block" "2026-1A")
+                    (":block nonsense" :invalid-value "block" "nonsense")
                     (":block today" :invalid-value "block"
-                     "relative block requires :time-context")))
+                     "relative block requires :time-context")
+                    (":tstart 2026-10-14 :tend 2026-10-12"
+                     :invalid-value "tend"
+                     "range end is before range start")
+                    (":tstart today :tend tomorrow" :invalid-value "tstart"
+                     "relative value requires :time-context")
+                    ("" :invalid-value "block"
+                     "default range requires :time-context")))
       (destructuring-bind (arguments reason parameter value) case
         (let* ((source (format nil "#+BEGIN: clocktable ~A~%stale~%#+END:~%"
                                arguments))
@@ -724,6 +781,58 @@
          condition :invalid-value "block" ":block")
         (expect (document-text document) :to-equal source))))
 
+  (it "maps invalid Org match queries to a named clocktable error"
+    (let* ((source
+             (format nil
+                     "* Task~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :scope file :block 2026-10-12 :match +~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (condition
+             (edit-clocktable-test-capture-condition
+              (lambda () (org-kit::update-dynamic-block document target)))))
+      (edit-clocktable-test-expect-parameter-error
+       condition :invalid-value "match" "+")
+      (expect (document-text document) :to-equal source)))
+
+  (it "validates clocktable parameters and scopes before rendering"
+    (let* ((document
+             (parse-org
+              (format nil "* Parent~%** Child~%#+BEGIN: clocktable~%old~%#+END:~%")))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (unsupported
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-validate-parameters '(:unknown "value")))))
+           (invalid-scope
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-scope-sections
+                 document block '(:scope ("valid" 3)) nil)))))
+      (edit-clocktable-test-expect-parameter-error
+       unsupported :unsupported-parameter "unknown" "value")
+      (edit-clocktable-test-expect-parameter-error
+       invalid-scope :invalid-value "scope" "(valid 3)")))
+
+  (it "finds enclosing tree scope headings and reads relative endpoint dates"
+    (let* ((context
+             (make-time-context
+              :reference-time (make-org-time-value "2026-10-13T12:00:00")
+              :zone (make-fixed-time-zone 0)))
+           (source
+             (format nil
+                     "* Parent~%** Child~%CLOCK: [2026-10-13 Tue 09:00]--[2026-10-13 Tue 09:30] => 0:30~%#+BEGIN: clocktable :scope tree :tstart today :tend tomorrow~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (updated
+             (document-text
+              (edit-result-updated-document
+               (org-kit::update-dynamic-block
+                document target :time-context context)))))
+      (with-soft-assertions
+        (expect (search "| Parent" updated) :to-be-truthy)
+        (expect (search "*0:30*" updated) :to-be-truthy)
+        (expect (document-text document) :to-equal source))))
+
   (it "reports the name and value of a duplicate clocktable parameter"
     (let* ((source
              (format nil
@@ -737,3 +846,362 @@
         (edit-clocktable-test-expect-parameter-error
          condition :invalid-value "block" "today")
         (expect (document-text document) :to-equal source)))))
+
+(describe "clocktable calendar ranges and rendering"
+  (it "selects exact year, month, week, quarter, and day block ranges"
+    (let ((prefix
+            (format nil
+                    "* Previous~%CLOCK: [2025-10-12 Sun 09:00]--[2025-10-12 Sun 09:10] => 0:10~%* October~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:15] => 0:15~%* November~%CLOCK: [2026-11-02 Mon 09:00]--[2026-11-02 Mon 09:20] => 0:20~%")))
+      (dolist (case '(("2025" "0:10")
+                      ("2026" "0:35")
+                      ("2026-10" "0:15")
+                      ("2026-11" "0:20")
+                      ("2026-10-12" "0:15")
+                      ("2026-W42" "0:15")
+                      ("2026-Q4" "0:35")))
+        (destructuring-bind (block total) case
+          (multiple-value-bind (updated edit document)
+              (edit-clocktable-test-update-arguments
+               (format nil ":scope file :block ~A" block) :prefix prefix)
+            (declare (ignore edit document))
+            (expect (search (format nil "*~A*" total) updated)
+                    :to-be-truthy))))))
+
+  (it "uses relative block periods only with the supplied reference instant"
+    (let* ((prefix
+             (format nil
+                     "* Prior year~%CLOCK: [2025-10-12 Sun 09:00]--[2025-10-12 Sun 09:10] => 0:10~%* Prior week~%CLOCK: [2026-10-07 Wed 09:00]--[2026-10-07 Wed 09:07] => 0:07~%* Prior month~%CLOCK: [2026-09-15 Tue 09:00]--[2026-09-15 Tue 09:09] => 0:09~%* Yesterday~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:12] => 0:12~%* Today~%CLOCK: [2026-10-13 Tue 09:00]--[2026-10-13 Tue 09:13] => 0:13~%* Future~%CLOCK: [2026-10-14 Wed 09:00]--[2026-10-14 Wed 09:14] => 0:14~%"))
+           (context
+             (make-time-context
+              :reference-time (make-org-time-value "2026-10-13T12:00:00")
+              :zone (make-fixed-time-zone 0))))
+      (dolist (case '(("today" "0:13")
+                      ("today-1" "0:12")
+                      ("yesterday" "0:12")
+                      ("thisweek" "0:39")
+                      ("thisweek-1" "0:07")
+                      ("lastweek" "0:07")
+                      ("thismonth" "0:46")
+                      ("thismonth-1" "0:09")
+                      ("lastmonth" "0:09")
+                      ("thisyear" "0:55")
+                      ("thisyear-1" "0:10")
+                      ("lastyear" "0:10")
+                      ("untilnow" "0:51")))
+        (destructuring-bind (block total) case
+          (multiple-value-bind (updated edit document)
+              (edit-clocktable-test-update-arguments
+               (format nil ":scope file :block ~A" block)
+               :prefix prefix :time-context context)
+            (declare (ignore edit document))
+            (expect (search (format nil "*~A*" total) updated)
+                    :to-be-truthy))))))
+
+  (it "splits weekly, semimonthly, monthly, quarterly, and yearly ranges"
+    (dolist (case '( ("week" "2026-10-13" "2026-10-29"
+                      "Weekly report starting on: [2026-10-12 Mon]"
+                      "Weekly report starting on: [2026-10-19 Mon]"
+                      "Weekly report starting on: [2026-10-26 Mon]")
+                    ("semimonth" "2026-10-01" "2026-12-01"
+                     "Semimonthly report starting on: [2026-10-01 Thu]"
+                     "Semimonthly report starting on: [2026-10-16 Fri]"
+                     "Semimonthly report starting on: [2026-11-01 Sun]"
+                     "Semimonthly report starting on: [2026-11-16 Mon]")
+                    ("month" "2026-10-15" "2026-12-01"
+                     "Monthly report starting on: [2026-10-01 Thu]"
+                     "Monthly report starting on: [2026-11-01 Sun]")
+                    ("quarter" "2026-10-15" "2027-02-01"
+                     "Quarterly report starting on: [2026-10-01 Thu]"
+                     "Quarterly report starting on: [2027-01-01 Fri]")
+                    ("year" "2025-10-15" "2027-03-01"
+                     "Annual report starting on: [2025-01-01 Wed]"
+                     "Annual report starting on: [2026-01-01 Thu]"
+                     "Annual report starting on: [2027-01-01 Fri]")))
+      (destructuring-bind (step start end &rest labels) case
+        (multiple-value-bind (updated edit document)
+            (edit-clocktable-test-update-arguments
+             (format nil ":scope file :tstart ~A :tend ~A :step ~A"
+                     start end step))
+          (declare (ignore edit document))
+          (with-soft-assertions
+            (let ((positions (mapcar (lambda (label)
+                                       (search label updated))
+                                     labels)))
+              (expect (every #'integerp positions) :to-be t)
+              (expect positions :to-equal (sort (copy-list positions) #'<))))))))
+
+  (it "maps formula parse and calculation failures to named clocktable errors"
+    (dolist (case '(("$2=vsum(1)" "$2=vsum(1)")
+                    ("$2=1/0" "$2=1/0")))
+      (destructuring-bind (formula value) case
+        (let* ((source
+                 (format nil
+                         "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :scope file :block 2026-10-12 :formula \"~A\"~%stale~%#+END:~%"
+                         formula))
+               (document (parse-org source))
+               (target (edit-clocktable-test-dynamic-block document "clocktable"))
+               (condition
+                 (edit-clocktable-test-capture-condition
+                  (lambda () (org-kit::update-dynamic-block document target)))))
+          (edit-clocktable-test-expect-parameter-error
+           condition :invalid-value "formula" value)
+          (expect (document-text document) :to-equal source)))))
+
+  (it "writes and recalculates a supported custom clocktable formula"
+    (let* ((source
+             (format nil
+                     "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :scope file :block 2026-10-12 :formula \"$2=0\"~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (updated-document
+             (edit-result-updated-document
+              (org-kit::update-dynamic-block document target)))
+           (updated (document-text updated-document))
+           (table (org-kit::edit-clocktable-find-table updated-document))
+           (times
+             (loop for row in (node-children table)
+                   when (eq (node-property row :type) :standard)
+                     collect (node-property (second (node-children row))
+                                            :value))))
+      (with-soft-assertions
+        (expect (search "#+TBLFM: $2=0" updated) :to-be-truthy)
+        (expect times :to-equal '("Time" "0" "0"))
+        (expect (document-text document) :to-equal source))))
+
+  (it "shows zero percent for an empty percent clocktable"
+    (multiple-value-bind (updated edit document)
+        (edit-clocktable-test-update-arguments
+         ":scope file :block 2026-10-12 :formula %")
+      (declare (ignore edit document))
+      (with-soft-assertions
+        (expect (search "0.0" updated) :to-be-truthy)
+        (expect (search "#+TBLFM:" updated) :to-be nil))))
+
+  (it "uses the supplied time context for an implicit current-year range"
+    (let* ((source
+             (format nil
+                     "* Previous~%CLOCK: [2025-10-12 Sun 09:00]--[2025-10-12 Sun 09:10] => 0:10~%* Current~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:25] => 0:25~%#+BEGIN: clocktable~%stale~%#+END:~%"))
+           (context
+             (make-time-context
+              :reference-time (make-org-time-value "2026-10-13T12:00:00")
+              :zone (make-fixed-time-zone 0)))
+           (document (parse-org source))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (updated
+             (document-text
+              (edit-result-updated-document
+               (org-kit::update-dynamic-block
+                document block :time-context context)))))
+      (with-soft-assertions
+        (expect (search "*0:25*" updated) :to-be-truthy)
+        (expect (search "| Current" updated) :to-be-truthy)
+        (expect (search "| Previous" updated) :to-be nil)
+        (expect (document-text document) :to-equal source))))
+
+  (it "keeps the total while hiding all headline rows at maxlevel zero"
+    (let* ((source
+             (format nil
+                     "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :scope file :block 2026-10-12 :maxlevel 0~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (updated
+             (document-text
+              (edit-result-updated-document
+               (org-kit::update-dynamic-block document block)))))
+      (with-soft-assertions
+        (expect (search "*0:30*" updated) :to-be-truthy)
+        (expect (search "| Work" updated) :to-be nil)
+        (expect (document-text document) :to-equal source))))
+
+  (it "supports string yes/no display flags and retains empty resolved files"
+    (let* ((tagged-document
+             (parse-org
+              (format nil
+                      "* Tagged :sample:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
+              :source-name "tagged.org"))
+           (empty-document (parse-org "* Empty" :source-name "empty.org"))
+           (selectors nil)
+           (resolver
+             (lambda (selector)
+               (push selector selectors)
+               (list tagged-document empty-document)))
+           (source
+             (format nil
+                     "#+BEGIN: clocktable :scope combined :block 2026-10-12 :tags yes :emphasize no :fileskip0 no~%stale~%#+END:~%")))
+      (let* ((document (parse-org source))
+             (block (edit-clocktable-test-dynamic-block document "clocktable"))
+             (updated
+               (document-text
+                (edit-result-updated-document
+                 (org-kit::update-dynamic-block
+                  document block :document-resolver resolver)))))
+        (with-soft-assertions
+          (expect (nreverse selectors) :to-equal '("combined"))
+          (expect (search "File: tagged.org" updated) :to-be-truthy)
+          (expect (search "File: empty.org" updated) :to-be-truthy)
+          (expect (search "Tags" updated) :to-be-truthy)
+          (expect (search "sample" updated) :to-be-truthy)
+          (expect (search "*Tagged*" updated) :to-be nil)))))
+
+  (it "maps named external scopes to caller-resolved documents"
+    (let ((resolved-document (parse-org "* Resolved")))
+      (dolist (case '(("agenda" :agenda)
+                      ("agenda-with-archives" :agenda-with-archives)
+                      ("file-with-archives" :file-with-archives)))
+        (destructuring-bind (scope selector) case
+          (let* ((source
+                   (format nil
+                           "#+BEGIN: clocktable :scope ~A :block 2026-10-12~%stale~%#+END:~%"
+                           scope))
+                 (document (parse-org source))
+                 (block (edit-clocktable-test-dynamic-block document "clocktable"))
+                 (received nil)
+                 (updated
+                   (document-text
+                    (edit-result-updated-document
+                     (org-kit::update-dynamic-block
+                      document block
+                      :document-resolver
+                      (lambda (requested-selector)
+                        (setf received requested-selector)
+                        resolved-document))))))
+            (with-soft-assertions
+              (expect received :to-be selector)
+              (expect (search (format nil "File: ~A" (string-downcase (symbol-name selector)))
+                              updated)
+                      :to-be-truthy)))))))
+
+  (it "rejects missing and invalid external document resolvers exactly"
+    (dolist (case '((:missing "external scope requires :document-resolver")
+                    (:invalid "resolver must return a document or document list")
+                    (:empty "resolver must return a document or document list")))
+      (destructuring-bind (resolver-kind expected-value) case
+        (let* ((source
+                 (format nil
+                         "#+BEGIN: clocktable :scope external :block 2026-10-12~%stale~%#+END:~%"))
+               (document (parse-org source))
+               (block (edit-clocktable-test-dynamic-block document "clocktable"))
+               (resolver
+                 (case resolver-kind
+                   (:invalid (lambda (selector) (declare (ignore selector)) 17))
+                   (:empty (lambda (selector) (declare (ignore selector)) nil))))
+               (condition
+                 (edit-clocktable-test-capture-condition
+                  (lambda ()
+                    (if resolver
+                        (org-kit::update-dynamic-block
+                         document block :document-resolver resolver)
+                        (org-kit::update-dynamic-block document block))))))
+          (edit-clocktable-test-expect-parameter-error
+           condition :invalid-value "scope" expected-value)
+          (expect (document-text document) :to-equal source))))))
+
+(describe "clocktable validation and heading mapping boundaries"
+  (it "validates direct parameter types and zero-total percentage rows"
+    (let* ((range (edit-clocktable-test-range))
+           (row (make-clocktable-row :level 1 :title "Zero" :tags nil
+                                     :range range :minutes 0))
+           (cells (org-kit::edit-clocktable-data-cells
+                   row "Zero" "0:00" 1 nil nil t 0))
+           (string-parameter
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-parameter-error
+                 :invalid-value "scope" "bad"))))
+           (maxlevel
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-validate-parameters
+                 '(:maxlevel "2")))))
+           (block
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-validate-parameters
+                 '(:block :invalid)))))
+           (newline-formula
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-validate-parameters
+                 (list :formula (format nil "x~%y"))))))
+           (return-formula
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-validate-parameters
+                 (list :formula (format nil "x~Cy" #\Return)))))))
+      (with-soft-assertions
+        (expect (coerce cells 'list) :to-equal '("Zero" "0:00" "0.0"))
+        (edit-clocktable-test-expect-parameter-error
+         string-parameter :invalid-value "scope" "bad")
+        (edit-clocktable-test-expect-parameter-error
+         maxlevel :invalid-value "maxlevel" "2")
+        (expect (typep block 'org-kit::org-clocktable-parameter-error)
+                :to-be t)
+        (expect (typep newline-formula 'org-kit::org-clocktable-parameter-error)
+                :to-be t)
+        (expect (typep return-formula 'org-kit::org-clocktable-parameter-error)
+                :to-be t)
+        (expect (org-kit::clocktable-flag '(:tags nil) :tags)
+                :to-be nil))))
+
+  (it "checks block separators, date parser failures, and external scope labels"
+    (let* ((document
+             (parse-org (format nil "#+BEGIN: clocktable~%stale~%#+END:~%")))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (bad-date
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-parse-org-time-value
+                 "nonsense" nil :tstart))))
+           (time-context
+             (make-time-context
+              :reference-time (make-org-time-value "2026-10-13T12:00:00")
+              :zone (make-fixed-time-zone 0)))
+           (bad-date-with-context
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-parse-org-time-value
+                 "nonsense" time-context :tstart))))
+           (invalid-scope
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-scope-sections
+                 document block '(:scope 3) nil))))
+           (sections
+             (org-kit::clocktable-scope-sections
+              document block '(:scope "ext")
+              (lambda (selector)
+                (expect selector :to-equal "ext")
+                (parse-org "* Resolved"))))
+           (headings
+             (org-kit::clocktable-document-headings
+              (parse-org (format nil "* Parent~%** Child~%")))))
+      (with-soft-assertions
+        (expect (org-kit::clocktable-string-digits-p "12" 2 1)
+                :to-be nil)
+        (expect (org-kit::clocktable-absolute-block-range "2026/W01")
+                :to-be nil)
+        (expect (org-kit::clocktable-absolute-block-range "2026/Q2")
+                :to-be nil)
+        (edit-clocktable-test-expect-parameter-error
+         bad-date :invalid-value "tstart" "nonsense")
+        (edit-clocktable-test-expect-parameter-error
+         bad-date-with-context :invalid-value "tstart" "nonsense")
+        (expect (typep invalid-scope 'org-kit::org-clocktable-parameter-error)
+                :to-be t)
+        (expect (first (first sections)) :to-equal "ext")
+        (expect (mapcar (lambda (heading)
+                          (node-property heading :raw-value ""))
+                        headings)
+                :to-equal '("Parent")))))
+
+  (it "maps nested clock rows past unmatched headings"
+    (let* ((source
+             (format nil
+                     "* Parent~%** Group~%*** Unclocked~%** Other~%** Repeated :skip:~%** Repeated :chosen:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :scope file :block 2026-10-12~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (updated
+             (document-text
+              (edit-result-updated-document
+               (org-kit::update-dynamic-block document block)))))
+      (expect (search "Repeated" updated) :to-be-truthy))))

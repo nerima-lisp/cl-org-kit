@@ -368,7 +368,8 @@
                  (not (and (integerp maxlevel) (>= maxlevel 0))))
         (clocktable-parameter-error :invalid-value :maxlevel maxlevel))
       (when (and (clocktable-parameter-present-p parameters :block)
-                 (not (stringp block)))
+                 (not (or (stringp block)
+                          (and (integerp block) (<= 1000 block 9999)))))
         (clocktable-parameter-error :invalid-value :block block))
       (dolist (key '(:tstart :tend))
         (let ((value (clocktable-parameter-value parameters key)))
@@ -597,7 +598,10 @@
       (%time-value-from-local-value value))))
 
 (defun clocktable-range-from-parameters (parameters time-context)
-  (let ((block (clocktable-parameter-value parameters :block)))
+  (let* ((block-value (clocktable-parameter-value parameters :block))
+         (block (if (integerp block-value)
+                    (write-to-string block-value)
+                    block-value)))
     (cond
       ((clocktable-parameter-present-p parameters :tstart)
        (handler-case
@@ -614,8 +618,7 @@
             "range end is before range start"))))
       (block
        (or (handler-case (clocktable-absolute-block-range block)
-             (cl-date-kit:invalid-date () nil)
-             (parse-error () nil))
+             (cl-date-kit:invalid-date () nil))
            (clocktable-relative-block-range
             block time-context)
            (clocktable-parameter-error :invalid-value :block block)))
@@ -696,9 +699,6 @@
                            (clocktable-document-headings document)
                            nil))))
     (unless (or heading (member scope '("file" "nil") :test #'string=))
-      (clocktable-parameter-error :invalid-value :scope scope))
-    (when (and (member scope '("subtree" "tree") :test #'string=)
-               (null heading))
       (clocktable-parameter-error :invalid-value :scope scope))
     (list (list (document-source-name document) document headings nil))))
 
@@ -929,8 +929,9 @@
                    stream)
                   (setf written-p t))))))))))
 
-(register-dynamic-block-handler "clocktable"
-                                #'clocktable-dynamic-block-handler
-                                :parameters '(:scope :maxlevel :block :tstart
-                                              :tend :step :match :tags :formula
-                                              :fileskip0 :emphasize))
+(eval-when (:load-toplevel :execute)
+  (register-dynamic-block-handler "clocktable"
+                                  #'clocktable-dynamic-block-handler
+                                  :parameters '(:scope :maxlevel :block :tstart
+                                                :tend :step :match :tags :formula
+                                                :fileskip0 :emphasize)))
