@@ -872,18 +872,18 @@
                         (agenda-match-entry-end-line match-entry))
                   :to-equal (list document heading path 1 2))))))
 
-  (it "returns exact daily habit states from repeat dates and DONE log history"
+  (it "reconstructs restart habit due dates from DONE log history"
     (let* ((source
              (format nil
-                     "* TODO Drink water~%SCHEDULED: <2025-01-02 Thu .+1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-02 Thu]~%- State \"DONE\" from \"TODO\" [2025-01-04 Sat]~%:END:~%"))
+                     "* TODO Drink water~%SCHEDULED: <2025-01-10 Fri .+1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun]~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%:END:~%"))
            (document (parse-org source))
            (entries
              (agenda-result-entries
               (agenda (list document)
-                      (make-org-time-value "2025-01-01")
-                      (make-org-time-value "2025-01-06")
+                      (make-org-time-value "2025-01-05")
+                      (make-org-time-value "2025-01-10")
                       :time-context
-                      (agenda-test-context "2025-01-04T12:00:00+00:00")
+                      (agenda-test-context "2025-01-10T12:00:00+00:00")
                       :future-repeats :none)))
            (habit-entry (find-if #'agenda-entry-habit-p entries))
            (consistency
@@ -895,17 +895,84 @@
       (with-soft-assertions
         (expect (agenda-entry-habit-p habit-entry) :to-be t)
         (expect consistency
-                :to-equal '(("2025-01-01" :within-schedule)
-                            ("2025-01-02" :completed)
-                            ("2025-01-03" :within-schedule)
-                            ("2025-01-04" :completed)
-                            ("2025-01-05" :within-schedule)
-                            ("2025-01-06" :late)))
+                :to-equal '(("2025-01-05" :completed)
+                            ("2025-01-06" :within-schedule)
+                            ("2025-01-07" :late)
+                            ("2025-01-08" :late)
+                            ("2025-01-09" :completed)
+                            ("2025-01-10" :within-schedule)))
         (expect (every (lambda (entry)
                          (or (agenda-entry-habit-p entry)
                              (null (agenda-entry-habit-consistency entry))))
                        entries)
                 :to-be t))))
+
+  (it "keeps cumulate and catch-up habit due dates distinct"
+    (labels ((states (scheduled done-1 done-2 end-date
+                       &optional
+                         (reference-time "2025-01-10T12:00:00+00:00"))
+               (let* ((source
+                        (format nil
+                                "* TODO Drink water~%SCHEDULED: <~A>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [~A]~%- State \"DONE\" from \"TODO\" [~A]~%:END:~%"
+                                scheduled done-1 done-2))
+                      (document (parse-org source))
+                      (entries
+                        (agenda-result-entries
+                         (agenda (list document)
+                                 (make-org-time-value "2025-01-05")
+                                 (make-org-time-value end-date)
+                                 :time-context
+                                 (agenda-test-context reference-time)
+                                 :future-repeats :none)))
+                      (habit-entry (find-if #'agenda-entry-habit-p entries)))
+                 (mapcar (lambda (day)
+                           (list (org-time-value-iso8601 (getf day :date))
+                                 (getf day :status)))
+                         (agenda-entry-habit-consistency habit-entry)))))
+      (with-soft-assertions
+        (expect (states "2025-01-10 Fri +1d"
+                        "2025-01-05 Sun" "2025-01-09 Thu" "2025-01-11")
+                :to-equal '(("2025-01-05" :completed)
+                            ("2025-01-06" :within-schedule)
+                            ("2025-01-07" :within-schedule)
+                            ("2025-01-08" :within-schedule)
+                            ("2025-01-09" :completed)
+                            ("2025-01-10" :within-schedule)
+                            ("2025-01-11" :within-schedule)))
+        (expect (states "2025-01-09 Thu ++2d"
+                        "2025-01-05 Sun" "2025-01-08 Wed" "2025-01-11")
+                :to-equal '(("2025-01-05" :completed)
+                            ("2025-01-06" :within-schedule)
+                            ("2025-01-07" :within-schedule)
+                            ("2025-01-08" :completed)
+                            ("2025-01-09" :within-schedule)
+                            ("2025-01-10" :late)
+                            ("2025-01-11" :within-schedule)))
+        (expect (states "2025-01-10 Fri ++2d"
+                        "2025-01-05 Sun" "2025-01-08 Wed" "2025-01-11")
+                :to-equal '(("2025-01-05" :completed)
+                            ("2025-01-06" :within-schedule)
+                            ("2025-01-07" :late)
+                            ("2025-01-08" :completed)
+                            ("2025-01-09" :within-schedule)
+                            ("2025-01-10" :within-schedule)
+                            ("2025-01-11" :within-schedule)))
+        (expect (states "2025-01-15 Wed ++5d"
+                        "2025-01-05 Sun" "2025-01-06 Mon" "2025-01-17"
+                        "2025-01-16T12:00:00+00:00")
+                :to-equal '(("2025-01-05" :completed)
+                            ("2025-01-06" :completed)
+                            ("2025-01-07" :within-schedule)
+                            ("2025-01-08" :within-schedule)
+                            ("2025-01-09" :within-schedule)
+                            ("2025-01-10" :within-schedule)
+                            ("2025-01-11" :within-schedule)
+                            ("2025-01-12" :within-schedule)
+                            ("2025-01-13" :within-schedule)
+                            ("2025-01-14" :within-schedule)
+                            ("2025-01-15" :within-schedule)
+                            ("2025-01-16" :late)
+                            ("2025-01-17" :within-schedule))))))
 
   (it "signals a named agenda reason for a habit without a scheduled repeater"
     (let* ((document

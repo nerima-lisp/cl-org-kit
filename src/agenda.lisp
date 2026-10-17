@@ -79,9 +79,10 @@
 
 Each row is a plist with :DATE as a date-only ORG-TIME-VALUE and :STATUS as
 :COMPLETED, :WITHIN-SCHEDULE, or :LATE. A DONE state log timestamp, or CLOSED
-on a currently done heading, marks its date completed. The scheduled repeater
-sets the initial due date; a completion advances that date by the repeater for
-restart repeaters, or to the next scheduled repeat date for other modes."
+on a currently done heading, marks its date completed. SCHEDULED is the current
+due date; historical due dates are reconstructed from DONE log timestamps
+according to repeater mode. Incomplete dates after the reference date remain
+:WITHIN-SCHEDULE."
   (%agenda-entry-habit-consistency entry))
 
 (defun agenda-entry-source-node (entry)
@@ -411,20 +412,35 @@ restart repeaters, or to the next scheduled repeat date for other modes."
                             current amount unit time-context)))
     (nreverse dates)))
 
-(defun agenda-habit-next-due-ordinal (completion-ordinal view repeat-dates
-                                     time-context)
-  "Return the due date after COMPLETION-ORDINAL for VIEW's repeater mode."
-  (let ((amount (org-timestamp-view-repeater-amount view))
-        (unit (org-timestamp-view-repeater-unit view)))
-    (if (eq (org-timestamp-view-repeater-mode view) :restart)
-        (agenda-date-ordinal
-         (agenda-time-value-date
-          (agenda-add-interval
-           (agenda-date-value
-            (cl-date-kit:local-date-from-epoch-day completion-ordinal))
-           amount unit time-context)))
-        (find-if (lambda (ordinal) (> ordinal completion-ordinal))
-                 repeat-dates))))
+(defun agenda-habit-next-due-ordinal (completion-ordinal view scheduled-ordinal
+                                     later-completion-count previous-due)
+  "Return the due date after COMPLETION-ORDINAL for the repeater mode on VIEW."
+  (let* ((amount (org-timestamp-view-repeater-amount view))
+         (unit (org-timestamp-view-repeater-unit view))
+         (repeat-days (floor (* amount
+                               (ecase unit
+                                 (:day 1)
+                                 (:week 7)
+                                 (:month 30.4)
+                                 (:year 365.25)))))
+         (mode (org-timestamp-view-repeater-mode view)))
+    (ecase mode
+      (:restart (+ completion-ordinal repeat-days))
+      (:cumulate (- scheduled-ordinal
+                    (* repeat-days later-completion-count)))
+      (:catch-up
+       (let ((due
+               (or previous-due
+                   (+ completion-ordinal
+                      (let ((offset
+                              (mod (- scheduled-ordinal completion-ordinal)
+                                   repeat-days)))
+                        (if (zerop offset) repeat-days offset))))))
+         (if previous-due
+             (+ due (* (1+ (floor (max (- completion-ordinal due) 0)
+                                  repeat-days))
+                       repeat-days))
+             due))))))
 
 (defun agenda-habit-consistency-data (document heading planning start-date
                                      end-date time-context state)
@@ -446,37 +462,51 @@ restart repeaters, or to the next scheduled repeat date for other modes."
                              (node-text scheduled)
                              "Habit consistency requires a scheduled repeater")))
     (let* ((scheduled-date (agenda-view-start-date view))
-           (scheduled-ordinal (agenda-date-ordinal scheduled-date))
            (repeat-dates (agenda-habit-repeat-dates view end-date state
                                                     time-context))
+           (scheduled-ordinal (or (first repeat-dates)
+                                  (agenda-date-ordinal scheduled-date)))
            (completion-dates (agenda-habit-completion-dates document heading))
            (completion-dates (remove-if
                               (lambda (ordinal)
                                 (> ordinal (agenda-date-ordinal end-date)))
                               completion-dates))
+           (completion-due-dates
+             (let ((later-completion-count (1- (length completion-dates)))
+                   (previous-due nil))
+               (loop for completion-ordinal in completion-dates
+                     for due-ordinal =
+                       (agenda-habit-next-due-ordinal
+                        completion-ordinal view scheduled-ordinal
+                        later-completion-count previous-due)
+                     do (setf previous-due due-ordinal)
+                        (decf later-completion-count)
+                     collect due-ordinal)))
            (completion-tail completion-dates)
+           (due-tail completion-due-dates)
+           (start-ordinal (agenda-date-ordinal start-date))
+           (reference-ordinal
+             (agenda-date-ordinal (agenda-reference-date time-context)))
            (next-due scheduled-ordinal)
            (rows nil))
-      (loop while (and completion-tail
-                       (< (car completion-tail)
-                          (agenda-date-ordinal start-date)))
-            do (setf next-due
-                     (agenda-habit-next-due-ordinal
-                      (pop completion-tail) view repeat-dates time-context)))
-      (loop for ordinal from (agenda-date-ordinal start-date)
+      (loop while (and completion-tail due-tail
+                       (< (car completion-tail) start-ordinal))
+            do (pop completion-tail)
+               (setf next-due (pop due-tail)))
+      (loop for ordinal from start-ordinal
               to (agenda-date-ordinal end-date)
             for completed-p = (and completion-tail
                                    (= (car completion-tail) ordinal))
-            for status = (if completed-p
-                             :completed
-                             (if (or (< ordinal scheduled-ordinal)
-                                     (and next-due (<= ordinal next-due)))
-                                 :within-schedule
-                                 :late))
+            for status = (cond
+                           (completed-p :completed)
+                           ((or (> ordinal reference-ordinal)
+                                (< ordinal scheduled-ordinal)
+                                (and next-due (<= ordinal next-due)))
+                            :within-schedule)
+                           (t :late))
             do (when completed-p
-                 (setf next-due
-                       (agenda-habit-next-due-ordinal
-                        (pop completion-tail) view repeat-dates time-context)))
+                 (pop completion-tail)
+                 (setf next-due (pop due-tail)))
                (push (list :date (agenda-date-value
                                   (cl-date-kit:local-date-from-epoch-day ordinal))
                            :status status)
