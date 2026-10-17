@@ -184,8 +184,9 @@ entries for the inclusive start and end dates. Its call options are
 `:scheduled-delay` is a nonnegative integer day count. A scheduled timestamp's
 explicit warning amount and unit override `:scheduled-delay`; otherwise that
 option supplies the delay in days. This warning amount or option value is the
-effective delay used below. The first
-scheduled occurrence appears on its scheduled date when its visible date is on
+effective delay used below. The visible date is the calendar date obtained by
+applying the effective delay to the scheduled timestamp. The first scheduled
+occurrence appears on its scheduled date when its visible date is on
 or before that date and the scheduled date is in range. If the scheduled date is
 before the reference date, a reminder appears on the reference date once its
 visible date has arrived, provided the reference date is in range. For a repeat
