@@ -214,7 +214,13 @@
         (expect (document-text explicit-nil-result)
                 :to-equal (format nil "* [#B] Task~%"))
         (expect (document-text numeric-result)
-                :to-equal (format nil "#+PRIORITIES: 1 10 5~%* [#5] Task~%")))))
+                :to-equal (format nil "#+PRIORITIES: 1 10 5~%* [#5] Task~%"))
+        (multiple-value-bind (value kind valid-p)
+            (org-kit::edit-priority-setting-value "65")
+          (expect (list value kind valid-p) :to-equal '(65 :alphabetic t)))
+        (multiple-value-bind (value kind valid-p)
+            (org-kit::edit-priority-setting-value "5")
+          (expect (list value kind valid-p) :to-equal '(5 :numeric t))))))
 
   (it "clears an out-of-range priority and cycles to the opposite end"
     (let* ((source
@@ -282,7 +288,13 @@
                    (adjust-heading-priority range-document range-heading :up
                                             :previous-direction :sideways)
                    nil)
-               (org-edit-error (condition) condition))))
+               (org-edit-error (condition) condition)))
+           (current-source
+             (format nil "#+PRIORITIES: A E C~%* [#F] Task~%"))
+           (current-document (parse-org current-source))
+           (current-heading (first (edit-headline-test-nodes current-document)))
+           (current-result
+             (adjust-heading-priority current-document current-heading :up)))
       (with-soft-assertions
         (expect (typep invalid-range 'org-edit-error) :to-be t)
         (when (typep invalid-range 'org-edit-error)
@@ -301,7 +313,23 @@
           (expect (org-edit-error-reason invalid-previous-direction)
                   :to-be :invalid-value))
         (expect (document-text range-document) :to-equal range-source)
-        (expect (document-text directive-document) :to-equal directive-source))))
+        (expect (document-text directive-document) :to-equal directive-source)
+        (progn
+          (expect (document-text current-result)
+                  :to-equal (format nil "#+PRIORITIES: A E C~%* [#E] Task~%"))
+          (expect (document-text current-document) :to-equal current-source)))))
+  (it "rejects unsupported current priority values before adjusting"
+    (let* ((document (parse-org "* Task"))
+           (heading (first (edit-headline-test-nodes document))))
+      (setf (node-property heading :priority) :unsupported)
+      (signals org-edit-error
+        (adjust-heading-priority document heading :up))
+      (progn
+  (expect (node-property heading :priority) :to-be :unsupported)
+  (multiple-value-bind (value kind token valid-p)
+      (org-kit::edit-priority-object-value (code-char 66))
+    (expect (list value kind token valid-p)
+        :to-equal '(66 :alphabetic "B" t))))))
 
   (it "edits a final headline without a trailing newline and preserves its bytes"
     (let* ((source "* Plain")
@@ -522,7 +550,7 @@
       (edit-headline-test-assert-result
        without-todo without-priority without-todo-source without-todo-tree
        without-todo-path
-       priority-start (+ priority-start 4) "" '(:priority))
+       priority-start (+ priority-start 5) "" '(:priority))
       (expect (node-property (first (edit-headline-test-nodes without-priority))
                              :todo-keyword)
               :to-be nil)))

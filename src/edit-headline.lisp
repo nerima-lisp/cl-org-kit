@@ -266,30 +266,38 @@
       (multiple-value-bind (replacement priority-value priority-kind)
           (if priority
               (edit-headline-priority-value priority target)
-              (values nil nil nil))
+            (values nil nil nil))
         (when (and priority
                    (not (edit-priority-valid-in-range-p
                          priority-value priority-kind highest lowest policy-kind)))
           (edit-signal-error target :invalid-value
                              "Priority is outside the document's PRIORITIES range"))
-      (multiple-value-bind (marker-end todo-start todo-end priority-start priority-end)
-          (edit-headline-prefix-layout document headline)
-        (declare (ignore todo-start))
-        (let ((patches
-                (cond (priority-start
-                       (if replacement
-                           (list (edit-make-patch
-                                  priority-start priority-end
-                                  (format nil "[#~A]" replacement) target))
-                           (list (edit-make-patch priority-start priority-end
-                                                  "" target))))
-                      (replacement
-                       (let ((position (or todo-end marker-end)))
-                         (list (edit-make-patch
-                                position position
-                                (format nil " [#~A]" replacement) target)))))))
-          (edit-headline-apply document headline target patches
-                               (list :priority priority-value))))))))
+        (multiple-value-bind (marker-end todo-start todo-end priority-start priority-end)
+            (edit-headline-prefix-layout document headline)
+          (declare (ignore todo-start))
+          (let ((patches
+                 (cond (priority-start
+                        (if replacement
+                            (list (edit-make-patch
+                                   priority-start priority-end
+                                   (format nil "[#~A]" replacement) target))
+                          (list (edit-make-patch
+                                 priority-start
+                                 (if (and (< priority-end
+                                             (length (document-text document)))
+                                          (find (char (document-text document)
+                                                      priority-end)
+                                                '(#\Space #\Tab)))
+                                     (1+ priority-end)
+                                   priority-end)
+                                 "" target))))
+                       (replacement
+                        (let ((position (or todo-end marker-end)))
+                          (list (edit-make-patch
+                                 position position
+                                 (format nil " [#~A]" replacement) target)))))))
+            (edit-headline-apply document headline target patches
+                                 (list :priority priority-value))))))))
 
 (defun adjust-heading-priority (document target direction &key previous-direction)
   "Move a headline priority one step up or down within its PRIORITIES range.
@@ -312,13 +320,10 @@ An unset priority starts at the default, or wraps when PREVIOUS-DIRECTION equals
               (edit-priority-current-value
                priority)
               (values default policy-kind nil t))
-        (declare (ignore token))
-        (unless (or repeat-unset-p
-                    (and current-valid-p
-                         (edit-priority-valid-in-range-p
-                          current current-kind highest lowest policy-kind)))
+        (declare (ignore current-kind token))
+        (unless (or repeat-unset-p current-valid-p)
           (edit-signal-error target :invalid-value
-                             "Current priority is outside the document's PRIORITIES range"))
+                             "Current priority is not a supported priority value"))
         (let* ((next (cond (repeat-unset-p
                             (if (eq direction :up) lowest highest))
                            (priority
