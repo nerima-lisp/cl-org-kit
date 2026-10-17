@@ -1106,7 +1106,13 @@
                                       (export-results-adjacent-p
                                        node results-node))
                                     (result-views nil))
-                                   (when adjacent-p
+                                   ;; Org drops adjacent results that the
+                                   ;; mode does not export, so they must not
+                                   ;; contribute footnotes or selection.
+                                   (when (and adjacent-p
+                                              (member requested-mode
+                                                      '(:results :both)
+                                                      :test #'eq))
                                      (multiple-value-bind (prepared descendant-p)
                                          (prepare-node results-node source-document
                                                        selected-scope depth
@@ -1120,8 +1126,7 @@
                                    (push (%make-export-view
                                           :node node
                                           :children result-views
-                                          :payload (list :exports :both
-                                                         :requested-exports
+                                          :payload (list :exports
                                                          requested-mode
                                                          :adjacent-results
                                                          adjacent-p)

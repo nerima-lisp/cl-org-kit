@@ -29,6 +29,15 @@ rejected, and a successful call returns the stream.
 context values. Non-NIL context metadata overrides the corresponding Org
 keywords such as `#+TITLE`; NIL leaves the in-document value in effect.
 
+## Source blocks
+
+A source block's `:exports` header argument selects what is exported, and
+defaults to `code`. `code` exports the block, `results` exports the
+`#+RESULTS:` element that follows it with only blank lines between, `both`
+exports the two, and `none` exports neither. Source blocks are not executed,
+so `results` exports nothing when no such `#+RESULTS:` element exists.
+Results that the mode leaves out take no part in footnote numbering.
+
 ## Errors and limits
 
 Unsupported syntax for a backend signals `org-export-unsupported-syntax` with

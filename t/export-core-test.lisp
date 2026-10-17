@@ -1085,15 +1085,9 @@
         (expect (getf (org-kit::export-view-payload with-ignored-view) :exports)
                 :to-be :both)
         (expect (getf (org-kit::export-view-payload with-ignored-view)
-                      :requested-exports)
-                :to-be :both)
-        (expect (getf (org-kit::export-view-payload with-ignored-view)
                       :adjacent-results)
                 :to-be t)
         (expect (getf (org-kit::export-view-payload ignored-view) :exports)
-                :to-be :both)
-        (expect (getf (org-kit::export-view-payload ignored-view)
-                      :requested-exports)
                 :to-be :code)
         (expect (every (lambda (condition)
                          (and (typep condition 'org-export-unsupported-syntax)
@@ -1156,15 +1150,11 @@
                   (org-kit::export-view-node separated-result-view))))
       (with-soft-assertions
         (expect (mapcar (lambda (payload) (getf payload :exports)) source-payloads)
-                :to-equal '(:both :both :both :both :both :both))
-        (expect (mapcar (lambda (payload)
-                          (getf payload :requested-exports))
-                        source-payloads)
                 :to-equal '(:both :code :results :none :code :results))
         (expect (mapcar (lambda (payload) (getf payload :adjacent-results))
                         source-payloads)
                 :to-equal '(t t t t nil nil))
-        (expect result-child-counts :to-equal '(1 1 1 1 0 0))
+        (expect result-child-counts :to-equal '(1 0 1 0 0 0))
         (expect separated-result :to-be-truthy)
         (expect (and separated-result-view
                      (eq (getf (org-kit::export-view-payload separated-result-view)
@@ -1175,6 +1165,33 @@
                      (string= (node-property separated-result :value)
                               "separated-result"))
                 :to-be t))))
+
+  (it "exports only the parts each source export mode selects in every backend"
+    (let* ((document
+             (parse-org
+              (export-core-test-lines
+               "#+BEGIN_SRC text :exports both" "both-code" "#+END_SRC"
+               "#+RESULTS:" ": both-result"
+               "#+BEGIN_SRC text :exports code" "code-code" "#+END_SRC"
+               "#+RESULTS:" ": code-result"
+               "#+BEGIN_SRC text" "default-code" "#+END_SRC"
+               "#+RESULTS:" ": default-result [fn:secretlabel]"
+               "#+BEGIN_SRC text :exports results" "results-code" "#+END_SRC"
+               "#+RESULTS:" ": results-result"
+               "#+BEGIN_SRC text :exports results" "unrun-code" "#+END_SRC"
+               ""
+               "#+BEGIN_SRC text :exports none" "none-code" "#+END_SRC"
+               "#+RESULTS:" ": none-result")))
+           (outputs (mapcar (lambda (backend) (export-org document backend))
+                            '(:html :gfm :ascii))))
+      (with-soft-assertions
+        (dolist (output outputs)
+          (expect (mapcar (lambda (text) (and (search text output) t))
+                          '("both-code" "both-result" "code-code" "code-result"
+                            "default-code" "default-result" "secretlabel"
+                            "results-code" "results-result" "unrun-code"
+                            "none-code" "none-result"))
+                  :to-equal '(t t t nil t nil nil nil t nil nil nil))))))
 
   (it "does not mutate documents on successful preparation or failure"
     (let* ((source (parse-org "#+INCLUDE: \"part.org\"" :source-name "main.org"))
