@@ -206,6 +206,48 @@
         (expect (document-text (edit-result-updated-document result)) :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
+  (it "rejects unavailable relative hline ordinals"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 0 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (dolist (case '((1 1 :above)
+                      (3 2 :above)
+                      (3 0 :above)
+                      (3 :invalid :above)))
+        (expect (table-recalculate-test-condition
+                 (lambda ()
+                   (org-kit::table-recalculate-relative-hline-row
+                    #(2) (first case) (second case) (third case) table)))
+                :to-equal '(:table :invalid-reference)))))
+
+  (it "rejects non-positive hline offsets"
+    (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (base-reference
+             (org-kit::table-calc-assignment-target
+              (table-recalculate-test-assignment "$1=1"))))
+      (dolist (offset '(0 :invalid))
+        (let ((reference (org-kit::copy-table-calc-reference base-reference)))
+          (setf (org-kit::table-calc-reference-row-kind reference) :hline-following
+                (org-kit::table-calc-reference-row-value reference) 1
+                (org-kit::table-calc-reference-row-offset reference) offset)
+          (expect (table-recalculate-test-condition
+                   (lambda ()
+                     (org-kit::table-recalculate-reference-position
+                      reference 1 1 2 1 (make-hash-table :test #'equal) #(1) table)))
+                  :to-equal '(:table :invalid-reference))))))
+
+  (it "collects direct expression regions without a remote resolver"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 0 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (expression
+             (org-kit::table-calc-assignment-expression
+              (table-recalculate-test-assignment "@2$2=@1$1")))
+           (regions
+             (org-kit::table-recalculate-expression-regions
+              expression 2 2 2 2 (make-hash-table :test #'equal) table
+              (make-limits) (org-kit::make-table-calc-work-budget))))
+      (expect regions :to-equal '((1 1 1 1)))))
+
   (it "rejects an unavailable hline anchor"
     (let* ((source
              (format nil "| a | b |~%|---+---|~%| 1 | 0 |~%#+TBLFM: @2$2=@II$1~%"))
@@ -291,6 +333,10 @@
         (expect (document-text (edit-result-updated-document result)) :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
+  (it "strips Org's trailing decimal point from constant values"
+    (expect (org-kit::table-recalculate-constant-pairs "ratio=3.")
+            :to-equal '(("ratio" . "3"))))
+
   (it "rejects unknown constants and properties without changing the document"
     (dolist (case '(("$missing" :unknown-constant)
                     ("$PROP_missing" :unknown-property)))
@@ -330,6 +376,50 @@
         (expect (length tables) :to-be 2)
         (expect (document-text (edit-result-updated-document result)) :to-equal expected)
         (expect (document-text document) :to-equal source))))
+
+  (it "rejects a non-string remote table name"
+    (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (context (org-kit::make-table-recalculate-context))
+           (remote-function
+             (org-kit::table-recalculate-remote-reference-function context table))
+           (expression
+             (org-kit::table-calc-assignment-expression
+              (table-recalculate-test-assignment "$1=1"))))
+      (expect (table-recalculate-test-condition
+               (lambda () (funcall remote-function 42 expression 1 1)))
+              :to-equal '(:table :unknown-remote-table))))
+
+  (it "rejects remote expressions that do not select a field or range"
+    (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (tables (make-hash-table :test #'equal))
+           (cache (make-hash-table :test #'eq))
+           (state
+             (org-kit::make-table-recalculate-state
+              :standard-rows #(#(t)) :hline-rows #() :header-row nil :values nil))
+           (context
+             (org-kit::make-table-recalculate-context :tables tables :cache cache))
+           (expression
+             (org-kit::table-calc-assignment-expression
+              (table-recalculate-test-assignment "$1=1")))
+           (remote-function nil))
+      (setf (gethash "remote" tables) table
+            (gethash table cache) state
+            remote-function
+            (org-kit::table-recalculate-remote-reference-function context table))
+      (expect (table-recalculate-test-condition
+               (lambda () (funcall remote-function "remote" expression 1 1)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "returns a cached state for a previously computed table"
+    (let* ((table :cached-table)
+           (state (org-kit::make-table-recalculate-state))
+           (cache (make-hash-table :test #'eq))
+           (context (org-kit::make-table-recalculate-context :cache cache)))
+      (setf (gethash table cache) state)
+      (expect (eq (org-kit::table-recalculate-compute-state context table) state)
+              :to-be t)))
 
   (it "evaluates duration modes from HH:MM and HH:MM:SS cell references"
     (let* ((source
@@ -596,6 +686,40 @@
                   assignment 2 2 (make-hash-table :test #'equal) #() table)))
               :to-equal '(:table :invalid-reference))))
 
+  (it "rejects unsupported column kinds while normalizing column assignments"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "$1=1")))
+      (setf (org-kit::table-calc-reference-column-kind
+             (org-kit::table-calc-assignment-target assignment))
+            :relative)
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-normalize-assignment-target
+                  assignment 2 2 (make-hash-table :test #'equal) #() table)))
+              :to-equal '(:table :invalid-reference))))
+
+  (it "rejects an out-of-bounds position returned by reference resolution"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (reference
+             (org-kit::table-calc-assignment-target
+              (table-recalculate-test-assignment "$1=1")))
+           (symbol 'org-kit::table-recalculate-reference-position)
+           (original (symbol-function symbol)))
+      (unwind-protect
+           (progn
+             (setf (symbol-function symbol)
+                   (lambda (&rest arguments)
+                     (declare (ignore arguments))
+                     (values 0 1)))
+             (expect (table-recalculate-test-condition
+                      (lambda ()
+                        (org-kit::table-recalculate-target-position
+                         reference 2 2 (make-hash-table :test #'equal) #() table)))
+                     :to-equal '(:table :invalid-reference)))
+        (setf (symbol-function symbol) original))))
+
   (it "rejects invalid assignment target rows"
     (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
            (table (table-recalculate-test-find-node (document-root document) :table))
@@ -679,6 +803,17 @@
                       (list assignment) #(#(t)) 1 2 table
                       (make-limits) (org-kit::make-table-calc-work-budget))))
                   :to-equal '(:table :invalid-reference))))))
+
+  (it "rejects field ranges that extend past a ragged row"
+    (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (assignment (table-recalculate-test-assignment "@1$1..@1$2=1")))
+      (expect (table-recalculate-test-condition
+               (lambda ()
+                 (org-kit::table-recalculate-plan-field-assignments
+                  (list assignment) #(#(t)) 1 2 table
+                  (make-limits) (org-kit::make-table-calc-work-budget))))
+              :to-equal '(:table :invalid-reference))))
 
   (it "detects duplicate targets expressed by a name and a number"
     (let* ((document (parse-org
