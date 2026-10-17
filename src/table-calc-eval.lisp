@@ -360,8 +360,6 @@
                         (subseq trimmed 0 (1- (length trimmed)))
                         trimmed))
          (decimal (parse-safe-decimal canonical :limits limits)))
-    (unless decimal
-      (table-calc-evaluation-error :non-finite-result :formula))
     (setf (safe-decimal-float-p decimal) t)
     decimal))
 

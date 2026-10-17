@@ -1,11 +1,12 @@
 ;;;; t/table-calc-eval-test.lisp
 (in-package #:cl-org-kit/test)
 
-(defun table-calc-eval-test-assignment (formula &optional (index 0) (limits (make-limits)))
+(defun table-calc-eval-test-assignment
+    (formula &optional (index 0) (limits (make-limits)) functions)
   (let ((assignment
           (nth index
                (org-kit::table-calc-program-assignments
-                (org-kit::table-calc-parse-formula formula limits)))))
+                (org-kit::table-calc-parse-formula formula limits functions)))))
     (or assignment (error "No table formula assignment at index ~D." index))))
 
 (defun table-calc-eval-test-position-function
@@ -50,9 +51,10 @@
 (defun table-calc-eval-test-evaluate
     (formula &key (assignment-index 0) (base-row 1) (base-column 1)
                   (last-row 1) (named-columns nil) (cells nil)
-                  (limits (make-limits)) work-budget hline-anchors)
+                  (limits (make-limits)) work-budget hline-anchors functions
+                  reference-value-function remote-function current-row current-column)
   (let ((assignment (table-calc-eval-test-assignment
-                     formula assignment-index limits)))
+                     formula assignment-index limits functions)))
     (org-kit::table-calc-evaluate-assignment
      assignment
      (table-calc-eval-test-position-function
@@ -60,7 +62,25 @@
      (table-calc-eval-test-cell-value-function cells)
      :limits limits
      :work-budget (or work-budget
-                      (org-kit::make-table-calc-work-budget)))))
+                      (org-kit::make-table-calc-work-budget))
+     :functions functions
+     :reference-value-function reference-value-function
+     :remote-function remote-function
+     :current-row current-row
+     :current-column current-column)))
+
+(defun table-calc-eval-test-expression-value (formula)
+  (let* ((assignment (table-calc-eval-test-assignment formula))
+         (limits (make-limits)))
+    (org-kit::table-calc-evaluate-expression
+     (org-kit::table-calc-assignment-expression assignment)
+     (table-calc-eval-test-position-function 1 1 1 nil)
+     (table-calc-eval-test-cell-value-function
+      (table-calc-eval-test-cell-map))
+     (org-kit::table-calc-assignment-mode assignment)
+     limits (org-kit::make-table-calc-work-budget)
+     (org-kit::table-calc-assignment-target-description assignment)
+     :flags (org-kit::table-calc-assignment-flags assignment))))
 
 (defun table-calc-eval-test-condition (formula &rest arguments)
   (handler-case
@@ -617,3 +637,399 @@
       (table-calc-eval-test-expect-limit
        condition :max-formula-work 1 2)
       (expect reads :to-equal 0))))
+
+(describe "table formula evaluator helper branches"
+  (it "uses default precision in decimal arithmetic helpers"
+    (let* ((limits (make-limits :max-formula-precision 4))
+           (zero (table-calc-test-decimal "0" limits))
+           (one (table-calc-test-decimal "1" limits))
+           (two (table-calc-test-decimal "2" limits))
+           (large (table-calc-test-decimal "1e8" limits)))
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-add zero zero limits))
+              :to-equal 0)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-add zero one limits))
+              :to-equal 1)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-add one zero limits))
+              :to-equal 1)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-add large one limits))
+              :to-equal 100000000)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-add one two limits))
+              :to-equal 3)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-multiply
+                (table-calc-test-decimal "1.2" limits)
+                (table-calc-test-decimal "5" limits) limits))
+              :to-equal 6)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-multiply zero one limits))
+              :to-equal 0)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-divide
+                one (table-calc-test-decimal "4" limits) limits "target"))
+              :to-equal 1/4)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-decimal-divide
+                zero two limits "target"))
+              :to-equal 0)))
+
+  (it "evaluates mixed rational and decimal arithmetic and decimal conversions"
+    (let* ((limits (make-limits))
+           (decimal (table-calc-test-decimal "1.25" limits))
+           (one (table-calc-test-decimal "1" limits))
+           (zero (table-calc-test-decimal "0" limits)))
+      (dolist (case `((#\+ 1/3 1/2 5/6)
+                      (#\- 1/3 1/2 -1/6)
+                      (#\* 1/3 1/2 1/6)
+                      (#\/ 1/3 1/2 2/3)
+                      (#\+ ,one 1/3 4/3)
+                      (#\+ 1/3 ,one 4/3)
+                      (#\+ 1/3 ,zero 1/3)))
+        (expect (org-kit::table-calc-decimal-binary
+                 (first case) (second case) (third case) limits "target")
+                :to-equal (fourth case)))
+      (table-calc-eval-test-expect-table-error
+       (handler-case
+           (org-kit::table-calc-decimal-binary #\/ 1/3 0 limits "target")
+         (error (condition) condition))
+       :division-by-zero)
+      (let ((negative-rational
+              (org-kit::table-calc-number-to-decimal -1/3 limits))
+            (terminating-rational
+              (org-kit::table-calc-number-to-decimal 1/8 limits))
+            (float (org-kit::table-calc-number-to-decimal 1d0 limits)))
+        (expect (minusp (org-kit::safe-decimal-rational negative-rational))
+                :to-be t)
+        (expect (org-kit::safe-decimal-rational terminating-rational)
+                :to-equal 1/8)
+        (expect (org-kit::safe-decimal-float-p float) :to-be t)
+        (expect (org-kit::safe-decimal-rational float) :to-equal 1))
+      (dolist (condition
+                (list (handler-case
+                          (org-kit::table-calc-float-to-decimal
+                           most-positive-double-float limits)
+                        (error (condition) condition))
+                      (handler-case
+                          (org-kit::table-calc-float-to-decimal #c(1d0 2d0) limits)
+                        (error (condition) condition))))
+        (expect (typep condition 'org-table-error) :to-be t)
+        (when (typep condition 'org-table-error)
+          (expect (org-table-error-reason condition) :to-be :non-finite-result)
+          (expect (org-table-error-target condition) :to-be :formula)))
+      (let ((condition
+              (handler-case
+                  (org-kit::table-calc-number-to-decimal t limits)
+                (error (condition) condition))))
+        (expect (typep condition 'org-table-error) :to-be t)
+        (when (typep condition 'org-table-error)
+          (expect (org-table-error-reason condition) :to-be :invalid-value)
+          (expect (org-table-error-target condition) :to-be :formula)))
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-float-to-decimal 1d0 limits))
+              :to-equal 1)
+      (expect (org-kit::table-calc-decimal-negative-p decimal) :to-be nil)))
+
+  (it "coerces scalar values, durations, and Calc type codes"
+    (let* ((limits (make-limits))
+           (decimal (table-calc-test-decimal "1.25" limits))
+           (integer-decimal (table-calc-test-decimal "3" limits))
+           (fraction-decimal (org-kit::%make-safe-decimal
+                              :coefficient 15 :exponent -1
+                              :negative-zero-p nil :float-p nil))
+           (float-decimal (org-kit::%make-safe-decimal
+                           :coefficient 15 :exponent -1
+                           :negative-zero-p nil :float-p t)))
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-coerce-reference-value
+                decimal limits nil))
+              :to-equal 5/4)
+      (expect (org-kit::table-calc-coerce-reference-value
+               decimal limits t)
+              :to-equal 5/4)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-coerce-reference-value
+                3/2 limits nil))
+              :to-equal 3/2)
+      (expect (org-kit::table-calc-coerce-reference-value 3/2 limits t)
+              :to-equal 3/2)
+      (expect (org-kit::table-calc-coerce-reference-value
+               " 2.50 " limits t)
+              :to-equal 5/2)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-coerce-reference-value
+                "2.50" limits nil))
+              :to-equal 5/2)
+      (expect (org-kit::safe-decimal-rational
+               (org-kit::table-calc-coerce-reference-value
+                " -1:02 " limits nil t))
+              :to-equal -3720)
+      (expect (org-kit::table-calc-coerce-reference-value
+               "-1:02" limits t t)
+              :to-equal -3720)
+      (expect (org-kit::table-calc-coerce-reference-value "units" limits nil)
+              :to-equal "units")
+      (expect (org-kit::table-calc-coerce-reference-value t limits nil)
+              :to-be t)
+      (dolist (text '("1:2" "1:99"))
+        (table-calc-eval-test-expect-table-error
+         (handler-case
+             (org-kit::table-calc-coerce-reference-value
+              text limits nil nil t "target")
+           (error (condition) condition))
+         :unsupported-mode))
+      (expect (org-kit::table-calc-function-input-mode :e) :to-equal :e)
+      (expect (org-kit::table-calc-function-input-mode :n) :to-equal :n)
+      (expect (org-kit::table-calc-function-input-mode :en) :to-equal :e)
+      (expect (org-kit::table-calc-function-input-mode :default)
+              :to-equal :default)
+      (expect (org-kit::table-calc-type-code org-kit::+table-calc-nan+)
+              :to-equal 12)
+      (expect (org-kit::table-calc-type-code "text") :to-equal 4)
+      (expect (org-kit::table-calc-type-code float-decimal) :to-equal 3)
+      (expect (org-kit::table-calc-type-code fraction-decimal) :to-equal 2)
+      (expect (org-kit::table-calc-type-code integer-decimal) :to-equal 1)
+      (expect (org-kit::table-calc-type-code 4) :to-equal 1)
+      (expect (org-kit::table-calc-type-code 1/2) :to-equal 2)
+      (expect (org-kit::table-calc-type-code 1d0) :to-equal 3)
+      (expect (org-kit::table-calc-type-code t) :to-equal 0)
+      (expect (org-kit::table-calc-value-string "text" limits)
+              :to-equal "text")
+      (expect (org-kit::table-calc-value-string decimal limits)
+              :to-equal "1.25")
+      (expect (org-kit::table-calc-value-string 5/2 limits)
+              :to-equal "2.5")
+      (expect (org-kit::table-calc-value-string org-kit::+table-calc-nan+ limits)
+              :to-equal "nan")
+      (let ((condition
+              (handler-case (org-kit::table-calc-value-string t limits)
+                (error (condition) condition))))
+        (expect (typep condition 'org-table-error) :to-be t)
+        (when (typep condition 'org-table-error)
+          (expect (org-table-error-reason condition)
+                  :to-be :invalid-function-result)
+          (expect (org-table-error-target condition) :to-be :formula)))))
+
+  (it "compares string and numeric operands and rejects mixed values"
+    (dolist (case '((:less "a" "b" t)
+                    (:less "b" "a" nil)
+                    (:greater "b" "a" t)
+                    (:greater "a" "b" nil)
+                    (:equal "same" "same" t)
+                    (:equal "a" "b" nil)
+                    (:less 1/3 1/2 t)
+                    (:greater 1/2 1/3 t)
+                    (:equal 1/2 2/4 t)))
+      (expect (org-kit::table-calc-compare-values
+               (first case) (second case) (third case) "target")
+              :to-be (fourth case)))
+    (table-calc-eval-test-expect-table-error
+     (handler-case
+         (org-kit::table-calc-compare-values :equal "1" 1 "target")
+       (error (condition) condition))
+     :invalid-value)
+    (expect (org-kit::table-calc-callback-argument
+             (table-calc-test-decimal "2.5") "target")
+            :to-equal 5/2)
+    (expect (org-kit::table-calc-callback-argument 3/2 "target")
+            :to-equal 3/2)
+    (expect (org-kit::table-calc-callback-argument "text" "target")
+            :to-equal "text")
+    (table-calc-eval-test-expect-table-error
+     (handler-case (org-kit::table-calc-callback-argument t "target")
+       (error (condition) condition))
+     :invalid-function-result)
+    (expect (org-kit::table-calc-callback-result "text" "target")
+            :to-equal "text")
+    (expect (org-kit::table-calc-callback-result 3/2 "target")
+            :to-equal 3/2)
+    (table-calc-eval-test-expect-table-error
+     (handler-case (org-kit::table-calc-callback-result t "target")
+       (error (condition) condition))
+     :invalid-function-result))
+
+  (it "covers rational vectors and remote range callback values"
+    (let ((functions (list (cons "third" (lambda (value)
+                                          (declare (ignore value)) 1/3)))))
+      (dolist (formula '("@1$1=1/3+1/2;F"
+                         "@1$1=third(1)+1;F"
+                         "@1$1=1+third(1);F"))
+        (expect (table-calc-eval-test-evaluate
+                 formula :functions functions)
+                :to-equal (if (string= formula "@1$1=1/3+1/2;F")
+                              "5:6" "4:3"))))
+    (let ((cells (table-calc-eval-test-cell-map
+                  '(1 2 "1.5") '(1 3 "0.75"))))
+      (dolist (case '(("@1$1=vsum(@1$2..@1$3);F" . "9:4")
+                      ("@1$1=vmean(@1$2..@1$3);F" . "9:8")
+                      ("@1$1=vmin(@1$2..@1$3);F" . "3:4")
+                      ("@1$1=vmax(@1$2..@1$3);F" . "3:2")))
+        (expect (table-calc-eval-test-evaluate (car case) :cells cells)
+                :to-equal (cdr case)))
+      (table-calc-eval-test-expect-table-error
+       (handler-case
+           (org-kit::table-calc-evaluate-vector
+            "unknown" (org-kit::%make-table-calc-range-value 1 1 1 1)
+            :default (table-calc-eval-test-cell-value-function cells)
+            (make-limits) (org-kit::make-table-calc-work-budget) "target")
+         (error (condition) condition))
+       :invalid-function-result)
+      (expect (table-calc-eval-test-evaluate
+               "@1$1=@1$2;F"
+               :cells (table-calc-eval-test-cell-map '(1 2 "1.5")))
+              :to-equal "3:2"))
+    (expect (table-calc-eval-test-evaluate
+             "@1$1=vsum(remote(inputs,@1$1..@1$2))"
+             :remote-function (lambda (name reference row column)
+                                (declare (ignore reference row column))
+                                (expect name :to-equal "inputs")
+                                #("2" "3")))
+            :to-equal "5")
+    (expect (table-calc-eval-test-evaluate
+             "@1$1=vsum(remote(inputs,@1$1..@1$2))"
+             :remote-function (lambda (name reference row column)
+                                (declare (ignore name reference row column))
+                                '("2" "3")))
+            :to-equal "5")
+    (expect (table-calc-eval-test-evaluate
+             "@1$1=remote(inputs,@1$2)"
+             :remote-function (lambda (name reference row column)
+                                (declare (ignore name reference row column))
+                                "2.5"))
+            :to-equal "2.5")
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition
+      "@1$1=remote(inputs,@1$1..@1$2)"
+      :remote-function (lambda (name reference row column)
+                         (declare (ignore name reference row column))
+                         "not-a-range"))
+     :invalid-function-result)
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition "@1$1=remote(inputs,@1$1)")
+     :unknown-remote-table)
+    (table-calc-eval-test-expect-table-error
+     (handler-case
+         (org-kit::table-calc-function-value
+          "remote" nil nil (make-limits)
+          (org-kit::make-table-calc-work-budget) "target" nil nil :default
+          nil nil 12)
+       (error (condition) condition))
+     :unknown-remote-table))
+
+  (it "covers conditional, logical, unary, and callback error paths"
+    (expect (table-calc-eval-test-expression-value
+             "@1$1=1<2||2<1")
+            :to-be t)
+    (expect (table-calc-eval-test-expression-value
+             "@1$1=1<0||2<1")
+            :to-be nil)
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition "@1$1=\"x\"||1<2")
+     :invalid-value)
+    (expect (table-calc-eval-test-expression-value "@1$1=+1/3;F")
+            :to-equal 1/3)
+    (expect (table-calc-eval-test-expression-value "@1$1=-1/3;F")
+            :to-equal -1/3)
+    (expect (org-kit::safe-decimal-rational
+             (table-calc-eval-test-expression-value "@1$1=+1"))
+            :to-equal 1)
+    (dolist (case '(("@1$1=+\"x\"" :invalid-number)
+                    ("@1$1=-\"x\"" :invalid-number)
+                    ("@1$1=+\"x\";S" :unsupported-mode)
+                    ("@1$1=-\"x\";S" :unsupported-mode)
+                    ("@1$1=(1<2)+1" :invalid-number)
+                    ("@1$1=1+(1<2)" :invalid-number)
+                    ("@1$1=(1<2)+1;S" :unsupported-mode)))
+      (table-calc-eval-test-expect-table-error
+       (table-calc-eval-test-condition (first case)) (second case)))
+    (expect (table-calc-eval-test-evaluate "@1$1=if(1<0,2,3)")
+            :to-equal "3")
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition "@1$1=if(3,2,1)")
+     :invalid-value)
+    (dolist (name '("exp" "sin" "tan"))
+      (table-calc-eval-test-expect-table-error
+       (table-calc-eval-test-condition
+        (format nil "@1$1=~A(\"x\")" name))
+       :invalid-number)
+      (table-calc-eval-test-expect-table-error
+       (table-calc-eval-test-condition
+        (format nil "@1$1=~A(\"x\");S" name))
+       :unsupported-mode))
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition
+      "@1$1=identity(1<2)"
+      :functions (list (cons "identity" #'identity)))
+     :invalid-function-result)
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition
+      "@1$1=constant(1)"
+      :functions (list (cons "constant" (lambda (value)
+                                            (declare (ignore value)) t))))
+     :invalid-function-result)
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition
+      "@1$1=missing(1)"
+      :functions (list (cons "missing" nil)))
+     :unknown-function))
+
+  (it "covers Taylor validation and precision-independent formatting branches"
+    (expect (stringp (table-calc-eval-test-evaluate
+                      "@1$1=taylor(exp(x),x=1/3,2);F"))
+            :to-be t)
+    (expect (org-kit::table-calc-taylor-float-string 1d0)
+            :to-equal "1")
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition "@1$1=taylor(sin(x),x=0,2)")
+     :unsupported-mode)
+    (table-calc-eval-test-expect-table-error
+     (table-calc-eval-test-condition "@1$1=taylor(exp(x),x=0,3)")
+     :unsupported-mode)
+    (dolist (text '("abc" "1:2"))
+      (expect (org-kit::table-calc-duration-cell-seconds text)
+              :to-be nil))
+    (dolist (text '("1:99" "1:00:99"))
+      (expect (org-kit::table-calc-duration-cell-seconds text)
+              :to-be nil))
+    (expect (org-kit::table-calc-duration-cell-seconds "1:02")
+            :to-equal 3720)
+    (expect (org-kit::table-calc-duration-cell-seconds "1:02:03")
+            :to-equal 3723)
+    (expect (org-kit::table-calc-duration-cell-seconds "-1:02")
+            :to-equal -3720)
+    (expect (org-kit::table-calc-rounded-seconds 3/2) :to-equal 2)
+    (expect (org-kit::table-calc-rounded-seconds -3/2) :to-equal -2)
+    (expect (table-calc-eval-test-evaluate "@1$1=3/2;T")
+            :to-equal "00:00:02")
+    (expect (table-calc-eval-test-evaluate "@1$1=-3/2;T")
+            :to-equal "-00:00:02")
+    (expect (org-kit::table-calc-format-result
+             (table-calc-test-decimal "1.25") -1 nil (make-limits) "target")
+            :to-equal "1.2")
+    (expect (org-kit::table-calc-format-result
+             org-kit::+table-calc-nan+ -1 nil (make-limits) "target")
+            :to-equal "")
+    (table-calc-eval-test-expect-table-error
+     (handler-case
+         (org-kit::table-calc-format-result t nil nil (make-limits) "target")
+       (error (condition) condition))
+     :unsupported-mode))
+
+  (it "rejects evaluator-only malformed expression nodes"
+    (let* ((limits (make-limits))
+           (expression (org-kit::%make-table-calc-expression
+                        :kind :unknown :start 0 :end 0 :value nil
+                        :children nil :depth 1)))
+      (table-calc-eval-test-expect-table-error
+       (handler-case
+           (org-kit::table-calc-evaluate-expression
+            expression
+            (table-calc-eval-test-position-function 1 1 1 nil)
+            (table-calc-eval-test-cell-value-function
+             (table-calc-eval-test-cell-map))
+            :default limits (org-kit::make-table-calc-work-budget) "target")
+         (error (condition) condition))
+       :unsupported-mode))))
