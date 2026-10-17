@@ -257,11 +257,11 @@
            (time-context
              (make-time-context
               :reference-time (make-org-time-value "2026-10-13T22:30:00+00:00")
-              :zone (make-fixed-time-zone 0))))
+              :zone (make-fixed-time-zone 180))))
       (expect (query-match-test-titles
                (query-match-now document "DEADLINE<=\"<today>\""
                                 :time-context time-context))
-              :to-equal '("Due today"))))
+              :to-equal '("Due today" "Due tomorrow"))))
 
   (it "reports an invalid time context with a named reason"
     (let* ((document (parse-org "* TODO Task"))
