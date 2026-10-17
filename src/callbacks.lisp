@@ -41,30 +41,30 @@ for the same key replaces the earlier callback."
                  (%callback-registry-callbacks registry))
         function))
 
-(defun invoke-callback (registry kind name &rest arguments)
-  "Invoke the callback registered under KIND and NAME with ARGUMENTS.
-Missing callbacks signal ORG-CALLBACK-ERROR. Callback conditions propagate
-unchanged."
+(defun %lookup-callback (registry kind name condition-class message)
   (unless (callback-registry-p registry)
     (error 'type-error :datum registry :expected-type 'callback-registry))
   (let* ((key (callback-key kind name))
          (callback (gethash key (%callback-registry-callbacks registry))))
     (unless callback
-      (error 'org-callback-error
-             :message "No callback is registered"
+      (error condition-class
+             :message message
              :kind (car key) :name (cdr key) :reason :unregistered))
-    (apply callback arguments)))
+    callback))
+
+(defun invoke-callback (registry kind name &rest arguments)
+  "Invoke the callback registered under KIND and NAME with ARGUMENTS.
+Missing callbacks signal ORG-CALLBACK-ERROR. Callback conditions propagate
+unchanged."
+  (apply (%lookup-callback registry kind name 'org-callback-error
+                           "No callback is registered")
+         arguments))
 
 (defun evaluate-elisp (registry expression)
   "Pass EXPRESSION unchanged to the registered Emacs Lisp evaluator.
 The callback is registered as KIND :EVALUATOR and NAME :EMACS-LISP. This
 library does not read or evaluate EXPRESSION."
-  (unless (callback-registry-p registry)
-    (error 'type-error :datum registry :expected-type 'callback-registry))
-  (let* ((key (callback-key :evaluator :emacs-lisp))
-         (callback (gethash key (%callback-registry-callbacks registry))))
-    (unless callback
-      (error 'org-elisp-evaluator-error
-             :message "No Emacs Lisp evaluator is registered"
-             :kind (car key) :name (cdr key) :reason :unregistered))
-    (funcall callback expression)))
+  (funcall (%lookup-callback registry :evaluator :emacs-lisp
+                             'org-elisp-evaluator-error
+                             "No Emacs Lisp evaluator is registered")
+           expression))
