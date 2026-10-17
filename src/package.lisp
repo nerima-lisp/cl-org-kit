@@ -146,7 +146,7 @@
    #:agenda-match-entry-end-line
    #:agenda #:agenda-todo-list #:agenda-match
    ;; Effective Org semantics
-   #:effective-heading-tags #:effective-property
+   #:effective-heading-tags #:effective-property #:startup-options
    ;; Unit E1 export context and conditions
    #:export-context #:make-export-context #:export-context-p
    #:export-context-title #:export-context-author #:export-context-date

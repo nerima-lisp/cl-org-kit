@@ -44,6 +44,15 @@ Failures:
 | `offset-line-column` | 1-based line and column of an offset (the text length is allowed) |
 | `line-offset` | offset at which a 1-based line starts |
 
+`startup-options` interprets the document's `#+STARTUP` words with Org's
+`org-startup-options` table. Its first value is a plist from each named Org
+variable, without the `org-` prefix, to the value set by the last word naming
+it: `t`, `nil`, or a keyword such as `:overview`, `:time`, `:note`, or
+`:state`. For example, `#+STARTUP: overview lognotedone` yields a plist that
+maps `:startup-folded` to `:overview` and `:log-done` to `:note`. The second
+value lists the words Org does not recognize, in source order. A `:startup`
+argument to `parse-org` replaces the document's words.
+
 Only `#\Newline` advances to the next line. In a CRLF pair, offsets at both
 `#\Return` and `#\Newline` are reported on the line being terminated; the
 column at the `#\Newline` includes the preceding `#\Return`. The offset just

@@ -76,6 +76,34 @@
         (expect (org-kit::org-setting-value disabled :odd-levels-only-p)
                 :to-be nil))))
 
+  (it "interprets every STARTUP word as Org's variable and value"
+    (multiple-value-bind (options unknown)
+        (startup-options
+         (parse-org (format nil "#+STARTUP: overview logdone constSI~%~
+                                 #+STARTUP: nologdone FnConfirm bogus noptag shrink~%")))
+      (with-soft-assertions
+        (expect (getf options :startup-folded) :to-be :overview)
+        (expect (getf options :constants-unit-system) :to-be :si)
+        (expect (getf options :footnote-auto-label) :to-be :confirm)
+        (expect (getf options :startup-shrink-all-tables) :to-be t)
+        (expect (member :log-done options) :to-be-truthy)
+        (expect (getf options :log-done :absent) :to-be nil)
+        (expect (getf options :tag-persistent-alist :absent) :to-be nil)
+        (expect (getf options :log-repeat :absent) :to-be :absent)
+        (expect (length options) :to-equal 12)
+        (expect unknown :to-equal '("bogus")))))
+
+  (it "covers each Org STARTUP option and honors a STARTUP override"
+    (let* ((words (mapcar #'first org-kit::+org-startup-options+))
+           (document (parse-org "" :startup words))
+           (options (startup-options document)))
+      (with-soft-assertions
+        (expect (length words) :to-equal 71)
+        (expect (getf options :log-repeat) :to-be nil)
+        (expect (getf options :pretty-entities) :to-be nil)
+        (expect (nth-value 1 (startup-options document)) :to-be nil)
+        (expect (startup-options (parse-org "")) :to-be nil))))
+
   (it "maps source star counts and logical levels in default mode"
     (let ((document (parse-org "")))
       (with-soft-assertions
