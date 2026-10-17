@@ -142,6 +142,75 @@
                       :to-be 0)
               (expect actual :to-equal (cdr row)))))))
 
+  (it "evaluates each Calc function listed in the Org table manual"
+    (dolist (case '(("@1$1=exp(1)" . "2.7182818")
+                    ("@1$1=sin(30)" . "0.5")
+                    ("@1$1=sin(30);D" . "0.5")
+                    ("@1$1=tan(45);D" . "1.")
+                    ("@1$1=taylor(exp(x),x=7,2)"
+                     . "1096.63315843 x + 548.316579215 (x - 7)^2 - 6579.79895058")
+                    ("@1$1=if(1<20,teen,string(\"\"))" . "teen")
+                    ("@1$1=string(42)" . "42")
+                    ("@1$1=typeof(3)" . "1")))
+      (expect (table-calc-eval-test-evaluate (car case)) :to-equal (cdr case)))
+    (expect (table-calc-eval-test-evaluate "@1$1=vmean(@1$2..@1$3)"
+                                           :cells (table-calc-eval-test-cell-map
+                                                   '(1 2 "2") '(1 3 "4")))
+            :to-equal "3")
+    (expect (table-calc-eval-test-evaluate "@1$1=vsum(@1$2..@1$3)"
+                                           :cells (table-calc-eval-test-cell-map
+                                                   '(1 2 "2") '(1 3 "4")))
+            :to-equal "6"))
+
+  (it "keeps default result display separate from calculation precision"
+    (expect (table-calc-eval-test-evaluate "@1$1=exp(1);p20")
+            :to-equal "2.7182818"))
+
+  (it "formats numeric results with Calc output modes and format strings"
+    (dolist (case '(("@1$1=1/3;n3" . "0.333")
+                    ("@1$1=12345.0;s3" . "1.23e4")
+                    ("@1$1=12345.0;e2" . "12e3")
+                    ("@1$1=1/3;f4" . "0.3333")
+                    ("@1$1=12345.0;%.2e" . "1.23e+04")
+                    ("@1$1=sin(30);Dp3%.1e" . "5.0e-01")
+                    ("@1$1=sin(30);ENp3%.1f" . "0.5")))
+      (expect (table-calc-eval-test-evaluate (car case))
+              :to-equal (cdr case))))
+
+  (it "supports duration suffix modes and explicit degree and radian modes"
+    (dolist (case '(("@1$1=2:12+1:47;T" . "03:59:00")
+                    ("@1$1=2:12+1:47;U" . "03:59")
+                    ("@1$1=3:02:20+(-2:07:00);t" . "0.92")
+                    ("@1$1=sin(30);D" . "0.5")
+                    ("@1$1=sin(90);R" . "0.89399666")
+                    ("@1$1=1;F" . "1")
+                    ("@1$1=1/3;F" . "1:3")
+                    ("@1$1=1;S" . "1")
+                    ("@1$1=1;u" . "1")))
+      (expect (table-calc-eval-test-evaluate (car case)) :to-equal (cdr case)))
+    (let ((cells (table-calc-eval-test-cell-map
+                  '(1 1 "1:02") '(1 2 "2:03"))))
+      (dolist (case '(("@1$3=@1$1+@1$2;T" . "03:05:00")
+                      ("@1$3=@1$1+@1$2;U" . "03:05")
+                      ("@1$3=@1$1+@1$2;t" . "3.08")))
+        (expect (table-calc-eval-test-evaluate (car case) :cells cells)
+                :to-equal (cdr case))))
+    (expect (table-calc-eval-test-evaluate
+             "@1$3=@1$1+@1$2;t"
+             :cells (table-calc-eval-test-cell-map
+                     '(1 1 "1:30:00") '(1 2 "2:00:00")))
+            :to-equal "3.50"))
+
+  (it "reports symbolic and unit mode limits with a named table error"
+    (let ((symbolic
+            (table-calc-eval-test-condition "@1$1=x+1;S"))
+          (unit-bearing
+            (table-calc-eval-test-condition
+             "@1$1=@1$2;u"
+             :cells (table-calc-eval-test-cell-map '(1 2 "12 km")))))
+      (table-calc-eval-test-expect-table-error symbolic :unsupported-mode)
+      (table-calc-eval-test-expect-table-error unit-bearing :unsupported-mode)))
+
   (it "evaluates absolute, relative, last-row, named, and range references"
     (let* ((rows (table-calc-test-oracle-rows "references.tsv"))
            (cases
@@ -380,7 +449,7 @@
     (let ((limits (make-limits :max-formula-precision 2)))
       (dolist (formula '("@1$1=1e3+1" "@1$1=1+1e3"))
         (expect (table-calc-eval-test-evaluate formula :limits limits)
-                :to-equal "1000"))))
+                :to-equal "1000."))))
 
   (it "checks division ratio ordering and exponent bounds"
     (dolist (case '(("@1$1=1/22" . "0.045454545")
@@ -477,7 +546,7 @@
        precision-input-over :max-formula-precision 2 3)
       (expect (table-calc-eval-test-evaluate
                "@1$1=1e2" :limits exponent-limits)
-              :to-equal "100")
+              :to-equal "100.")
       (table-calc-eval-test-expect-limit
        exponent-over :max-formula-exponent 2 3)))
 

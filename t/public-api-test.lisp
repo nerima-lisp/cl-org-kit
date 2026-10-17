@@ -326,7 +326,9 @@ docs/src/reference/node-model.md.")
       (expect (documentation 'table-move-column 'function)
               :to-equal "Move a column between one-based positions and remap supported references.")
       (expect (documentation 'table-recalculate 'function)
-              :to-equal "Recalculate a pipe table's TBLFM formulas and return its validated edit result.")
+              :to-equal
+              "Recalculate a pipe table's TBLFM formulas and return its validated edit result.
+FUNCTIONS is an alist of string names and call-scoped function designators.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.

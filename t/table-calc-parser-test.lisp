@@ -278,6 +278,28 @@
         (expect (mapcar #'org-kit::table-calc-reference-row-value range-references)
                 :to-equal '(1 2)))))
 
+  (it "accepts ordinal, relative, offset, and shorthand hline references"
+    (let* ((formula
+             "$1=@I::$2=@-I::$3=@+II::$4=@III+2::$5=vsum(@I..II)")
+           (assignments
+             (org-kit::table-calc-program-assignments
+              (org-kit::table-calc-parse-formula formula))))
+      (expect (length assignments) :to-be 5)
+      (expect (mapcar #'org-kit::table-calc-expression-kind
+                      (mapcar #'org-kit::table-calc-assignment-expression
+                              assignments))
+              :to-equal '(:reference :reference :reference :reference :function))))
+
+  (it "accepts the supported table formula mode families"
+    (dolist (mode '("p2" "n2" "s2" "e2" "f2" "D" "R" "F" "S"
+                    "u" "T" "t" "U" "E" "N"))
+      (expect (table-calc-test-condition (format nil "$1=1;~A" mode))
+              :to-be nil)))
+
+  (it "accepts exponent format strings and combined Calc modes"
+    (dolist (formula '("$1=sin(30);Dp3%.1e" "$1=1;ENp3%.1f"))
+      (expect (table-calc-test-condition formula) :to-be nil)))
+
   (it "keeps the exact case of named column references"
     (let* ((formula "$1=$INVALID+$invalid")
            (expression
@@ -352,7 +374,7 @@
                    (org-kit::table-calc-parse-formula
                     "$1=2;E::$1=2;N::$1=2;EN::$1=2;%.2f::$1=2;EN%.12f"))))
       (with-soft-assertions
-        (expect functions :to-equal '(:vsum :vmean :vmin :vmax :vcount))
+        (expect functions :to-equal '("vsum" "vmean" "vmin" "vmax" "vcount"))
         (expect (mapcar #'org-kit::table-calc-assignment-mode modes)
                 :to-equal '(:e :n :en :default :en))
         (expect (mapcar #'org-kit::table-calc-assignment-format-precision modes)
@@ -367,10 +389,7 @@
                   (list "#x" 0 :reader-dispatch)
                   (list "#1=(x)" 0 :reader-dispatch)
                   (list "@2$1=1;L" 7 :lisp-mode)
-                  (list "@2$1=1;D" 7 :unsupported-mode)
-                  (list "@2$1=1;%.2e" 7 :unsupported-format)
-                  (list "@2$1=1;ENp3%.1f" 9 :unsupported-mode)
-                  (list "$1=sin($1..$2)" 3 :unknown-function)
+                  (list "$1=unknown($1..$2)" 3 :unknown-function)
                   (list "$1=VSUM($1..$2)" 3 :unknown-function)
                   (list "$1=vsum(1)" 8 :unsupported-function-argument)
                   (list "x=1" 0 :unsupported-assignment)
@@ -398,8 +417,6 @@
                   (list "$1=1;%.f" 5 :unsupported-format)
                   (list "$1=1;%.af" 5 :unsupported-format)
                   (list "$1=1;%.02f" 5 :unsupported-format)
-                  (list "$1=1;%.123f" 5 :unsupported-format)
-                  (list "$1=1;%.13f" 5 :unsupported-format)
                   (list "@2$1=" 5 :empty-expression)
                   (list "::" 0 :empty-assignment)
                   (list "" 0 :empty-formula))))
@@ -407,7 +424,7 @@
         (dolist (case cases)
           (let ((condition (table-calc-test-condition (first case))))
             (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
-            (when condition
+            (when (typep condition 'org-table-unsupported-syntax)
               (expect (org-table-unsupported-syntax-position condition) :to-be (second case))
               (expect (org-table-unsupported-syntax-feature condition) :to-be (third case))))))))
 
@@ -453,6 +470,7 @@
            (depth-three (make-limits :max-formula-ast-depth 3))
            (precision-two (make-limits :max-formula-precision 2))
            (exponent-two (make-limits :max-formula-exponent 2))
+           (format-precision-limit (make-limits :max-formula-precision 34))
            (suffix-token-limit (make-limits :max-formula-tokens 4))
            (token-condition (table-calc-test-condition "$1=1" token-below))
            (reader-eval-condition
@@ -469,7 +487,9 @@
            (precision-condition (table-calc-test-condition "$1=1.23" precision-two))
            (exponent-condition (table-calc-test-condition "$1=1e3" exponent-two))
            (saturated-exponent-condition
-             (table-calc-test-condition "$1=1e999999" exponent-two)))
+             (table-calc-test-condition "$1=1e999999" exponent-two))
+           (format-precision-condition
+             (table-calc-test-condition "$1=1;%.35f" format-precision-limit)))
       (with-soft-assertions
         (expect (length (org-kit::table-calc-program-assignments
                          (org-kit::table-calc-parse-formula "$1=1" token-exact)))
@@ -513,7 +533,13 @@
                 :to-be :max-formula-exponent)
         (expect (org-resource-limit-error-actual exponent-condition) :to-be 3)
         (expect (org-resource-limit-error-actual saturated-exponent-condition)
-                :to-be 3))))
+                :to-be 3)
+        (expect (table-calc-test-condition "$1=1;%.34f" format-precision-limit)
+                :to-be nil)
+        (expect (org-resource-limit-error-limit-name format-precision-condition)
+                :to-be :max-formula-precision)
+        (expect (org-resource-limit-error-actual format-precision-condition)
+                :to-be 35))))
 
   (it "preserves fixnum bounds for parsed references and decimals"
     (let* ((reference-limit (write-to-string most-positive-fixnum))
