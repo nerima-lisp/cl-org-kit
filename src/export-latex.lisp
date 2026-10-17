@@ -110,17 +110,17 @@
           with previous-view = nil
           for view in views
           for separator = (if first-p
-                                  ""
-                                  (if inline-p
-                                      (make-string (node-post-blank
-                                                    (export-view-node previous-view))
-                                                   :initial-element #\Space)
-                                      (if (and (eq (node-type (export-view-node previous-view))
-                                                   :keyword)
-                                               (eq (node-type (export-view-node view))
-                                                   :keyword))
-                                          (string #\Newline)
-                                          (format nil "~%~%"))))
+                              ""
+                              (if inline-p
+                                  (make-string (node-post-blank
+                                                (export-view-node previous-view))
+                                               :initial-element #\Space)
+                                  (if (and (eq (node-type (export-view-node previous-view))
+                                               :keyword)
+                                           (eq (node-type (export-view-node view))
+                                               :keyword))
+                                      (string #\Newline)
+                                      (format nil "~%~%"))))
           for rendered = (export-latex-render-view
                           state view (+ base-count length (length separator)))
           do (when (plusp (length rendered))
