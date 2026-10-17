@@ -827,11 +827,11 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
      (let ((item (node-property headline :raw-value)))
        (values item (not (null item)) t)))
     ((string= name "BLOCKED")
-     (let ((provider (query-context-blocked-provider context)))
-       (if provider
-           (let ((value (funcall provider headline)))
-             (values value (not (null value)) t))
-           (values nil nil t))))
+     (let* ((provider (query-context-blocked-provider context))
+            (provided (and provider (funcall provider headline)))
+            (blocked (or provided (org-todo-blocked-p headline))))
+       (values (if provided provided (and blocked t))
+               (not (null blocked)) t)))
     ((string= name "CLOCKSUM")
      (let ((provider (query-context-clock-sum-provider context)))
        (if provider

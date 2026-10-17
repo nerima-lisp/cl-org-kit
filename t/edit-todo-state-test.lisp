@@ -490,6 +490,72 @@
         (expect (document-text wrong-sequence-document) :to-equal wrong-sequence-source)
         (expect (document-text ambiguous-document) :to-equal ambiguous-source))))
 
+  (it "blocks DONE transitions on unfinished TODO children and ordered siblings"
+    (let* ((at "2025-03-07T09:00:00")
+           (child-source
+             (format nil "#+TODO: TODO | DONE~%* TODO Parent~%** TODO Child~%"))
+           (child-document (parse-org child-source))
+           (child-condition
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 child-document
+                 (edit-todo-state-test-heading-path child-document '("Parent"))
+                 "DONE" :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at)))))
+           (ordered-source
+             (format nil
+                     "#+TODO: TODO | DONE~%* Parent~%:PROPERTIES:~%:ORDERED: t~%:END:~%** TODO First~%** TODO Second~%"))
+           (ordered-document (parse-org ordered-source))
+           (ordered-condition
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 ordered-document
+                 (edit-todo-state-test-heading-path
+                  ordered-document '("Parent" "Second"))
+                 "DONE" :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at))))))
+      (edit-todo-state-test-assert-error child-condition :blocked)
+      (edit-todo-state-test-assert-error ordered-condition :blocked)
+      (with-soft-assertions
+        (expect (document-text child-document) :to-equal child-source)
+        (expect (document-text ordered-document) :to-equal ordered-source))))
+
+  (it "honors NOBLOCKING and leaves checkbox dependencies disabled"
+    (let* ((at "2025-03-07T09:00:00")
+           (unblocked-source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Parent~%:PROPERTIES:~%:NOBLOCKING: t~%:END:~%** TODO Child~%"))
+           (unblocked-document (parse-org unblocked-source))
+           (unblocked-edit
+             (nth-value
+              0 (transition-heading-todo
+                 unblocked-document
+                 (edit-todo-state-test-heading-path unblocked-document '("Parent"))
+                 "DONE" :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at))))
+           (checkbox-source
+             (format nil "#+TODO: TODO | DONE~%* TODO Parent~%- [ ] Check~%"))
+           (checkbox-document (parse-org checkbox-source))
+           (checkbox-edit
+             (nth-value
+              0 (transition-heading-todo
+                 checkbox-document
+                 (edit-todo-state-test-heading-path checkbox-document '("Parent"))
+                 "DONE" :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at)))))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document unblocked-edit))
+                :to-equal
+                (format nil
+                        "#+TODO: TODO | DONE~%* DONE Parent~%:PROPERTIES:~%:NOBLOCKING: t~%:END:~%** TODO Child~%"))
+        (expect (document-text (edit-result-updated-document checkbox-edit))
+                :to-equal
+                (format nil "#+TODO: TODO | DONE~%* DONE Parent~%- [ ] Check~%"))
+        (expect (document-text unblocked-document) :to-equal unblocked-source)
+        (expect (document-text checkbox-document) :to-equal checkbox-source))))
+
   (it "keeps raw set-heading-todo limited to the TODO token"
     (let* ((crlf (concatenate 'string (string #\Return) (string #\Newline)))
            (source (concatenate 'string

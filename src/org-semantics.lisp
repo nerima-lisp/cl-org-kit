@@ -327,6 +327,36 @@ The nearest occurrence of a tag determines its position in the result."
                                              (node-property property :key) key))
                                     collect property))))
 
+(defun org-todo-unfinished-heading-p (heading)
+  (and (eq (node-type heading) :headline)
+       (node-property heading :todo-keyword)
+       (not (eq (node-property heading :todo-type) :done))))
+
+(defun org-todo-ordered-heading-p (heading)
+  (some (lambda (property)
+          (let ((value (node-property property :value)))
+            (or (null value)
+                (not (string-equal value "nil")))))
+        (effective-heading-property-entries heading "ORDERED")))
+
+(defun org-todo-ordered-sibling-blocked-p (heading)
+  (let ((parent (node-parent heading)))
+    (and parent
+         (org-todo-ordered-heading-p parent)
+         (loop for sibling in (node-children parent)
+               until (eq sibling heading)
+               thereis (org-todo-unfinished-heading-p sibling)))))
+
+(defun org-todo-unfinished-child-p (heading)
+  (some #'org-todo-unfinished-heading-p (node-children heading)))
+
+(defun org-todo-blocked-p (heading)
+  "Return true when local TODO children or ordered siblings block HEADING."
+  (and (eq (node-type heading) :headline)
+       (not (effective-heading-property-entries heading "NOBLOCKING"))
+       (or (org-todo-unfinished-child-p heading)
+           (org-todo-ordered-sibling-blocked-p heading))))
+
 (defun effective-heading-property-value (heading key)
   (let ((entry (first (effective-heading-property-entries heading key))))
     (if entry

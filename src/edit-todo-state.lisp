@@ -1507,6 +1507,10 @@ document's normalized TODO sequence and the supplied workflow settings."
                (edit-todo-drawer-setting
                 document heading workflow-options
                 log-drawer log-drawer-supplied-p)))
+        (when (and state-changed-p new-done-p
+                   (org-todo-blocked-p heading))
+          (edit-todo-error heading :blocked
+                           "TODO entry is blocked by unfinished dependencies"))
         (when (and state-changed-p new-done-p (not repeating-p) done-mode)
           (push (cons :closed (list :action :set :value timestamp))
                 planning-changes)

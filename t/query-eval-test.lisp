@@ -271,6 +271,28 @@
                 :to-equal
                 '("Entry")))))
 
+  (it "computes BLOCKED from TODO dependencies and retains provider results"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+TODO: TODO | DONE~%* Parent~%:PROPERTIES:~%:ORDERED: t~%:END:~%** TODO First~%** TODO Second~%* TODO Has child~%** TODO Child~%* External~%")))
+           (context
+             (org-kit:make-query-context
+              :blocked-provider
+              (lambda (headline)
+                (when (string= (node-property headline :raw-value) "External")
+                  "provided")))))
+      (with-soft-assertions
+        (expect (query-eval-test-titles
+                 (org-kit:query-list document '(:property-exists "BLOCKED")
+                                     :context context))
+                :to-equal '("Parent" "Second" "Has child" "External"))
+        (expect (query-eval-test-titles
+                 (org-kit:query-list document
+                                     '(:property "BLOCKED" := "provided")
+                                     :context context))
+                :to-equal '("External")))))
+
   (it "enforces document input limits on FILE and CATEGORY regex candidates"
     (let* ((document
              (query-eval-test-programmatic-document
