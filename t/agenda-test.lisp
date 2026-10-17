@@ -931,7 +931,7 @@
                           ("2025-01-08" :late)
                           ("2025-01-09" :completed)
                           ("2025-01-10" :within-schedule)))))
-  (it "collects a habit heading's DONE logs and CLOSED date, excluding child logs"
+  (it "collects timestamped DONE log dates and CLOSED date on a habit heading, excluding child logs"
     (let* ((document
              (parse-org
               (format nil
