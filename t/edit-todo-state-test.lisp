@@ -597,11 +597,10 @@
            (default-options (make-org-workflow-options))
            (override-source
              (format nil
-                     "#+TODO: TODO | DONE(d!)~%#+PROPERTY: LOG_INTO_DRAWER DOCUMENT~%#+PROPERTY: LOG_DONE time~%#+PROPERTY: LOG_REPEAT time~%* TODO Closed~%* TODO Repeating~%SCHEDULED: <2025-03-01 Sat +1w>~%"))
+                     "#+TODO: TODO | DONE(d!)~%#+PROPERTY: LOG_INTO_DRAWER DOCUMENT~%#+STARTUP: logdone logrepeat~%* TODO Closed~%* TODO Repeating~%SCHEDULED: <2025-03-01 Sat +1w>~%"))
            (override-document
              (parse-org override-source
-                        :settings '(:log-into-drawer "DOCUMENT"
-                                    :log-done time :log-repeat time)))
+                        :settings '(:log-into-drawer "DOCUMENT")))
            (override-headings
              (list (edit-todo-state-test-heading-path override-document '("Closed"))
                    (edit-todo-state-test-heading-path override-document '("Repeating"))))
@@ -820,7 +819,7 @@
               (expect (transition-result-log-events transition) :to-be nil)
               (expect (document-text document) :to-equal original)))))))
 
-  (it "lets local LOG_DONE and LOG_REPEAT properties override workflow values"
+  (it "lets an inherited LOGGING property override workflow values"
     (let* ((at "2025-03-07T09:00:00")
            (time-context (edit-todo-state-test-context at))
            (workflow-options
@@ -828,11 +827,12 @@
                                         :log-into-drawer nil))
            (source
              (format nil
-                     "#+TODO: TODO | DONE~%* TODO Closed~%:PROPERTIES:~%:LOG_DONE: time~%:END:~%* TODO Repeating~%:PROPERTIES:~%:LOG_REPEAT: time~%:END:~%SCHEDULED: <2025-03-01 Sat +1w>~%"))
+                     "#+TODO: TODO | DONE~%* Project~%:PROPERTIES:~%:LOGGING: logdone logrepeat~%:END:~%** TODO Closed~%** TODO Repeating~%SCHEDULED: <2025-03-01 Sat +1w>~%:PROPERTIES:~%:CATEGORY: chores~%:END:~%* TODO Legacy~%:PROPERTIES:~%:LOG_DONE: time~%:LOG_REPEAT: time~%:END:~%"))
            (document (parse-org source))
            (headings
-             (list (edit-todo-state-test-heading-path document '("Closed"))
-                   (edit-todo-state-test-heading-path document '("Repeating"))))
+             (list (edit-todo-state-test-heading-path document '("Project" "Closed"))
+                   (edit-todo-state-test-heading-path document '("Project" "Repeating"))
+                   (edit-todo-state-test-heading-path document '("Legacy"))))
            (results
              (loop for heading in headings
                    collect
@@ -847,7 +847,7 @@
                          (edit-result-updated-document
                           (first (first results)))))
                 :to-be-truthy)
-        (expect (search "LAST_REPEAT: [2025-03-07 Fri 09:00]"
+        (expect (search (format nil ":CATEGORY: chores~%:LAST_REPEAT: [2025-03-07 Fri 09:00]~%:END:")
                         (document-text
                          (edit-result-updated-document
                           (first (second results)))))
@@ -855,7 +855,91 @@
         (expect (transition-result-log-events (second (second results)))
                 :to-equal
                 '("- State \"DONE\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
+        (expect (transition-result-closed-timestamp (second (third results)))
+                :to-be nil)
+        (expect (transition-result-log-events (second (third results)))
+                :to-be nil)
         (expect (document-text document) :to-equal source))))
+
+  (it "reads TODO logging from STARTUP when no other setting applies"
+    (let* ((at "2025-03-07T09:00:00")
+           (source
+             (format nil
+                     "#+STARTUP: nologdone lognotedone lognoterepeat~%#+TODO: TODO | DONE~%* TODO Closed~%* TODO Repeating~%SCHEDULED: <2025-03-01 Sat +1w>~%"))
+           (document (parse-org source))
+           (results
+             (loop for path in '(("Closed") ("Repeating"))
+                   collect
+                   (multiple-value-list
+                    (transition-heading-todo
+                     document (edit-todo-state-test-heading-path document path)
+                     "DONE" :at (make-org-time-value at)
+                     :time-context (edit-todo-state-test-context at)
+                     :note "Wrapped up"
+                     :log-drawer nil)))))
+      (with-soft-assertions
+        (expect (transition-result-closed-timestamp (second (first results)))
+                :to-equal "[2025-03-07 Fri 09:00]")
+        (expect (transition-result-log-events (second (first results)))
+                :to-equal '("- CLOSING NOTE [2025-03-07 Fri 09:00] \\\\"
+                            "  Wrapped up"))
+        (expect (length (transition-result-log-events (second (second results))))
+                :to-equal 2)
+        (expect (search "Wrapped up"
+                        (second (transition-result-log-events
+                                 (second (second results)))))
+                :to-be-truthy))))
+
+  (it "applies LOGGING state specs and turns off logging LOGGING omits"
+    (let* ((at "2025-03-07T09:00:00")
+           (source
+             (format nil
+                     "#+STARTUP: logdone~%#+TODO: TODO(t!) WAIT | DONE~%* Scope~%:PROPERTIES:~%:LOGGING: logdrawer WAIT(w@/!) NEXT(n) BAD(x@y) PLAIN X() Y(/ Z(/) DONE(!)~%:END:~%** TODO Wait~%** WAIT Resume~%** WAIT Clear~%** Plain~%** DONE Reopen~%** TODO Finish~%* Off~%:PROPERTIES:~%:LOGGING: nil~%:END:~%** TODO Quiet~%"))
+           (document (parse-org source)))
+      (flet ((run (path state &optional note)
+               (second
+                (multiple-value-list
+                 (transition-heading-todo
+                  document (edit-todo-state-test-heading-path document path)
+                  state :at (make-org-time-value at)
+                  :time-context (edit-todo-state-test-context at)
+                  :note note :log-drawer nil)))))
+        (let ((wait (run '("Scope" "Wait") "WAIT" "Blocked"))
+              (resume (run '("Scope" "Resume") "TODO"))
+              (clear (run '("Scope" "Clear") nil))
+              (plain (run '("Scope" "Plain") "TODO"))
+              (reopen (run '("Scope" "Reopen") "TODO"))
+              (finish (run '("Scope" "Finish") "DONE"))
+              (quiet (run '("Off" "Quiet") "DONE")))
+          (with-soft-assertions
+            (expect (transition-result-log-events wait)
+                    :to-equal '("- State \"WAIT\"       from \"TODO\"       [2025-03-07 Fri 09:00] \\\\"
+                                "  Blocked"))
+            (expect (transition-result-log-events resume)
+                    :to-equal '("- State \"TODO\"       from \"WAIT\"       [2025-03-07 Fri 09:00]"))
+            (expect (length (transition-result-log-events clear)) :to-equal 1)
+            (expect (transition-result-log-events plain) :to-be nil)
+            (expect (transition-result-log-events reopen) :to-be nil)
+            (expect (transition-result-log-events finish)
+                    :to-equal '("- State \"DONE\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
+            (expect (transition-result-closed-timestamp finish) :to-be nil)
+            (expect (transition-result-closed-timestamp quiet) :to-be nil)
+            (expect (transition-result-log-events quiet) :to-be nil))))))
+
+  (it "parses LOGGING state specs the way Org extracts them"
+    (with-soft-assertions
+      (expect (org-kit::edit-todo-logging-state "WAIT(w@/!)")
+              :to-equal '("WAIT" :note :timestamp))
+      (expect (org-kit::edit-todo-logging-state "HOLD(!)")
+              :to-equal '("HOLD" :timestamp nil))
+      (expect (org-kit::edit-todo-logging-state "HOLD(/@)")
+              :to-equal '("HOLD" nil :note))
+      (expect (org-kit::edit-todo-logging-state "NEXT(n)") :to-be nil)
+      (expect (org-kit::edit-todo-logging-state "BAD(x@y)") :to-be nil)
+      (expect (org-kit::edit-todo-logging-state "PLAIN") :to-be nil)
+      (expect (org-kit::edit-todo-logging-state "X()") :to-be nil)
+      (expect (org-kit::edit-todo-logging-state "Y(/") :to-be nil)
+      (expect (org-kit::edit-todo-logging-state "Z(/)") :to-be nil)))
 
   (it "keeps an indented body with a drawerless closing note"
     (let* ((at "2025-03-07T09:00:00")
@@ -1204,6 +1288,11 @@
               (transition-heading-todo
                document heading "DONE" :at at
                :workflow-options (make-org-workflow-options :log-done "OFF"))))
+           (state-result
+             (multiple-value-list
+              (transition-heading-todo
+               document heading "DONE" :at at
+               :workflow-options (make-org-workflow-options :log-done "state"))))
            (invalid-mode
              (edit-todo-state-test-error
               (lambda ()
@@ -1223,7 +1312,9 @@
         (expect (transition-result-closed-timestamp (second note-result))
                 :to-equal "[2025-03-07 Fri 09:00]")
         (expect (transition-result-closed-timestamp (second off-result)) :to-be nil)
-        (expect (transition-result-log-events (second off-result)) :to-be nil))
+        (expect (transition-result-log-events (second off-result)) :to-be nil)
+        (expect (transition-result-closed-timestamp (second state-result))
+                :to-equal "[2025-03-07 Fri 09:00]"))
       (edit-todo-state-test-assert-error invalid-mode :invalid-value)
       (edit-todo-state-test-assert-error missing-note :invalid-value))
     (let* ((source

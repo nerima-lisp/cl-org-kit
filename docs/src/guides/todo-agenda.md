@@ -72,6 +72,24 @@ any `CLOSED` timestamp.
        (org-kit:transition-result-log-events transition)))))
 ~~~
 
+### Logging settings
+
+A transition records a `CLOSED` timestamp, a closing note, state-change log
+lines, and `LAST_REPEAT` according to Org's logging settings. When the heading
+has or inherits a `LOGGING` property, including one from a
+`#+PROPERTY: LOGGING` line, that property alone decides. As in Org, it turns
+off every logging setting it does not name. Its words can be `logdone`,
+`lognotedone`, `nologdone`, `logrepeat`, `lognoterepeat`, `nologrepeat`, and
+TODO keyword specs such as `WAIT(w@/!)`, which replace the markers on the
+`#+TODO` line; `nil` turns all logging off.
+
+Without `LOGGING`, state-change lines follow the `#+TODO` markers. Done and
+repeat logging come from the `:log-done` and `:log-repeat` values of
+`:workflow-options` when it is supplied, and otherwise from the last
+`logdone`-family word of `#+STARTUP` (see `startup-options` in the
+[node model](../reference/node-model.md)). `LOG_DONE` and `LOG_REPEAT`
+properties have no effect.
+
 An unknown state, invalid heading, or conflicting edit signals
 `org-edit-error`; invalid or ambiguous time input signals `org-time-error`.
 When a repeater transition catches up missed occurrences, expansion is bounded

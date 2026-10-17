@@ -427,8 +427,6 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
       (source value)
       (options
        (ecase key
-         (:log-done (org-workflow-options-log-done options))
-         (:log-repeat (org-workflow-options-log-repeat options))
          (:repeat-to-state (org-workflow-options-repeat-to-state options))
          (:log-into-drawer (org-workflow-options-log-into-drawer options))))
       (t (multiple-value-bind (setting present-p)
@@ -443,14 +441,15 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
     ((null value) nil)
     ((eq value t) :timestamp)
     ((and (symbolp value)
-          (member (string-upcase (symbol-name value)) '("TIME" "TIMESTAMP")
+          (member (string-upcase (symbol-name value))
+                  '("TIME" "TIMESTAMP" "STATE")
                   :test #'string=))
      :timestamp)
     ((and (symbolp value)
           (string-equal (symbol-name value) "NOTE"))
      :note)
     ((stringp value)
-     (cond ((member (string-upcase value) '("TIME" "TIMESTAMP" "T")
+     (cond ((member (string-upcase value) '("TIME" "TIMESTAMP" "STATE" "T")
                     :test #'string=)
             :timestamp)
            ((string-equal value "NOTE") :note)
@@ -461,10 +460,77 @@ DIRECTION is :NEXT or :PREVIOUS; an omitted SEQUENCE-ID must be unambiguous."
                                "Invalid TODO logging mode"))))
     (t (edit-todo-error target :invalid-value "Invalid TODO logging mode"))))
 
-(defun edit-todo-mode-setting (document heading options key property-name)
-  (edit-todo-normalize-mode
-   (edit-todo-property-value document heading options key property-name nil)
-   heading))
+(defun edit-todo-logging-state (word)
+  "Return WORD's (KEYWORD ENTRY-MODE EXIT-MODE) when it is a logging spec such
+as WAIT(w@/!), following Org's org-extract-log-state-settings."
+  (let* ((open (position #\( word))
+         (end (1- (length word)))
+         (spec (and open
+                    (char= (char word end) #\))
+                    (subseq word (1+ open) end)))
+         (spec-length (length spec))
+         (index 0)
+         (entry nil)
+         (exit nil))
+    (flet ((marker-at-p (position)
+             (and (< position spec-length) (find (char spec position) "!@")))
+           (mode (position)
+             (if (char= (char spec position) #\!) :timestamp :note)))
+      (when spec
+        (when (and (< index spec-length) (not (find (char spec index) "!@/")))
+          (incf index))
+        (when (marker-at-p index)
+          (setf entry (mode index))
+          (incf index))
+        (when (and (< index spec-length)
+                   (char= (char spec index) #\/)
+                   (marker-at-p (1+ index)))
+          (setf exit (mode (1+ index)))
+          (incf index 2))
+        (when (and (= index spec-length) (or entry exit))
+          (list (subseq word 0 open) entry exit))))))
+
+(defun edit-todo-logging (document heading)
+  "Return HEADING's own or inherited LOGGING property as a plist of :LOG-DONE,
+:LOG-REPEAT and :STATES, or NIL when there is none. As in Org's
+org-local-logging, LOGGING turns off every logging setting it does not name."
+  (multiple-value-bind (value source)
+      (effective-property document heading "LOGGING" :inherit t)
+    (when source
+      (let ((log-done nil)
+            (log-repeat nil)
+            (states nil))
+        (dolist (word (reader-heading-words (substitute #\Space #\Newline value)))
+          (let ((option (org-startup-option word)))
+            (cond
+              ((null option)
+               (let ((state (edit-todo-logging-state word)))
+                 (when state
+                   (push state states))))
+              ((eq (second option) :log-done)
+               (setf log-done (edit-todo-normalize-mode (third option) heading)))
+              ((eq (second option) :log-repeat)
+               (setf log-repeat
+                     (edit-todo-normalize-mode (third option) heading))))))
+        (list :log-done log-done :log-repeat log-repeat :states states)))))
+
+(defun edit-todo-mode-setting (document heading logging options key)
+  (cond
+    (logging (getf logging key))
+    (options
+     (edit-todo-normalize-mode
+      (if (eq key :log-done)
+          (org-workflow-options-log-done options)
+          (org-workflow-options-log-repeat options))
+      heading))
+    (t (edit-todo-normalize-mode (getf (startup-options document) key)
+                                 heading))))
+
+(defun edit-todo-logging-state-mode (states previous-state new-state)
+  (or (and new-state
+           (second (assoc new-state states :test #'string=)))
+      (and previous-state
+           (third (assoc previous-state states :test #'string=)))))
 
 (defun edit-todo-drawer-setting (document heading options
                                 log-drawer log-drawer-supplied-p)
@@ -1407,14 +1473,19 @@ document's normalized TODO sequence and the supplied workflow settings."
              (previous-done-p (and sequence
                                    (edit-todo-done-state-p sequence previous-state)))
              (state-changed-p (not (equal previous-state new-state)))
+             (logging (edit-todo-logging document heading))
              (done-mode (edit-todo-mode-setting
-                         document heading workflow-options :log-done "LOG_DONE"))
+                         document heading logging workflow-options :log-done))
              (repeat-mode (edit-todo-mode-setting
-                           document heading workflow-options
-                           :log-repeat "LOG_REPEAT"))
-             (marker-mode (edit-todo-marker-log-mode
-                           sequence previous-state
-                           (if repeating-p state new-state)))
+                           document heading logging workflow-options
+                           :log-repeat))
+             (marker-mode (if logging
+                              (edit-todo-logging-state-mode
+                               (getf logging :states) previous-state
+                               (if repeating-p state new-state))
+                              (edit-todo-marker-log-mode
+                               sequence previous-state
+                               (if repeating-p state new-state))))
              (state-log-mode (if repeating-p repeat-mode marker-mode))
              (closed-value (edit-todo-local-planning-value
                             document heading :closed))
