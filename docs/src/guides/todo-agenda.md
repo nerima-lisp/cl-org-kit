@@ -224,8 +224,8 @@ The current `SCHEDULED` timestamp anchors the active occurrence and sets its
 due date; this is the due date after the latest recorded completion. Earlier
 due dates are reconstructed from completion dates according to repeater mode.
 `.+` places the next occurrence one repeater interval after each earlier DONE.
-`+` steps
-backward from the current `SCHEDULED` date by one interval for each later DONE.
+`+` steps backward from the current `SCHEDULED` date by one interval for each
+later DONE.
 `++` keeps the cadence and advances past each earlier DONE to the next
 occurrence. For historical dates, month repeaters convert at 30.4 days per
 month and year repeaters at 365.25 days per year, with the resulting day count
