@@ -80,13 +80,13 @@
                         (lambda ()
                           (resolve-babel-variables
                            document consumer
-                           '(("VAR" . "value=(write-char #\\X)")))))))))
+                           '(("VAR" . "value=(write-char #\\X)"))))))))))
       (with-soft-assertions
         (expect (typep condition 'org-babel-error) :to-be t)
         (when (typep condition 'org-babel-error)
           (expect (org-babel-error-reason condition)
                   :to-equal :unsupported-expression))
-        (expect output :to-equal "")))))
+        (expect output :to-equal ""))))
 
   (it "resolves a named source block through the callback with variables"
     (let* ((document
@@ -249,7 +249,7 @@
                  :result-resolver
                  (lambda (block-name parameters)
                    (declare (ignore block-name parameters))
-                   (make-hash-table :test #'equal))))))
+                   (make-hash-table :test #'equal)))))))
       (with-soft-assertions
         (expect variables
                 :to-equal
@@ -268,4 +268,4 @@
                   :to-equal :unresolved-reference))
         (when (typep unsupported-condition 'org-babel-error)
           (expect (org-babel-error-reason unsupported-condition)
-                  :to-equal :unsupported-result))))))
+                  :to-equal :unsupported-result)))))
