@@ -95,6 +95,14 @@
     "SET-KEYWORD-VALUE" "REMOVE-KEYWORD"
     ;; Format-preserving element edits
     "REPLACE-BLOCK-BODY" "SET-CHECKBOX-STATE"
+    ;; Format-preserving plain list edits
+    "INSERT-LIST-ITEM" "DELETE-LIST-ITEM" "MOVE-LIST-ITEM"
+    "INDENT-LIST-ITEM" "UNINDENT-LIST-ITEM" "SET-LIST-BULLET"
+    "RENUMBER-ORDERED-LIST"
+    ;; Format-preserving footnote edits
+    "INSERT-FOOTNOTE" "RENUMBER-FOOTNOTES" "NORMALIZE-FOOTNOTES"
+    ;; Format-preserving drawer edits
+    "SET-DRAWER-BODY" "REMOVE-DRAWER"
     ;; T2 table alignment
     "TABLE-ALIGN" "TABLE-INSERT-ROW" "TABLE-DELETE-ROW" "TABLE-MOVE-ROW"
     "TABLE-INSERT-COLUMN" "TABLE-DELETE-COLUMN" "TABLE-MOVE-COLUMN"

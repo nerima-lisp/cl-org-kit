@@ -15,6 +15,7 @@ nav:
   - Guides:
       - TODO and Agenda: guides/todo-agenda.md
       - Clock: guides/clock.md
+      - Structure Edits: guides/structure-edits.md
       - Tables: guides/tables.md
       - Export: guides/export.md
       - Callbacks and Write Plans: guides/callbacks-and-write-plans.md

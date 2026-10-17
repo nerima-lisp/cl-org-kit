@@ -90,6 +90,14 @@
    #:set-keyword-value #:remove-keyword
    ;; Format-preserving element edits
    #:replace-block-body #:set-checkbox-state
+   ;; Format-preserving plain list edits
+   #:insert-list-item #:delete-list-item #:move-list-item
+   #:indent-list-item #:unindent-list-item #:set-list-bullet
+   #:renumber-ordered-list
+   ;; Format-preserving footnote edits
+   #:insert-footnote #:renumber-footnotes #:normalize-footnotes
+   ;; Format-preserving drawer edits
+   #:set-drawer-body #:remove-drawer
    ;; Format-preserving table edits
    #:table-align #:table-insert-row #:table-delete-row #:table-move-row
    #:table-insert-column #:table-delete-column #:table-move-column
