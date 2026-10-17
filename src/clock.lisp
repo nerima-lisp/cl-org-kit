@@ -286,7 +286,9 @@
     (if newline (1+ newline) (length source))))
 
 (defun clock-timer-item-metadata-p (node)
-  (member (node-type node) '(:planning :property-drawer) :test #'eq))
+  (or (member (node-type node) '(:planning :property-drawer) :test #'eq)
+      (and (eq (node-type node) :drawer)
+           (string-equal (node-property node :drawer-name) "LOGBOOK"))))
 
 (defun clock-timer-item-insertion-offset (document heading)
   (let* ((section (find :section (node-children heading) :key #'node-type))
@@ -351,11 +353,34 @@
                root)
     (nreverse clocks)))
 
+(defun clock-consistency-record-overlaps (document intervals record-issue)
+  (let ((active '())
+        (ordered (stable-sort (copy-list intervals) #'< :key #'second)))
+    (dolist (interval ordered)
+      (destructuring-bind (clock start end) interval
+        (when (< start end)
+          (setf active
+                (delete-if (lambda (active-interval)
+                             (<= (third active-interval) start))
+                           active))
+          (dolist (active-interval active)
+            (let ((other-clock (first active-interval))
+                  (line (clock-consistency-line document clock))
+                  (other-line
+                    (clock-consistency-line document
+                                            (first active-interval))))
+              (if (< line other-line)
+                  (funcall record-issue :overlap clock :other-clock other-clock)
+                  (funcall record-issue :overlap other-clock
+                           :other-clock clock))))
+          (push interval active)))))
+
 (defun check-clock-consistency (document &key time-context max-duration-minutes)
   "Return clock consistency findings in DOCUMENT.
 TIME-CONTEXT is required and its reference instant ends running clocks.
 When MAX-DURATION-MINUTES is supplied, intervals longer than that threshold
-also produce a finding."
+also produce a finding. Exceeding the document's clock consistency issue limit
+signals ORG-RESOURCE-LIMIT-ERROR."
   (check-type document document)
   (let ((root (document-root document)))
     (unless root
@@ -367,12 +392,16 @@ also produce a finding."
       (%org-clock-error :invalid-range
                         "max-duration-minutes must be a non-negative integer"))
     (let ((clocks (clock-check-document-clock-nodes document root))
+          (limits (document-limits document))
           (reference-seconds
             (cl-date-kit:instant-epoch-second
              (org-time-context-reference-instant time-context)))
           (issues '())
-          (intervals '()))
+          (intervals '())
+          (issue-count 0))
       (labels ((record-issue (reason clock &key other-clock duration-minutes)
+                 (incf issue-count)
+                 (check-limit limits :max-clock-consistency-issues issue-count)
                  (push (make-clock-consistency-issue
                         :reason reason
                         :line (clock-consistency-line document clock)
@@ -426,19 +455,8 @@ also produce a finding."
                          start-seconds end-seconds)
                     (record-issue :end-before-start clock)
                     (error condition))))))
-        (let ((ordered-intervals (nreverse intervals)))
-          (loop for tail on ordered-intervals
-                for (clock start end) = (first tail)
-                do (dolist (later (rest tail))
-                     (destructuring-bind (other-clock other-start other-end) later
-                       (when (and (< start other-end) (< other-start end))
-                         (let ((line (clock-consistency-line document clock))
-                               (other-line
-                                 (clock-consistency-line document other-clock)))
-                           (if (< line other-line)
-                               (record-issue :overlap clock :other-clock other-clock)
-                               (record-issue :overlap other-clock
-                                             :other-clock clock)))))))
+        (clock-consistency-record-overlaps document (nreverse intervals)
+                                           #'record-issue)
         (stable-sort issues #'clock-consistency-issue-before-p))))))
 
 (defun insert-timer-item (document heading start-time description &key time-context)

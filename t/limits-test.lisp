@@ -14,6 +14,7 @@
     (:max-agenda-range-days 3660)
     (:max-agenda-entries 1000000)
     (:max-future-repeats 10000)
+    (:max-clock-consistency-issues 100000)
     (:max-export-expansion-depth 32)
     (:max-export-expanded-characters 67108864)
     (:max-export-expanded-nodes 4194304)

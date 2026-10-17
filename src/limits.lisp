@@ -3,7 +3,7 @@
 
 (defstruct (limits (:constructor %make-limits) (:conc-name %limits-) (:copier nil)
                    (:predicate %limits-p))
-  "Resource ceilings for parsing and writing. Build one with MAKE-LIMITS."
+  "Resource ceilings for document processing and output. Build one with MAKE-LIMITS."
   (max-input-length 0 :read-only t)
   (max-heading-depth 0 :read-only t)
   (max-element-depth 0 :read-only t)
@@ -16,6 +16,7 @@
   (max-agenda-range-days 0 :read-only t)
   (max-agenda-entries 0 :read-only t)
   (max-future-repeats 0 :read-only t)
+  (max-clock-consistency-issues 0 :read-only t)
   (max-export-expansion-depth 0 :read-only t)
   (max-export-expanded-characters 0 :read-only t)
   (max-export-expanded-nodes 0 :read-only t)
@@ -46,6 +47,7 @@
                          (max-agenda-range-days 3660)
                          (max-agenda-entries 1000000)
                          (max-future-repeats 10000)
+                         (max-clock-consistency-issues 100000)
                          (max-export-expansion-depth 32)
                          (max-export-expanded-characters (* 64 1024 1024))
                          (max-export-expanded-nodes (* 4 1024 1024))
@@ -71,8 +73,9 @@ depth zero. Formula token, AST-depth, precision, and exponent limits are per
 formula; work is per table recalculation. Write-plan entries count files in one
 application, and write-plan bytes count combined UTF-8 string content and
 octet-vector content. Write-plan path bytes count UTF-8 octets in each submitted
-path, and path depth counts non-empty components other than dot. Each keyword
-overrides its corresponding default with a non-negative integer."
+path, and path depth counts non-empty components other than dot.
+Clock consistency issue counts are per check. Each keyword overrides its
+corresponding default with a non-negative integer."
   (%make-limits :max-input-length (checked-limit-value max-input-length)
                 :max-heading-depth (checked-limit-value max-heading-depth)
                 :max-element-depth (checked-limit-value max-element-depth)
@@ -86,6 +89,8 @@ overrides its corresponding default with a non-negative integer."
                 :max-agenda-range-days (checked-limit-value max-agenda-range-days)
                 :max-agenda-entries (checked-limit-value max-agenda-entries)
                 :max-future-repeats (checked-limit-value max-future-repeats)
+                :max-clock-consistency-issues
+                (checked-limit-value max-clock-consistency-issues)
                 :max-export-expansion-depth
                 (checked-limit-value max-export-expansion-depth)
                 :max-export-expanded-characters
@@ -124,6 +129,8 @@ overrides its corresponding default with a non-negative integer."
     (:max-agenda-range-days (%limits-max-agenda-range-days limits))
     (:max-agenda-entries (%limits-max-agenda-entries limits))
     (:max-future-repeats (%limits-max-future-repeats limits))
+    (:max-clock-consistency-issues
+     (%limits-max-clock-consistency-issues limits))
     (:max-export-expansion-depth (%limits-max-export-expansion-depth limits))
     (:max-export-expanded-characters
      (%limits-max-export-expanded-characters limits))

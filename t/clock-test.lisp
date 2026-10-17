@@ -774,6 +774,32 @@
        "max-duration-minutes must be a non-negative integer"
        "Invalid clock range")))
 
+  (it "caps clock consistency findings before emitting an unbounded overlap set"
+    (let* ((source
+             (with-output-to-string (stream)
+               (write-line "* Task" stream)
+               (dotimes (index 20000)
+                 (declare (ignore index))
+                 (write-line
+                  "CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 10:00] => 1:00"
+                  stream))))
+           (document
+             (parse-org source :limits (make-limits :max-clock-consistency-issues 10)))
+           (condition
+             (handler-case
+                 (progn
+                   (check-clock-consistency
+                    document :time-context
+                    (clock-test-context "2026-10-12T11:00:00"))
+                   nil)
+               (org-resource-limit-error (condition) condition))))
+      (expect (typep condition 'org-resource-limit-error) :to-be t)
+      (when condition
+        (expect (org-resource-limit-error-limit-name condition)
+                :to-be :max-clock-consistency-issues)
+        (expect (org-resource-limit-error-limit condition) :to-be 10)
+        (expect (org-resource-limit-error-actual condition) :to-be 11))))
+
   (it "inserts an Org timer item using the explicit reference instant and preserves source bytes"
     (let* ((source (format nil "* Task~%既存の本文~%"))
            (source-octets (cl-codec-kit:string-to-octets source :encoding :utf-8))
@@ -820,6 +846,23 @@
           (expect (node-property updated-heading :scheduled) :to-be-truthy)
           (expect (effective-property updated updated-heading "ID")
                   :to-equal "stable")))))
+
+  (it "inserts timer items after LOGBOOK and before the body"
+    (let* ((source
+             (format nil
+                     "* Task~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-01 Wed 09:00]~%:END:~%Body~%"))
+           (document (parse-org source))
+           (heading (clock-test-heading document "Task"))
+           (context (clock-test-context "2025-01-01T10:01:00")))
+      (multiple-value-bind (result value)
+          (insert-timer-item document heading
+                             (clock-test-value "2025-01-01T10:00:00")
+                             "Review" :time-context context)
+        (expect value :to-equal "0:01:00")
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil
+                        "* Task~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-01 Wed 09:00]~%:END:~%- 0:01:00 :: Review~%Body~%")))))
 
   (it "rejects a timer start after the reference instant with a named reason"
     (let* ((context (clock-test-context "2025-01-01T10:00:00"))
