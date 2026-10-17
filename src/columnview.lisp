@@ -259,7 +259,8 @@
 
 (defun column-view-timestamp-property (heading key)
   (let ((timestamp (node-property heading key)))
-    (and (node-p timestamp) (node-text timestamp))))
+    (and (node-p timestamp)
+         (string-trim '(#\Space #\Tab) (node-text timestamp)))))
 
 (defun column-view-own-value (document heading column)
   (let* ((property (column-view-column-property column))
@@ -289,10 +290,14 @@
        (or (column-view-timestamp-property heading :closed) ""))
       ((string= name "TIMESTAMP")
        (let ((timestamp (query-entry-timestamp heading :active)))
-         (if timestamp (node-text timestamp) "")))
+         (if timestamp
+             (string-trim '(#\Space #\Tab) (node-text timestamp))
+             "")))
       ((string= name "TIMESTAMP_IA")
        (let ((timestamp (query-entry-timestamp heading :inactive)))
-         (if timestamp (node-text timestamp) "")))
+         (if timestamp
+             (string-trim '(#\Space #\Tab) (node-text timestamp))
+             "")))
       ((string= name "LEVEL")
        (let ((level (query-logical-heading-level document heading)))
          (if level (write-to-string level) "")))
@@ -335,8 +340,7 @@
     (unless (and (or (plusp (length digits-before))
                      (plusp (length digits-after)))
                  (every #'digit-char-p digits-before)
-                 (every #'digit-char-p digits-after)
-                 (or (null dot) (null (position #\. text :start (1+ dot)))))
+                 (every #'digit-char-p digits-after))
       (column-view-invalid-summary-value column value))
     (* sign
        (/ (+ (if (plusp (length digits-before))
@@ -417,6 +421,7 @@
           (unless first-token
             (column-view-invalid-summary-value column value))
           (let ((position next)
+                (negative-p (minusp number))
                 (total 0)
                 (token-count 0))
             (loop
@@ -434,17 +439,19 @@
                            (factor (column-view-duration-unit-factor unit)))
                       (unless factor
                         (column-view-invalid-summary-value column value))
-                      (incf total (* number factor))))
+                      (incf total (* (abs number) factor))))
                 (setf position (column-view-skip-space text position))
                 (when (= position (length text))
                   (return))
+                (when (find (char text position) '(#\+ #\-))
+                  (column-view-invalid-summary-value column value))
                 (multiple-value-bind (token token-value next-position)
                     (column-view-read-number text position)
                   (unless token
                     (column-view-invalid-summary-value column value))
                   (setf number token-value
                         position next-position))))
-            total)))))
+            (if negative-p (- total) total))))))
 
 (defun column-view-format-number (number &optional precision)
   (if precision
@@ -453,9 +460,9 @@
           (write-to-string number)
           (let* ((text (format nil "~,6F" (float number 1d0)))
                  (end (length text)))
-            (loop while (and (> end 0) (char= (char text (1- end)) #\0))
+            (loop while (char= (char text (1- end)) #\0)
                   do (decf end))
-            (when (and (> end 0) (char= (char text (1- end)) #\.))
+            (when (char= (char text (1- end)) #\.)
               (decf end))
             (subseq text 0 end)))))
 
@@ -530,7 +537,6 @@
             (let ((slash (position #\/ text)))
               (and slash
                    (> slash 1)
-                   (< slash (1- count))
                    (every #'digit-char-p (subseq text 1 slash))
                    (every #'digit-char-p (subseq text (1+ slash) (1- count))))))
        (let* ((slash (position #\/ text))
@@ -774,5 +780,6 @@ the reference time for age summaries over timestamp values."
   (column-view-data document :heading (query-nearest-headline block)
                     :time-context time-context))
 
-(register-dynamic-block-handler "columnview"
-                                #'column-view-dynamic-block-handler)
+(eval-when (:load-toplevel :execute)
+  (register-dynamic-block-handler "columnview"
+                                  #'column-view-dynamic-block-handler))

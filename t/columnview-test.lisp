@@ -293,4 +293,347 @@
                 (org-kit::column-view-data document
                                            :heading (document-root document))))))
       (columnview-test-expect-error unparsed-error :document-not-parsed)
-      (columnview-test-expect-error scope-error :invalid-heading))))
+      (expect (not (null (search "document-not-parsed"
+                                 (princ-to-string unparsed-error))))
+              :to-be t)
+      (columnview-test-expect-error scope-error :invalid-heading)))
+
+  (it "reports each incomplete column-definition form with a named reason"
+    (dolist (source (list (format nil "#+COLUMNS: %~%* Root~%")
+                          (format nil "#+COLUMNS: %ITEM(Title~%* Root~%")
+                          (format nil "#+COLUMNS: %ITEM{+~%* Root~%")
+                          (format nil "#+COLUMNS:~%* Root~%")))
+      (let* ((document (parse-org source))
+             (condition
+               (columnview-test-capture-condition
+                (lambda () (org-kit::column-view-data document)))))
+        (columnview-test-expect-error condition :invalid-columns)))
+    (dolist (summary '("+;%.f" "+;%.13f"))
+      (let* ((document
+               (parse-org
+                (format nil "#+COLUMNS: %ITEM{~A}~%* Root~%" summary)))
+             (condition
+               (columnview-test-capture-condition
+                (lambda () (org-kit::column-view-data document)))))
+        (columnview-test-expect-error condition :invalid-summary-type))))
+
+  (it "keeps empty parser inputs and unsupported summary fallback explicit"
+    (let* ((number-column
+             (org-kit::%make-column-view-column :property "Number"))
+           (duration-column
+             (org-kit::%make-column-view-column :property "Duration"))
+           (unsupported-column
+             (org-kit::%make-column-view-column :property "Value"
+                                                 :summary :unsupported))
+           (number-error
+             (columnview-test-capture-condition
+              (lambda ()
+                (org-kit::column-view-parse-number number-column ""))))
+           (duration-error
+             (columnview-test-capture-condition
+              (lambda ()
+                (org-kit::column-view-parse-duration duration-column "")))))
+      (columnview-test-expect-error number-error :invalid-summary-value)
+      (columnview-test-expect-error duration-error :invalid-summary-value)
+      (expect (org-kit::column-view-summary-value unsupported-column nil)
+              :to-equal "")))
+
+  (it "reads COLUMNS from a top-level property drawer and skips other children"
+    (let* ((document (parse-org (format nil "* Root~%")))
+           (root (document-root document))
+           (drawer
+             (make-node
+              :property-drawer
+              :children
+              (list (make-node :paragraph)
+                    (make-node :node-property
+                               :properties '(:key "COLUMNS"
+                                             :value "%ITEM(Drawer)"))))))
+      (append-child root drawer)
+      (expect (org-kit::column-view-data document)
+              :to-equal '(("Drawer") ("Root")))))
+
+  (it "renders special properties, timestamps, categories, and source names"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %TODO %PRIORITY %TAGS %ALLTAGS %CATEGORY %FILE %SCHEDULED %DEADLINE %CLOSED %TIMESTAMP %TIMESTAMP_IA %LEVEL %BLOCKED %CLOCKSUM %CLOCKSUM_T %Custom~%#+FILETAGS: global~%#+CATEGORY: file-category~%* TODO [#A] Parent :outer:~%SCHEDULED: <2025-01-01 Wed> DEADLINE: <2025-01-02 Thu> CLOSED: [2024-12-31 Tue]~%:PROPERTIES:~%:CATEGORY: local-category~%:Custom: text~%:END:~%active <2024-12-30 Mon> inactive [2024-12-29 Sun]~%** Child :inner:~%** Untagged~%")
+              :source-name "tasks.org"))
+           (child (columnview-test-heading document "Child"))
+           (rows (org-kit::column-view-data document)))
+      (expect rows
+              :to-equal
+              '(("ITEM" "TODO" "PRIORITY" "TAGS" "ALLTAGS" "CATEGORY"
+                 "FILE" "SCHEDULED" "DEADLINE" "CLOSED" "TIMESTAMP"
+                 "TIMESTAMP_IA" "LEVEL" "BLOCKED" "CLOCKSUM" "CLOCKSUM_T"
+                 "Custom")
+                ("Parent" "TODO" "A" ":outer:" ":global:outer:"
+                 "local-category" "tasks.org" "<2025-01-01 Wed>"
+                 "<2025-01-02 Thu>" "[2024-12-31 Tue]" "<2024-12-30 Mon>"
+                 "[2024-12-29 Sun]" "1" "" "" "" "text")
+                ("Child" "" "" ":inner:" ":global:outer:inner:"
+                 "local-category" "tasks.org" "" "" "" "" "" "2"
+                 "" "" "" "")
+                ("Untagged" "" "" "" ":global:outer:" "local-category"
+                 "tasks.org" "" "" "" "" "" "2" "" "" "" "")))
+      (setf (node-property child :priority) "B")
+      (expect (third (third (org-kit::column-view-data document)))
+              :to-equal "B")
+      (setf (node-property child :priority) #\C)
+      (expect (third (third (org-kit::column-view-data document)))
+              :to-equal "C")
+      (setf (node-property child :priority) #xD800)
+      (expect (third (third (org-kit::column-view-data document)))
+              :to-equal (if (code-char #xD800)
+                            (string (code-char #xD800))
+                            ""))
+      (setf (node-property child :priority) #x110000)
+      (expect (third (third (org-kit::column-view-data document)))
+              :to-equal "")
+      (let ((custom-property nil))
+        (map-nodes (lambda (node)
+                     (when (and (eq (node-type node) :node-property)
+                                (string-equal (node-property node :key "")
+                                              "Custom"))
+                       (setf custom-property node)))
+                   (document-root document))
+        (setf (node-property custom-property :value) 7)
+        (expect (car (last (second (org-kit::column-view-data document))))
+                :to-equal "7")
+        (setf (node-property custom-property :value) nil)
+        (expect (car (last (second (org-kit::column-view-data document))))
+                :to-equal ""))))
+
+  (it "uses settings and source-name fallbacks for CATEGORY"
+    (let* ((settings-document
+             (parse-org (format nil "#+COLUMNS: %CATEGORY %FILE~%* Root~%")
+                        :settings '(:category "settings-category")))
+           (source-document
+             (parse-org (format nil "#+COLUMNS: %CATEGORY %FILE~%* Root~%")
+                        :source-name "folder/tasks.org"))
+           (empty-source-document
+             (parse-org (format nil "#+COLUMNS: %CATEGORY~%* Root~%")))
+           (directory-source-document
+             (parse-org (format nil "#+COLUMNS: %CATEGORY %FILE~%* Root~%")
+                        :source-name "folder/")))
+      (expect (org-kit::column-view-data settings-document)
+              :to-equal '(("CATEGORY" "FILE")
+                          ("settings-category" "")))
+      (expect (org-kit::column-view-data source-document)
+              :to-equal '(("CATEGORY" "FILE")
+                          ("tasks" "folder/tasks.org")))
+      (expect (org-kit::column-view-data empty-source-document)
+              :to-equal '(("CATEGORY") ("")))
+      (expect (org-kit::column-view-data directory-source-document)
+              :to-equal '(("CATEGORY" "FILE") ("" "folder/")))))
+
+  (it "parses signed decimals and multi-unit durations and rejects malformed values"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %Number(Sum){+} %Number(Min){min} %Number(Max){max} %Number(Mean){mean} %Number(Precise){+;%.2f} %Duration{:} %NegativeClock{:}~%* Parent~%** Negative~%:PROPERTIES:~%:Number: -.5~%:Duration: -1h 30min~%:NegativeClock: -1h~%:END:~%** Positive~%:PROPERTIES:~%:Number: +1.~%:Duration: 1h 30min~%:NegativeClock: -30min~%:END:~%")))
+           (rows (org-kit::column-view-data document)))
+      (expect rows
+              :to-equal
+              '(("ITEM" "Sum" "Min" "Max" "Mean" "Precise" "Duration"
+                 "NegativeClock")
+                ("Parent" "0.5" "-0.5" "1" "0.25" "0.50" "0:00"
+                 "-1:30")
+                ("Negative" "-.5" "-.5" "-.5" "-.5" "-.5"
+                 "-1h 30min" "-1h")
+                ("Positive" "+1." "+1." "+1." "+1." "+1." "1h 30min"
+                 "-30min")))
+      (dolist (case '(("+" "1.2.3") (":" "1fortnight")
+                      (":" "1h nope") (":" "1h -30min")
+                      (":min" "1:x")))
+        (let ((condition
+                (columnview-test-summary-error (first case) (second case))))
+          (columnview-test-expect-error condition :invalid-summary-value)))))
+
+  (it "formats parser boundary values and rejects repeated decimal points"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %Duration{:}~%* Parent~%** Bare number~%:PROPERTIES:~%:Duration: 90~%:END:~%** Decimal unit~%:PROPERTIES:~%:Duration: 1.5h~%:END:~%"))))
+      (expect (org-kit::column-view-parse-number-value "12") :to-equal 12)
+      (expect (org-kit::column-view-parse-number-value "1.25") :to-equal 5/4)
+      (expect (org-kit::column-view-format-number 1.0d0) :to-equal "1")
+      (expect (org-kit::column-view-format-age 61) :to-equal "1h 1min")
+      (expect (org-kit::column-view-data document)
+              :to-equal '(("ITEM" "Duration")
+                          ("Parent" "3:00")
+                          ("Bare number" "90")
+                          ("Decimal unit" "1.5h")))
+      (columnview-test-expect-error
+       (columnview-test-summary-error ":" "1.2.3h")
+       :invalid-summary-value)))
+
+  (it "reports a recognized timestamp that fails to parse"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %Age{@min}~%* Parent~%** Broken~%:PROPERTIES:~%:Age: today~%:END:~%")))
+           (time-context
+             (make-time-context
+              :reference-time (make-org-time-value "2025-01-04T00:00:00")
+              :zone (make-fixed-time-zone 0)))
+           (original (symbol-function 'org-kit::query-parse-org-date-literal))
+           (condition nil))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::query-parse-org-date-literal)
+                   (lambda (&rest arguments)
+                     (declare (ignore arguments))
+                     nil))
+             (setf condition
+                   (columnview-test-capture-condition
+                    (lambda ()
+                      (org-kit::column-view-data
+                       document :time-context time-context)))))
+        (setf (symbol-function 'org-kit::query-parse-org-date-literal)
+              original))
+      (columnview-test-expect-error condition :invalid-summary-value)))
+
+  (it "aggregates long duration units and relative timestamp ages"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %Long{:} %AgeMin{@min} %AgeMax{@max} %AgeMean{@mean}~%* Parent~%** Week~%:PROPERTIES:~%:Long: 1w~%:AgeMin: [+1d]~%:AgeMax: [-1d]~%:AgeMean: today~%:END:~%** Month year~%:PROPERTIES:~%:Long: 1m 1y~%:AgeMin: now~%:AgeMax: tomorrow~%:AgeMean: 2025-01-05~%:END:~%")))
+           (time-context
+             (make-time-context
+              :reference-time (make-org-time-value "2025-01-04T00:00:00")
+              :zone (make-fixed-time-zone 0))))
+      (expect (org-kit::column-view-data document :time-context time-context)
+              :to-equal
+              '(("ITEM" "Long" "AgeMin" "AgeMax" "AgeMean")
+                ("Parent" "402d 6:00" "-1d" "1d" "-12h")
+                ("Week" "1w" "[+1d]" "[-1d]" "today")
+                ("Month year" "1m 1y" "now" "tomorrow" "2025-01-05")))
+      (let* ((zero-document
+               (parse-org
+                (format nil
+                        "#+COLUMNS: %ITEM %Age{@min}~%* Parent~%** Now~%:PROPERTIES:~%:Age: now~%:END:~%** Today~%:PROPERTIES:~%:Age: today~%:END:~%"))))
+        (expect (org-kit::column-view-data zero-document
+                                           :time-context time-context)
+                :to-equal '(("ITEM" "Age")
+                            ("Parent" "0min")
+                            ("Now" "now")
+                            ("Today" "today"))))))
+
+  (it "rejects invalid document and time-context argument types"
+    (let* ((document-error
+             (columnview-test-capture-condition
+              (lambda () (org-kit::column-view-data :not-a-document))))
+           (context-error
+             (columnview-test-capture-condition
+              (lambda () (org-kit::column-view-data (parse-org "* Root")
+                                                    :time-context :bad))))
+           (report-condition
+             (columnview-test-summary-error "mean" "nope"))
+           (report (princ-to-string report-condition)))
+      (expect (typep document-error 'type-error) :to-be t)
+      (expect (typep context-error 'type-error) :to-be t)
+      (expect (not (null (search "invalid-summary-value" report))) :to-be t)
+      (expect (not (null (search "Value=" report))) :to-be t)))
+
+  (it "preserves special columns instead of aggregating their values"
+    (let ((document
+            (parse-org
+             (format nil
+                     "#+COLUMNS: %ITEM{+} %TODO{+} %PRIORITY{mean}~%* Parent~%** TODO Child~%"))))
+      (expect (org-kit::column-view-data document)
+              :to-equal '(("ITEM" "TODO" "PRIORITY")
+                          ("Parent" "" "")
+                          ("Child" "TODO" "")))))
+
+  (it "summarizes partial cookies, negative estimates, and percentage cookies"
+    (let* ((cookie-document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %All{X} %Count{X/} %Percent{X%}~%* Parent~%** Half~%:PROPERTIES:~%:All: [50%]~%:Count: [2/4]~%:Percent: [50%]~%:END:~%** Done~%:PROPERTIES:~%:All: [X]~%:Count: [4/4]~%:Percent: [100%]~%:END:~%** Lower~%:PROPERTIES:~%:All: [x]~%:Count: [1/1]~%:Percent: [100%]~%:END:~%** Zero~%:PROPERTIES:~%:All: [ ]~%:Count: [0/0]~%:Percent: [ ]~%:END:~%")))
+           (estimate-document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %Estimate{est+}~%* Parent~%** Negative~%:PROPERTIES:~%:Estimate: -2--1~%:END:~%** Point~%:PROPERTIES:~%:Estimate: 5~%:END:~%")))
+           (mixed-estimate-document
+             (parse-org
+              (format nil
+                      "#+COLUMNS: %ITEM %Estimate{est+}~%* Parent~%** Number~%:PROPERTIES:~%:Estimate: 5~%:END:~%** Duration~%:PROPERTIES:~%:Estimate: 1h~%:END:~%"))))
+      (expect (org-kit::column-view-data cookie-document)
+              :to-equal '(("ITEM" "All" "Count" "Percent")
+                          ("Parent" "[-]" "[2/4]" "[50%]")
+                          ("Half" "[50%]" "[2/4]" "[50%]")
+                          ("Done" "[X]" "[4/4]" "[100%]")
+                          ("Lower" "[x]" "[1/1]" "[100%]")
+                          ("Zero" "[ ]" "[0/0]" "[ ]")))
+      (expect (org-kit::column-view-data estimate-document)
+              :to-equal '(("ITEM" "Estimate")
+                          ("Parent" "3-4")
+                          ("Negative" "-2--1")
+                          ("Point" "5")))
+      (columnview-test-expect-error
+       (columnview-test-capture-condition
+        (lambda () (org-kit::column-view-data mixed-estimate-document)))
+       :invalid-summary-value)
+      (dolist (case '(("X/" "[2/1]") ("X%" "[101%]")))
+        (let ((condition
+                (columnview-test-summary-error (first case) (second case))))
+          (columnview-test-expect-error condition :invalid-summary-value)))))
+
+  (it "covers numeric and duration parser boundaries"
+    (let ((column (org-kit::%make-column-view-column :property "Value")))
+      (multiple-value-bind (token number end)
+          (org-kit::column-view-read-number "" 0)
+        (expect (list token number end) :to-equal (list nil nil 0)))
+      (expect (org-kit::column-view-parse-number-value "+1") :to-equal 1)
+      (expect (org-kit::column-view-parse-number-value ".5") :to-equal 1/2)
+      (columnview-test-expect-error
+       (columnview-test-capture-condition
+        (lambda () (org-kit::column-view-parse-duration column "1h 30")))
+       :invalid-summary-value)
+      (columnview-test-expect-error
+       (columnview-test-capture-condition
+        (lambda ()
+          (org-kit::column-view-checkbox-complete-p
+           column "x2/4]" :checkbox-count)))
+       :invalid-summary-value)
+      (columnview-test-expect-error
+       (columnview-test-capture-condition
+        (lambda ()
+          (org-kit::column-view-checkbox-complete-p
+           column "[50%x" :checkbox-percent)))
+       :invalid-summary-value)
+      (columnview-test-expect-error
+       (columnview-test-capture-condition
+        (lambda () (org-kit::column-view-parse-estimate column "1h-2")))
+       :invalid-summary-value)))
+
+  (it "reads property drawer text and ignores nested global COLUMNS keywords"
+    (let* ((source (format nil ":COLUMNS: %ITEM(Text)~%* Root~%"))
+           (document (parse-org source))
+           (drawer (make-node :drawer :properties '(:drawer-name "PROPERTIES")))
+           (paragraph
+             (make-node :paragraph :begin 0
+                        :end (position #\Newline source))))
+      (append-child drawer (make-node :comment))
+      (append-child drawer paragraph)
+      (append-child (document-root document) drawer)
+      (expect (multiple-value-list
+               (org-kit::column-view-global-property-format document))
+              :to-equal '("%ITEM(Text)" t)))
+    (let ((document
+            (parse-org (format nil "* Root~%#+COLUMNS: %ITEM(Nested)~%"))))
+      (expect (multiple-value-list
+               (org-kit::column-view-global-keyword-format document))
+              :to-equal '(nil nil))))
+
+  (it "rejects malformed checkbox cookies and mixed estimate endpoints"
+    (let ((column (org-kit::%make-column-view-column :property "Value")))
+      (dolist (value '("x2/4]" "[50%x"))
+        (expect (typep
+                 (columnview-test-capture-condition
+                  (lambda ()
+                    (org-kit::column-view-checkbox-complete-p
+                     column value :checkbox-percent)))
+                 'org-kit::org-column-view-error)
+                :to-be t)))))
