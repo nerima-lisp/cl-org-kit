@@ -1,8 +1,6 @@
 # TODO and Agenda
 
-TODO keywords and planning timestamps are stored on parsed headlines. The
-public API can set a configured TODO keyword, list unfinished TODO headlines,
-build an agenda for a date range, and select headlines with Org match syntax.
+TODO keywords and planning timestamps are stored on parsed headlines.
 
 ## Set a TODO keyword
 
@@ -38,23 +36,32 @@ An unknown keyword, invalid target, or conflicting edit signals
 
 ## Set and adjust priorities
 
-`#+PRIORITIES` defines the highest, lowest, and default values for the document.
+`#+PRIORITIES` lists the highest, lowest, and default values, in that order.
 For example, `#+PRIORITIES: A C B` uses the alphabetic range A through C and
 defaults unmarked headings to B. Numeric ranges use values from 0 through 64,
-such as `#+PRIORITIES: 1 10 5`. The three values must use the same kind and be
-in ascending order. Without the directive, Org's A, C, and B defaults apply.
+such as `#+PRIORITIES: 1 10 5`. The endpoints and default must use the same kind,
+and the default must lie between the endpoints. Only the first three values are
+used; directives with fewer than three values are ignored. Without the
+directive, Org's A, C, and B defaults apply.
 
 `set-heading-priority` accepts an uppercase letter or a numeric priority and
 rejects values outside the configured range. Pass `nil` to clear the priority.
-`adjust-heading-priority` moves one step with `:up` or `:down`, clamping at the
-range limits. An unmarked heading starts from the configured default before
-the adjustment. Invalid directives, directions, or values signal
-`org-edit-error` with reason `:invalid-value`.
+`adjust-heading-priority` moves one step with `:up` or `:down`. The first
+adjustment of an unmarked heading assigns the configured default. Moving past a
+range endpoint clears the priority cookie. To wrap on the next call, pass the
+direction that cleared the cookie as `:previous-direction` and use that same
+direction again; the unset priority then starts at the opposite endpoint. An
+unset priority without a matching `:previous-direction` starts at the default.
+Invalid directives, directions, or values signal `org-edit-error` with reason
+`:invalid-value`. A numeric `PRIORITY` query value is returned as decimal text.
 
 ## Transition a TODO state
 
 `transition-heading-todo` sets a heading to a configured state, while
 `cycle-heading-todo` advances or reverses through a configured TODO sequence.
+Pass `:direction :next` to advance or `:direction :previous` to reverse with
+`cycle-heading-todo`. If the heading has no TODO state and more than one active
+sequence is configured, pass that sequence's ID as `:sequence-id`.
 Both functions return two values: an `edit-result` and a `transition-result`.
 The `edit-result` contains the updated document; the `transition-result`
 describes the previous and new states, log events, repeater rescheduling, and
@@ -115,12 +122,16 @@ by the document's `:max-future-repeats` limit, which defaults to 10,000. An
 exceeded limit signals `org-resource-limit-error`.
 
 Changing a heading to a DONE state is refused with `org-edit-error` reason
-`:blocked` when it has an unfinished direct TODO child, or when an earlier
-unfinished TODO sibling blocks it under its parent's local `ORDERED` property.
-A local `NOBLOCKING` property on the heading disables these checks. Unchecked
-checkboxes do not block TODO transitions. Querying the special `BLOCKED`
-property uses these dependency rules and also checks any caller-supplied
-blocked provider.
+`:blocked` when any TODO heading in its subtree is unfinished, or when an
+earlier unfinished TODO sibling blocks it under an `ORDERED` parent or
+ancestor. Put `:ORDERED: t` in the parent heading's `:PROPERTIES:` drawer to mark
+an ordered sequence. Put `:NOBLOCKING: t` in the target heading's drawer to skip
+its dependency checks. Unchecked checkboxes do not block TODO transitions.
+Querying the special `BLOCKED` property combines these rules with an optional
+provider. Pass a one-argument function as `:blocked-provider` to
+`make-query-context`; it receives the headline node and returns `nil` or the
+provider value to expose as `BLOCKED`. A non-`nil` provider value is preserved;
+otherwise a built-in blocked result is returned as `"t"`.
 
 ## Build a TODO list and agenda
 
@@ -171,21 +182,25 @@ entries for the inclusive start and end dates. Its call options are
 `:warning-days` (14 days before a deadline by default), `:scheduled-delay`
 (zero days by default), and `:future-repeats` (default `:all`).
 `:scheduled-delay` is a nonnegative integer day count. A scheduled timestamp's
-explicit warning amount and unit set its visible date; otherwise the visible
-date is the scheduled timestamp plus `:scheduled-delay` days. The first
-scheduled occurrence appears on its scheduled date when that visible date is
-on or before it and the scheduled date is in range. If it is past, it appears
-on the reference date once its visible date has arrived, provided that date is
-in the inclusive agenda range. `:delayed` is set only when the effective delay
-is positive and the original scheduled date is before the reference date. It can
-mark the stale reference-date reminder or an eligible future repeat row, but not
-the original scheduled-date row.
+explicit warning amount and unit override `:scheduled-delay`; otherwise that
+option supplies the delay in days. This warning amount or option value is the
+effective delay used below. The first
+scheduled occurrence appears on its scheduled date when its visible date is on
+or before that date and the scheduled date is in range. If the scheduled date is
+before the reference date, a reminder appears on the reference date once its
+visible date has arrived, provided the reference date is in range. For a repeat
+row, the visible date must be on or before that occurrence date. On an agenda
+entry, `agenda-entry-scheduled-delay-state` returns `:delayed` when the original
+scheduled date is before the reference date and the effective delay is positive.
+This can mark the reference-date reminder or an eligible repeat row, but not the
+original scheduled-date row.
 
-`:future-repeats` can be `:all`, `:next`, or `:none`. Future repeat rows are
-limited to the requested inclusive date range. Repeating scheduled or deadline
-entries generate occurrences strictly after the later of the original date and
-the time-context reference date. These keyword options are call settings, not
-document resource limits.
+`:future-repeats` can be `:all`, `:next`, or `:none`. For repeating scheduled or
+deadline entries, `:all` includes occurrences through the requested inclusive
+date range. `:next` includes at most one occurrence strictly after the later of
+the original date and reference date; when the original date is already in the
+future, it adds no repeat row. `:none` adds no repeat rows. These are call
+settings, not document resource limits.
 
 Use `agenda-result-entries` to read rows and `agenda-entry-headline`,
 `agenda-entry-kind`, `agenda-entry-date`, `agenda-entry-heading-path`, and the
@@ -193,8 +208,9 @@ other `agenda-entry-*` accessors to inspect them. The matcher signature is
 `(agenda-match documents match &key time-context)`. It returns matching
 headlines in document order as `agenda-match-entry` values, with document,
 node, heading path, and source line information. It requires the same explicit
-time context as the agenda calls. `agenda-todo-list`'s `:match` argument uses
-the same Org match syntax but only filters its non-DONE TODO headlines.
+time context as the agenda calls. The `agenda-todo-list` `:match` argument uses
+the same Org match syntax and filters non-DONE TODO headlines.
+
 `query-match-now` also requires `:time-context` and evaluates relative dates at
 that context's reference instant in its configured time zone. Callers that
 used the former implicit system-clock behavior must supply this context.
@@ -203,14 +219,22 @@ Agenda rows for a scheduled habit also expose `agenda-entry-habit-consistency`.
 It returns one `(:date ... :status ...)` plist for each date in the inclusive
 agenda range. Dates use date-only `org-time-value` objects. Status is
 `:completed` for a DONE state log on that date or a `CLOSED` date on a done
-heading, `:within-schedule` through the current due date, and `:late` after
-that date. The initial due date is the habit's `SCHEDULED` date. Restart
-repeaters advance from each completion; other repeater modes advance to the
-next scheduled occurrence. Rows for non-habits return `nil`. A habit must be a
+heading, `:within-schedule` through the due date, and `:late` after that date.
+The current `SCHEDULED` timestamp is the active due date. Earlier due dates are
+reconstructed from completion logs: `.+` restarts its interval after each DONE,
+`+` keeps a fixed cadence. The current `SCHEDULED` date is the due date after
+the latest DONE; moving backward through DONE logs, each earlier DONE's due date
+is one repeater interval before the due date after the next later DONE. `++`
+keeps its fixed cadence and advances past each completion. An incomplete date
+after the time context's reference date remains `:within-schedule`. Rows for
+non-habits return `nil`. A habit must be a
 TODO heading with an active scheduled repeater; otherwise `agenda` signals
 `org-agenda-error` with a reason such as `:habit-without-repeater`.
 
 ~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
 (let* ((document
          (org-kit:parse-org
           (format nil
@@ -235,7 +259,8 @@ dates or time contexts signal `org-time-error`, malformed match syntax signals
 `org-resource-limit-error`. The default limits are 3,660 inclusive days,
 1,000,000 generated entries, and 10,000 future repeats. A call over multiple
 documents uses the lowest configured agenda ceiling among them. These ceilings
-can be changed through the documents' `limits`.
+can be changed by passing a limits object to `parse-org`, for example
+`:limits (org-kit:make-limits :max-agenda-range-days 90)`.
 
 See [Clock](clock.md) for clock aggregation and
 [API Stability](../reference/api-stability.md) for the 0.1.0 public API scope.
