@@ -732,7 +732,9 @@
                        "CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 10:15] => 0:15"
                        "CLOCK: [2026-10-12 Mon 10:15]--[2026-10-12 Mon 10:45] => 0:30"
                        "CLOCK: [2026-10-12 Mon 11:00]"
-                       "CLOCK: [2026-10-12 Mon 13:00]--[2026-10-12 Mon 12:00] => 1:00")))
+                       "CLOCK: [2026-10-12 Mon 13:00]--[2026-10-12 Mon 12:00] => 1:00"
+                       "CLOCK: => 0:30"
+                       "CLOCK: [2026-10-12 Mon 12:00]--[2026-10-12 Mon 12:00] => 0:00")))
            (document (parse-org source))
            (context (clock-test-context "2026-10-12T14:00:00"))
            (issues (check-clock-consistency
@@ -752,6 +754,64 @@
                 (:too-long 5 nil 180)
                 (:end-before-start 6 nil nil)))
       (expect (every #'clock-consistency-issue-p issues) :to-be t)))
+  (it "covers clock consistency validation and normalized interval edges"
+    (let* ((context (clock-test-context "2024-03-10T11:00:00"))
+           (future-document
+             (parse-org
+              (format nil "* Task~%CLOCK: [2024-03-10 Sun 12:00]")))
+           (future-error
+             (handler-case
+                 (progn
+                   (check-clock-consistency future-document :time-context context)
+                   nil)
+               (org-clock-error (condition) condition)))
+           (overlap-document
+             (parse-org
+              (format nil
+                      "* Task~%CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 10:30]~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:15]")))
+           (overlap-issues
+             (check-clock-consistency
+              overlap-document
+              :time-context (clock-test-context "2026-10-12T11:00:00")))
+           (dst-document
+             (parse-org
+              (format nil
+                      "* Task~%CLOCK: [2024-03-10 Sun 02:30]--[2024-03-10 Sun 03:00] => 0:30")))
+           (dst-context
+             (clock-test-context
+              "2024-03-10T04:00:00"
+              (org-kit::resolve-time-zone "America/New_York")))
+           (dst-issues (check-clock-consistency dst-document :time-context dst-context)))
+      (signals type-error
+        (make-clock-consistency-issue :reason :unknown :line 1))
+      (signals type-error
+        (make-clock-consistency-issue :reason :overlap))
+      (signals type-error
+        (make-clock-consistency-issue :reason :overlap :line 1 :other-line 0))
+      (signals type-error
+        (make-clock-consistency-issue
+         :reason :overlap :line 1 :duration-minutes -1))
+      (signals type-error
+        (check-clock-consistency
+         (make-document "* Task") :time-context context))
+      (signals type-error
+        (check-clock-consistency (parse-org "* Task")))
+      (expect (org-clock-error-reason future-error) :to-be :invalid-range)
+      (expect (mapcar
+               (lambda (issue)
+                 (list (clock-consistency-issue-reason issue)
+                       (clock-consistency-issue-line issue)
+                       (clock-consistency-issue-other-line issue)))
+               overlap-issues)
+              :to-equal '((:overlap 2 3)))
+      (progn
+  (expect (mapcar #'clock-consistency-issue-reason dst-issues)
+          :to-equal '(:end-before-start))
+  (expect
+   (org-kit::clock-consistency-issue-before-p
+    (make-clock-consistency-issue :reason :overlap :line 1 :other-line 2)
+    (make-clock-consistency-issue :reason :overlap :line 1 :other-line 2))
+   :to-be nil))))
 
   (it "signals named clock errors for malformed entries and an invalid duration threshold"
     (let* ((context (clock-test-context "2026-10-12T10:00:00"))
@@ -823,7 +883,46 @@
           (expect (write-org updated :output-type :octets) :to-equalp expected-octets)
           (expect (edit-span-start span) :to-be (length (format nil "* Task~%")))
           (expect (edit-span-end span) :to-be (length (format nil "* Task~%")))
-          (expect (write-org document :output-type :octets) :to-equalp original-octets)))))
+          (expect (write-org document :output-type :octets) :to-equalp original-octets)))
+      (let* ((plain-document (parse-org "* Task"))
+             (plain-heading (clock-test-heading plain-document "Task"))
+             (plain-context (clock-test-context "2025-01-01T10:01:00")))
+        (multiple-value-bind (result value)
+            (insert-timer-item plain-document plain-heading
+                               (clock-test-value "2025-01-01T10:00:00")
+                               "Review" :time-context plain-context)
+          (expect value :to-equal "0:01:00")
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal (format nil "* Task~%- 0:01:00 :: Review"))))
+      (let* ((crlf (format nil "* Task~C~CBody~C~C"
+                           #\Return #\Newline #\Return #\Newline))
+             (crlf-document (parse-org crlf))
+             (crlf-heading (clock-test-heading crlf-document "Task"))
+             (crlf-context (clock-test-context "2025-01-01T10:01:00")))
+        (multiple-value-bind (result value)
+            (insert-timer-item crlf-document crlf-heading
+                               (clock-test-value "2025-01-01T10:00:00")
+                               "Review" :time-context crlf-context)
+          (expect value :to-equal "0:01:00")
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal
+                  (format nil "* Task~C~C- 0:01:00 :: Review~C~CBody~C~C"
+                          #\Return #\Newline #\Return #\Newline
+                          #\Return #\Newline))))
+      (let* ((metadata-document
+               (parse-org
+                (format nil "* Task~%:PROPERTIES:~%:ID: stable~%:END:~%")))
+             (metadata-heading (clock-test-heading metadata-document "Task"))
+             (metadata-context (clock-test-context "2025-01-01T10:01:00")))
+        (multiple-value-bind (result value)
+            (insert-timer-item metadata-document metadata-heading
+                               (clock-test-value "2025-01-01T10:00:00")
+                               "Review" :time-context metadata-context)
+          (expect value :to-equal "0:01:00")
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal
+                  (format nil
+                          "* Task~%:PROPERTIES:~%:ID: stable~%:END:~%- 0:01:00 :: Review~%"))))))
 
   (it "inserts timer items after planning and property metadata"
     (let* ((source
@@ -875,6 +974,20 @@
        condition :invalid-range
        "timer start follows the time-context reference instant"
        "Invalid clock range")))
+  (it "validates timer references and heading line endings"
+    (let* ((start (clock-test-value "2025-01-01T10:00:00"))
+           (no-newline-document (parse-org "* Task"))
+           (no-newline-heading (clock-test-heading no-newline-document "Task"))
+           (newline-source (format nil "* Task~%Body~%"))
+           (newline-document (parse-org newline-source))
+           (newline-heading (clock-test-heading newline-document "Task")))
+      (signals type-error (timer-item-value start nil))
+      (expect (org-kit::clock-timer-item-line-end
+               no-newline-document no-newline-heading)
+              :to-be (length (document-text no-newline-document)))
+      (expect (org-kit::clock-timer-item-line-end
+               newline-document newline-heading)
+              :to-be (length (format nil "* Task~%")))))
 
   (it "rejects a multi-line timer description with a named reason"
     (let* ((document (parse-org "* Task"))
@@ -889,4 +1002,8 @@
       (clock-test-expect-clock-error
        condition :unsupported-option
        "timer description must be a single line"
-       "Unsupported clock option"))))
+       "Unsupported clock option")
+      (signals type-error
+        (insert-timer-item document heading
+                           (clock-test-value "2025-01-01T09:59:00")
+                           42 :time-context context)))))

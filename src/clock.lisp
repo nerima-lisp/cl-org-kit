@@ -212,10 +212,10 @@
   (unless (org-time-value-p value)
     (error 'type-error :datum value :expected-type 'org-time-value))
   (cl-date-kit:instant-epoch-second
-   (org-time-context-reference-instant
-    (make-time-context :reference-time value
-                       :zone (org-time-context-zone context)
-                       :dst-policy (org-time-context-dst-policy context)))))
+   (%time-value-to-instant
+    value
+    (org-time-context-zone context)
+    (org-time-context-dst-policy context))))
 
 (defun clock-consistency-reversed-range (clock time-context)
   (let* ((timestamp (node-property clock :value))
@@ -373,7 +373,7 @@
                   (funcall record-issue :overlap clock :other-clock other-clock)
                   (funcall record-issue :overlap other-clock
                            :other-clock clock))))
-          (push interval active)))))
+          (push interval active))))))
 
 (defun check-clock-consistency (document &key time-context max-duration-minutes)
   "Return clock consistency findings in DOCUMENT.
@@ -457,7 +457,7 @@ signals ORG-RESOURCE-LIMIT-ERROR."
                     (error condition))))))
         (clock-consistency-record-overlaps document (nreverse intervals)
                                            #'record-issue)
-        (stable-sort issues #'clock-consistency-issue-before-p))))))
+        (stable-sort issues #'clock-consistency-issue-before-p)))))
 
 (defun insert-timer-item (document heading start-time description &key time-context)
   "Insert a description-list timer item after HEADING's line.
