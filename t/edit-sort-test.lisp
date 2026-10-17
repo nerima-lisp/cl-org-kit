@@ -471,6 +471,22 @@
         (expect (edit-sort-test-direct-child-values
                  (edit-sort-test-parent (edit-result-updated-document result)))
                 :to-equal '("Implicit" "Explicit")))
+      (let* ((short-directive-source
+               (format nil "#+PRIORITIES: A B~%~A" source))
+             (document (parse-org short-directive-source))
+             (result (sort-subtree-children
+                      document (edit-sort-test-parent document) :priority)))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent (edit-result-updated-document result)))
+                :to-equal '("Implicit" "Explicit")))
+      (let* ((extra-token-source
+               (format nil "#+PRIORITIES: A C B EXTRA~%~A" source))
+             (document (parse-org extra-token-source))
+             (result (sort-subtree-children
+                      document (edit-sort-test-parent document) :priority)))
+        (expect (edit-sort-test-direct-child-values
+                 (edit-sort-test-parent (edit-result-updated-document result)))
+                :to-equal '("Implicit" "Explicit")))
       (let* ((scanned-source
                (format nil
                        "Preamble text~%#+PRIORITIES: A D B~%* Parent~%** [#D] Explicit~%** Implicit~%** [#C] Medium~%"))

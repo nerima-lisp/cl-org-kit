@@ -170,7 +170,7 @@
         (expect (node-property (first (edit-headline-test-nodes edited)) :priority)
                 :to-equal 7))))
 
-  (it "adjusts alphabetic and numeric priorities within the configured range"
+  (it "adjusts priorities and starts unset values at configured defaults"
     (let* ((alphabetic-source
              (format nil "#+PRIORITIES: A E C~%* [#C] Letter~%* Number~%"))
            (alphabetic (parse-org alphabetic-source))
@@ -189,9 +189,61 @@
         (expect (document-text letter-result)
                 :to-equal (format nil "#+PRIORITIES: A E C~%* [#B] Letter~%* Number~%"))
         (expect (document-text number-result)
-                :to-equal (format nil "#+PRIORITIES: A E C~%* [#C] Letter~%* [#D] Number~%"))
+                :to-equal (format nil "#+PRIORITIES: A E C~%* [#C] Letter~%* [#C] Number~%"))
         (expect (document-text numeric-result)
                 :to-equal (format nil "#+PRIORITIES: 1 10 5~%* [#4] Number~%")))))
+
+  (it "starts unset priorities at the configured default in either direction"
+    (let* ((source (format nil "* Task~%"))
+           (document (parse-org source))
+           (headline (first (edit-headline-test-nodes document)))
+           (up-result (adjust-heading-priority document headline :up))
+           (down-result (adjust-heading-priority document headline :down))
+           (explicit-nil-result
+             (adjust-heading-priority document headline :up :previous-direction nil))
+           (numeric-source (format nil "#+PRIORITIES: 1 10 5~%* Task~%"))
+           (numeric-document (parse-org numeric-source))
+           (numeric-result
+             (adjust-heading-priority
+              numeric-document (first (edit-headline-test-nodes numeric-document)) :up)))
+      (with-soft-assertions
+        (expect (document-text up-result)
+                :to-equal (format nil "* [#B] Task~%"))
+        (expect (document-text down-result)
+                :to-equal (format nil "* [#B] Task~%"))
+        (expect (document-text explicit-nil-result)
+                :to-equal (format nil "* [#B] Task~%"))
+        (expect (document-text numeric-result)
+                :to-equal (format nil "#+PRIORITIES: 1 10 5~%* [#5] Task~%")))))
+
+  (it "clears an out-of-range priority and cycles to the opposite end"
+    (let* ((source
+             (format nil "#+PRIORITIES: A C B~%* [#A] Highest~%* [#C] Lowest~%"))
+           (document (parse-org source))
+           (headlines (edit-headline-test-nodes document))
+           (up-cleared (adjust-heading-priority document (first headlines) :up))
+           (up-cycled
+             (adjust-heading-priority
+              up-cleared (first (edit-headline-test-nodes up-cleared)) :up
+              :previous-direction :up))
+           (down-cleared (adjust-heading-priority document (second headlines) :down))
+           (down-cycled
+             (adjust-heading-priority
+              down-cleared (second (edit-headline-test-nodes down-cleared)) :down
+              :previous-direction :down)))
+      (with-soft-assertions
+        (expect (document-text up-cleared)
+                :to-equal
+                (format nil "#+PRIORITIES: A C B~%* Highest~%* [#C] Lowest~%"))
+        (expect (document-text up-cycled)
+                :to-equal
+                (format nil "#+PRIORITIES: A C B~%* [#C] Highest~%* [#C] Lowest~%"))
+        (expect (document-text down-cleared)
+                :to-equal
+                (format nil "#+PRIORITIES: A C B~%* [#A] Highest~%* Lowest~%"))
+        (expect (document-text down-cycled)
+                :to-equal
+                (format nil "#+PRIORITIES: A C B~%* [#A] Highest~%* [#A] Lowest~%")))))
 
   (it "rejects priorities outside the configured range and invalid directives"
     (let* ((range-source (format nil "#+PRIORITIES: A E C~%* Task~%"))
@@ -223,6 +275,13 @@
                  (progn
                    (adjust-heading-priority range-document range-heading :sideways)
                    nil)
+               (org-edit-error (condition) condition)))
+           (invalid-previous-direction
+             (handler-case
+                 (progn
+                   (adjust-heading-priority range-document range-heading :up
+                                            :previous-direction :sideways)
+                   nil)
                (org-edit-error (condition) condition))))
       (with-soft-assertions
         (expect (typep invalid-range 'org-edit-error) :to-be t)
@@ -237,6 +296,10 @@
         (expect (typep invalid-direction 'org-edit-error) :to-be t)
         (when (typep invalid-direction 'org-edit-error)
           (expect (org-edit-error-reason invalid-direction) :to-be :invalid-value))
+        (expect (typep invalid-previous-direction 'org-edit-error) :to-be t)
+        (when (typep invalid-previous-direction 'org-edit-error)
+          (expect (org-edit-error-reason invalid-previous-direction)
+                  :to-be :invalid-value))
         (expect (document-text range-document) :to-equal range-source)
         (expect (document-text directive-document) :to-equal directive-source))))
 

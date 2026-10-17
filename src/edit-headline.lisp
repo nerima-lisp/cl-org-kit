@@ -212,12 +212,10 @@
 (defun edit-priority-settings (document target)
   (multiple-value-bind (directive directive-p)
       (edit-priority-keyword document)
-    (if directive-p
-        (let ((tokens (and (stringp directive)
-                           (edit-priority-directive-tokens directive))))
-          (unless (= (length tokens) 3)
-            (edit-signal-error target :invalid-value
-                               "PRIORITIES must contain highest, lowest, and default"))
+    (let ((tokens (and directive-p
+                       (stringp directive)
+                       (edit-priority-directive-tokens directive))))
+      (if (and directive-p (>= (length tokens) 3))
           (multiple-value-bind (highest highest-kind highest-token highest-valid-p)
               (edit-priority-object-value (first tokens))
             (declare (ignore highest-token))
@@ -233,7 +231,7 @@
                              (<= highest default lowest))
                   (edit-signal-error target :invalid-value
                                      "PRIORITIES values must share an ordered range"))
-                (values highest lowest default highest-kind)))))
+                (values highest lowest default highest-kind))))
         (let* ((settings (document-settings document))
                (setting-present-p (member :priority-default settings :test #'eq))
                (setting-value (and setting-present-p
@@ -249,7 +247,7 @@
                             value nil)
                         :alphabetic))
               (values (char-code #\A) (char-code #\C) (char-code #\B)
-                      :alphabetic))))))
+                      :alphabetic)))))))
 
 (defun edit-headline-priority-value (priority target)
   (multiple-value-bind (value kind token valid-p)
@@ -293,33 +291,46 @@
           (edit-headline-apply document headline target patches
                                (list :priority priority-value))))))))
 
-(defun adjust-heading-priority (document target direction)
+(defun adjust-heading-priority (document target direction &key previous-direction)
   "Move a headline priority one step up or down within its PRIORITIES range.
-An unset priority starts at the configured default before the adjustment."
+An unset priority starts at the default, or wraps when PREVIOUS-DIRECTION equals DIRECTION."
   (unless (member direction '(:up :down) :test #'eq)
     (edit-signal-error target :invalid-value
                        "Priority direction must be :UP or :DOWN"))
-  (let* ((headline (edit-headline-resolve-target document target)))
+  (unless (or (null previous-direction)
+              (member previous-direction '(:up :down) :test #'eq))
+    (edit-signal-error target :invalid-value
+                       "Previous priority direction must be :UP or :DOWN"))
+  (let* ((headline (edit-headline-resolve-target document target))
+         (priority (node-property headline :priority))
+         (repeat-unset-p (and (null priority)
+                              (eq previous-direction direction))))
     (multiple-value-bind (highest lowest default policy-kind)
         (edit-priority-settings document target)
       (multiple-value-bind (current current-kind token current-valid-p)
-          (if (node-property headline :priority)
+          (if priority
               (edit-priority-current-value
-               (node-property headline :priority))
+               priority)
               (values default policy-kind nil t))
         (declare (ignore token))
-        (unless (and current-valid-p
-                     (edit-priority-valid-in-range-p
-                      current current-kind highest lowest policy-kind))
+        (unless (or repeat-unset-p
+                    (and current-valid-p
+                         (edit-priority-valid-in-range-p
+                          current current-kind highest lowest policy-kind)))
           (edit-signal-error target :invalid-value
                              "Current priority is outside the document's PRIORITIES range"))
-        (let* ((next (max highest
-                          (min lowest
-                               (+ current (if (eq direction :up) -1 1)))))
+        (let* ((next (cond (repeat-unset-p
+                            (if (eq direction :up) lowest highest))
+                           (priority
+                            (+ current (if (eq direction :up) -1 1)))
+                           (t current)))
+               (past-boundary-p (and priority
+                                     (not (<= highest next lowest))))
                (value (if (eq policy-kind :numeric)
                           next
                           (code-char next))))
-          (set-heading-priority document headline value))))))
+          (set-heading-priority document headline
+                                (unless past-boundary-p value)))))))
 
 (defun edit-headline-title-value (document raw-title target)
   (unless (and (stringp raw-title)
