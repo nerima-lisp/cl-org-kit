@@ -722,3 +722,128 @@
                 :to-be 0)
         (expect (org-clock-error-reason bare) :to-be nil)
         (expect (org-clock-error-context bare) :to-be nil)))))
+
+(describe "clock consistency and timer items"
+  (it "reports reversed, overlapping, open, and overlong clock intervals in source order"
+    (let* ((source
+             (format nil "~{~A~^~%~}"
+                     '("* Task"
+                       "CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 10:30] => 1:30"
+                       "CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 10:15] => 0:15"
+                       "CLOCK: [2026-10-12 Mon 10:15]--[2026-10-12 Mon 10:45] => 0:30"
+                       "CLOCK: [2026-10-12 Mon 11:00]"
+                       "CLOCK: [2026-10-12 Mon 13:00]--[2026-10-12 Mon 12:00] => 1:00")))
+           (document (parse-org source))
+           (context (clock-test-context "2026-10-12T14:00:00"))
+           (issues (check-clock-consistency
+                    document :time-context context :max-duration-minutes 60))
+           (rows
+             (mapcar (lambda (issue)
+                       (list (clock-consistency-issue-reason issue)
+                             (clock-consistency-issue-line issue)
+                             (clock-consistency-issue-other-line issue)
+                             (clock-consistency-issue-duration-minutes issue)))
+                     issues)))
+      (expect rows :to-equal
+              '((:overlap 2 3 nil)
+                (:overlap 2 4 nil)
+                (:too-long 2 nil 90)
+                (:open-clock 5 nil 180)
+                (:too-long 5 nil 180)
+                (:end-before-start 6 nil nil)))
+      (expect (every #'clock-consistency-issue-p issues) :to-be t)))
+
+  (it "signals named clock errors for malformed entries and an invalid duration threshold"
+    (let* ((context (clock-test-context "2026-10-12T10:00:00"))
+           (malformed-document (parse-org (format nil "* Task~%CLOCK: => 1:60")))
+           (malformed
+             (clock-test-error
+              (lambda ()
+                (check-clock-consistency malformed-document
+                                         :time-context context))))
+           (invalid-threshold
+             (clock-test-error
+              (lambda ()
+                (check-clock-consistency (parse-org "* Task")
+                                         :time-context context
+                                         :max-duration-minutes -1)))))
+      (clock-test-expect-clock-error malformed :malformed-clock "CLOCK: => 1:60"
+                                     "Malformed CLOCK entry")
+      (clock-test-expect-clock-error
+       invalid-threshold :invalid-range
+       "max-duration-minutes must be a non-negative integer"
+       "Invalid clock range")))
+
+  (it "inserts an Org timer item using the explicit reference instant and preserves source bytes"
+    (let* ((source (format nil "* Task~%既存の本文~%"))
+           (source-octets (cl-codec-kit:string-to-octets source :encoding :utf-8))
+           (document (parse-org source-octets :encoding :utf-8))
+           (heading (clock-test-heading document "Task"))
+           (context (clock-test-context "2025-01-01T10:01:23"))
+           (start (clock-test-value "2025-01-01T10:00:00"))
+           (original-octets (write-org document :output-type :octets))
+           (expected-source
+             (format nil "* Task~%- 0:01:23 :: Review~%既存の本文~%"))
+           (expected-octets
+             (cl-codec-kit:string-to-octets expected-source :encoding :utf-8)))
+      (expect (timer-item-value start context) :to-equal "0:01:23")
+      (multiple-value-bind (result value)
+          (insert-timer-item document heading start "Review"
+                             :time-context context)
+        (let* ((updated (edit-result-updated-document result))
+               (span (first (edit-result-spans result))))
+          (expect (edit-result-p result) :to-be t)
+          (expect value :to-equal "0:01:23")
+          (expect (write-org updated :output-type :octets) :to-equalp expected-octets)
+          (expect (edit-span-start span) :to-be (length (format nil "* Task~%")))
+          (expect (edit-span-end span) :to-be (length (format nil "* Task~%")))
+          (expect (write-org document :output-type :octets) :to-equalp original-octets)))))
+
+  (it "inserts timer items after planning and property metadata"
+    (let* ((source
+             (format nil
+                     "* Task~%SCHEDULED: <2025-01-01 Wed>~%:PROPERTIES:~%:ID: stable~%:END:~%Body~%"))
+           (document (parse-org source))
+           (heading (clock-test-heading document "Task"))
+           (context (clock-test-context "2025-01-01T10:01:00")))
+      (multiple-value-bind (result value)
+          (insert-timer-item document heading
+                             (clock-test-value "2025-01-01T10:00:00")
+                             "Review" :time-context context)
+        (let* ((updated (edit-result-updated-document result))
+               (updated-heading (clock-test-heading updated "Task")))
+          (expect value :to-equal "0:01:00")
+          (expect (document-text updated)
+                  :to-equal
+                  (format nil
+                          "* Task~%SCHEDULED: <2025-01-01 Wed>~%:PROPERTIES:~%:ID: stable~%:END:~%- 0:01:00 :: Review~%Body~%"))
+          (expect (node-property updated-heading :scheduled) :to-be-truthy)
+          (expect (effective-property updated updated-heading "ID")
+                  :to-equal "stable")))))
+
+  (it "rejects a timer start after the reference instant with a named reason"
+    (let* ((context (clock-test-context "2025-01-01T10:00:00"))
+           (condition
+             (clock-test-error
+              (lambda ()
+                (timer-item-value (clock-test-value "2025-01-01T10:00:01")
+                                  context)))))
+      (clock-test-expect-clock-error
+       condition :invalid-range
+       "timer start follows the time-context reference instant"
+       "Invalid clock range")))
+
+  (it "rejects a multi-line timer description with a named reason"
+    (let* ((document (parse-org "* Task"))
+           (heading (clock-test-heading document "Task"))
+           (context (clock-test-context "2025-01-01T10:00:00"))
+           (condition
+             (clock-test-error
+              (lambda ()
+                (insert-timer-item
+                 document heading (clock-test-value "2025-01-01T09:59:00")
+                 (format nil "first~%second") :time-context context)))))
+      (clock-test-expect-clock-error
+       condition :unsupported-option
+       "timer description must be a single line"
+       "Unsupported clock option"))))

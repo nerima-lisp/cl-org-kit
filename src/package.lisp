@@ -38,6 +38,11 @@
    #:clocktable-result #:make-clocktable-result #:clocktable-result-p
    #:clocktable-result-total-minutes #:clocktable-result-rows
    #:clocktable-result-range #:clocktable-data
+   #:clock-consistency-issue #:make-clock-consistency-issue
+   #:clock-consistency-issue-p #:clock-consistency-issue-reason
+   #:clock-consistency-issue-line #:clock-consistency-issue-other-line
+   #:clock-consistency-issue-duration-minutes #:check-clock-consistency
+   #:timer-item-value #:insert-timer-item
    ;; Clock editing
    #:clock-in #:clock-out
    #:write-clocktable

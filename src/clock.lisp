@@ -43,6 +43,53 @@
   "Return the count of dated intervals with positive length after clipping."
   (%clock-summary-clipped-interval-count summary))
 
+(defstruct (clock-consistency-issue
+            (:constructor %make-clock-consistency-issue)
+            (:conc-name %clock-consistency-issue-)
+            (:copier nil)
+            (:predicate %clock-consistency-issue-p))
+  "A clock consistency finding and its source line or lines."
+  (reason nil :read-only t)
+  (line nil :read-only t)
+  (other-line nil :read-only t)
+  (duration-minutes nil :read-only t))
+
+(defun make-clock-consistency-issue (&key reason line other-line duration-minutes)
+  "Make a clock consistency issue with 1-based source line numbers."
+  (unless (member reason '(:end-before-start :overlap :open-clock :too-long))
+    (error 'type-error :datum reason
+           :expected-type '(member :end-before-start :overlap :open-clock :too-long)))
+  (unless (typep line '(integer 1))
+    (error 'type-error :datum line :expected-type '(integer 1)))
+  (unless (or (null other-line) (typep other-line '(integer 1)))
+    (error 'type-error :datum other-line :expected-type '(or null (integer 1))))
+  (unless (or (null duration-minutes)
+              (and (rationalp duration-minutes) (>= duration-minutes 0)))
+    (error 'type-error :datum duration-minutes :expected-type '(or null (rational 0))))
+  (%make-clock-consistency-issue :reason reason :line line
+                                 :other-line other-line
+                                 :duration-minutes duration-minutes))
+
+(defun clock-consistency-issue-p (object)
+  "Return true when OBJECT is a clock consistency issue."
+  (%clock-consistency-issue-p object))
+
+(defun clock-consistency-issue-reason (issue)
+  "Return ISSUE's reason: :END-BEFORE-START, :OVERLAP, :OPEN-CLOCK, or :TOO-LONG."
+  (%clock-consistency-issue-reason issue))
+
+(defun clock-consistency-issue-line (issue)
+  "Return the 1-based source line of ISSUE's first clock."
+  (%clock-consistency-issue-line issue))
+
+(defun clock-consistency-issue-other-line (issue)
+  "Return the other 1-based source line for an overlap, or NIL."
+  (%clock-consistency-issue-other-line issue))
+
+(defun clock-consistency-issue-duration-minutes (issue)
+  "Return the elapsed minutes for ISSUE when its clock interval is valid."
+  (%clock-consistency-issue-duration-minutes issue))
+
 (defun %org-clock-error (reason &optional context)
   (error 'org-clock-error
          :message (ecase reason
@@ -170,6 +217,108 @@
                        :zone (org-time-context-zone context)
                        :dst-policy (org-time-context-dst-policy context)))))
 
+(defun clock-consistency-reversed-range (clock time-context)
+  (let* ((timestamp (node-property clock :value))
+         (type (and timestamp (node-property timestamp :type))))
+    (when (member type '(:active-range :inactive-range))
+      (let ((start (timestamp-start timestamp))
+            (end (timestamp-end timestamp)))
+        (when (and start end)
+          (let ((start-seconds
+                  (clock-context-instant-seconds
+                   (%time-value-from-local-value start) time-context))
+                (end-seconds
+                  (clock-context-instant-seconds
+                   (%time-value-from-local-value end) time-context)))
+            (when (> start-seconds end-seconds)
+              (values start-seconds end-seconds))))))))
+
+(defun clock-consistency-line (document clock)
+  (nth-value 0 (offset-line-column document (node-begin clock))))
+
+(defun clock-consistency-duration-minutes (start-seconds end-seconds)
+  (/ (- end-seconds start-seconds) 60))
+
+(defun clock-consistency-reason-rank (reason)
+  (position reason '(:end-before-start :overlap :open-clock :too-long)
+            :test #'eq))
+
+(defun clock-consistency-issue-before-p (left right)
+  (let ((left-line (clock-consistency-issue-line left))
+        (right-line (clock-consistency-issue-line right)))
+    (or (< left-line right-line)
+        (and (= left-line right-line)
+             (let ((left-rank
+                     (clock-consistency-reason-rank
+                      (clock-consistency-issue-reason left)))
+                   (right-rank
+                     (clock-consistency-reason-rank
+                      (clock-consistency-issue-reason right))))
+               (or (< left-rank right-rank)
+                   (and (= left-rank right-rank)
+                        (< (or (clock-consistency-issue-other-line left) 0)
+                           (or (clock-consistency-issue-other-line right) 0)))))))))
+
+(defun clock-timer-item-value-string (seconds)
+  (let* ((hours (floor seconds 3600))
+         (minutes (floor (mod seconds 3600) 60))
+         (remainder (mod seconds 60)))
+    (format nil "~D:~2,'0D:~2,'0D" hours minutes remainder)))
+
+(defun timer-item-value (start-time time-context)
+  "Return the elapsed H:MM:SS value from START-TIME to the context reference."
+  (unless (org-time-context-p time-context)
+    (error 'type-error :datum time-context :expected-type 'org-time-context))
+  (let* ((start-seconds
+           (clock-context-instant-seconds start-time time-context))
+         (end-seconds
+           (cl-date-kit:instant-epoch-second
+            (org-time-context-reference-instant time-context))))
+    (when (> start-seconds end-seconds)
+      (%org-clock-error :invalid-range
+                        "timer start follows the time-context reference instant"))
+    (clock-timer-item-value-string (- end-seconds start-seconds))))
+
+(defun clock-timer-item-line-end (document heading)
+  (let* ((source (document-text document))
+         (start (node-begin heading))
+         (newline (position #\Newline source :start start)))
+    (if newline (1+ newline) (length source))))
+
+(defun clock-timer-item-metadata-p (node)
+  (member (node-type node) '(:planning :property-drawer) :test #'eq))
+
+(defun clock-timer-item-insertion-offset (document heading)
+  (let* ((section (find :section (node-children heading) :key #'node-type))
+         (children (and section (node-children section))))
+    (cond
+      ((null section) (clock-timer-item-line-end document heading))
+      ((find-if-not #'clock-timer-item-metadata-p children)
+       (node-begin (find-if-not #'clock-timer-item-metadata-p children)))
+      (t (node-end (car (last children)))))))
+
+(defun clock-timer-item-newline (document)
+  (let* ((source (document-text document))
+         (position (position #\Newline source)))
+    (if (and position (plusp position)
+             (char= (char source (1- position)) #\Return))
+        (format nil "~C~C" #\Return #\Newline)
+        (string #\Newline))))
+
+(defun clock-timer-item-insertion-text (document offset item-line)
+  (let* ((source (document-text document))
+         (newline (clock-timer-item-newline document))
+         (eof-p (= offset (length source)))
+         (needs-leading-newline-p
+           (and eof-p
+                (not (char= (char source (1- offset)) #\Newline))))
+         (preserve-final-newline-p
+           (and eof-p (document-final-newline-p document))))
+    (concatenate 'string
+                 (if needs-leading-newline-p newline "")
+                 item-line
+                 (if (or (not eof-p) preserve-final-newline-p) newline ""))))
+
 (defun clock-check-heading (document heading)
   (check-type document document)
   (check-type heading node)
@@ -189,6 +338,136 @@
                               :max-node-count count))
                (document-root document))
     count))
+
+(defun clock-check-document-clock-nodes (document root)
+  (let ((count 0)
+        (clocks '()))
+    (map-nodes (lambda (node)
+                 (incf count)
+                 (check-limit (document-limits document)
+                              :max-node-count count)
+                 (when (eq (node-type node) :clock)
+                   (push node clocks)))
+               root)
+    (nreverse clocks)))
+
+(defun check-clock-consistency (document &key time-context max-duration-minutes)
+  "Return clock consistency findings in DOCUMENT.
+TIME-CONTEXT is required and its reference instant ends running clocks.
+When MAX-DURATION-MINUTES is supplied, intervals longer than that threshold
+also produce a finding."
+  (check-type document document)
+  (let ((root (document-root document)))
+    (unless root
+      (error 'type-error :datum root :expected-type 'node))
+    (unless (org-time-context-p time-context)
+      (error 'type-error :datum time-context :expected-type 'org-time-context))
+    (when (and max-duration-minutes
+               (not (typep max-duration-minutes '(integer 0))))
+      (%org-clock-error :invalid-range
+                        "max-duration-minutes must be a non-negative integer"))
+    (let ((clocks (clock-check-document-clock-nodes document root))
+          (reference-seconds
+            (cl-date-kit:instant-epoch-second
+             (org-time-context-reference-instant time-context)))
+          (issues '())
+          (intervals '()))
+      (labels ((record-issue (reason clock &key other-clock duration-minutes)
+                 (push (make-clock-consistency-issue
+                        :reason reason
+                        :line (clock-consistency-line document clock)
+                        :other-line
+                        (and other-clock
+                             (clock-consistency-line document other-clock))
+                        :duration-minutes duration-minutes)
+                       issues))
+               (record-duration (clock start-seconds end-seconds)
+                 (let ((duration-minutes
+                         (clock-consistency-duration-minutes
+                          start-seconds end-seconds)))
+                   (when (and max-duration-minutes
+                              (> duration-minutes max-duration-minutes))
+                     (record-issue :too-long clock
+                                   :duration-minutes duration-minutes)))))
+        (dolist (clock clocks)
+          (handler-case
+              (multiple-value-bind (kind start end duration)
+                  (clock-row-values clock)
+                (declare (ignore duration))
+                (case kind
+                  (:unscoped nil)
+                  (:closed
+                   (let* ((start-seconds
+                            (clock-context-instant-seconds start time-context))
+                          (end-seconds
+                            (clock-context-instant-seconds end time-context)))
+                     (if (> start-seconds end-seconds)
+                         (record-issue :end-before-start clock)
+                         (progn
+                           (push (list clock start-seconds end-seconds) intervals)
+                           (record-duration clock start-seconds end-seconds)))))
+                  (:running
+                   (let ((start-seconds
+                           (clock-context-instant-seconds start time-context)))
+                     (when (> start-seconds reference-seconds)
+                       (%org-clock-error :invalid-range
+                                         (clock-row-source-line clock)))
+                     (record-issue
+                      :open-clock clock
+                      :duration-minutes
+                      (clock-consistency-duration-minutes
+                       start-seconds reference-seconds))
+                     (push (list clock start-seconds reference-seconds) intervals)
+                     (record-duration clock start-seconds reference-seconds)))))
+            (org-clock-error (condition)
+              (multiple-value-bind (start-seconds end-seconds)
+                  (clock-consistency-reversed-range clock time-context)
+                (if (and (eq (org-clock-error-reason condition) :malformed-clock)
+                         start-seconds end-seconds)
+                    (record-issue :end-before-start clock)
+                    (error condition))))))
+        (let ((ordered-intervals (nreverse intervals)))
+          (loop for tail on ordered-intervals
+                for (clock start end) = (first tail)
+                do (dolist (later (rest tail))
+                     (destructuring-bind (other-clock other-start other-end) later
+                       (when (and (< start other-end) (< other-start end))
+                         (let ((line (clock-consistency-line document clock))
+                               (other-line
+                                 (clock-consistency-line document other-clock)))
+                           (if (< line other-line)
+                               (record-issue :overlap clock :other-clock other-clock)
+                               (record-issue :overlap other-clock
+                                             :other-clock clock)))))))
+        (stable-sort issues #'clock-consistency-issue-before-p))))))
+
+(defun insert-timer-item (document heading start-time description &key time-context)
+  "Insert a description-list timer item after HEADING's line.
+Return the edit result and the inserted H:MM:SS value. TIME-CONTEXT's reference
+instant supplies the timer's current time."
+  (clock-check-heading document heading)
+  (unless (stringp description)
+    (error 'type-error :datum description :expected-type 'string))
+  (when (or (find #\Newline description) (find #\Return description))
+    (%org-clock-error :unsupported-option
+                      "timer description must be a single line"))
+  (clock-check-document-node-count document)
+  (let* ((value (timer-item-value start-time time-context))
+         (source (document-text document))
+         (offset (clock-timer-item-insertion-offset document heading))
+         (item-line (format nil "- ~A :: ~A" value description))
+         (patch (edit-make-patch
+                 offset offset
+                 (clock-timer-item-insertion-text document offset item-line)
+                 heading))
+         (new-source (edit-splice-source source (list patch)))
+         (expected
+           (edit-canonical-document
+            (edit-reparse-source document new-source heading)))
+         (result
+           (edit-apply-patches-result document (list patch)
+                                      :target heading :expected expected)))
+    (values result value)))
 
 (defun clock-collect-range (heading from to time-context
                             include-running-p include-unscoped-p
