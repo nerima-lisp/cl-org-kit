@@ -249,31 +249,31 @@
         (query-match-at depth-limited-document nested-regex
                         +query-match-test-reference-time+))))
 
-  (it "captures one current reference time for the convenience API"
+  (it "matches relative dates using the supplied time context's zone"
     (let* ((document
              (parse-org
               (format nil
                       "* TODO Due today~%DEADLINE: <2026-10-13>~%* TODO Due tomorrow~%DEADLINE: <2026-10-14>")))
-           (original
-             (symbol-function 'org-kit::query-match-current-reference-time))
-           (calls 0))
-      (unwind-protect
-           (progn
-             (setf (symbol-function 'org-kit::query-match-current-reference-time)
-                   (lambda ()
-                     (incf calls)
-                     +query-match-test-reference-time+))
-             (expect (query-match-test-titles
-                      (query-match-now document "DEADLINE<=\"<today>\""))
-                     :to-equal '("Due today"))
-             (expect calls :to-be 1))
-        (setf (symbol-function 'org-kit::query-match-current-reference-time)
-              original))))
+           (time-context
+             (make-time-context
+              :reference-time (make-org-time-value "2026-10-13T22:30:00+00:00")
+              :zone (make-fixed-time-zone 0))))
+      (expect (query-match-test-titles
+               (query-match-now document "DEADLINE<=\"<today>\""
+                                :time-context time-context))
+              :to-equal '("Due today"))))
 
-  (it "builds a local date-time from the current decoded time"
-    (expect (cl-date-kit:local-date-time-p
-             (org-kit::query-match-current-reference-time))
-            :to-be t))
+  (it "reports an invalid time context with a named reason"
+    (let* ((document (parse-org "* TODO Task"))
+           (invalid-context
+             (handler-case
+                 (progn
+                   (query-match-now document "TODO" :time-context :invalid)
+                   nil)
+               (org-time-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep invalid-context 'org-time-error) :to-be t)
+        (expect (org-time-error-reason invalid-context) :to-be :invalid-time))))
 
   (it "requires a date-time reference for match evaluation"
     (let ((document (parse-org "* TODO Task")))

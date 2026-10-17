@@ -436,13 +436,6 @@
              "Unexpected character in Org match"))))
     (query-match-and (remove nil (list tag-predicate todo-predicate)))))
 
-(defun query-match-current-reference-time ()
-  (multiple-value-bind (second minute hour day month year)
-      (get-decoded-time)
-    (cl-date-kit:make-local-date-time
-     (cl-date-kit:make-local-date year month day)
-     (cl-date-kit:make-local-time hour minute second))))
-
 (defun query-match-at (document match reference-time &key context)
   "Return headlines matching Org MATCH using REFERENCE-TIME.
 REFERENCE-TIME must be a cl-date-kit:LOCAL-DATE-TIME."
@@ -456,7 +449,15 @@ REFERENCE-TIME must be a cl-date-kit:LOCAL-DATE-TIME."
          (query-ir (%make-query-ir :headlines predicate context)))
     (query-evaluate-ir document query-ir :reference-time reference-time)))
 
-(defun query-match-now (document match &key context)
-  "Return headlines matching Org MATCH relative to one local reading of now."
-  (query-match-at document match (query-match-current-reference-time)
+(defun query-match-now-reference-time (time-context)
+  (unless (org-time-context-p time-context)
+    (%org-time-error :invalid-time time-context))
+  (cl-date-kit:local-date-time-of-instant
+   (org-time-context-reference-instant time-context)
+   (org-time-zone-backend (org-time-context-zone time-context))))
+
+(defun query-match-now (document match &key time-context context)
+  "Return headlines matching Org MATCH using TIME-CONTEXT's local time."
+  (query-match-at document match
+                  (query-match-now-reference-time time-context)
                   :context context))
