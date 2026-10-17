@@ -4,7 +4,8 @@
 
 (defstruct (org-workflow-options
             (:constructor %make-org-workflow-options
-                (&key log-done log-repeat repeat-to-state
+                (&key log-done log-done-p log-repeat log-repeat-p
+                      repeat-to-state
                       (log-into-drawer "LOGBOOK")
                       (clock-into-drawer "LOGBOOK")))
             (:conc-name %org-workflow-options-)
@@ -12,16 +13,22 @@
             (:predicate %org-workflow-options-p))
   "Workflow settings that override document-wide TODO logging settings."
   (log-done nil :read-only t)
+  (log-done-p nil :read-only t)
   (log-repeat nil :read-only t)
+  (log-repeat-p nil :read-only t)
   (repeat-to-state nil :read-only t)
   (log-into-drawer "LOGBOOK" :read-only t)
   (clock-into-drawer "LOGBOOK" :read-only t))
 
-(defun make-org-workflow-options (&key log-done log-repeat repeat-to-state
+(defun make-org-workflow-options (&key (log-done nil log-done-p)
+                                    (log-repeat nil log-repeat-p)
+                                    repeat-to-state
                                     (log-into-drawer "LOGBOOK")
                                     (clock-into-drawer "LOGBOOK"))
-  "Make explicit TODO workflow settings with kit defaults for both drawers."
-  (%make-org-workflow-options :log-done log-done :log-repeat log-repeat
+  "Make explicit TODO workflow settings with kit defaults for both drawers.
+LOG-DONE and LOG-REPEAT override #+STARTUP only when supplied."
+  (%make-org-workflow-options :log-done log-done :log-done-p log-done-p
+                              :log-repeat log-repeat :log-repeat-p log-repeat-p
                               :repeat-to-state repeat-to-state
                               :log-into-drawer log-into-drawer
                               :clock-into-drawer clock-into-drawer))
@@ -501,7 +508,9 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
             (log-repeat nil)
             (states nil))
         (dolist (word (reader-heading-words (substitute #\Space #\Newline value)))
-          (let ((option (org-startup-option word)))
+          ;; org-local-logging matches these words case-sensitively,
+          ;; unlike #+STARTUP.
+          (let ((option (assoc word +org-startup-options+ :test #'string=)))
             (cond
               ((null option)
                (let ((state (edit-todo-logging-state word)))
@@ -515,20 +524,21 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
         (list :log-done log-done :log-repeat log-repeat :states states)))))
 
 (defun edit-todo-mode-setting (document heading logging options key)
-  (cond
-    (logging (getf logging key))
-    (options
-     (edit-todo-normalize-mode
-      (if (eq key :log-done)
-          (org-workflow-options-log-done options)
-          (org-workflow-options-log-repeat options))
-      heading))
-    (t (edit-todo-normalize-mode (getf (startup-options document) key)
-                                 heading))))
+  (multiple-value-bind (value supplied-p)
+      (cond ((null options) (values nil nil))
+            ((eq key :log-done)
+             (values (org-workflow-options-log-done options)
+                     (%org-workflow-options-log-done-p options)))
+            (t (values (org-workflow-options-log-repeat options)
+                       (%org-workflow-options-log-repeat-p options))))
+    (cond
+      (logging (getf logging key))
+      (supplied-p (edit-todo-normalize-mode value heading))
+      (t (edit-todo-normalize-mode (getf (startup-options document) key)
+                                   heading)))))
 
 (defun edit-todo-logging-state-mode (states previous-state new-state)
-  (or (and new-state
-           (second (assoc new-state states :test #'string=)))
+  (or (second (assoc new-state states :test #'string=))
       (and previous-state
            (third (assoc previous-state states :test #'string=)))))
 
@@ -1425,9 +1435,8 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
               (- (node-end node) (node-post-blank node))))))
 
 (defun edit-todo-marker-log-mode (sequence previous-state new-state)
-  (let* ((new-entry (and sequence new-state
-                         (edit-todo-sequence-state sequence new-state)))
-         (old-entry (and sequence previous-state
+  (let* ((new-entry (edit-todo-sequence-state sequence new-state))
+         (old-entry (and previous-state
                          (edit-todo-sequence-state sequence previous-state)))
          (entry-mode (and new-entry (getf new-entry :logging-mode))))
     (cond ((and entry-mode (not (eq entry-mode :none))) entry-mode)
@@ -1479,14 +1488,15 @@ document's normalized TODO sequence and the supplied workflow settings."
              (repeat-mode (edit-todo-mode-setting
                            document heading logging workflow-options
                            :log-repeat))
-             (marker-mode (if logging
-                              (edit-todo-logging-state-mode
-                               (getf logging :states) previous-state
-                               (if repeating-p state new-state))
-                              (edit-todo-marker-log-mode
-                               sequence previous-state
-                               (if repeating-p state new-state))))
-             (state-log-mode (if repeating-p repeat-mode marker-mode))
+             ;; Like org-todo, removing the keyword logs no state change.
+             (state-log-mode (cond
+                               (repeating-p repeat-mode)
+                               ((null new-state) nil)
+                               (logging
+                                (edit-todo-logging-state-mode
+                                 (getf logging :states) previous-state new-state))
+                               (t (edit-todo-marker-log-mode
+                                   sequence previous-state new-state))))
              (closed-value (edit-todo-local-planning-value
                             document heading :closed))
              (closed-timestamp nil)
@@ -1522,7 +1532,7 @@ document's normalized TODO sequence and the supplied workflow settings."
                          previous-state (if repeating-p state new-state)
                          timestamp state-log-mode note heading))))
         (when (and state-changed-p new-done-p (not repeating-p)
-                   (eq done-mode :note))
+                   (eq done-mode :note) (null state-log-mode))
           (setf log-lines
                 (append log-lines
                         (edit-todo-build-closing-note-lines

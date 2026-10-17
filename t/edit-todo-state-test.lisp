@@ -611,7 +611,9 @@
                     (transition-heading-todo
                      override-document heading "DONE"
                      :at (make-org-time-value at) :time-context time-context
-                     :workflow-options default-options)))))
+                     :workflow-options
+                     (make-org-workflow-options :log-done nil
+                                                :log-repeat nil))))))
       (with-soft-assertions
         (expect (search ":DOCUMENT:" (document-text
                                      (edit-result-updated-document
@@ -917,7 +919,7 @@
                                 "  Blocked"))
             (expect (transition-result-log-events resume)
                     :to-equal '("- State \"TODO\"       from \"WAIT\"       [2025-03-07 Fri 09:00]"))
-            (expect (length (transition-result-log-events clear)) :to-equal 1)
+            (expect (transition-result-log-events clear) :to-be nil)
             (expect (transition-result-log-events plain) :to-be nil)
             (expect (transition-result-log-events reopen) :to-be nil)
             (expect (transition-result-log-events finish)
@@ -925,6 +927,48 @@
             (expect (transition-result-closed-timestamp finish) :to-be nil)
             (expect (transition-result-closed-timestamp quiet) :to-be nil)
             (expect (transition-result-log-events quiet) :to-be nil))))))
+
+  (it "follows org-todo when a state log, removal, or unset option applies"
+    (let ((at "2025-03-07T09:00:00"))
+      (flet ((run (source path state &rest arguments)
+               (let ((document (parse-org source)))
+                 (second
+                  (multiple-value-list
+                   (apply #'transition-heading-todo
+                          document (edit-todo-state-test-heading-path document path)
+                          state :at (make-org-time-value at)
+                          :time-context (edit-todo-state-test-context at)
+                          :log-drawer nil arguments))))))
+        (let ((startup-state
+                (run (format nil "#+STARTUP: lognotedone~%#+TODO: TODO | DONE(!)~%* TODO Task~%")
+                     '("Task") "DONE" :note "Ignored"))
+              (logging-state
+                (run (format nil "#+TODO: TODO | DONE~%* TODO Task~%:PROPERTIES:~%:LOGGING: lognotedone DONE(@)~%:END:~%")
+                     '("Task") "DONE" :note "Shipped"))
+              (marker-removal
+                (run (format nil "#+TODO: TODO WAIT(w@/!) | DONE~%* WAIT Task~%")
+                     '("Task") nil))
+              (unset-option
+                (run (format nil "#+STARTUP: logdone~%#+TODO: TODO NEXT | DONE~%* TODO Task~%")
+                     '("Task") "DONE"
+                     :workflow-options (make-org-workflow-options
+                                        :repeat-to-state "NEXT")))
+              (cased-logging
+                (run (format nil "#+STARTUP: logdone~%#+TODO: TODO | DONE~%* TODO Task~%:PROPERTIES:~%:LOGGING: LogDone~%:END:~%")
+                     '("Task") "DONE")))
+          (with-soft-assertions
+            (expect (transition-result-log-events startup-state)
+                    :to-equal '("- State \"DONE\"       from \"TODO\"       [2025-03-07 Fri 09:00]"))
+            (expect (transition-result-closed-timestamp startup-state)
+                    :to-equal "[2025-03-07 Fri 09:00]")
+            (expect (transition-result-log-events logging-state)
+                    :to-equal '("- State \"DONE\"       from \"TODO\"       [2025-03-07 Fri 09:00] \\\\"
+                                "  Shipped"))
+            (expect (transition-result-log-events marker-removal) :to-be nil)
+            (expect (transition-result-closed-timestamp unset-option)
+                    :to-equal "[2025-03-07 Fri 09:00]")
+            (expect (transition-result-closed-timestamp cased-logging) :to-be nil)
+            (expect (transition-result-log-events cased-logging) :to-be nil))))))
 
   (it "parses LOGGING state specs the way Org extracts them"
     (with-soft-assertions

@@ -84,11 +84,14 @@ TODO keyword specs such as `WAIT(w@/!)`, which replace the markers on the
 `#+TODO` line; `nil` turns all logging off.
 
 Without `LOGGING`, state-change lines follow the `#+TODO` markers. Done and
-repeat logging come from the `:log-done` and `:log-repeat` values of
-`:workflow-options` when it is supplied, and otherwise from the last
-`logdone`-family word of `#+STARTUP` (see `startup-options` in the
+repeat logging each come from the `:log-done` or `:log-repeat` argument given
+to `make-org-workflow-options`, and otherwise from the last `logdone`-family
+word of `#+STARTUP` (see `startup-options` in the
 [node model](../reference/node-model.md)). `LOG_DONE` and `LOG_REPEAT`
 properties have no effect.
+
+As in Org, removing a TODO keyword writes no state-change line, and a
+`lognotedone` closing note is written only when no state-change line is.
 
 An unknown state, invalid heading, or conflicting edit signals
 `org-edit-error`; invalid or ambiguous time input signals `org-time-error`.
