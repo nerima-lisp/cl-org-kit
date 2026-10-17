@@ -375,8 +375,7 @@ are :LATE."
   "Collect DONE log dates and the CLOSED date of a done HEADING."
   (let ((dates nil))
     (labels ((visit (node)
-               (unless (and (eq (node-type node) :headline)
-                            (not (eq node heading)))
+               (unless (eq (node-type node) :headline)
                  (when (eq (node-type node) :item)
                    (let ((keyword (agenda-habit-log-keyword node)))
                      (when (and keyword (query-done-keyword-p keyword document))

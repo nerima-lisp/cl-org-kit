@@ -755,63 +755,95 @@
                 (:end-before-start 6 nil nil)))
       (expect (every #'clock-consistency-issue-p issues) :to-be t)))
   (it "covers clock consistency validation and normalized interval edges"
-    (let* ((context (clock-test-context "2024-03-10T11:00:00"))
-           (future-document
-             (parse-org
-              (format nil "* Task~%CLOCK: [2024-03-10 Sun 12:00]")))
-           (future-error
-             (handler-case
-                 (progn
-                   (check-clock-consistency future-document :time-context context)
-                   nil)
-               (org-clock-error (condition) condition)))
-           (overlap-document
-             (parse-org
-              (format nil
-                      "* Task~%CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 10:30]~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:15]")))
-           (overlap-issues
-             (check-clock-consistency
-              overlap-document
-              :time-context (clock-test-context "2026-10-12T11:00:00")))
-           (dst-document
-             (parse-org
-              (format nil
-                      "* Task~%CLOCK: [2024-03-10 Sun 02:30]--[2024-03-10 Sun 03:00] => 0:30")))
-           (dst-context
-             (clock-test-context
-              "2024-03-10T04:00:00"
-              (org-kit::resolve-time-zone "America/New_York")))
-           (dst-issues (check-clock-consistency dst-document :time-context dst-context)))
-      (signals type-error
-        (make-clock-consistency-issue :reason :unknown :line 1))
-      (signals type-error
-        (make-clock-consistency-issue :reason :overlap))
-      (signals type-error
-        (make-clock-consistency-issue :reason :overlap :line 1 :other-line 0))
-      (signals type-error
-        (make-clock-consistency-issue
-         :reason :overlap :line 1 :duration-minutes -1))
-      (signals type-error
-        (check-clock-consistency
-         (make-document "* Task") :time-context context))
-      (signals type-error
-        (check-clock-consistency (parse-org "* Task")))
-      (expect (org-clock-error-reason future-error) :to-be :invalid-range)
-      (expect (mapcar
-               (lambda (issue)
-                 (list (clock-consistency-issue-reason issue)
-                       (clock-consistency-issue-line issue)
-                       (clock-consistency-issue-other-line issue)))
-               overlap-issues)
-              :to-equal '((:overlap 2 3)))
-      (progn
-  (expect (mapcar #'clock-consistency-issue-reason dst-issues)
-          :to-equal '(:end-before-start))
-  (expect
-   (org-kit::clock-consistency-issue-before-p
-    (make-clock-consistency-issue :reason :overlap :line 1 :other-line 2)
-    (make-clock-consistency-issue :reason :overlap :line 1 :other-line 2))
-   :to-be nil))))
+      (let* ((context (clock-test-context "2024-03-10T11:00:00"))
+             (future-document
+              (parse-org
+               (format nil "* Task~%CLOCK: [2024-03-10 Sun 12:00]")))
+             (future-error
+              (handler-case
+                  (progn
+                    (check-clock-consistency future-document :time-context context)
+                    nil)
+                (org-clock-error (condition) condition)))
+             (overlap-document
+              (parse-org
+               (format nil
+                       "* Task~%CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 10:30]~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:15]")))
+             (overlap-issues
+              (check-clock-consistency
+               overlap-document
+               :time-context (clock-test-context "2026-10-12T11:00:00")))
+             (dst-document
+              (parse-org
+               (format nil
+                       "* Task~%CLOCK: [2024-03-10 Sun 02:30]--[2024-03-10 Sun 03:00] => 0:30")))
+             (dst-context
+              (clock-test-context
+               "2024-03-10T04:00:00"
+               (org-kit::resolve-time-zone "America/New_York")))
+             (dst-issues (check-clock-consistency dst-document :time-context dst-context)))
+        (signals type-error
+                 (make-clock-consistency-issue :reason :unknown :line 1))
+        (signals type-error
+                 (make-clock-consistency-issue :reason :overlap))
+        (signals type-error
+                 (make-clock-consistency-issue :reason :overlap :line 1 :other-line 0))
+        (signals type-error
+                 (make-clock-consistency-issue
+                  :reason :overlap :line 1 :duration-minutes -1))
+        (signals type-error
+                 (make-clock-consistency-issue
+                  :reason :overlap :line 1 :duration-minutes "bad"))
+        (signals type-error
+                 (check-clock-consistency
+                  (make-document "* Task") :time-context context))
+        (signals type-error
+                 (check-clock-consistency (parse-org "* Task")))
+        (expect (org-clock-error-reason future-error) :to-be :invalid-range)
+        (expect (mapcar
+                 (lambda (issue)
+                   (list (clock-consistency-issue-reason issue)
+                         (clock-consistency-issue-line issue)
+                         (clock-consistency-issue-other-line issue)))
+                 overlap-issues)
+                :to-equal '((:overlap 2 3)))
+        (expect (mapcar #'clock-consistency-issue-reason dst-issues)
+                :to-equal '(:end-before-start))
+        (expect
+         (org-kit::clock-consistency-issue-before-p
+          (make-clock-consistency-issue :reason :overlap :line 1 :other-line 2)
+          (make-clock-consistency-issue :reason :overlap :line 1 :other-line 2))
+         :to-be nil)
+        (let* ((clock-without-end
+                (make-node
+                 :clock
+                 :properties
+                 (list :value
+                       (make-node
+                        :timestamp
+                        :properties
+                        (list :type :active-range
+                              :year-start 2024 :month-start 3 :day-start 10
+                              :hour-start 1 :minute-start 0)))))
+               (clock-with-ordered-range
+                (make-node
+                 :clock
+                 :properties
+                 (list :value
+                       (make-node
+                        :timestamp
+                        :properties
+                        (list :type :active-range
+                              :year-start 2024 :month-start 3 :day-start 10
+                              :hour-start 1 :minute-start 0
+                              :year-end 2024 :month-end 3 :day-end 10
+                              :hour-end 2 :minute-end 0))))))
+          (expect
+           (org-kit::clock-consistency-reversed-range clock-without-end context)
+           :to-be nil)
+          (expect
+           (org-kit::clock-consistency-reversed-range clock-with-ordered-range context)
+           :to-be nil))))
 
   (it "signals named clock errors for malformed entries and an invalid duration threshold"
     (let* ((context (clock-test-context "2026-10-12T10:00:00"))

@@ -922,22 +922,54 @@
     (let* ((document
              (parse-org
               (format nil
-                      "#+TODO: TODO | DONE~%* DONE Water~%SCHEDULED: <2025-01-06 Mon> CLOSED: [2025-01-06 Mon 09:30]~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun 08:00]~%- State \"TODO\" from \"DONE\" [2025-01-07 Tue 12:00]~%- State \"DONE\" from \"TODO\"~%:END:~%** DONE Child~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%:END:~%")))
+                      "#+TODO: TODO | DONE~%* DONE Water~%SCHEDULED: <2025-01-06 Mon> CLOSED: [2025-01-06 Mon 09:30]~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun 08:00]~%- State \"TODO\" from \"DONE\" [2025-01-07 Tue 12:00]~%- State \"DONE\" from \"TODO\"~%- no state marker~%- State \"~%- State \"\" from \"TODO\"~%:END:~%** DONE Child~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%:END:~%")))
            (headings
              (nth-value
               0 (org-kit::agenda-document-heading-data
                  document :collect-headlines-p t)))
            (heading (first headings))
+           (child-heading (second headings))
            (planning (org-kit::agenda-planning-node heading))
+           (planning-only-heading
+             (make-node
+              :headline
+              :properties (list :todo-type :done)
+              :children
+              (list
+               (make-node
+                :section
+                :children
+                (list
+                 (make-node
+                  :planning
+                  :properties (list :closed (node-property planning :closed))))))))
+           (planning-only-dates
+             (org-kit::agenda-habit-completion-dates document planning-only-heading))
            (dates
-             (org-kit::agenda-habit-completion-dates document heading)))
+             (org-kit::agenda-habit-completion-dates document heading))
+           (child-dates
+             (org-kit::agenda-habit-completion-dates document child-heading)))
       (expect (node-property planning :closed) :to-be-truthy)
-      (expect (mapcar (lambda (ordinal)
-                        (org-time-value-iso8601
-                         (org-kit::agenda-date-value
-                          (cl-date-kit:local-date-from-epoch-day ordinal))))
-                      dates)
-              :to-equal '("2025-01-05" "2025-01-06"))))
+      (with-soft-assertions
+        (expect (node-property planning-only-heading :closed) :to-be nil)
+        (expect (mapcar (lambda (ordinal)
+                          (org-time-value-iso8601
+                           (org-kit::agenda-date-value
+                            (cl-date-kit:local-date-from-epoch-day ordinal))))
+                        planning-only-dates)
+                :to-equal (list "2025-01-06"))
+        (expect (mapcar (lambda (ordinal)
+                          (org-time-value-iso8601
+                           (org-kit::agenda-date-value
+                            (cl-date-kit:local-date-from-epoch-day ordinal))))
+                        dates)
+                :to-equal (list "2025-01-05" "2025-01-06"))
+        (expect (mapcar (lambda (ordinal)
+                          (org-time-value-iso8601
+                           (org-kit::agenda-date-value
+                            (cl-date-kit:local-date-from-epoch-day ordinal))))
+                        child-dates)
+                :to-equal (list "2025-01-09")))))
 
   (it "keeps cumulate and catch-up habit due dates distinct"
     (labels ((states (scheduled done-1 done-2 end-date

@@ -169,6 +169,28 @@
                 :to-equal (format nil "#+PRIORITIES: 1 10 5~%* [#7] Task~%"))
         (expect (node-property (first (edit-headline-test-nodes edited)) :priority)
                 :to-equal 7))))
+  (it "covers invalid priority kind combinations and empty headlines"
+    (let* ((mixed-document
+             (parse-org (format nil "#+PRIORITIES: A 10 C~%* Task~%")))
+           (mixed-heading (first (edit-headline-test-nodes mixed-document)))
+           (kind-document
+             (parse-org (format nil "#+PRIORITIES: A E C~%* Task~%")))
+           (kind-heading (first (edit-headline-test-nodes kind-document)))
+           (end-document (parse-org "* [#A]"))
+           (end-heading (first (edit-headline-test-nodes end-document)))
+           (newline-document (parse-org (format nil "* [#A]~%")))
+           (newline-heading (first (edit-headline-test-nodes newline-document)))
+           (end-cleared (set-heading-priority end-document end-heading nil))
+           (newline-cleared
+             (set-heading-priority newline-document newline-heading nil)))
+      (signals org-edit-error
+        (set-heading-priority mixed-document mixed-heading #\A))
+      (signals org-edit-error
+        (set-heading-priority kind-document kind-heading 5))
+      (with-soft-assertions
+        (expect (document-text end-cleared) :to-equal "* ")
+        (expect (document-text newline-cleared)
+                :to-equal (format nil "* ~%")))))
 
   (it "adjusts priorities and starts unset values at configured defaults"
     (let* ((alphabetic-source

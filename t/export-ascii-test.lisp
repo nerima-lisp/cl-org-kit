@@ -895,6 +895,9 @@
              (table-output
                (export-ascii-test-output-state preparation))
              (at-signal nil)
+             (initial-capacity
+               (array-total-size
+                (org-kit::export-ascii-output-output table-output)))
              (before (progn (sb-ext:gc :full t) (sb-ext:get-bytes-consed)))
              (table-condition
                (catch 'ascii-table-limit
@@ -927,7 +930,8 @@
           (expect (<= (array-total-size buffer) 1000) :to-be t)
           (expect (> at-signal 0) :to-be t)
           (unless *coverage-run-p*
-            (expect (< at-signal (* 48 1000)) :to-be t))))))
+            (expect (< at-signal (* 48 1000)) :to-be t))
+          (expect (= (array-total-size buffer) initial-capacity) :to-be t)))))
 
   (it "preflights all ASCII table rows before writing padded output"
     (let* ((source
