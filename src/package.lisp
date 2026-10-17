@@ -23,6 +23,7 @@
    #:org-callback-error #:org-callback-error-kind #:org-callback-error-name
    #:org-callback-error-reason #:org-elisp-evaluator-error
    #:org-write-plan-error #:org-write-plan-error-path #:org-write-plan-error-reason
+   #:org-write-plan-error-cause
    ;; Clock aggregation
    #:org-clock-error #:org-clock-error-reason #:org-clock-error-context
    #:clock-summary #:make-clock-summary #:clock-summary-p

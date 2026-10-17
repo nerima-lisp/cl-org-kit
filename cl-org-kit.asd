@@ -13,7 +13,8 @@
   :homepage "https://github.com/nerima-lisp/cl-org-kit"
   :bug-tracker "https://github.com/nerima-lisp/cl-org-kit/issues"
   :source-control (:git "https://github.com/nerima-lisp/cl-org-kit.git")
-  :depends-on ("cl-parser-kit"  ; Combinators and spans for the element and object parsers.
+  :depends-on ("sb-posix"
+               "cl-parser-kit"  ; Combinators and spans for the element and object parsers.
                "cl-regex-kit"   ; Lexical recognition of inline objects.
                "cl-codec-kit"   ; Detects and decodes octet input (BOM, UTF-16/32).
                "cl-date-kit")   ; Calendar values behind Org timestamps.

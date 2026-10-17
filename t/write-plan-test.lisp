@@ -56,8 +56,29 @@
     (org-write-plan-error (condition) condition)
     (org-resource-limit-error (condition) condition)))
 
-(defun write-plan-test-call-with-encoder-counter (function)
-  (let* ((symbol (find-symbol "STRING-TO-OCTETS" "CL-CODEC-KIT"))
+(defun write-plan-test-call-with-failing-renames (failure-index function)
+  (let* ((symbol 'org-kit::write-plan-rename-temporary-file)
+         (original (symbol-function symbol))
+         (cause (make-condition 'simple-error
+                                 :format-control "injected rename failure"
+                                 :format-arguments nil))
+         (calls 0)
+         (failed-temporary-name nil))
+    (unwind-protect
+         (progn
+           (setf (symbol-function symbol)
+                 (lambda (&rest arguments)
+                   (if (= (incf calls) failure-index)
+                       (progn
+                         (setf failed-temporary-name (second arguments))
+                         (error cause))
+                       (apply original arguments))))
+           (funcall function cause (lambda () calls)
+                    (lambda () failed-temporary-name)))
+      (setf (symbol-function symbol) original))))
+
+(defun write-plan-test-call-with-full-encoder-counter (function)
+  (let* ((symbol 'org-kit::write-plan-encode-string)
          (original (symbol-function symbol))
          (calls 0))
     (unwind-protect
@@ -70,11 +91,6 @@
       (setf (symbol-function symbol) original))))
 
 (describe "write plans"
-  (it "keeps the filesystem root as the parent of a top-level target"
-    (expect (org-kit::write-plan-record-parent
-             "/" (list nil "file.txt" '("file.txt") #()))
-            :to-equal "/"))
-
   (it "writes exact UTF-8 content with the requested mode and creates parents"
     (write-plan-test-call-with-directory
      (lambda (root)
@@ -137,24 +153,38 @@
                    :to-equalp (make-array 4 :element-type '(unsigned-byte 8)
                                           :initial-contents '(0 #xFF #x80 10))))))))
 
-  (it "checks an oversized string budget before UTF-8 encoding or file writes"
+  (it "checks an oversized string budget before full encoding or file writes"
     (write-plan-test-call-with-directory
      (lambda (root)
-       (let* ((plan (make-write-plan
-                     (list (make-write-plan-entry
-                            "oversized.txt" (string #\é)))))
+       (let* ((content (make-string 4097 :initial-element #\a))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry "oversized.txt" content))))
               (target (write-plan-test-path root "oversized.txt")))
-         (write-plan-test-call-with-encoder-counter
+         (write-plan-test-call-with-full-encoder-counter
           (lambda (calls)
             (let ((condition
                     (write-plan-test-capture-error
-                     plan root :limits (make-limits :max-write-plan-bytes 1))))
+                     plan root :limits (make-limits :max-write-plan-bytes 4096))))
               (with-soft-assertions
                 (expect (typep condition 'org-resource-limit-error) :to-be t)
                 (when condition
-                  (expect (org-resource-limit-error-actual condition) :to-be 2))
+                  (expect (org-resource-limit-error-actual condition) :to-be 4097))
                 (expect (funcall calls) :to-be 0)
                 (expect (probe-file target) :to-be nil)))))))))
+
+  (it "writes strings whose size spans multiple counting chunks"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((content (make-string 9000 :initial-element #\a))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry "chunked.txt" content))))
+              (target (write-plan-test-path root "chunked.txt")))
+         (with-soft-assertions
+           (expect (apply-write-plan
+                    plan root
+                    :limits (make-limits :max-write-plan-bytes (length content)))
+                   :to-equal '("chunked.txt"))
+           (expect (write-plan-test-read-text target) :to-equal content))))))
 
   (it "rejects absolute and parent-component paths before writing"
     (write-plan-test-call-with-directory
@@ -184,6 +214,7 @@
     (write-plan-test-call-with-directory
      (lambda (root)
        (dolist (case '((("a/./b.txt" "a//b.txt") :duplicate-path)
+                       (("Readme.txt" "README.TXT") :duplicate-path)
                        (("a" "a/child.txt") :path-conflict)))
          (let* ((paths (first case))
                 (plan (make-write-plan
@@ -196,7 +227,142 @@
              (expect (typep condition 'org-write-plan-error) :to-be t)
              (when condition
                (expect (org-write-plan-error-reason condition) :to-be (second case)))
-             (expect (probe-file (write-plan-test-path root "a")) :to-be nil)))))))
+             (dolist (path paths)
+               (expect (probe-file (write-plan-test-path root path)) :to-be nil))))))))
+
+  (it "rejects empty, trailing-separator, NUL, and dot-only paths"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (dolist (path (list "" "trailing/" (format nil "nul~Cpath" #\Null) "."))
+         (let ((condition
+                 (write-plan-test-capture-error
+                  (make-write-plan
+                   (list (make-write-plan-entry "safe.txt" "first"
+                                                :create-directories-p t)
+                         (make-write-plan-entry path "invalid")))
+                  root)))
+           (with-soft-assertions
+             (expect (typep condition 'org-write-plan-error) :to-be t)
+             (when condition
+               (expect (org-write-plan-error-reason condition)
+                       :to-be :invalid-path))
+             (expect (probe-file (write-plan-test-path root "safe.txt"))
+                     :to-be nil)))))))
+
+  (it "rejects an existing directory as the target"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-child-directory root "target"))
+              (condition
+                (write-plan-test-capture-error
+                 (make-write-plan
+                  (list (make-write-plan-entry "target" "replacement")))
+                 root)))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when condition
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :target-not-regular-file))
+           (expect (write-plan-test-directory-exists-p target)
+                   :to-be-truthy))))))
+
+  (it "requires an existing parent when directory creation is disabled"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let ((condition
+               (write-plan-test-capture-error
+                (make-write-plan
+                 (list (make-write-plan-entry "missing/target.txt" "value"
+                                              :create-directories-p nil)))
+                root)))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when condition
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :missing-parent-directory))
+           (expect (write-plan-test-directory-exists-p
+                    (write-plan-test-path root "missing"))
+                   :to-be nil)
+           (expect (probe-file (write-plan-test-path root "missing/target.txt"))
+                   :to-be nil))))))
+
+  (it "resolves a symlink used as the root directory"
+    (write-plan-test-call-with-directory
+     (lambda (base)
+       (let* ((root (write-plan-test-child-directory base "root"))
+              (root-link (write-plan-test-path base "root-link"))
+              (target (write-plan-test-path root "resolved.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry "resolved.txt" "through link")))))
+         (sb-posix:symlink (namestring root) (namestring root-link))
+         (with-soft-assertions
+           (expect (apply-write-plan plan root-link)
+                   :to-equal '("resolved.txt"))
+           (expect (write-plan-test-read-text target) :to-equal "through link")
+           (expect (logand (sb-posix:stat-mode (sb-posix:lstat (namestring root-link)))
+                           #o170000)
+                   :to-be #o120000))))))
+
+  (it "replaces an existing regular file"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "replace.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry "replace.txt" "new content")))))
+         (write-plan-test-write-text target "old content")
+         (with-soft-assertions
+           (expect (apply-write-plan plan root) :to-equal '("replace.txt"))
+           (expect (write-plan-test-read-text target) :to-equal "new content"))))))
+
+  (it "wraps rename I/O failures and removes the temporary file"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let ((plan (make-write-plan
+                    (list (make-write-plan-entry "failed.txt" "value")))))
+         (write-plan-test-call-with-failing-renames
+          1
+          (lambda (cause calls temporary-name)
+            (let ((condition (write-plan-test-capture-error plan root)))
+              (with-soft-assertions
+                (expect (typep condition 'org-write-plan-error) :to-be t)
+                (when condition
+                  (expect (org-write-plan-error-reason condition) :to-be :io-failed)
+                  (expect (eq (org-write-plan-error-cause condition) cause) :to-be t))
+                (expect (funcall calls) :to-be 1)
+                (expect (probe-file (write-plan-test-path root "failed.txt"))
+                        :to-be nil)
+                (expect (funcall temporary-name) :to-be-truthy)
+                (when (funcall temporary-name)
+                  (expect (probe-file (write-plan-test-path
+                                       root (funcall temporary-name)))
+                          :to-be nil))))))))))
+
+  (it "keeps earlier files applied when a later rename fails"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let ((plan (make-write-plan
+                    (list (make-write-plan-entry "first.txt" "first")
+                          (make-write-plan-entry "second.txt" "second")))))
+         (write-plan-test-call-with-failing-renames
+          2
+          (lambda (cause calls temporary-name)
+            (let ((condition (write-plan-test-capture-error plan root)))
+              (with-soft-assertions
+                (expect (typep condition 'org-write-plan-error) :to-be t)
+                (when condition
+                  (expect (org-write-plan-error-reason condition) :to-be :io-failed)
+                  (expect (eq (org-write-plan-error-cause condition) cause) :to-be t))
+                (expect (funcall calls) :to-be 2)
+                (expect (write-plan-test-read-text
+                         (write-plan-test-path root "first.txt"))
+                        :to-equal "first")
+                (expect (probe-file (write-plan-test-path root "second.txt"))
+                        :to-be nil)
+                (expect (funcall temporary-name) :to-be-truthy)
+                (when (funcall temporary-name)
+                  (expect (probe-file (write-plan-test-path
+                                       root (funcall temporary-name)))
+                          :to-be nil))))))))))
 
   (it "rejects existing parent, dangling-parent, and final symlinks"
     (write-plan-test-call-with-directory

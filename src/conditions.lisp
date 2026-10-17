@@ -129,14 +129,16 @@ registered Emacs Lisp evaluator."))
 
 (define-condition org-write-plan-error (org-kit-error)
   ((path :initarg :path :initform nil)
-   (reason :initarg :reason :initform nil))
+   (reason :initarg :reason :initform nil)
+   (cause :initarg :cause :initform nil))
   (:report (lambda (condition stream)
              (format stream "~A (~(~A~))~@[ for ~A~]"
                      (org-kit-error-message condition)
                      (org-write-plan-error-reason condition)
                      (org-write-plan-error-path condition))))
   (:documentation "Signalled when a write plan is invalid or cannot be applied.
-PATH is a bounded path excerpt and REASON classifies the failure."))
+PATH is a bounded path excerpt, REASON classifies the failure, and CAUSE is the
+underlying condition for an I/O failure when available."))
 
 ;; Readers are plain functions rather than :READER options so each carries a
 ;; docstring and is measured by the coverage gate.
@@ -232,6 +234,10 @@ otherwise a character index into the document text. NIL when unknown."
 (defun org-write-plan-error-reason (condition)
   "Return the keyword classifying the write-plan failure."
   (slot-value condition 'reason))
+
+(defun org-write-plan-error-cause (condition)
+  "Return the underlying condition for a write-plan I/O failure, or NIL."
+  (slot-value condition 'cause))
 
 (define-condition org-time-error (org-kit-error)
   ((reason :initarg :reason :initform nil)
