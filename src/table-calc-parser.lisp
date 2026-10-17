@@ -332,18 +332,21 @@
         (parse-integer normalized))))
 
 (defun table-calc-roman-ordinal (text)
-  (let ((total 0)
-        (previous 0))
-    (loop for character across text
-          for value = (case character
-                        (#\I 1) (#\V 5) (#\X 10) (#\L 50)
-                        (#\C 100) (#\D 500) (#\M 1000)
-                        (otherwise 0))
-          do (when (zerop value)
-               (return-from table-calc-roman-ordinal nil))
-             (incf total (if (< value previous) (- value) value))
-             (setf previous value))
-    (and (plusp total) total)))
+  (flet ((roman-value (character)
+           (case character
+             (#\I 1) (#\V 5) (#\X 10) (#\L 50)
+             (#\C 100) (#\D 500) (#\M 1000)
+             (otherwise 0))))
+    (let ((total 0))
+      (loop for index from 0 below (length text)
+            for value = (roman-value (char text index))
+            for next-value = (if (< (1+ index) (length text))
+                                 (roman-value (char text (1+ index)))
+                                 0)
+            do (when (zerop value)
+                 (return-from table-calc-roman-ordinal nil))
+               (incf total (if (< value next-value) (- value) value)))
+      (and (plusp total) total))))
 
 (defun table-calc-parse-reference (parser)
   (let* ((formula (table-calc-parser-formula parser))

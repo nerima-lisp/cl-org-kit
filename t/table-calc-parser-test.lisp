@@ -689,4 +689,129 @@
         (expect (org-kit::safe-decimal-compare (table-calc-test-decimal "-2")
                                       (table-calc-test-decimal "-3"))
                 :to-be 1))))
+
+  (it "parses escaped strings and reports unterminated strings and escapes"
+    (let* ((expression (table-calc-test-assignment-expression "$1=\"a\\\"b\""))
+           (unterminated (table-calc-test-condition "$1=\"open"))
+           (dangling-escape (table-calc-test-condition "$1=\"open\\")))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-expression-kind expression) :to-be :string)
+        (expect (org-kit::table-calc-expression-value expression) :to-equal "a\"b")
+        (dolist (condition (list unterminated dangling-escape))
+          (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+          (when (typep condition 'org-table-unsupported-syntax)
+            (expect (org-table-unsupported-syntax-feature condition)
+                    :to-be :unterminated-string))))))
+
+  (it "parses duration literals and rejects invalid or incomplete durations"
+    (let* ((minutes (table-calc-test-assignment-expression "$1=1:02"))
+           (seconds (table-calc-test-assignment-expression "$1=1:02:03"))
+           (incomplete (table-calc-test-condition "$1=1:02:"))
+           (invalid-minutes (table-calc-test-condition "$1=1:60"))
+           (invalid-seconds (table-calc-test-condition "$1=1:02:60")))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-expression-kind minutes) :to-be :duration)
+        (expect (org-kit::table-calc-expression-value minutes) :to-be 3720)
+        (expect (org-kit::table-calc-expression-kind seconds) :to-be :duration)
+        (expect (org-kit::table-calc-expression-value seconds) :to-be 3723)
+        (expect (typep incomplete 'org-table-unsupported-syntax) :to-be t)
+        (when (typep incomplete 'org-table-unsupported-syntax)
+          (expect (org-table-unsupported-syntax-feature incomplete)
+                  :to-be :unsupported-character))
+        (dolist (condition (list invalid-minutes invalid-seconds))
+          (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+          (when (typep condition 'org-table-unsupported-syntax)
+            (expect (org-table-unsupported-syntax-feature condition)
+                    :to-be :invalid-duration))))))
+
+  (it "parses Roman hline ordinals and negative relative row references"
+    (dolist (case '(("I" 1) ("V" 5) ("X" 10) ("L" 50) ("C" 100) ("D" 500)
+                    ("M" 1000) ("IV" 4) ("VI" 6)))
+      (let* ((expression
+               (table-calc-test-assignment-expression
+                (format nil "$1=@~A$2" (first case))))
+             (reference (org-kit::table-calc-expression-value expression)))
+        (with-soft-assertions
+          (expect (org-kit::table-calc-reference-row-kind reference)
+                  :to-be :hline-anchor)
+          (expect (org-kit::table-calc-reference-row-value reference)
+                  :to-be (second case)))))
+    (let* ((expression
+             (table-calc-test-assignment-expression "$1=@-2$-0"))
+           (reference (org-kit::table-calc-expression-value expression)))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-reference-row-kind reference) :to-be :relative)
+        (expect (org-kit::table-calc-reference-row-value reference) :to-be -2))))
+
+  (it "parses logical-or and equality and greater-than comparisons"
+    (let* ((logical-or (table-calc-test-assignment-expression "$1=1||2"))
+           (equality (table-calc-test-assignment-expression "$1=1==2"))
+           (greater-than (table-calc-test-assignment-expression "$1=1>2")))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-expression-kind logical-or) :to-be :logical-or)
+        (expect (org-kit::table-calc-expression-value logical-or) :to-be :or)
+        (expect (org-kit::table-calc-expression-kind equality) :to-be :comparison)
+        (expect (org-kit::table-calc-expression-value equality) :to-be :equal)
+        (expect (org-kit::table-calc-expression-kind greater-than) :to-be :comparison)
+        (expect (org-kit::table-calc-expression-value greater-than) :to-be :greater))))
+
+  (it "validates Calc function argument shapes"
+    (let ((valid-remote
+            (table-calc-test-assignment-expression
+             "$1=vsum(remote(source,@1$1..@3$1))")))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-expression-value valid-remote) :to-equal "vsum")
+        (expect (org-kit::table-calc-expression-kind
+                 (first (org-kit::table-calc-expression-children valid-remote)))
+                :to-be :function))
+      (dolist (formula '("$1=remote(1,@2$1)"
+                        "$1=if(1,2)"
+                        "$1=taylor(1,2,3)"
+                        "$1=exp()"
+                        "$1=sin()"
+                        "$1=tan()"
+                        "$1=string()"
+                        "$1=typeof()"))
+        (let ((condition (table-calc-test-condition formula)))
+          (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+          (when (typep condition 'org-table-unsupported-syntax)
+            (expect (org-table-unsupported-syntax-feature condition)
+                    :to-be :unsupported-function-argument))))))
+
+  (it "parses hline shorthand range targets and rejects relative range targets"
+    (let* ((assignment
+             (first (org-kit::table-calc-program-assignments
+                     (org-kit::table-calc-parse-formula "@I$1..II=$2"))))
+           (start (org-kit::table-calc-assignment-target assignment))
+           (end (org-kit::table-calc-assignment-target-end assignment))
+           (condition
+             (table-calc-test-condition "@+1$1..@2$2=1")))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-assignment-kind assignment) :to-be :range)
+        (expect (org-kit::table-calc-reference-row-value start) :to-be 1)
+        (expect (org-kit::table-calc-reference-row-kind end) :to-be :hline-anchor)
+        (expect (org-kit::table-calc-reference-row-value end) :to-be 2)
+        (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+        (when (typep condition 'org-table-unsupported-syntax)
+          (expect (org-table-unsupported-syntax-feature condition)
+                  :to-be :invalid-reference)))))
+
+  (it "parses suffix whitespace and the negative-one format"
+    (let* ((spaced
+             (first (org-kit::table-calc-program-assignments
+                     (org-kit::table-calc-parse-formula "$1=1; E N"))))
+           (negative-one
+             (first (org-kit::table-calc-program-assignments
+                     (org-kit::table-calc-parse-formula "$1=1;f-1"))))
+           (missing-precision (table-calc-test-condition "$1=1;p"))
+           (zero-precision (table-calc-test-condition "$1=1;p0")))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-assignment-mode spaced) :to-be :en)
+        (expect (org-kit::table-calc-assignment-format-precision negative-one)
+                :to-be -1)
+        (dolist (condition (list missing-precision zero-precision))
+          (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+          (when (typep condition 'org-table-unsupported-syntax)
+            (expect (org-table-unsupported-syntax-feature condition)
+                    :to-be :unsupported-mode))))))
 )
