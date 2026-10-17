@@ -1,5 +1,3 @@
-;;;; src/org-id.lisp
-;;;;
 ;;;; UUID-based Org IDs and document-local ID indexing.
 (in-package #:org-kit)
 
@@ -34,15 +32,9 @@ REASON classifies the failure."))
                          "Org ID must be a non-empty single-line string"))
   value)
 
-(defun org-id-proper-list-p (value)
-  (and (listp value)
-       (handler-case
-           (or (null value) (integerp (list-length value)))
-         (type-error () nil))))
-
 (defun org-id-normalize-documents (documents)
   (let ((normalized (if (document-p documents) (list documents) documents)))
-    (unless (org-id-proper-list-p normalized)
+    (unless (edit-proper-list-length normalized)
       (org-id-signal-error :invalid-documents
                            "Expected a document or a proper list of documents"))
     (unless (every #'document-p normalized)
@@ -50,52 +42,51 @@ REASON classifies the failure."))
                            "Every Org ID index input must be a document"))
     normalized))
 
-(defun org-id-heading-id-properties (heading)
-  (let* ((section (find :section (node-children heading) :key #'node-type))
-         (drawer (and section
-                      (find :property-drawer (node-children section)
-                            :key #'node-type))))
-    (when drawer
-      (remove-if-not
-       (lambda (node)
-         (and (eq (node-type node) :node-property)
-              (stringp (node-property node :key))
-              (string= (node-property node :key) "ID")))
-       (node-children drawer)))))
+(defun org-id-target-id-properties (target)
+  (effective-heading-property-entries target "ID"))
 
-(defun org-id-document-headings (document)
-  (let ((headings nil))
+(defun org-id-document-id-targets (document)
+  (let ((targets nil))
     (when (document-root document)
       (map-nodes (lambda (node)
-                   (when (eq (node-type node) :headline)
-                     (push node headings)))
+                   (when (member (node-type node) '(:headline :inlinetask)
+                                 :test #'eq)
+                     (push node targets)))
                  (document-root document)))
-    (nreverse headings)))
+    (nreverse targets)))
 
 (defun org-id-document-identifiers (document &key reject-duplicates)
   (let ((identifiers nil)
         (seen (make-hash-table :test #'equal)))
-    (dolist (heading (org-id-document-headings document))
-      (let ((properties (org-id-heading-id-properties heading)))
+    (dolist (target (org-id-document-id-targets document))
+      (let ((properties (org-id-target-id-properties target)))
         (when (and reject-duplicates (> (length properties) 1))
           (org-id-signal-error :duplicate-id
-                               "A heading has more than one ID property"))
+                               "A target has more than one ID property"))
         (dolist (property properties)
           (let ((id (org-id-check-value (node-property property :value))))
             (when (and reject-duplicates (gethash id seen))
               (org-id-signal-error :duplicate-id
                                    "An ID occurs more than once in the document"))
             (setf (gethash id seen) t)
-            (push (cons id heading) identifiers)))))
+            (push (cons id target) identifiers)))))
     (nreverse identifiers)))
+
+(defvar *org-id-random-state-factory*
+  (lambda () (make-random-state t)))
+
+(defun org-id-default-random-source ()
+  (let ((random-state (funcall *org-id-random-state-factory*)))
+    (lambda () (random 256 random-state))))
 
 (defun generate-org-id (&key (random-source nil random-source-supplied-p))
   "Return a lowercase UUID version 4 string.
 RANDOM-SOURCE, when supplied, must be a zero-argument function returning
-successive integer octets from 0 through 255. Without it, the current Common
-Lisp random state is used. Signals ORG-ID-ERROR for an invalid source or octet."
+successive integer octets from 0 through 255. Without it, a fresh random state
+is created for each UUID. Signals ORG-ID-ERROR when the source is not a function
+or returns an invalid octet; errors signalled by RANDOM-SOURCE propagate."
   (unless random-source-supplied-p
-    (setf random-source (lambda () (random 256))))
+    (setf random-source (org-id-default-random-source)))
   (unless (functionp random-source)
     (org-id-signal-error :invalid-random-source
                          "Random source must be a zero-argument function"))
@@ -145,34 +136,35 @@ already present in DOCUMENT."
                          (:conc-name %org-id-index-)
                          (:copier nil)
                          (:predicate %org-id-index-p))
-  "Snapshot index mapping Org ID strings to matching headline nodes."
+  "Snapshot index mapping Org ID strings to matching headlines and inlinetasks."
   (entries (make-hash-table :test #'equal) :read-only t))
 
 (defun make-org-id-index (documents)
-  "Index ID properties across DOCUMENTS in document and heading order.
+  "Index ID properties across DOCUMENTS in document and target order.
 DOCUMENTS may be one parsed or unparsed document, or a proper list of them.
-Duplicate IDs are retained as separate heading candidates."
+Duplicate IDs are retained as separate candidates; invalid stored IDs are skipped."
   (let ((entries (make-hash-table :test #'equal)))
     (dolist (document (org-id-normalize-documents documents))
-      (dolist (heading (org-id-document-headings document))
-        (let ((heading-ids nil))
-          (dolist (property (org-id-heading-id-properties heading))
-            (let ((id (org-id-check-value (node-property property :value))))
-              (unless (member id heading-ids :test #'string=)
-                (push id heading-ids)
-                (push heading (gethash id entries))))))))
+      (dolist (target (org-id-document-id-targets document))
+        (let ((target-ids nil))
+          (dolist (property (org-id-target-id-properties target))
+            (let ((id (node-property property :value)))
+              (when (org-id-valid-value-p id)
+                (unless (member id target-ids :test #'string=)
+                  (push id target-ids)
+                  (push target (gethash id entries)))))))))
     (maphash (lambda (id candidates)
                (setf (gethash id entries) (nreverse candidates)))
              entries)
     (%make-org-id-index entries)))
 
 (defun org-id-index-p (object)
-  "Return true when OBJECT is an Org ID index."
   (%org-id-index-p object))
 
 (defun org-id-index-candidates (index id)
-  "Return matching headline nodes for ID in the index's document order.
-ID must be a non-empty single-line string. The returned list is fresh."
+  "Return matching headlines and inlinetasks for ID in document order.
+ID must be non-empty, contain a character other than spaces or tabs, and be
+single-line. The returned list is fresh."
   (unless (org-id-index-p index)
     (org-id-signal-error :invalid-index "Expected an Org ID index"))
   (org-id-check-value id)

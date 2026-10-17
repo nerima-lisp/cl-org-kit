@@ -82,6 +82,19 @@
               (generate-org-id :random-source (org-id-test-random-source)))
       (expect (org-id-test-canonical-uuid-p (generate-org-id)) :to-be t)))
 
+  (it "creates a fresh default random state for each UUID"
+    (let* ((state-creations 0)
+           (*random-state* (make-random-state nil))
+           (org-kit::*org-id-random-state-factory*
+             (lambda ()
+               (incf state-creations)
+               (make-random-state *random-state*))))
+      (let ((first (generate-org-id))
+            (second (generate-org-id)))
+        (with-soft-assertions
+          (expect state-creations :to-be 2)
+          (expect first :to-equal second)))))
+
   (it "sets a generated ID while preserving the exact surrounding source"
     (let* ((source (format nil "* Alpha~%Body~%* Beta~%tail~%"))
            (document (parse-org source))
@@ -129,6 +142,28 @@
                                 (org-id-test-heading first-document "Second")
                                 (org-id-test-heading second-document "Third")))
         (expect (org-id-index-candidates index "missing") :to-equal nil))))
+
+  (it "skips invalid stored IDs and indexes valid IDs in the same document"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Empty~%:PROPERTIES:~%:ID:~%:END:~%* Valid~%:PROPERTIES:~%:ID: good-id~%:END:~%")))
+           (index (make-org-id-index document)))
+      (with-soft-assertions
+        (expect (org-id-index-candidates index "good-id")
+                :to-equal (list (org-id-test-heading document "Valid"))))))
+
+  (it "indexes lowercase ID properties on headlines and inlinetasks"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Lowercase~%:PROPERTIES:~%:id: lower-id~%:END:~%*************** TODO Inline~%:PROPERTIES:~%:id: inline-id~%:END:~%*************** END~%")))
+           (index (make-org-id-index document))
+           (lowercase (org-id-index-candidates index "lower-id"))
+           (inlinetask (org-id-index-candidates index "inline-id")))
+      (with-soft-assertions
+        (expect (mapcar #'node-type lowercase) :to-equal '(:headline))
+        (expect (mapcar #'node-type inlinetask) :to-equal '(:inlinetask)))))
 
   (it "accepts a single document and returns a fresh candidate list"
     (let* ((document
