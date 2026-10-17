@@ -80,9 +80,10 @@
 Each row is a plist with :DATE as a date-only ORG-TIME-VALUE and :STATUS as
 :COMPLETED, :WITHIN-SCHEDULE, or :LATE. A DONE state log timestamp, or CLOSED
 on a currently done heading, marks its date completed. The current SCHEDULED
-timestamp anchors the active occurrence, with its date as the due date.
-Historical due dates are reconstructed from DONE log timestamps according to
-repeater mode. Dates after their due date are :LATE."
+timestamp anchors the active occurrence and sets its due date; this is the due
+date after the latest recorded completion. Earlier due dates are reconstructed
+from completion dates according to repeater mode. Dates after their due date
+are :LATE."
   (%agenda-entry-habit-consistency entry))
 
 (defun agenda-entry-source-node (entry)

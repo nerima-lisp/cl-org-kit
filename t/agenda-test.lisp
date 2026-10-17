@@ -931,7 +931,7 @@
                           ("2025-01-08" :late)
                           ("2025-01-09" :completed)
                           ("2025-01-10" :within-schedule)))))
-  (it "collects only a habit heading's DONE logs and CLOSED date"
+  (it "collects a habit heading's DONE logs and CLOSED date, excluding child logs"
     (let* ((document
              (parse-org
               (format nil
@@ -940,16 +940,15 @@
              (nth-value
               0 (org-kit::agenda-document-heading-data
                  document :collect-headlines-p t)))
+           (heading (first headings))
+           (planning (org-kit::agenda-planning-node heading))
            (dates
-  (let* ((heading (first headings))
-         (planning (org-kit::agenda-planning-node heading)))
-    (expect (node-property planning :closed) :to-be-truthy)
-    (setf (node-property heading :closed) nil)
-    (org-kit::agenda-habit-completion-dates document heading))))
+             (org-kit::agenda-habit-completion-dates document heading)))
+      (expect (node-property planning :closed) :to-be-truthy)
       (expect (mapcar (lambda (ordinal)
                         (org-time-value-iso8601
                          (org-kit::agenda-date-value
-                         (cl-date-kit:local-date-from-epoch-day ordinal))))
+                          (cl-date-kit:local-date-from-epoch-day ordinal))))
                       dates)
               :to-equal '("2025-01-05" "2025-01-06"))))
 

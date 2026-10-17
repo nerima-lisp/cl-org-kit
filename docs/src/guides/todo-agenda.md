@@ -220,10 +220,11 @@ It returns one `(:date ... :status ...)` plist for each date in the inclusive
 agenda range. Dates use date-only `org-time-value` objects. Status is
 `:completed` for a DONE state log on that date or a `CLOSED` date on a done
 heading, `:within-schedule` through the due date, and `:late` after that date.
-The current `SCHEDULED` timestamp anchors the active occurrence, and its date
-is the due date. The latest DONE log uses that due date; earlier due dates are
-reconstructed from DONE history according to repeater mode. `.+` places the
-next occurrence one repeater interval after each earlier DONE. `+` steps
+The current `SCHEDULED` timestamp anchors the active occurrence and sets its
+due date; this is the due date after the latest recorded completion. Earlier
+due dates are reconstructed from completion dates according to repeater mode.
+`.+` places the next occurrence one repeater interval after each earlier DONE.
+`+` steps
 backward from the current `SCHEDULED` date by one interval for each later DONE.
 `++` keeps the cadence and advances past each earlier DONE to the next
 occurrence. For historical dates, month repeaters convert at 30.4 days per
