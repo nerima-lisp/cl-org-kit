@@ -47,6 +47,16 @@
     "CLOCK-CONSISTENCY-ISSUE-LINE" "CLOCK-CONSISTENCY-ISSUE-OTHER-LINE"
     "CLOCK-CONSISTENCY-ISSUE-DURATION-MINUTES" "CHECK-CLOCK-CONSISTENCY"
     "TIMER-ITEM-VALUE" "INSERT-TIMER-ITEM"
+    ;; Dynamic block updates
+    "ORG-DYNAMIC-BLOCK-ERROR" "ORG-DYNAMIC-BLOCK-ERROR-REASON"
+    "ORG-DYNAMIC-BLOCK-ERROR-NAME"
+    "ORG-CLOCKTABLE-PARAMETER-ERROR" "ORG-CLOCKTABLE-PARAMETER-ERROR-REASON"
+    "ORG-CLOCKTABLE-PARAMETER-ERROR-PARAMETER"
+    "ORG-CLOCKTABLE-PARAMETER-ERROR-VALUE"
+    "REGISTER-DYNAMIC-BLOCK-HANDLER" "UPDATE-DYNAMIC-BLOCK"
+    ;; Column view
+    "ORG-COLUMN-VIEW-ERROR" "ORG-COLUMN-VIEW-ERROR-REASON"
+    "ORG-COLUMN-VIEW-ERROR-CONTEXT" "COLUMN-VIEW-DATA"
     ;; Clock editing
     "CLOCK-IN" "CLOCK-OUT"
     "WRITE-CLOCKTABLE"
@@ -145,6 +155,9 @@
     "NODE-HEADING-PATH"
     ;; Timestamp values
     "TIMESTAMP-START" "TIMESTAMP-END" "TIMESTAMP-REPEATER" "TIMESTAMP-WARNING-DELAY"
+    ;; Effort estimates
+    "ORG-EFFORT-ERROR" "ORG-EFFORT-ERROR-REASON"
+    "EFFORT-DURATION-MINUTES" "SUBTREE-EFFORT-MINUTES"
     ;; Unit V timestamp facade and time context
     "ORG-TIME-ERROR" "ORG-TIME-ERROR-REASON" "ORG-TIME-ERROR-CONTEXT"
     "ORG-TIME-VALUE" "MAKE-ORG-TIME-VALUE" "ORG-TIME-VALUE-P"
@@ -347,7 +360,7 @@ are :LATE."))
   (it "pins the H2 clocktable writer documentation"
     (expect (documentation 'write-clocktable 'function)
             :to-equal
-            "Replace a clocktable dynamic block body with RESULT's fixed table data.")
+            "Replace a clocktable block body with RESULT and optional formatting.")
     (expect (fboundp 'clocktable-result-rows) :to-be-truthy)
     (expect (fboundp 'clocktable-result-total-minutes) :to-be-truthy)
     (expect (fboundp 'clocktable-result-range) :to-be-truthy))

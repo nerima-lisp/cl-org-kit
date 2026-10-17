@@ -103,6 +103,35 @@
     (expect (org-resource-limit-error-limit condition) :to-be limit)
     (expect (org-resource-limit-error-actual condition) :to-be actual)))
 
+(defun edit-clocktable-test-dynamic-update
+    (source &key document-resolver time-context)
+  (let* ((document (parse-org source))
+         (target (edit-clocktable-test-dynamic-block document "clocktable"))
+         (edit (org-kit::update-dynamic-block
+                document target :document-resolver document-resolver
+                :time-context time-context)))
+    (values (document-text (edit-result-updated-document edit)) edit document)))
+
+(defun edit-clocktable-test-expect-parameter-error
+    (condition reason parameter value)
+  (expect (typep condition 'org-kit::org-clocktable-parameter-error)
+          :to-be t)
+  (when (typep condition 'org-kit::org-clocktable-parameter-error)
+    (expect (org-kit::org-kit-error-message condition)
+            :to-equal (ecase reason
+                        (:unsupported-parameter
+                         "Unsupported clocktable parameter")
+                        (:invalid-value "Invalid clocktable parameter value")))
+    (expect (org-kit::org-clocktable-parameter-error-reason condition)
+            :to-be reason)
+    (expect (org-kit::org-clocktable-parameter-error-parameter condition)
+            :to-equal parameter)
+    (expect (org-kit::org-clocktable-parameter-error-value condition)
+            :to-equal value)))
+
+(defun edit-clocktable-test-dynamic-source-octets (source)
+  (cl-codec-kit:string-to-octets source :encoding :utf-8))
+
 (describe "clocktable body edits"
   (it "matches the H2 policy oracle and patches only the dynamic-block body"
     (let* ((cases (getf (edit-clocktable-test-fixture "cases") :cases))
@@ -540,3 +569,171 @@
             (expect (document-text document) :to-equal source)
             (expect (write-org document :output-type :octets)
                     :to-equalp source-octets)))))))
+
+(describe "clocktable dynamic block parameters"
+  (it "uses scope, block, maxlevel, tags, and emphasis with exact output"
+    (let* ((source
+             (format nil
+                     "* Parent :parent:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:15] => 0:15~%#+BEGIN: clocktable :scope subtree :block 2026-10-12 :maxlevel 2 :tags t :emphasize t~%stale~%#+END:~%** Child :child:~%CLOCK: [2026-10-12 Mon 09:15]--[2026-10-12 Mon 09:30] => 0:15~%*** Deep :deep:~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:00] => 0:30~%"))
+           (expected
+             (format nil
+                     "* Parent :parent:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:15] => 0:15~%#+BEGIN: clocktable :scope subtree :block 2026-10-12 :maxlevel 2 :tags t :emphasize t~%| Tags          | Headline     | Time   |        |~%|---------------+--------------+--------+--------|~%|               | *Total time* | *1:00* |        |~%|---------------+--------------+--------+--------|~%| parent        | *Parent*     | *1:00* |        |~%| parent, child | \\_  /Child/  |        | /0:45/ |~%#+END:~%** Child :child:~%CLOCK: [2026-10-12 Mon 09:15]--[2026-10-12 Mon 09:30] => 0:15~%*** Deep :deep:~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:00] => 0:30~%")))
+      (multiple-value-bind (updated edit document)
+          (edit-clocktable-test-dynamic-update source)
+        (with-soft-assertions
+          (expect (edit-result-p edit) :to-be t)
+          (expect updated :to-equal expected)
+          (expect (document-text document) :to-equal source)))))
+
+  (it "uses a block-only date range with exact output"
+    (let* ((source
+             (format nil
+                     "* Kept~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 10:00] => 1:00~%* Excluded~%CLOCK: [2026-10-13 Tue 09:00]--[2026-10-13 Tue 10:00] => 1:00~%#+BEGIN: clocktable :block 2026-10-12~%stale~%#+END:~%"))
+           (expected
+             (format nil
+                     "* Kept~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 10:00] => 1:00~%* Excluded~%CLOCK: [2026-10-13 Tue 09:00]--[2026-10-13 Tue 10:00] => 1:00~%#+BEGIN: clocktable :block 2026-10-12~%| Headline     | Time   |~%|--------------+--------|~%| *Total time* | *1:00* |~%|--------------+--------|~%| Kept         | 1:00   |~%#+END:~%"))
+           (source-octets (edit-clocktable-test-dynamic-source-octets source))
+           (document (parse-org source-octets))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (edit (org-kit::update-dynamic-block document block))
+           (updated (edit-result-updated-document edit)))
+      (with-soft-assertions
+        (expect (document-text updated) :to-equal expected)
+        (expect (document-text document) :to-equal source)
+        (expect (write-org document :output-type :octets)
+                :to-equalp source-octets))))
+
+  (it "applies explicit start and end dates, step buckets, and match filtering"
+    (let* ((source
+             (format nil
+                     "* Kept :keep:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 10:00] => 1:00~%CLOCK: [2026-10-13 Tue 09:00]--[2026-10-13 Tue 10:00] => 1:00~%* Skipped :skip:~%CLOCK: [2026-10-12 Mon 10:00]--[2026-10-12 Mon 11:00] => 1:00~%#+BEGIN: clocktable :scope file :tstart \"[2026-10-12 09:30]\" :tend 2026-10-14 :step day :match \"+keep\"~%stale~%#+END:~%"))
+           (source-octets (edit-clocktable-test-dynamic-source-octets source))
+           (document (parse-org source-octets))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (edit (org-kit::update-dynamic-block document block))
+           (updated (document-text (edit-result-updated-document edit))))
+      (with-soft-assertions
+        (expect (search "Daily report: [2026-10-12 Mon]" updated)
+                :to-be-truthy)
+        (expect (search "Daily report: [2026-10-13 Tue]" updated)
+                :to-be-truthy)
+        (expect (search "| Kept" updated) :to-be-truthy)
+        (expect (search "0:30" updated) :to-be-truthy)
+        (expect (search "1:00" updated) :to-be-truthy)
+        (expect (search "| Skipped" updated) :to-be nil)
+        (expect (document-text document) :to-equal source)
+        (expect (write-org document :output-type :octets)
+                :to-equalp source-octets))))
+
+  (it "emits Org inline percentages for the percent formula"
+    (let* ((source
+             (format nil
+                     "* Parent :parent:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:15] => 0:15~%#+BEGIN: clocktable :scope subtree :block 2026-10-12 :formula %~%stale~%#+END:~%** Child :child:~%CLOCK: [2026-10-12 Mon 09:15]--[2026-10-12 Mon 09:30] => 0:15~%*** Deep :deep:~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:00] => 0:30~%"))
+           (document (parse-org source))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (edit (org-kit::update-dynamic-block document block))
+           (updated-document (edit-result-updated-document edit))
+           (table (org-kit::edit-clocktable-find-table updated-document))
+           (updated (document-text updated-document)))
+      (with-soft-assertions
+        (expect (search "%" (node-text table)) :to-be-truthy)
+        (expect (search "100.0" updated) :to-be-truthy)
+        (expect (search "75.0" updated) :to-be-truthy)
+        (expect (search "50.0" updated) :to-be-truthy)
+        (expect (search "#+TBLFM:" updated) :to-be nil)
+        (expect (document-text document) :to-equal source))))
+
+  (it "labels each step with the beginning date of its reporting period"
+    (let* ((range (make-time-range
+                   (make-org-time-value "2026-10-13T09:30:00")
+                   (make-org-time-value "2026-10-14T00:00:00")))
+           (steps '("day" "week" "semimonth" "month" "quarter" "year")))
+      (expect (mapcar (lambda (step)
+                        (org-kit::clocktable-step-name range step))
+                      steps)
+              :to-equal
+              '("Daily report: [2026-10-13 Tue]"
+                "Weekly report starting on: [2026-10-12 Mon]"
+                "Semimonthly report starting on: [2026-10-01 Thu]"
+                "Monthly report starting on: [2026-10-01 Thu]"
+                "Quarterly report starting on: [2026-10-01 Thu]"
+                "Annual report starting on: [2026-01-01 Thu]"))))
+
+  (it "uses only the supplied resolver and skips zero-contribution files"
+    (let* ((source
+             (format nil "#+BEGIN: clocktable :scope (keep empty) :block 2026-10-12 :fileskip0 t~%stale~%#+END:~%"))
+           (target-document (parse-org source))
+           (target (edit-clocktable-test-dynamic-block
+                    target-document "clocktable"))
+           (kept-document
+             (parse-org
+              (format nil
+                      "* Tracked :keep:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
+              :source-name "keep.org"))
+           (empty-document (parse-org "* Empty" :source-name "empty.org"))
+           (selectors nil)
+           (resolver (lambda (selector)
+                       (push selector selectors)
+                       (cond ((string= selector "keep") kept-document)
+                             ((string= selector "empty") empty-document))))
+           (source-octets (write-org target-document :output-type :octets))
+           (edit (org-kit::update-dynamic-block
+                  target-document target :document-resolver resolver))
+           (updated (document-text (edit-result-updated-document edit))))
+      (with-soft-assertions
+        (expect (nreverse selectors) :to-equal '("keep" "empty"))
+        (expect (search "File: keep.org" updated) :to-be-truthy)
+        (expect (search "File: empty.org" updated) :to-be nil)
+        (expect (search "*0:30*" updated) :to-be-truthy)
+        (expect (document-text target-document) :to-equal source)
+        (expect (write-org target-document :output-type :octets)
+                :to-equalp source-octets))))
+
+  (it "reports exact unsupported, invalid, and missing-time-context reasons"
+    (dolist (case '((":unknown 3" :unsupported-parameter "unknown" "3")
+                    (":maxlevel -1" :invalid-value "maxlevel" "-1")
+                    (":step day" :invalid-value "step"
+                     "requires :block or :tstart and :tend")
+                    (":block today" :invalid-value "block"
+                     "relative block requires :time-context")))
+      (destructuring-bind (arguments reason parameter value) case
+        (let* ((source (format nil "#+BEGIN: clocktable ~A~%stale~%#+END:~%"
+                               arguments))
+               (document (parse-org source))
+               (target (edit-clocktable-test-dynamic-block
+                        document "clocktable"))
+               (source-octets (write-org document :output-type :octets))
+               (condition
+                 (edit-clocktable-test-capture-condition
+                  (lambda () (org-kit::update-dynamic-block document target)))))
+          (edit-clocktable-test-expect-parameter-error
+           condition reason parameter value)
+          (expect (document-text document) :to-equal source)
+          (expect (write-org document :output-type :octets)
+                  :to-equalp source-octets)))))
+
+  (it "names malformed clocktable syntax as an invalid parameter"
+    (let* ((source (format nil "#+BEGIN: clocktable :block~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (condition
+             (edit-clocktable-test-capture-condition
+              (lambda () (org-kit::update-dynamic-block document target)))))
+      (with-soft-assertions
+        (edit-clocktable-test-expect-parameter-error
+         condition :invalid-value "block" ":block")
+        (expect (document-text document) :to-equal source))))
+
+  (it "reports the name and value of a duplicate clocktable parameter"
+    (let* ((source
+             (format nil
+                     "#+BEGIN: clocktable :block 2025-01 :block today~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (target (edit-clocktable-test-dynamic-block document "clocktable"))
+           (condition
+             (edit-clocktable-test-capture-condition
+              (lambda () (org-kit::update-dynamic-block document target)))))
+      (with-soft-assertions
+        (edit-clocktable-test-expect-parameter-error
+         condition :invalid-value "block" "today")
+        (expect (document-text document) :to-equal source)))))

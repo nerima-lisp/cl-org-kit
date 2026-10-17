@@ -16,6 +16,7 @@ nav:
       - TODO and Agenda: guides/todo-agenda.md
       - Clock: guides/clock.md
       - Structure Edits: guides/structure-edits.md
+      - Column view: guides/columnview.md
       - Tables: guides/tables.md
       - Links: guides/links.md
       - Org IDs: guides/org-id.md

@@ -30,6 +30,7 @@
                (:file "document")
                (:file "nodes")
                (:file "org-semantics")
+               (:file "effort")
                (:file "outline")
                (:file "timestamp")
                (:file "time-values")
@@ -76,6 +77,8 @@
                (:file "edit-clock")
                (:file "edit-todo-state")
                (:file "clocktable")
+               (:file "dynamic-blocks")
+               (:file "columnview")
                (:file "edit-clocktable")
                ;; F agenda
                ;; Unit E1 export core
@@ -117,6 +120,7 @@
                (:file "document-test")
                (:file "nodes-test")
                (:file "org-semantics-test")
+               (:file "effort-test")
                (:file "outline-test")
                (:file "object-parser-test")
                (:file "object-markup-test")
@@ -163,6 +167,8 @@
                (:file "clock-test")
                (:file "edit-clock-test")
                (:file "edit-clocktable-test")
+               (:file "dynamic-blocks-test")
+               (:file "columnview-test")
                (:file "edit-todo-state-test")
                (:file "agenda-test")
                ;; Unit E1 export core

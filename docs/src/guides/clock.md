@@ -189,6 +189,21 @@ signals `org-clock-error` with reason `:invalid-range`.
 This follows Org's description-list timer item syntax from the
 [Org manual's timer section](https://orgmode.org/manual/Timers.html).
 
+## Effort estimates
+
+`effort-duration-minutes` parses an Org duration and returns exact minutes.
+It accepts clock forms such as `1:30` and `1:23:45`, unit forms such as `2d`
+and `1h 30min`, and bare numbers interpreted as minutes. Units are `min`, `h`,
+`d`, `w`, `m`, and `y`; weeks are seven days, months are 30 days, and years
+are 365.25 days. Fractional results remain exact rationals.
+`subtree-effort-minutes` adds the direct `EFFORT` property on each heading in a
+selected subtree; an inherited property is not counted repeatedly.
+
+~~~lisp
+(org-kit:effort-duration-minutes "1d3h5min")
+;; => 1625
+~~~
+
 ## Sum clock time
 
 `sum-clocks` totals a heading and its descendants over the half-open interval
@@ -263,7 +278,8 @@ heading and descendants in the requested subtree. The result total counts each
 matching clock once across the requested subtree.
 
 `write-clocktable` replaces the body of a parsed `clocktable` dynamic block
-with that result and returns an `edit-result`.
+with that result and returns an `edit-result`. Its `:tags-p`, `:emphasize-p`,
+and `:formula` options add the corresponding clocktable formatting.
 
 ~~~lisp
 (require :asdf)
@@ -300,6 +316,38 @@ with that result and returns an `edit-result`.
     (list (org-kit:clocktable-result-total-minutes data)
           (org-kit:write-org (org-kit:edit-result-updated-document edit)))))
 ~~~
+
+`update-dynamic-block` dispatches by dynamic block name. The built-in handlers
+are `clocktable` and `columnview`; see [Column view](columnview.md) for the
+latter. Register a custom handler with the parameter names it accepts:
+
+~~~lisp
+(org-kit:register-dynamic-block-handler
+ "summary"
+ (lambda (document block parameters &key document-resolver time-context)
+   (declare (ignore document block document-resolver time-context))
+   (format nil "Summary: ~A" (getf parameters :label)))
+ :parameters '(:label))
+~~~
+
+The handler receives the parsed parameter plist and optional document resolver
+and time context. It can return replacement body text, an `edit-result`, or rows
+of string cells. `update-dynamic-block` returns an `edit-result`; unregistered
+names and undeclared parameters signal `org-dynamic-block-error`.
+
+For the built-in clocktable handler, `:scope` accepts `file`, `nil`, `subtree`,
+`tree`, and `treeN`. Other string selectors, lists of string selectors, and
+`agenda`, `agenda-with-archives`, or `file-with-archives` scopes use the
+`document-resolver` supplied to `update-dynamic-block`. The resolver receives
+each selector and returns a parsed document or a nonempty list of parsed
+documents. The library does not open files. `:maxlevel` limits displayed
+depth while deeper clock time remains in its visible ancestor row. `:block`
+or `:tstart` with `:tend` selects the time range; `:step` splits that range
+into `day`, `week`, `semimonth`, `month`, `quarter`, or `year` sections. `:match`
+filters headings. `:tags`, `:emphasize`, and `:fileskip0` control table
+formatting, and `:formula` accepts a table formula or `%` for time percentages.
+Unsupported or invalid clocktable parameters signal
+`org-clocktable-parameter-error` with the parameter name and reason.
 
 Invalid clock rows, ranges, or options can signal `org-clock-error` or
 `org-time-error`. Clock edits can also signal `org-edit-error`. Clock operations

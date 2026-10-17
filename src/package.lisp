@@ -43,6 +43,15 @@
    #:clock-consistency-issue-line #:clock-consistency-issue-other-line
    #:clock-consistency-issue-duration-minutes #:check-clock-consistency
    #:timer-item-value #:insert-timer-item
+   ;; Dynamic block updates
+   #:org-dynamic-block-error #:org-dynamic-block-error-reason
+   #:org-dynamic-block-error-name
+   #:org-clocktable-parameter-error #:org-clocktable-parameter-error-reason
+   #:org-clocktable-parameter-error-parameter #:org-clocktable-parameter-error-value
+   #:register-dynamic-block-handler #:update-dynamic-block
+   ;; Column view
+   #:org-column-view-error #:org-column-view-error-reason
+   #:org-column-view-error-context #:column-view-data
    ;; Clock editing
    #:clock-in #:clock-out
    #:write-clocktable
@@ -187,6 +196,9 @@
    #:link-resolution #:make-link-resolution #:link-resolution-p
    #:link-resolution-status #:link-resolution-target
    #:link-resolution-candidates #:resolve-link #:store-link
+   ;; Effort estimates
+   #:org-effort-error #:org-effort-error-reason
+   #:effort-duration-minutes #:subtree-effort-minutes
    ;; Unit E1 export context and conditions
    #:export-context #:make-export-context #:export-context-p
    #:export-context-title #:export-context-author #:export-context-date
