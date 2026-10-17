@@ -19,6 +19,8 @@
   (max-clock-consistency-issues 0 :read-only t)
   (max-export-expansion-depth 0 :read-only t)
   (max-export-expanded-characters 0 :read-only t)
+  (max-babel-expansion-depth 0 :read-only t)
+  (max-babel-expanded-characters 0 :read-only t)
   (max-export-expanded-nodes 0 :read-only t)
   (max-formula-tokens 0 :read-only t)
   (max-formula-ast-depth 0 :read-only t)
@@ -50,6 +52,8 @@
                          (max-clock-consistency-issues 100000)
                          (max-export-expansion-depth 32)
                          (max-export-expanded-characters (* 64 1024 1024))
+                         (max-babel-expansion-depth 32)
+                         (max-babel-expanded-characters (* 64 1024 1024))
                          (max-export-expanded-nodes (* 4 1024 1024))
                          (max-formula-tokens 10000)
                          (max-formula-ast-depth 256)
@@ -69,13 +73,16 @@ Regex search work counts candidate text characters cumulatively per searched
 document and link-resolution index. Agenda entries and repeats count generated
 results per agenda call, and agenda ranges use inclusive days. Export character
 and node budgets count cumulative expansion per export call, with the root at
-depth zero. Formula token, AST-depth, precision, and exponent limits are per
-formula; work is per table recalculation. Write-plan entries count files in one
-application, and write-plan bytes count combined UTF-8 string content and
-octet-vector content. Write-plan path bytes count UTF-8 octets in each submitted
-path, and path depth counts non-empty components other than dot.
+depth zero. Babel character budgets count cumulative noweb expansion per call,
+with the root at depth zero. Babel result-element budgets count values traversed
+per callback result. Formula token, AST-depth, precision, and exponent limits
+are per formula; work is per table recalculation. Write-plan entries count files
+in one application, and write-plan bytes count combined UTF-8 string content
+and octet-vector content. Write-plan path bytes count UTF-8 octets in each
+submitted path, and path depth counts non-empty components other than dot.
 Clock consistency issue counts are per check. Each keyword overrides its
-corresponding default with a non-negative integer."
+corresponding default with a non-negative integer. An operation enforces the
+limits documented for that operation."
   (%make-limits :max-input-length (checked-limit-value max-input-length)
                 :max-heading-depth (checked-limit-value max-heading-depth)
                 :max-element-depth (checked-limit-value max-element-depth)
@@ -95,6 +102,10 @@ corresponding default with a non-negative integer."
                 (checked-limit-value max-export-expansion-depth)
                 :max-export-expanded-characters
                 (checked-limit-value max-export-expanded-characters)
+                :max-babel-expansion-depth
+                (checked-limit-value max-babel-expansion-depth)
+                :max-babel-expanded-characters
+                (checked-limit-value max-babel-expanded-characters)
                 :max-export-expanded-nodes
                 (checked-limit-value max-export-expanded-nodes)
                 :max-formula-tokens (checked-limit-value max-formula-tokens)
@@ -134,6 +145,8 @@ corresponding default with a non-negative integer."
     (:max-export-expansion-depth (%limits-max-export-expansion-depth limits))
     (:max-export-expanded-characters
      (%limits-max-export-expanded-characters limits))
+    (:max-babel-expansion-depth (%limits-max-babel-expansion-depth limits))
+    (:max-babel-expanded-characters (%limits-max-babel-expanded-characters limits))
     (:max-export-expanded-nodes (%limits-max-export-expanded-nodes limits))
     (:max-formula-tokens (%limits-max-formula-tokens limits))
     (:max-formula-ast-depth (%limits-max-formula-ast-depth limits))

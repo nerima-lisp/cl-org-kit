@@ -90,6 +90,8 @@
    #:outline-result-total #:outline-result-truncated
    ;; Reading and writing
    #:parse-org #:write-org #:emit-org
+   ;; Babel header arguments
+   #:resolve-babel-parameters #:resolve-babel-variables #:expand-babel-noweb
    ;; Format-preserving headline edits
    #:set-heading-todo #:set-heading-priority #:adjust-heading-priority
    #:replace-heading-title
@@ -172,6 +174,7 @@
    #:org-time-interval-kind #:org-time-interval-amount #:org-time-interval-unit
    ;; F agenda
    #:org-agenda-error #:org-agenda-error-reason #:org-agenda-error-context
+   #:org-babel-error #:org-babel-error-reason #:org-babel-error-context
    #:agenda-entry #:make-agenda-entry #:agenda-entry-p
    #:agenda-entry-date #:agenda-entry-kind #:agenda-entry-headline
    #:agenda-entry-heading-path #:agenda-entry-timestamp

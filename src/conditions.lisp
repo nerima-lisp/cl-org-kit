@@ -312,6 +312,25 @@ REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
   "Return the bounded, escaped agenda option or entry excerpt, or NIL."
   (slot-value condition 'context))
 
+(define-condition org-babel-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ near \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-babel-error-reason condition)
+                     (org-babel-error-context condition))))
+  (:documentation "Signalled when Babel parameters or references cannot be resolved.
+REASON classifies the failure, and CONTEXT is a bounded, escaped excerpt."))
+
+(defun org-babel-error-reason (condition)
+  "Return the keyword classifying the Babel resolution failure."
+  (slot-value condition 'reason))
+
+(defun org-babel-error-context (condition)
+  "Return the bounded, escaped excerpt associated with the Babel failure, or NIL."
+  (slot-value condition 'context))
+
 (define-condition org-export-error (org-kit-error)
   ((backend :initarg :backend :initform nil)
    (reason :initarg :reason :initform nil)

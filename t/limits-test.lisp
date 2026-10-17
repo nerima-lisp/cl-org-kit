@@ -17,6 +17,8 @@
     (:max-clock-consistency-issues 100000)
     (:max-export-expansion-depth 32)
     (:max-export-expanded-characters 67108864)
+    (:max-babel-expansion-depth 32)
+    (:max-babel-expanded-characters 67108864)
     (:max-export-expanded-nodes 4194304)
     (:max-formula-tokens 10000)
     (:max-formula-ast-depth 256)

@@ -27,7 +27,7 @@
   (it "roots every condition at ORG-KIT-ERROR"
     (with-soft-assertions
       (dolist (type '(org-parse-error org-query-error org-edit-error
-                      org-table-error org-resource-limit-error))
+                      org-table-error org-resource-limit-error org-babel-error))
         (expect (subtypep type 'org-kit-error) :to-be t))
       (expect (subtypep 'org-kit-error 'error) :to-be t)))
 
@@ -184,3 +184,18 @@
         (expect (report bare-unsupported)
                 :to-equal "Unsupported at position 0")))))
 )
+
+(describe "Babel error reports"
+  (it "reports reason and context when present and omits absent slots"
+    (let ((full (make-condition 'org-babel-error :message "Cannot resolve Babel input"
+                                                 :reason :missing-result-resolver
+                                                 :context "input"))
+          (bare (make-condition 'org-babel-error :message "Cannot resolve Babel input")))
+      (with-soft-assertions
+        (expect (org-babel-error-reason full) :to-be :missing-result-resolver)
+        (expect (org-babel-error-context full) :to-equal "input")
+        (expect (report full)
+                :to-equal "Cannot resolve Babel input (missing-result-resolver) near \"input\"")
+        (expect (org-babel-error-reason bare) :to-be nil)
+        (expect (org-babel-error-context bare) :to-be nil)
+        (expect (report bare) :to-equal "Cannot resolve Babel input")))))
