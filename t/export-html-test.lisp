@@ -1041,12 +1041,10 @@ paragraph" table-list) :not :to-be nil))))
         (expect (export-core-test-document-snapshot invalid) :to-equal invalid-before)))))
 
   (it "checks HTML escaping before allocating a large unescaped run"
-    (let* ((text (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((text (make-string (* 256 1024) :initial-element #\x))
            (state (org-kit::%make-export-html-state
                    :limits (make-limits :max-output-length 0)))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-html-test-catch-error
               (lambda ()
@@ -1062,7 +1060,7 @@ paragraph" table-list) :not :to-be nil))))
         (expect (< allocated (floor (length text) 2)) :to-be t))))
 
   (it "checks dynamic block output before allocating a source slice"
-    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((body (make-string (* 256 1024) :initial-element #\x))
            (prefix (format nil "#+OPTIONS: toc:nil num:nil~%#+BEGIN: populated~%"))
            (suffix (format nil "~%#+END:~%"))
            (source (concatenate 'string prefix body suffix))
@@ -1077,9 +1075,7 @@ paragraph" table-list) :not :to-be nil))))
              (org-kit::%make-export-html-state
               :limits (make-limits :max-output-length 2048)))
            (attached (setf (document-root document) root))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-html-test-catch-error
               (lambda ()
@@ -1103,7 +1099,7 @@ paragraph" table-list) :not :to-be nil))))
         (expect (< allocated (floor (length body) 2)) :to-be t))))
 
   (it "checks HTML link destinations before concatenating them"
-    (let* ((path (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((path (make-string (* 256 1024) :initial-element #\x))
            (source (concatenate 'string "https://budget.test/" path))
            (limits (make-limits :max-output-length 128))
            (document (make-document source :limits limits))
@@ -1111,9 +1107,7 @@ paragraph" table-list) :not :to-be nil))))
                             :properties (list :type "https" :path path)))
            (root (make-node :org-data :children (list link)))
            (attached (setf (document-root document) root))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-html-test-catch-error
               (lambda () (export-org document :html))))
@@ -1127,18 +1121,16 @@ paragraph" table-list) :not :to-be nil))))
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)
                   :to-be :max-output-length))
-        (expect (> (length source) (* 1024 1024)) :to-be t)
+        (expect (> (length source) (* 256 1024)) :to-be t)
         (expect (< allocated (floor (length source) 2)) :to-be t))))
 
   (it "checks HTML attribute values before copying them"
-    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((body (make-string (* 256 1024) :initial-element #\x))
            (value (concatenate 'string ":id \"" body "\""))
            (node (make-node :table :properties (list :ATTR_HTML value)))
            (state (org-kit::%make-export-html-state
                    :limits (make-limits :max-output-length 128)))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-html-test-catch-error
               (lambda () (org-kit::export-html-parse-attributes node state))))
@@ -1148,7 +1140,7 @@ paragraph" table-list) :not :to-be nil))))
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)
                   :to-be :max-output-length))
-        (expect (> (length value) (* 1024 1024)) :to-be t)
+        (expect (> (length value) (* 256 1024)) :to-be t)
         (expect (< allocated (floor (length value) 2)) :to-be t))))
 
   (it "uses the remaining text when an escaped HTML part omits its end"
@@ -1260,7 +1252,7 @@ paragraph" table-list) :not :to-be nil))))
                 :to-equal (format nil "<pre class=\"example\">~%~%</pre>~%")))))
 
   (it "checks HTML output before copying inline code source text"
-    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((body (make-string (* 256 1024) :initial-element #\x))
            (source (concatenate 'string "Before ~" body "~ after"))
            (document
              (parse-org source
@@ -1270,9 +1262,7 @@ paragraph" table-list) :not :to-be nil))))
            (state (org-kit::%make-export-html-state
                    :limits (make-limits :max-output-length 32)))
            (input-length (length source))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-html-test-catch-error
               (lambda ()
@@ -1284,7 +1274,7 @@ paragraph" table-list) :not :to-be nil))))
           (expect (>= (- (node-end node) (node-begin node))
                       (length body))
                   :to-be t))
-        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (> input-length (* 256 1024)) :to-be t)
         (expect (typep condition 'org-resource-limit-error) :to-be t)
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)

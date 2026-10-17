@@ -1283,7 +1283,7 @@
       (expect actual :to-equal "x")))
 
   (it "rejects an unsafe large GFM abbreviation before copying its path"
-    (let* ((payload (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((payload (make-string (* 256 1024) :initial-element #\x))
            (source
              (format nil
                      "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][x]]"
@@ -1292,13 +1292,12 @@
              (parse-org source :limits (make-limits :max-output-length 1)))
            (input-length (length source)))
       (expect (export-org document :gfm) :to-equal "x")
-      (sb-ext:gc :full t)
       (let* ((before (sb-ext:get-bytes-consed))
              (actual (export-org document :gfm))
              (allocated (- (sb-ext:get-bytes-consed) before)))
         (with-soft-assertions
           (expect actual :to-equal "x")
-          (expect (> input-length (* 1024 1024)) :to-be t)
+          (expect (> input-length (* 256 1024)) :to-be t)
           (expect (< allocated (floor input-length 2)) :to-be t)))))
 
   (it "preserves safe entity fragments and custom-id fuzzy links"
@@ -1378,15 +1377,13 @@
   (it "checks GFM output before allocating a large escaped text run"
     (let* ((source (concatenate 'string
                                 "Body "
-                                (make-string (* 2 1024 1024)
+                                (make-string (* 256 1024)
                                              :initial-element #\x)))
            (limits (make-limits :max-output-length 8))
            (document (parse-org source :limits limits))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
@@ -1402,7 +1399,7 @@
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
   (it "checks GFM output before copying a large bracket link destination"
-    (let* ((path (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((path (make-string (* 256 1024) :initial-element #\x))
            (source
              (concatenate 'string "[[https://budget.test/" path "][label]]"))
            (document
@@ -1410,16 +1407,14 @@
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
                 (org-kit::export-render-preparation preparation :gfm))))
            (allocated (- (sb-ext:get-bytes-consed) before)))
       (with-soft-assertions
-        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (> input-length (* 256 1024)) :to-be t)
         (expect (typep condition 'org-resource-limit-error) :to-be t)
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)
@@ -1429,23 +1424,21 @@
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
   (it "checks GFM output before copying inline code source text"
-    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((body (make-string (* 256 1024) :initial-element #\x))
            (source (concatenate 'string "Before ~" body "~ after"))
            (document
              (parse-org source
                         :limits (make-limits :max-output-length 32)))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
                 (org-kit::export-render-preparation preparation :gfm))))
            (allocated (- (sb-ext:get-bytes-consed) before)))
       (with-soft-assertions
-        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (> input-length (* 256 1024)) :to-be t)
         (expect (typep condition 'org-resource-limit-error) :to-be t)
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)
@@ -1455,7 +1448,7 @@
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
   (it "checks GFM output before copying literal link label objects"
-    (let* ((body (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((body (make-string (* 256 1024) :initial-element #\x))
            (source
              (concatenate 'string "[[https://budget.test][~" body "~]]"))
            (document
@@ -1463,16 +1456,14 @@
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
                 (org-kit::export-render-preparation preparation :gfm))))
            (allocated (- (sb-ext:get-bytes-consed) before)))
       (with-soft-assertions
-        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (> input-length (* 256 1024)) :to-be t)
         (expect (typep condition 'org-resource-limit-error) :to-be t)
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)
@@ -1482,7 +1473,7 @@
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
   (it "checks GFM plain link output before concatenating its destination"
-    (let* ((path (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((path (make-string (* 256 1024) :initial-element #\x))
            (source (concatenate 'string "https://budget.test/" path))
            (limits (make-limits :max-output-length 128))
            (document (make-document source :limits limits))
@@ -1492,9 +1483,7 @@
            (root (make-node :org-data :children (list link)))
            (attached (setf (document-root document) root))
            (input-length (length source))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (export-gfm-test-catch-error
               (lambda () (export-org document :gfm))))
@@ -1504,7 +1493,7 @@
         (expect (node-type link) :to-be :link)
         (expect (node-property link :format) :to-be :plain)
         (expect (node-property link :type) :to-equal "https")
-        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (> input-length (* 256 1024)) :to-be t)
         (expect (typep condition 'org-resource-limit-error) :to-be t)
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)

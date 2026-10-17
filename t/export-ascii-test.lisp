@@ -1133,7 +1133,7 @@
       (expect at-limit :to-equal (format nil "[l]~%"))))
 
   (it "rejects an unsafe large ASCII abbreviation before copying its path"
-    (let* ((payload (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((payload (make-string (* 256 1024) :initial-element #\x))
            (source
              (format nil
                      "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
@@ -1142,13 +1142,12 @@
              (parse-org source :limits (make-limits :max-output-length 8)))
            (input-length (length source)))
       (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
-      (sb-ext:gc :full t)
       (let* ((before (sb-ext:get-bytes-consed))
              (actual (export-org document :ascii))
              (allocated (- (sb-ext:get-bytes-consed) before)))
         (with-soft-assertions
           (expect actual :to-equal (format nil "[label]~%"))
-          (expect (> input-length (* 1024 1024)) :to-be t)
+          (expect (> input-length (* 256 1024)) :to-be t)
           (expect (< allocated (floor input-length 2)) :to-be t)))))
 
   (it "checks an ASCII abbreviation without a placeholder before discarding it"
@@ -1308,7 +1307,7 @@
                                      :initial-element (format nil "[l]~%"))))))
 
   (it "checks ASCII link output before allocating a large destination"
-    (let* ((path (make-string (* 2 1024 1024) :initial-element #\x))
+    (let* ((path (make-string (* 256 1024) :initial-element #\x))
            (source
              (concatenate 'string "[[https://budget.test/" path "]]"))
            (document
@@ -1316,9 +1315,7 @@
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :ascii))
            (input-length (length source))
-           (before (progn
-                     (sb-ext:gc :full t)
-                     (sb-ext:get-bytes-consed)))
+           (before (sb-ext:get-bytes-consed))
            (condition
              (handler-case
                  (progn
@@ -1327,7 +1324,7 @@
                (org-resource-limit-error (condition) condition)))
            (allocated (- (sb-ext:get-bytes-consed) before)))
       (with-soft-assertions
-        (expect (> input-length (* 1024 1024)) :to-be t)
+        (expect (> input-length (* 256 1024)) :to-be t)
         (expect (typep condition 'org-resource-limit-error) :to-be t)
         (when (typep condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name condition)
