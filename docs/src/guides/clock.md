@@ -55,6 +55,80 @@ below the threshold it writes the CLOCK line without a drawer. It refuses to
 start a second running clock on the same heading. `clock-out` requires exactly
 one running clock. Both return edits without changing the input document.
 
+## Check clock consistency
+
+`check-clock-consistency` returns findings in source order. It reports clock
+ranges whose end precedes their start, overlapping ranges, clocks that have no
+clock-out, and intervals longer than `:max-duration-minutes` when that optional
+threshold is supplied. Touching ranges do not overlap. A running clock is
+measured through the reference instant in the required `org-time-context`;
+the same instant is used to check its duration and overlap with closed clocks.
+Duration-only CLOCK rows are ignored. Malformed CLOCK rows signal
+`org-clock-error` with reason `:malformed-clock`.
+
+Each result is a `clock-consistency-issue`. Its reason and first source line
+come from `clock-consistency-issue-reason` and
+`clock-consistency-issue-line`. For an overlap,
+`clock-consistency-issue-other-line` gives the second line. For a valid interval,
+`clock-consistency-issue-duration-minutes` gives its elapsed duration. The
+maximum duration is a strict threshold: a clock is too long only when it
+exceeds the supplied number of minutes.
+
+~~~lisp
+(let* ((document
+         (org-kit:parse-org
+          (format nil
+                  "* Task~%CLOCK: [2025-01-01 Wed 09:00]--[2025-01-01 Wed 10:45] => 1:45~%")))
+       (time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2025-01-01T12:00:00")
+          :zone (org-kit:make-fixed-time-zone 0))))
+  (org-kit:check-clock-consistency
+   document :time-context time-context :max-duration-minutes 90))
+~~~
+
+## Insert timer items
+
+Org timer items are description-list items with an elapsed `H:MM:SS` value, as
+in `- 0:01:23 :: Review`. The start time is supplied by the caller, and the
+reference instant in `org-time-context` supplies the current time.
+`timer-item-value` returns the elapsed string. `insert-timer-item` inserts a
+single-line description after the target heading's planning and property
+metadata, before its body, and returns the
+`edit-result` and the inserted value. The input document is unchanged; use the
+updated document from the result. A start time after the reference instant
+signals `org-clock-error` with reason `:invalid-range`.
+
+~~~lisp
+(labels ((first-headline (document)
+           (let ((found nil))
+             (org-kit:map-nodes
+              (lambda (node)
+                (when (and (null found)
+                           (eq (org-kit:node-type node) :headline))
+                  (setf found node)))
+              (org-kit:document-root document))
+             found)))
+  (let* ((document (org-kit:parse-org (format nil "* Task~%")))
+         (heading (first-headline document))
+         (start (org-kit:make-org-time-value "2025-01-01T10:00:00"))
+         (time-context
+           (org-kit:make-time-context
+            :reference-time (org-kit:make-org-time-value "2025-01-01T10:01:23")
+            :zone (org-kit:make-fixed-time-zone 0))))
+    (list
+     (org-kit:timer-item-value start time-context)
+     (multiple-value-bind (edit value)
+         (org-kit:insert-timer-item document heading start "Review"
+                                    :time-context time-context)
+       (list value
+             (org-kit:write-org
+              (org-kit:edit-result-updated-document edit)))))))
+~~~
+
+This follows Org's description-list timer item syntax from the
+[Org manual's timer section](https://orgmode.org/manual/Timers.html).
+
 ## Sum clock time
 
 `sum-clocks` totals a heading and its descendants over the half-open interval

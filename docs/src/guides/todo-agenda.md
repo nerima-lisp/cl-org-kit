@@ -36,6 +36,21 @@ document remains unchanged.
 An unknown keyword, invalid target, or conflicting edit signals
 `org-edit-error`.
 
+## Set and adjust priorities
+
+`#+PRIORITIES` defines the highest, lowest, and default values for the document.
+For example, `#+PRIORITIES: A C B` uses the alphabetic range A through C and
+defaults unmarked headings to B. Numeric ranges use values from 0 through 64,
+such as `#+PRIORITIES: 1 10 5`. The three values must use the same kind and be
+in ascending order. Without the directive, Org's A, C, and B defaults apply.
+
+`set-heading-priority` accepts an uppercase letter or a numeric priority and
+rejects values outside the configured range. Pass `nil` to clear the priority.
+`adjust-heading-priority` moves one step with `:up` or `:down`, clamping at the
+range limits. An unmarked heading starts from the configured default before
+the adjustment. Invalid directives, directions, or values signal
+`org-edit-error` with reason `:invalid-value`.
+
 ## Transition a TODO state
 
 `transition-heading-todo` sets a heading to a configured state, while
@@ -98,6 +113,14 @@ An unknown state, invalid heading, or conflicting edit signals
 When a repeater transition catches up missed occurrences, expansion is bounded
 by the document's `:max-future-repeats` limit, which defaults to 10,000. An
 exceeded limit signals `org-resource-limit-error`.
+
+Changing a heading to a DONE state is refused with `org-edit-error` reason
+`:blocked` when it has an unfinished direct TODO child, or when an earlier
+unfinished TODO sibling blocks it under its parent's local `ORDERED` property.
+A local `NOBLOCKING` property on the heading disables these checks. Unchecked
+checkboxes do not block TODO transitions. Querying the special `BLOCKED`
+property uses these dependency rules and also checks any caller-supplied
+blocked provider.
 
 ## Build a TODO list and agenda
 
@@ -172,6 +195,39 @@ headlines in document order as `agenda-match-entry` values, with document,
 node, heading path, and source line information. It requires the same explicit
 time context as the agenda calls. `agenda-todo-list`'s `:match` argument uses
 the same Org match syntax but only filters its non-DONE TODO headlines.
+`query-match-now` also requires `:time-context` and evaluates relative dates at
+that context's reference instant in its configured time zone. Callers that
+used the former implicit system-clock behavior must supply this context.
+
+Agenda rows for a scheduled habit also expose `agenda-entry-habit-consistency`.
+It returns one `(:date ... :status ...)` plist for each date in the inclusive
+agenda range. Dates use date-only `org-time-value` objects. Status is
+`:completed` for a DONE state log on that date or a `CLOSED` date on a done
+heading, `:within-schedule` through the current due date, and `:late` after
+that date. The initial due date is the habit's `SCHEDULED` date. Restart
+repeaters advance from each completion; other repeater modes advance to the
+next scheduled occurrence. Rows for non-habits return `nil`. A habit must be a
+TODO heading with an active scheduled repeater; otherwise `agenda` signals
+`org-agenda-error` with a reason such as `:habit-without-repeater`.
+
+~~~lisp
+(let* ((document
+         (org-kit:parse-org
+          (format nil
+                  "#+TODO: TODO | DONE~%~%* TODO Drink water~%SCHEDULED: <2025-01-02 Thu .+1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%")))
+       (time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2025-01-03T12:00:00")
+          :zone (org-kit:make-fixed-time-zone 0)))
+       (result
+         (org-kit:agenda (list document)
+                         (org-kit:make-org-time-value "2025-01-01")
+                         (org-kit:make-org-time-value "2025-01-04")
+                         :time-context time-context)))
+  (org-kit:agenda-entry-habit-consistency
+   (find-if #'org-kit:agenda-entry-habit-p
+            (org-kit:agenda-result-entries result))))
+~~~
 
 Invalid agenda options or document lists signal `org-agenda-error`. Invalid
 dates or time contexts signal `org-time-error`, malformed match syntax signals
