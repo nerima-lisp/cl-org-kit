@@ -130,27 +130,150 @@
                              (list :todo-keyword keyword
                                    :todo-type (and entry (cdr entry))))))))
 
+(defun edit-priority-object-value (priority)
+  (cond
+    ((and (integerp priority) (<= 0 priority 64))
+     (values priority :numeric (princ-to-string priority) t))
+    ((characterp priority)
+     (edit-priority-object-value (string priority)))
+    ((stringp priority)
+     (cond
+       ((and (= (length priority) 1)
+             (<= (char-code #\A) (char-code (char priority 0))
+                 (char-code #\Z)))
+        (values (char-code (char priority 0)) :alphabetic priority t))
+       ((and (plusp (length priority))
+             (every #'digit-char-p priority)
+             (<= (parse-integer priority) 64))
+        (values (parse-integer priority) :numeric priority t))
+       (t (values nil nil nil nil))))
+    (t (values nil nil nil nil))))
+
+(defun edit-priority-current-value (priority)
+  (if (and (integerp priority)
+           (<= (char-code #\A) priority (char-code #\Z)))
+      (values priority :alphabetic (string (code-char priority)) t)
+      (edit-priority-object-value priority)))
+
+(defun edit-priority-keyword (document)
+  (let* ((section (find :section (node-children (document-root document))
+                        :key #'node-type))
+         (keyword (and section
+                       (find-if
+                        (lambda (node)
+                          (and (eq (node-type node) :keyword)
+                               (string-equal (node-property node :key)
+                                             "PRIORITIES")))
+                        (node-children section))))
+         (value (and keyword (node-property keyword :value))))
+    (values value (not (null keyword)))))
+
+(defun edit-priority-directive-tokens (value)
+  (loop with length = (length value)
+        with position = 0
+        with tokens = nil
+        do (loop while (and (< position length)
+                            (find (char value position) '(#\Space #\Tab)))
+                 do (incf position))
+           (when (= position length)
+             (return (nreverse tokens)))
+           (let ((start position))
+             (loop while (and (< position length)
+                              (not (find (char value position)
+                                         '(#\Space #\Tab))))
+                   do (incf position))
+             (push (subseq value start position) tokens))))
+
+(defun edit-priority-setting-value (value)
+  (cond
+    ((and (integerp value) (<= (char-code #\A) value (char-code #\Z)))
+     (values value :alphabetic t))
+    ((and (stringp value)
+          (plusp (length value))
+          (every #'digit-char-p value))
+     (let ((number (parse-integer value)))
+       (if (<= 65 number (char-code #\Z))
+           (values number :alphabetic t)
+           (multiple-value-bind (number kind token valid-p)
+               (edit-priority-object-value value)
+             (declare (ignore token))
+             (values number kind valid-p)))))
+    (t
+     (multiple-value-bind (number kind token valid-p)
+         (edit-priority-object-value value)
+       (declare (ignore token))
+       (values number kind valid-p)))))
+
+(defun edit-priority-valid-in-range-p (value kind highest lowest policy-kind)
+  (and (eq kind policy-kind)
+       (integerp value)
+       (<= highest value lowest)))
+
+(defun edit-priority-settings (document target)
+  (multiple-value-bind (directive directive-p)
+      (edit-priority-keyword document)
+    (if directive-p
+        (let ((tokens (and (stringp directive)
+                           (edit-priority-directive-tokens directive))))
+          (unless (= (length tokens) 3)
+            (edit-signal-error target :invalid-value
+                               "PRIORITIES must contain highest, lowest, and default"))
+          (multiple-value-bind (highest highest-kind highest-token highest-valid-p)
+              (edit-priority-object-value (first tokens))
+            (declare (ignore highest-token))
+            (multiple-value-bind (lowest lowest-kind lowest-token lowest-valid-p)
+                (edit-priority-object-value (second tokens))
+              (declare (ignore lowest-token))
+              (multiple-value-bind (default default-kind default-token default-valid-p)
+                  (edit-priority-object-value (third tokens))
+                (declare (ignore default-token))
+                (unless (and highest-valid-p lowest-valid-p default-valid-p
+                             (eq highest-kind lowest-kind)
+                             (eq highest-kind default-kind)
+                             (<= highest default lowest))
+                  (edit-signal-error target :invalid-value
+                                     "PRIORITIES values must share an ordered range"))
+                (values highest lowest default highest-kind)))))
+        (let* ((settings (document-settings document))
+               (setting-present-p (member :priority-default settings :test #'eq))
+               (setting-value (and setting-present-p
+                                   (getf settings :priority-default))))
+          (if setting-present-p
+              (multiple-value-bind (value kind valid-p)
+                  (edit-priority-setting-value setting-value)
+                (values (char-code #\A) (char-code #\C)
+                        (if (and valid-p
+                                 (edit-priority-valid-in-range-p
+                                  value kind (char-code #\A) (char-code #\C)
+                                  :alphabetic))
+                            value nil)
+                        :alphabetic))
+              (values (char-code #\A) (char-code #\C) (char-code #\B)
+                      :alphabetic))))))
+
 (defun edit-headline-priority-value (priority target)
-  (when priority
-    (let ((character (cond ((characterp priority) priority)
-                           ((and (stringp priority) (= (length priority) 1))
-                            (char priority 0)))))
-      (unless (and character
-                   (or (<= (char-code #\A) (char-code character)
-                           (char-code #\Z))
-                       (digit-char-p character)))
-        (edit-signal-error target :invalid-value
-                           "Priority must be one uppercase letter or digit"))
-      (values (string character)
-              (if (digit-char-p character)
-                  (digit-char-p character)
-                  (char-code character))))))
+  (multiple-value-bind (value kind token valid-p)
+      (edit-priority-object-value priority)
+    (unless valid-p
+      (edit-signal-error target :invalid-value
+                         "Priority must be an uppercase letter or an integer from 0 to 64"))
+    (values token value kind)))
 
 (defun set-heading-priority (document target priority)
-  "Set a headline priority to one uppercase letter or digit, or clear it."
+  "Set a priority within the document's PRIORITIES range, or clear it."
   (let* ((headline (edit-headline-resolve-target document target)))
-    (multiple-value-bind (replacement priority-value)
-        (edit-headline-priority-value priority target)
+    (multiple-value-bind (highest lowest default policy-kind)
+        (edit-priority-settings document target)
+      (declare (ignore default))
+      (multiple-value-bind (replacement priority-value priority-kind)
+          (if priority
+              (edit-headline-priority-value priority target)
+              (values nil nil nil))
+        (when (and priority
+                   (not (edit-priority-valid-in-range-p
+                         priority-value priority-kind highest lowest policy-kind)))
+          (edit-signal-error target :invalid-value
+                             "Priority is outside the document's PRIORITIES range"))
       (multiple-value-bind (marker-end todo-start todo-end priority-start priority-end)
           (edit-headline-prefix-layout document headline)
         (declare (ignore todo-start))
@@ -168,7 +291,35 @@
                                 position position
                                 (format nil " [#~A]" replacement) target)))))))
           (edit-headline-apply document headline target patches
-                               (list :priority priority-value)))))))
+                               (list :priority priority-value))))))))
+
+(defun adjust-heading-priority (document target direction)
+  "Move a headline priority one step up or down within its PRIORITIES range.
+An unset priority starts at the configured default before the adjustment."
+  (unless (member direction '(:up :down) :test #'eq)
+    (edit-signal-error target :invalid-value
+                       "Priority direction must be :UP or :DOWN"))
+  (let* ((headline (edit-headline-resolve-target document target)))
+    (multiple-value-bind (highest lowest default policy-kind)
+        (edit-priority-settings document target)
+      (multiple-value-bind (current current-kind token current-valid-p)
+          (if (node-property headline :priority)
+              (edit-priority-current-value
+               (node-property headline :priority))
+              (values default policy-kind nil t))
+        (declare (ignore token))
+        (unless (and current-valid-p
+                     (edit-priority-valid-in-range-p
+                      current current-kind highest lowest policy-kind))
+          (edit-signal-error target :invalid-value
+                             "Current priority is outside the document's PRIORITIES range"))
+        (let* ((next (max highest
+                          (min lowest
+                               (+ current (if (eq direction :up) -1 1)))))
+               (value (if (eq policy-kind :numeric)
+                          next
+                          (code-char next))))
+          (set-heading-priority document headline value))))))
 
 (defun edit-headline-title-value (document raw-title target)
   (unless (and (stringp raw-title)

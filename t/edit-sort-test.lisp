@@ -464,7 +464,7 @@
                    (edit-sort-test-parent (edit-result-updated-document result)))
                   :to-equal (second case))))
       (let* ((directive-source
-               (format nil "#+PRIORITIES: A B~%~A" source))
+               (format nil "#+PRIORITIES: A C B~%~A" source))
              (document (parse-org directive-source))
              (result (sort-subtree-children
                       document (edit-sort-test-parent document) :priority)))
@@ -473,13 +473,31 @@
                 :to-equal '("Implicit" "Explicit")))
       (let* ((scanned-source
                (format nil
-                       "Preamble text~%#+PRIORITIES: A C D~%* Parent~%** [#D] Explicit~%** Implicit~%** [#C] Medium~%"))
+                       "Preamble text~%#+PRIORITIES: A D B~%* Parent~%** [#D] Explicit~%** Implicit~%** [#C] Medium~%"))
              (document (parse-org scanned-source))
              (result (sort-subtree-children
                       document (edit-sort-test-parent document) :priority)))
         (expect (edit-sort-test-direct-child-values
                  (edit-sort-test-parent (edit-result-updated-document result)))
-                :to-equal '("Medium" "Explicit" "Implicit")))))
+                :to-equal '("Implicit" "Medium" "Explicit")))))
+
+  (it "rejects invalid PRIORITIES values before sorting"
+    (let* ((source
+             (format nil "#+PRIORITIES: 10 1 5~%* Parent~%** [#5] Task~%"))
+           (document (parse-org source))
+           (condition
+             (handler-case
+                 (progn
+                   (sort-subtree-children document
+                                          (edit-sort-test-parent document)
+                                          :priority)
+                   nil)
+               (org-edit-error (error) error))))
+      (with-soft-assertions
+        (expect (typep condition 'org-edit-error) :to-be t)
+        (when (typep condition 'org-edit-error)
+          (expect (org-edit-error-reason condition) :to-be :invalid-value))
+        (expect (document-text document) :to-equal source))))
 
   (it "keeps two missing sort keys in source order and accepts a symbol property name"
     (let* ((missing-source (format nil "* Parent~%** Z~%** A~%"))

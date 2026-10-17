@@ -93,7 +93,8 @@
     ;; Reading and writing
     "PARSE-ORG" "WRITE-ORG" "EMIT-ORG"
     ;; Format-preserving headline edits
-    "SET-HEADING-TODO" "SET-HEADING-PRIORITY" "REPLACE-HEADING-TITLE"
+    "SET-HEADING-TODO" "SET-HEADING-PRIORITY" "ADJUST-HEADING-PRIORITY"
+    "REPLACE-HEADING-TITLE"
     "ADD-HEADING-TAGS" "REMOVE-HEADING-TAGS" "REPLACE-HEADING-TAGS"
     ;; Format-preserving metadata edits
     "SET-PROPERTY" "REMOVE-PROPERTY" "SET-PLANNING" "REMOVE-PLANNING"
@@ -317,6 +318,12 @@ TARGET describes the addressed table and REASON classifies the table-specific fa
       (expect (documentation 'table-sort-rows 'function)
               :to-equal
               "Stable-sort rows in an Org pipe table and return its validated edit result.")))
+
+  (it "pins priority adjustment documentation"
+    (expect (documentation 'adjust-heading-priority 'function)
+            :to-equal
+            "Move a headline priority one step up or down within its PRIORITIES range.
+An unset priority starts at the configured default before the adjustment."))
 
   (it "pins the H2 clocktable writer documentation"
     (expect (documentation 'write-clocktable 'function)

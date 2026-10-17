@@ -25,57 +25,8 @@
                               ((> (length left) (length right)) 1)
                               (t 0)))))
 
-(defun edit-sort-priority-token-value (token)
-  (cond
-    ((and (= (length token) 1)
-          (<= (char-code #\A) (char-code (char token 0))
-              (char-code #\Z)))
-     (char-code (char token 0)))
-    ((and (plusp (length token))
-          (every #'table-calc-digit-p token))
-     (parse-integer token))))
-
-(defun edit-sort-priority-directive-value (document)
-  (let* ((section (find :section (node-children (document-root document))
-                        :key #'node-type))
-         (keyword (and section
-                       (find-if
-                        (lambda (node)
-                          (and (eq (node-type node) :keyword)
-                               (string-equal (node-property node :key)
-                                             "PRIORITIES")))
-                        (node-children section))))
-         (value (and keyword (node-property keyword :value))))
-    (when (stringp value)
-      (loop with length = (length value)
-            with position = 0
-            for token-index from 0
-            do (loop while (and (< position length)
-                                (find (char value position) '(#\Space #\Tab)))
-                     do (incf position))
-               (when (= position length)
-                 (return nil))
-               (let ((start position))
-                 (loop while (and (< position length)
-                                  (not (find (char value position)
-                                             '(#\Space #\Tab))))
-                       do (incf position))
-                 (when (= token-index 2)
-                   (return (edit-sort-priority-token-value
-                            (subseq value start position)))))))))
-
 (defun edit-sort-priority-default (document)
-  (let ((settings (document-settings document)))
-    (if (member :priority-default settings :test #'eq)
-        (let ((value (getf settings :priority-default)))
-          (typecase value
-            (null nil)
-            (integer value)
-            (character (char-code value))
-            (string (edit-sort-priority-token-value value))
-            (t nil)))
-        (or (edit-sort-priority-directive-value document)
-            (char-code #\B)))))
+  (nth-value 2 (edit-priority-settings document nil)))
 
 (defun edit-sort-time-key (timestamp time-context)
   (when timestamp

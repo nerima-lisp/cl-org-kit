@@ -77,7 +77,8 @@
    ;; Reading and writing
    #:parse-org #:write-org #:emit-org
    ;; Format-preserving headline edits
-   #:set-heading-todo #:set-heading-priority #:replace-heading-title
+   #:set-heading-todo #:set-heading-priority #:adjust-heading-priority
+   #:replace-heading-title
    #:add-heading-tags #:remove-heading-tags #:replace-heading-tags
    ;; TODO workflow transitions
    #:org-workflow-options #:make-org-workflow-options #:org-workflow-options-p

@@ -160,14 +160,85 @@
       (expect (node-property edited-headline :priority) :to-equal (char-code #\C))))
 
   (it "sets a digit priority using the parsed numeric value"
-    (let* ((source (format nil "* Task~%"))
+    (let* ((source (format nil "#+PRIORITIES: 1 10 5~%* Task~%"))
            (document (parse-org source))
            (headline (first (edit-headline-test-nodes document)))
-           (edited (set-heading-priority document headline #\7)))
+           (edited (set-heading-priority document headline 7)))
       (with-soft-assertions
-        (expect (document-text edited) :to-equal (format nil "* [#7] Task~%"))
+        (expect (document-text edited)
+                :to-equal (format nil "#+PRIORITIES: 1 10 5~%* [#7] Task~%"))
         (expect (node-property (first (edit-headline-test-nodes edited)) :priority)
                 :to-equal 7))))
+
+  (it "adjusts alphabetic and numeric priorities within the configured range"
+    (let* ((alphabetic-source
+             (format nil "#+PRIORITIES: A E C~%* [#C] Letter~%* Number~%"))
+           (alphabetic (parse-org alphabetic-source))
+           (letter (first (edit-headline-test-nodes alphabetic)))
+           (number (second (edit-headline-test-nodes alphabetic)))
+           (letter-result (adjust-heading-priority alphabetic letter :up))
+           (number-result (adjust-heading-priority alphabetic number :down))
+           (numeric-source
+             (format nil "#+PRIORITIES: 1 10 5~%* [#5] Number~%"))
+           (numeric (parse-org numeric-source))
+           (numeric-result
+             (adjust-heading-priority numeric
+                                      (first (edit-headline-test-nodes numeric))
+                                      :up)))
+      (with-soft-assertions
+        (expect (document-text letter-result)
+                :to-equal (format nil "#+PRIORITIES: A E C~%* [#B] Letter~%* Number~%"))
+        (expect (document-text number-result)
+                :to-equal (format nil "#+PRIORITIES: A E C~%* [#C] Letter~%* [#D] Number~%"))
+        (expect (document-text numeric-result)
+                :to-equal (format nil "#+PRIORITIES: 1 10 5~%* [#4] Number~%")))))
+
+  (it "rejects priorities outside the configured range and invalid directives"
+    (let* ((range-source (format nil "#+PRIORITIES: A E C~%* Task~%"))
+           (range-document (parse-org range-source))
+           (range-heading (first (edit-headline-test-nodes range-document)))
+           (invalid-range
+             (handler-case
+                 (progn (set-heading-priority range-document range-heading "F") nil)
+               (org-edit-error (condition) condition)))
+           (directive-source
+             (format nil "#+PRIORITIES: 10 1 5~%* Task~%"))
+           (directive-document (parse-org directive-source))
+           (directive-heading
+             (first (edit-headline-test-nodes directive-document)))
+           (invalid-directive
+             (handler-case
+                 (progn
+                   (set-heading-priority directive-document directive-heading "5")
+                   nil)
+               (org-edit-error (condition) condition)))
+           (invalid-number
+             (handler-case
+                 (progn
+                   (set-heading-priority range-document range-heading 65)
+                   nil)
+               (org-edit-error (condition) condition)))
+           (invalid-direction
+             (handler-case
+                 (progn
+                   (adjust-heading-priority range-document range-heading :sideways)
+                   nil)
+               (org-edit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep invalid-range 'org-edit-error) :to-be t)
+        (when (typep invalid-range 'org-edit-error)
+          (expect (org-edit-error-reason invalid-range) :to-be :invalid-value))
+        (expect (typep invalid-directive 'org-edit-error) :to-be t)
+        (when (typep invalid-directive 'org-edit-error)
+          (expect (org-edit-error-reason invalid-directive) :to-be :invalid-value))
+        (expect (typep invalid-number 'org-edit-error) :to-be t)
+        (when (typep invalid-number 'org-edit-error)
+          (expect (org-edit-error-reason invalid-number) :to-be :invalid-value))
+        (expect (typep invalid-direction 'org-edit-error) :to-be t)
+        (when (typep invalid-direction 'org-edit-error)
+          (expect (org-edit-error-reason invalid-direction) :to-be :invalid-value))
+        (expect (document-text range-document) :to-equal range-source)
+        (expect (document-text directive-document) :to-equal directive-source))))
 
   (it "edits a final headline without a trailing newline and preserves its bytes"
     (let* ((source "* Plain")
@@ -485,7 +556,7 @@
                    (0 (set-heading-todo document headline "TODO"))
                    (1 (set-heading-todo document headline "DONE"))
                    (2 (set-heading-priority
-                       document headline (nth (mod step 4) '(#\A #\B #\C #\D))))
+                       document headline (nth (mod step 3) '(#\A #\B #\C))))
                    (3 (replace-heading-title
                        document headline (format nil "title-~D" step)))
                    (4 (add-heading-tags
