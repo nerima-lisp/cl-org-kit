@@ -220,13 +220,16 @@ It returns one `(:date ... :status ...)` plist for each date in the inclusive
 agenda range. Dates use date-only `org-time-value` objects. Status is
 `:completed` for a DONE state log on that date or a `CLOSED` date on a done
 heading, `:within-schedule` through the due date, and `:late` after that date.
-The current `SCHEDULED` timestamp is the active due date. Earlier due dates are
-reconstructed from completion logs: `.+` restarts its interval after each DONE,
-`+` keeps a fixed cadence. The current `SCHEDULED` date is the due date after
-the latest DONE; moving backward through DONE logs, each earlier DONE's due date
-is one repeater interval before the due date after the next later DONE. `++`
-keeps its fixed cadence and advances past each completion. An incomplete date
-after the time context's reference date remains `:within-schedule`. Rows for
+The current `SCHEDULED` timestamp anchors the active occurrence, and its date
+is the due date. The latest DONE log uses that due date; earlier due dates are
+reconstructed from DONE history according to repeater mode. `.+` places the
+next occurrence one repeater interval after each earlier DONE. `+` steps
+backward from the current `SCHEDULED` date by one interval for each later DONE.
+`++` keeps the cadence and advances past each earlier DONE to the next
+occurrence. For historical dates, month repeaters convert at 30.4 days per
+month and year repeaters at 365.25 days per year, with the resulting day count
+rounded down as in Org's habit history calculation.
+Dates after the calculated due date are `:late`, including future dates. Rows for
 non-habits return `nil`. A habit must be a
 TODO heading with an active scheduled repeater; otherwise `agenda` signals
 `org-agenda-error` with a reason such as `:habit-without-repeater`.

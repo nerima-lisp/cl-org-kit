@@ -329,7 +329,7 @@ TARGET describes the addressed table and REASON classifies the table-specific fa
     (expect (documentation 'adjust-heading-priority 'function)
             :to-equal
             "Move a headline priority one step up or down within its PRIORITIES range.
-An unset priority starts at the configured default before the adjustment."))
+An unset priority starts at the default, or wraps when PREVIOUS-DIRECTION equals DIRECTION."))
 
   (it "pins habit consistency documentation"
     (expect (documentation 'agenda-entry-habit-consistency 'function)

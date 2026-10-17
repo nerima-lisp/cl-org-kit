@@ -906,6 +906,52 @@
                              (null (agenda-entry-habit-consistency entry))))
                        entries)
                 :to-be t))))
+  (it "reports a restart habit's overdue history inside a later window"
+    (let* ((source
+             (format nil
+                     "* TODO Drink water~%SCHEDULED: <2025-01-10 Fri .+1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun]~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%:END:~%"))
+           (document (parse-org source))
+           (entries
+             (agenda-result-entries
+              (agenda (list document)
+                      (make-org-time-value "2025-01-07")
+                      (make-org-time-value "2025-01-10")
+                      :time-context
+                      (agenda-test-context "2025-01-10T12:00:00+00:00")
+                      :future-repeats :none)))
+           (habit-entry (find-if #'agenda-entry-habit-p entries))
+           (consistency
+             (and habit-entry
+                  (mapcar (lambda (day)
+                            (list (org-time-value-iso8601 (getf day :date))
+                                  (getf day :status)))
+                          (agenda-entry-habit-consistency habit-entry)))))
+      (expect consistency
+              :to-equal '(("2025-01-07" :late)
+                          ("2025-01-08" :late)
+                          ("2025-01-09" :completed)
+                          ("2025-01-10" :within-schedule)))))
+  (it "collects only a habit heading's DONE logs and CLOSED date"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+TODO: TODO | DONE~%* DONE Water~%SCHEDULED: <2025-01-06 Mon> CLOSED: [2025-01-06 Mon 09:30]~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun 08:00]~%- State \"TODO\" from \"DONE\" [2025-01-07 Tue 12:00]~%- State \"DONE\" from \"TODO\"~%:END:~%** DONE Child~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%:END:~%")))
+           (headings
+             (nth-value
+              0 (org-kit::agenda-document-heading-data
+                 document :collect-headlines-p t)))
+           (dates
+  (let* ((heading (first headings))
+         (planning (org-kit::agenda-planning-node heading)))
+    (expect (node-property planning :closed) :to-be-truthy)
+    (setf (node-property heading :closed) nil)
+    (org-kit::agenda-habit-completion-dates document heading))))
+      (expect (mapcar (lambda (ordinal)
+                        (org-time-value-iso8601
+                         (org-kit::agenda-date-value
+                         (cl-date-kit:local-date-from-epoch-day ordinal))))
+                      dates)
+              :to-equal '("2025-01-05" "2025-01-06"))))
 
   (it "keeps cumulate and catch-up habit due dates distinct"
     (labels ((states (scheduled done-1 done-2 end-date
@@ -938,7 +984,7 @@
                             ("2025-01-08" :within-schedule)
                             ("2025-01-09" :completed)
                             ("2025-01-10" :within-schedule)
-                            ("2025-01-11" :within-schedule)))
+                            ("2025-01-11" :late)))
         (expect (states "2025-01-09 Thu ++2d"
                         "2025-01-05 Sun" "2025-01-08 Wed" "2025-01-11")
                 :to-equal '(("2025-01-05" :completed)
@@ -947,7 +993,7 @@
                             ("2025-01-08" :completed)
                             ("2025-01-09" :within-schedule)
                             ("2025-01-10" :late)
-                            ("2025-01-11" :within-schedule)))
+                            ("2025-01-11" :late)))
         (expect (states "2025-01-10 Fri ++2d"
                         "2025-01-05 Sun" "2025-01-08 Wed" "2025-01-11")
                 :to-equal '(("2025-01-05" :completed)
@@ -956,7 +1002,7 @@
                             ("2025-01-08" :completed)
                             ("2025-01-09" :within-schedule)
                             ("2025-01-10" :within-schedule)
-                            ("2025-01-11" :within-schedule)))
+                            ("2025-01-11" :late)))
         (expect (states "2025-01-15 Wed ++5d"
                         "2025-01-05 Sun" "2025-01-06 Mon" "2025-01-17"
                         "2025-01-16T12:00:00+00:00")
@@ -972,26 +1018,186 @@
                             ("2025-01-14" :within-schedule)
                             ("2025-01-15" :within-schedule)
                             ("2025-01-16" :late)
-                            ("2025-01-17" :within-schedule))))))
+                            ("2025-01-17" :late))))))
+  (it "projects catch-up deadlines across successive overdue completions"
+    (let* ((source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO Drink water~%SCHEDULED: <2025-01-15 Wed ++2d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [2025-01-05 Sun]~%- State \"DONE\" from \"TODO\" [2025-01-09 Thu]~%- State \"DONE\" from \"TODO\" [2025-01-13 Mon]~%:END:~%"))
+           (document (parse-org source))
+           (entries
+             (agenda-result-entries
+              (agenda (list document)
+                      (make-org-time-value "2025-01-05")
+                      (make-org-time-value "2025-01-15")
+                      :time-context
+                      (agenda-test-context "2025-01-15T12:00:00+00:00")
+                      :future-repeats :none)))
+           (habit-entry (find-if #'agenda-entry-habit-p entries))
+           (consistency
+             (mapcar (lambda (day)
+                       (list (org-time-value-iso8601 (getf day :date))
+                             (getf day :status)))
+                     (agenda-entry-habit-consistency habit-entry))))
+      (expect consistency
+              :to-equal '(("2025-01-05" :completed)
+                          ("2025-01-06" :within-schedule)
+                          ("2025-01-07" :within-schedule)
+                          ("2025-01-08" :late)
+                          ("2025-01-09" :completed)
+                          ("2025-01-10" :within-schedule)
+                          ("2025-01-11" :within-schedule)
+                          ("2025-01-12" :late)
+                          ("2025-01-13" :completed)
+                          ("2025-01-14" :within-schedule)
+                          ("2025-01-15" :within-schedule)))))
+  (it "uses Org whole-day repeater lengths and mode-specific habit deadlines"
+      (labels ((repeat-days-for (repeater)
+                                (let* ((document
+                                        (parse-org
+                                         (format nil "* TODO Task~%SCHEDULED: <2025-01-01 Wed ~A>~%"
+                                                 repeater)))
+                                       (planning nil))
+                                  (map-nodes (lambda (node)
+                                               (when (eq (node-type node) :planning)
+                                                 (setf planning node)))
+                                             (document-root document))
+                                  (org-kit::agenda-habit-repeat-days
+                                   (timestamp-view (node-property planning :scheduled)))))
+               (states (scheduled done-1 done-2 end-date
+                                  &optional (start-date "2025-01-05")
+                                  (reference-time "2025-01-10T12:00:00+00:00"))
+                       (let* ((source
+                               (format nil
+                                       "* TODO Drink water~%SCHEDULED: <~A>~%:PROPERTIES:~%:STYLE: habit~%:END:~%:LOGBOOK:~%- State \"DONE\" from \"TODO\" [~A]~%- State \"DONE\" from \"TODO\" [~A]~%:END:~%"
+                                       scheduled done-1 done-2))
+                              (document (parse-org source))
+                              (entries
+                               (agenda-result-entries
+                                (agenda (list document)
+                                        (make-org-time-value start-date)
+                                        (make-org-time-value end-date)
+                                        :time-context
+                                        (agenda-test-context reference-time)
+                                        :future-repeats :none)))
+                              (habit-entry (find-if #'agenda-entry-habit-p entries)))
+                         (mapcar (lambda (day)
+                                   (list (org-time-value-iso8601 (getf day :date))
+                                         (getf day :status)))
+                                 (agenda-entry-habit-consistency habit-entry))))
+               (status-on (scheduled done-1 done-2 end-date start-date
+                                     reference-time date)
+                          (second (assoc date
+                                         (states scheduled done-1 done-2 end-date
+                                                 start-date reference-time)
+                                         :test #'string=))))
+        (with-soft-assertions
+         (expect (repeat-days-for ".+1w") :to-be 7)
+         (expect (repeat-days-for "++1m") :to-be 30)
+         (expect (repeat-days-for "++1y") :to-be 365)
+         (expect (states "2025-01-10 Fri +2d"
+                         "2025-01-05 Sun" "2025-01-09 Thu" "2025-01-12")
+                 :to-equal '(("2025-01-05" :completed)
+                             ("2025-01-06" :within-schedule)
+                             ("2025-01-07" :within-schedule)
+                             ("2025-01-08" :within-schedule)
+                             ("2025-01-09" :completed)
+                             ("2025-01-10" :within-schedule)
+                             ("2025-01-11" :late)
+                             ("2025-01-12" :late)))
+         (expect (states "2025-01-10 Fri ++2d"
+                         "2025-01-05 Sun" "2025-01-09 Thu" "2025-01-12")
+                 :to-equal '(("2025-01-05" :completed)
+                             ("2025-01-06" :within-schedule)
+                             ("2025-01-07" :late)
+                             ("2025-01-08" :late)
+                             ("2025-01-09" :completed)
+                             ("2025-01-10" :within-schedule)
+                             ("2025-01-11" :late)
+                             ("2025-01-12" :late)))
+         (expect (status-on "2025-03-31 Mon .+1m"
+                            "2025-02-01 Sat" "2025-03-05 Wed"
+                            "2025-03-31" "2025-02-01"
+                            "2025-03-31T12:00:00+00:00" "2025-03-02")
+                 :to-be :within-schedule)
+         (expect (status-on "2025-03-31 Mon .+1m"
+                            "2025-02-01 Sat" "2025-03-05 Wed"
+                            "2025-03-31" "2025-02-01"
+                            "2025-03-31T12:00:00+00:00" "2025-03-04")
+                 :to-be :late)
+         (expect (status-on "2025-03-31 Mon +1m"
+                            "2025-02-01 Sat" "2025-03-05 Wed"
+                            "2025-03-31" "2025-02-01"
+                            "2025-03-31T12:00:00+00:00" "2025-03-01")
+                 :to-be :within-schedule)
+         (expect (status-on "2025-03-31 Mon +1m"
+                            "2025-02-01 Sat" "2025-03-05 Wed"
+                            "2025-03-31" "2025-02-01"
+                            "2025-03-31T12:00:00+00:00" "2025-03-02")
+                 :to-be :late)
+         (expect (status-on "2025-03-31 Mon ++1m"
+                            "2025-02-01 Sat" "2025-03-05 Wed"
+                            "2025-03-31" "2025-02-01"
+                            "2025-03-31T12:00:00+00:00" "2025-03-01")
+                 :to-be :within-schedule)
+         (expect (status-on "2025-03-31 Mon ++1m"
+                            "2025-02-01 Sat" "2025-03-05 Wed"
+                            "2025-03-31" "2025-02-01"
+                            "2025-03-31T12:00:00+00:00" "2025-03-02")
+                 :to-be :late))))
+  (it "uses the scheduled day as the initial habit deadline"
+    (let* ((source
+             (format nil
+                     "* TODO Drink water~%SCHEDULED: <2025-01-10 Fri ++2d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%"))
+           (document (parse-org source))
+           (entries
+             (agenda-result-entries
+              (agenda (list document)
+                      (make-org-time-value "2025-01-10")
+                      (make-org-time-value "2025-01-12")
+                      :time-context
+                      (agenda-test-context "2025-01-10T12:00:00+00:00")
+                      :future-repeats :none)))
+           (habit-entry (find-if #'agenda-entry-habit-p entries))
+           (consistency
+             (mapcar (lambda (day)
+                       (list (org-time-value-iso8601 (getf day :date))
+                             (getf day :status)))
+                     (agenda-entry-habit-consistency habit-entry))))
+      (expect consistency
+              :to-equal '(("2025-01-10" :within-schedule)
+                          ("2025-01-11" :late)
+                          ("2025-01-12" :late)))))
 
-  (it "signals a named agenda reason for a habit without a scheduled repeater"
-    (let* ((document
-             (parse-org
-              (format nil
-                      "* TODO Drink water~%SCHEDULED: <2025-01-02 Thu>~%:PROPERTIES:~%:STYLE: habit~%:END:~%")))
-           (error-condition
-             (agenda-test-captured-error
-              (lambda ()
-                (agenda (list document)
-                        (make-org-time-value "2025-01-01")
-                        (make-org-time-value "2025-01-03")
-                        :time-context
-                        (agenda-test-context "2025-01-01T12:00:00+00:00"))))))
+  (it "signals a named agenda reason for invalid habit metadata"
+    (labels ((reason-for (source)
+               (let* ((document (parse-org source))
+                      (condition
+                        (agenda-test-captured-error
+                         (lambda ()
+                           (agenda
+                            (list document)
+                            (make-org-time-value "2025-01-01")
+                            (make-org-time-value "2025-01-03")
+                            :time-context
+                            (agenda-test-context "2025-01-01T12:00:00+00:00"))))))
+                 (when (typep condition 'org-agenda-error)
+                   (org-agenda-error-reason condition)))))
       (with-soft-assertions
-        (expect (typep error-condition 'org-agenda-error) :to-be t)
-        (when (typep error-condition 'org-agenda-error)
-          (expect (org-agenda-error-reason error-condition)
-                  :to-be :habit-without-repeater)))))
+        (expect
+         (reason-for
+          (format nil
+                  "* TODO Drink water~%SCHEDULED: <2025-01-02 Thu>~%:PROPERTIES:~%:STYLE: habit~%:END:~%"))
+         :to-be :habit-without-repeater)
+        (expect
+         (reason-for
+          (format nil
+                  "* Drink water~%SCHEDULED: <2025-01-02 Thu +1d>~%:PROPERTIES:~%:STYLE: habit~%:END:~%"))
+         :to-be :habit-not-todo)
+        (expect
+         (reason-for
+          (format nil
+                  "* TODO Drink water~%:PROPERTIES:~%:STYLE: habit~%:END:~%"))
+         :to-be :habit-without-schedule))))
 
   (it "rejects malformed document lists, invalid contexts and date-time range endpoints"
     (let* ((document (parse-org "* TODO One"))
