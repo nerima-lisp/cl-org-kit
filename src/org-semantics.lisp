@@ -340,18 +340,33 @@ The nearest occurrence of a tag determines its position in the result."
         (effective-heading-property-entries heading "ORDERED")))
 
 (defun org-todo-ordered-sibling-blocked-p (heading)
-  (let ((parent (node-parent heading)))
-    (and parent
-         (org-todo-ordered-heading-p parent)
-         (loop for sibling in (node-children parent)
-               until (eq sibling heading)
-               thereis (org-todo-unfinished-heading-p sibling)))))
+  (labels ((ordered-sibling-blocked-p (current parent)
+             (and parent
+                  (eq (node-type parent) :headline)
+                  (org-todo-ordered-heading-p parent)
+                  (loop for sibling in (node-children parent)
+                        until (eq sibling current)
+                        thereis (org-todo-unfinished-heading-p sibling))))
+           (ordered-ancestor-blocked-p (child)
+             (and child
+                  (org-todo-unfinished-heading-p child)
+                  (let ((ancestor (node-parent child)))
+                    (and ancestor
+                         (eq (node-type ancestor) :headline)
+                         (or (ordered-sibling-blocked-p child ancestor)
+                             (ordered-ancestor-blocked-p ancestor)))))))
+    (let ((parent (node-parent heading)))
+      (or (ordered-sibling-blocked-p heading parent)
+          (ordered-ancestor-blocked-p parent)))))
 
 (defun org-todo-unfinished-child-p (heading)
-  (some #'org-todo-unfinished-heading-p (node-children heading)))
+  (some (lambda (child)
+          (or (org-todo-unfinished-heading-p child)
+              (org-todo-unfinished-child-p child)))
+        (node-children heading)))
 
 (defun org-todo-blocked-p (heading)
-  "Return true when local TODO children or ordered siblings block HEADING."
+  "Return true when unfinished descendants or ORDERED siblings block HEADING."
   (and (eq (node-type heading) :headline)
        (not (effective-heading-property-entries heading "NOBLOCKING"))
        (or (org-todo-unfinished-child-p heading)

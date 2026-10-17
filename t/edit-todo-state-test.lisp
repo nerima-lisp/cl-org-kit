@@ -490,7 +490,7 @@
         (expect (document-text wrong-sequence-document) :to-equal wrong-sequence-source)
         (expect (document-text ambiguous-document) :to-equal ambiguous-source))))
 
-  (it "blocks DONE transitions on unfinished TODO children and ordered siblings"
+  (it "blocks DONE transitions on unfinished descendants, ordered siblings, ancestors, and repeaters"
     (let* ((at "2025-03-07T09:00:00")
            (child-source
              (format nil "#+TODO: TODO | DONE~%* TODO Parent~%** TODO Child~%"))
@@ -501,6 +501,18 @@
                 (transition-heading-todo
                  child-document
                  (edit-todo-state-test-heading-path child-document '("Parent"))
+                 "DONE" :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at)))))
+           (descendant-source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO P~%** Notes~%*** TODO x~%"))
+           (descendant-document (parse-org descendant-source))
+           (descendant-condition
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 descendant-document
+                 (edit-todo-state-test-heading-path descendant-document '("P"))
                  "DONE" :at (make-org-time-value at)
                  :time-context (edit-todo-state-test-context at)))))
            (ordered-source
@@ -515,12 +527,67 @@
                  (edit-todo-state-test-heading-path
                   ordered-document '("Parent" "Second"))
                  "DONE" :at (make-org-time-value at)
-                 :time-context (edit-todo-state-test-context at))))))
+                 :time-context (edit-todo-state-test-context at)))))
+           (ancestor-source
+             (format nil
+                     "#+TODO: TODO | DONE~%* Proj~%:PROPERTIES:~%:ORDERED: t~%:END:~%** TODO A~%** TODO B~%*** TODO b1~%"))
+           (ancestor-document (parse-org ancestor-source))
+           (ancestor-condition
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 ancestor-document
+                 (edit-todo-state-test-heading-path
+                  ancestor-document '("Proj" "B" "b1"))
+                 "DONE" :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at)))))
+           (repeat-source
+             (format nil
+                     "#+TODO: TODO | DONE~%* TODO P~%SCHEDULED: <2025-03-07 Fri +1d>~%** TODO c~%"))
+           (repeat-document (parse-org repeat-source))
+           (repeat-heading
+             (edit-todo-state-test-heading-path repeat-document '("P")))
+           (repeat-updates
+             (org-kit::edit-todo-repeat-updates
+              repeat-heading (make-org-time-value at)
+              (edit-todo-state-test-context at) repeat-document))
+           (repeat-condition
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 repeat-document repeat-heading "DONE"
+                 :at (make-org-time-value at)
+                 :time-context (edit-todo-state-test-context at)))))
+           (cancellation-source
+             (format nil
+                     "#+TODO: TODO | DONE CANCELLED~%* DONE Parent~%** TODO Child~%"))
+           (cancellation-document (parse-org cancellation-source))
+           (cancellation-heading
+             (edit-todo-state-test-heading-path
+              cancellation-document '("Parent"))))
       (edit-todo-state-test-assert-error child-condition :blocked)
+      (edit-todo-state-test-assert-error descendant-condition :blocked)
       (edit-todo-state-test-assert-error ordered-condition :blocked)
+      (edit-todo-state-test-assert-error ancestor-condition :blocked)
+      (edit-todo-state-test-assert-error repeat-condition :blocked)
       (with-soft-assertions
+        (expect (org-kit::edit-todo-repeat-p repeat-updates) :to-be t)
         (expect (document-text child-document) :to-equal child-source)
-        (expect (document-text ordered-document) :to-equal ordered-source))))
+        (expect (document-text descendant-document) :to-equal descendant-source)
+        (expect (document-text ordered-document) :to-equal ordered-source)
+        (expect (document-text ancestor-document) :to-equal ancestor-source)
+        (expect (document-text repeat-document) :to-equal repeat-source))
+      (multiple-value-bind (edit transition)
+          (edit-todo-state-test-run-transition
+           cancellation-document cancellation-heading "CANCELLED" at)
+        (with-soft-assertions
+          (expect (transition-result-previous-state transition)
+                  :to-equal "DONE")
+          (expect (transition-result-new-state transition)
+                  :to-equal "CANCELLED")
+          (expect (document-text cancellation-document)
+                  :to-equal cancellation-source)
+          (expect (edit-result-p edit) :to-be t)))))
 
   (it "honors NOBLOCKING and leaves checkbox dependencies disabled"
     (let* ((at "2025-03-07T09:00:00")

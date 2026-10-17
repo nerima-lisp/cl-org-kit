@@ -1468,10 +1468,19 @@ document's normalized TODO sequence and the supplied workflow settings."
                            document heading state heading))))
       (let* ((requested-done-p (and sequence
                                     (edit-todo-done-state-p sequence state)))
-             (repeat-updates (if requested-done-p
-                                 (edit-todo-repeat-updates
-                                  heading at-value time-context document)
-                                 nil))
+             (previous-done-p (and sequence
+                                   (edit-todo-done-state-p sequence previous-state)))
+             (repeat-updates
+               (progn
+                 (when (and requested-done-p
+                            (not previous-done-p)
+                            (org-todo-blocked-p heading))
+                   (edit-todo-error heading :blocked
+                                    "TODO entry is blocked by unfinished dependencies"))
+                 (if requested-done-p
+                     (edit-todo-repeat-updates
+                      heading at-value time-context document)
+                     nil)))
              (repeating-p (edit-todo-repeat-p repeat-updates))
              (new-state (if repeating-p
                             (edit-todo-repeat-state
@@ -1479,8 +1488,6 @@ document's normalized TODO sequence and the supplied workflow settings."
                             state))
              (new-done-p (and sequence
                               (edit-todo-done-state-p sequence new-state)))
-             (previous-done-p (and sequence
-                                   (edit-todo-done-state-p sequence previous-state)))
              (state-changed-p (not (equal previous-state new-state)))
              (logging (edit-todo-logging document heading))
              (done-mode (edit-todo-mode-setting
@@ -1507,10 +1514,6 @@ document's normalized TODO sequence and the supplied workflow settings."
                (edit-todo-drawer-setting
                 document heading workflow-options
                 log-drawer log-drawer-supplied-p)))
-        (when (and state-changed-p new-done-p
-                   (org-todo-blocked-p heading))
-          (edit-todo-error heading :blocked
-                           "TODO entry is blocked by unfinished dependencies"))
         (when (and state-changed-p new-done-p (not repeating-p) done-mode)
           (push (cons :closed (list :action :set :value timestamp))
                 planning-changes)
