@@ -450,7 +450,13 @@
             (table-calc-eval-test-condition
              "@1$3=vsum(@I$2..@II$2)"
              :cells (table-calc-eval-test-cell-map '(1 2 "10")))))
-      (table-calc-eval-test-expect-table-error condition :unsupported-reference)))
+      (progn
+        (table-calc-eval-test-expect-table-error condition :unsupported-reference)
+        (table-calc-eval-test-expect-table-error
+         (table-calc-eval-test-condition
+          "@1$3=vsum(@I$2..@II$2)"
+          :hline-anchors (list (cons 1 2) (cons 2 1)))
+         :invalid-reference))))
 
   (it "preserves invalid and named targets through the public table edit API"
     (let* ((formula "@INVALID$2=1::$name=2")
@@ -958,8 +964,16 @@
             :to-equal "3")
     (expect (table-calc-eval-test-evaluate "@1$1=if(3,2,1)")
             :to-equal "2")
-    (expect (table-calc-eval-test-evaluate "@1$1=if(0,2,1)")
-            :to-equal "1")
+    (progn
+      (expect (table-calc-eval-test-evaluate "@1$1=if(0,2,1)") :to-equal "1")
+      (table-calc-eval-test-expect-table-error
+       (table-calc-eval-test-condition
+        "@1$1=if(@1$1,2,1)"
+        :reference-value-function
+        (lambda (reference)
+          (declare (ignore reference))
+          (values :invalid t)))
+       :invalid-value))
     (dolist (name '("exp" "sin" "tan"))
       (table-calc-eval-test-expect-table-error
        (table-calc-eval-test-condition

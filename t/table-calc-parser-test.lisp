@@ -766,6 +766,7 @@
                 :to-be :function))
       (dolist (formula '("$1=remote(1,@2$1)"
                          "$1=remote(source,@+1$-1)"
+                         "$1=remote(source,\"not-a-reference\")"
                          "$1=if(1,2)"
                          "$1=taylor(1,2,3)"
                          "$1=exp()"
@@ -779,21 +780,22 @@
             (expect (org-table-unsupported-syntax-feature condition)
                     :to-be :unsupported-function-argument))))))
 
-  (it "parses hline shorthand range targets and rejects relative range targets"
+  (it "parses hline shorthand range targets and rejects relative range endpoints"
     (let* ((assignment
              (first (org-kit::table-calc-program-assignments
                      (org-kit::table-calc-parse-formula "@I$1..II=$2"))))
            (start (org-kit::table-calc-assignment-target assignment))
            (end (org-kit::table-calc-assignment-target-end assignment))
-           (condition
-             (table-calc-test-condition "@+1$1..@2$2=1")))
+           (relative-start
+             (table-calc-test-condition "@+1$1..@2$2=1"))
+           (relative-end
+             (table-calc-test-condition "@2$1..@+1$2=1")))
       (with-soft-assertions
         (expect (org-kit::table-calc-assignment-kind assignment) :to-be :range)
         (expect (org-kit::table-calc-reference-row-value start) :to-be 1)
         (expect (org-kit::table-calc-reference-row-kind end) :to-be :hline-anchor)
         (expect (org-kit::table-calc-reference-row-value end) :to-be 2)
-        (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
-        (when (typep condition 'org-table-unsupported-syntax)
+        (dolist (condition (list relative-start relative-end))
           (expect (org-table-unsupported-syntax-feature condition)
                   :to-be :invalid-reference)))))
 

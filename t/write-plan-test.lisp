@@ -704,6 +704,82 @@
                    :to-be-truthy)
            (expect (probe-file first-target) :to-be nil)
            (expect (probe-file later-target) :to-be nil))))))
+  (it "detects a replacement parent restored before verification"
+    (write-plan-test-call-with-directory
+     (lambda (base)
+       (let* ((root (write-plan-test-child-directory base "root"))
+              (outside (write-plan-test-child-directory base "outside"))
+              (parent (write-plan-test-child-directory root "parent"))
+              (moved-parent (write-plan-test-path outside "parent"))
+              (target (write-plan-test-path root "parent/first.txt"))
+              (open-symbol (find-symbol "WRITE-PLAN-OPEN-PARENT-DIRECTORY" :org-kit))
+              (original-open (symbol-function open-symbol))
+              (open-calls 0)
+              (condition nil))
+         (unwind-protect
+              (progn
+                (setf (symbol-function open-symbol)
+                      (lambda (&rest arguments)
+                        (when (= (incf open-calls) 2)
+                          (sb-posix:rename (namestring parent)
+                                          (namestring moved-parent))
+                          (write-plan-test-child-directory root "parent"))
+                        (apply original-open arguments)))
+                (setf condition
+                      (write-plan-test-capture-error
+                       (make-write-plan
+                        (list
+                         (make-write-plan-entry "parent/first.txt" "value")))
+                       root)))
+           (setf (symbol-function open-symbol) original-open))
+         (with-soft-assertions
+           (expect (and condition
+                        (eq (org-write-plan-error-reason condition)
+                            :containment-lost))
+                   :to-be t)
+           (expect open-calls :to-be 2)
+           (expect (write-plan-test-read-text
+                    (write-plan-test-path outside "parent/first.txt"))
+                   :to-equal "value")
+           (expect (probe-file target) :to-be nil))))))
+  (it "reports descriptor stat failures as containment loss"
+    (write-plan-test-call-with-directory
+     (lambda (directory)
+       (let* ((canonical-root (org-kit::write-plan-canonical-root directory))
+              (root-fd (org-kit::write-plan-open-root-directory canonical-root))
+              (parent-fd (org-kit::write-plan-duplicate-close-on-exec root-fd))
+              (entry (make-write-plan-entry "target.txt" "value"))
+              (record (list entry "target.txt" (list "target.txt")))
+              (fstat-symbol (find-symbol "FSTAT" :sb-posix))
+              (original-fstat (symbol-function fstat-symbol)))
+         (unwind-protect
+              (dolist (failure-index (list 1 2))
+                (let ((calls 0)
+                      (condition nil))
+                  (unwind-protect
+                       (progn
+                         (setf (symbol-function fstat-symbol)
+                               (lambda (fd)
+                                 (if (= (incf calls) failure-index)
+                                     (error "injected fstat failure")
+                                     (funcall original-fstat fd))))
+                         (setf condition
+                               (handler-case
+                                   (progn
+                                     (org-kit::write-plan-verify-parent-directory
+                                      root-fd record parent-fd)
+                                     nil)
+                                 (org-write-plan-error (error-condition)
+                                   error-condition))))
+                    (setf (symbol-function fstat-symbol) original-fstat))
+                  (with-soft-assertions
+                    (expect calls :to-be failure-index)
+                    (expect (and condition
+                                 (eq (org-write-plan-error-reason condition)
+                                     :containment-lost))
+                            :to-be t))))
+           (sb-posix:close parent-fd)
+           (sb-posix:close root-fd))))))
 
   (it "copies and validates write-plan data"
     (let* ((source-path (copy-seq "entry.txt"))

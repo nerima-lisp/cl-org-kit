@@ -588,8 +588,14 @@
       (multiple-value-bind (token number end)
           (org-kit::column-view-read-number "" 0)
         (expect (list token number end) :to-equal (list nil nil 0)))
+      (multiple-value-bind (token number end)
+          (org-kit::column-view-read-number "-12.5tail" 0)
+        (expect (list token number end) :to-equal '("-12.5" -25/2 5)))
       (expect (org-kit::column-view-parse-number-value "+1") :to-equal 1)
       (expect (org-kit::column-view-parse-number-value ".5") :to-equal 1/2)
+      (expect (org-kit::column-view-parse-number-value "-1.25") :to-equal -5/4)
+      (expect (org-kit::column-view-format-clock -30 '("30min"))
+              :to-equal "-0:30")
       (columnview-test-expect-error
        (columnview-test-capture-condition
         (lambda () (org-kit::column-view-parse-duration column "1h 30")))

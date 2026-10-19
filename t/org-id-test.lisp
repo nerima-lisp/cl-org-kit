@@ -55,7 +55,10 @@
       (expect (typep condition 'org-id-error) :to-be t)
       (when (typep condition 'org-id-error)
         (expect (org-id-error-reason condition) :to-be reason)
-        (expect (plusp (length (org-kit-error-message condition))) :to-be t)))))
+        (expect (plusp (length (org-kit-error-message condition))) :to-be t)
+        (expect (search (string-downcase (symbol-name reason))
+                        (format nil "~A" condition))
+                :not :to-be nil)))))
 
 (describe "Org IDs"
   (it "generates deterministic UUID v4 octets and sets the version and variant bits"
@@ -209,6 +212,31 @@
       (org-id-test-expect-error
        (lambda () (set-heading-id other-document heading))
        :foreign-heading)))
+  (it "rejects inlinetasks as ID assignment targets and generates default IDs"
+  (let* ((source (format nil "* Alpha~%*************** TODO Inline~%*************** END~%"))
+         (document (parse-org source))
+         (heading (org-id-test-heading document "Alpha"))
+         (inline-task
+           (let ((found nil))
+             (map-nodes (lambda (node)
+                          (when (and (null found)
+                                     (eq (node-type node) :inlinetask))
+                            (setf found node)))
+                        (document-root document))
+             found))
+         (condition
+           (org-id-test-condition
+            (lambda () (set-heading-id document inline-task)))))
+    (multiple-value-bind (updated identifier)
+        (set-heading-id document heading)
+      (with-soft-assertions
+        (expect (typep condition 'org-id-error) :to-be t)
+        (when (typep condition 'org-id-error)
+          (expect (org-id-error-reason condition) :to-be :invalid-heading))
+        (expect (org-id-test-canonical-uuid-p identifier) :to-be t)
+        (expect (document-text document) :to-equal source)
+        (expect (org-id-index-candidates (make-org-id-index updated) identifier)
+                :to-equal (list (org-id-test-heading updated "Alpha")))))))
 
   (it "rejects invalid and duplicate local IDs before editing"
     (let* ((invalid-document
@@ -243,4 +271,20 @@
        (lambda () (set-heading-id document heading
                                   :random-source (org-id-test-random-source)))
        :duplicate-id)
-      (expect (document-text document) :to-equal source))))
+      (expect (document-text document) :to-equal source)))
+  (it "rejects multiple ID properties on one heading before setting an ID"
+  (let* ((source
+           (format nil
+                   "* Repeated~%:PROPERTIES:~%:ID: first~%:ID: second~%:END:~%"))
+         (document (parse-org source))
+         (heading (org-id-test-heading document "Repeated"))
+         (condition
+           (org-id-test-condition
+            (lambda ()
+              (set-heading-id document heading
+                              :random-source (org-id-test-random-source))))))
+    (with-soft-assertions
+      (expect (typep condition 'org-id-error) :to-be t)
+      (when (typep condition 'org-id-error)
+        (expect (org-id-error-reason condition) :to-be :duplicate-id))
+      (expect (document-text document) :to-equal source)))))

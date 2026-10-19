@@ -847,6 +847,29 @@
       (with-soft-assertions
         (expect (typep output 'string) :to-be t)
         (expect calls :to-be 1))))
+  (it "omits an HTML reference when its ID index is invalid"
+  (let* ((document (parse-org "[[id:target]]"))
+         (link (export-html-test-node-of-type document :link))
+         (index (org-kit::%make-link-resolution-index nil nil nil nil nil nil nil))
+         (state (org-kit::%make-export-html-state
+                 :limits (make-limits)
+                 :resolution-index index))
+         (reference (org-kit::export-html-link-resolution-reference state link)))
+    (expect reference :to-be nil)))
+  (it "includes the link source document in a lazy HTML resolution index"
+  (let* ((document
+           (parse-org
+            (format nil "* Target~%:PROPERTIES:~%:ID: stored-id~%:END:~%~%[[id:stored-id]]")))
+         (link (export-html-test-node-of-type document :link))
+         (state (org-kit::%make-export-html-state :limits (make-limits)))
+         (index (org-kit::export-html-link-resolution-index state link))
+         (resolution (org-kit::resolve-link-with-index link index)))
+    (with-soft-assertions
+      (expect (org-kit::%link-resolution-index-documents index)
+              :to-equal (list document))
+      (expect (link-resolution-status resolution) :to-be :resolved)
+      (expect (link-resolution-target resolution)
+              :to-be (export-html-test-node-of-type document :headline)))))
 
   (it "exports links whose resolution is unsupported, malformed, or over budget"
     (let ((documents

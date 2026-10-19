@@ -674,6 +674,8 @@
            (wide-range (make-time-range
                         (make-org-time-value "2026-10-13T00:00:00")
                         (make-org-time-value "2026-10-25T00:00:00")))
+           (default-ranges
+             (org-kit::clocktable-step-ranges wide-range "week"))
            (steps '("day" "week" "semimonth" "month" "quarter" "year"))
            (range-limit-condition
              (edit-clocktable-test-capture-condition
@@ -713,6 +715,11 @@
                 "Monthly report starting on: [2026-10-13 Tue]"
                 "Quarterly report starting on: [2026-10-13 Tue]"
                 "Annual report starting on: [2026-10-13 Tue]"))
+      (expect (mapcar (lambda (subrange)
+                        (org-kit::clocktable-step-name subrange "week"))
+                      default-ranges)
+              :to-equal '("Weekly report starting on: [2026-10-13 Tue]"
+                          "Weekly report starting on: [2026-10-19 Mon]"))
       (expect (typep range-limit-condition 'org-resource-limit-error) :to-be t)
       (expect (typep output-limit-condition 'org-resource-limit-error) :to-be t)
       (when (typep output-limit-condition 'org-resource-limit-error)

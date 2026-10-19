@@ -88,6 +88,25 @@
         (expect (link-resolution-target unresolved) :to-be nil)
         (expect (link-resolution-candidates unresolved) :to-equal nil)
         (expect (link-resolution-status empty-documents) :to-be :unresolved))))
+  (it "copies candidates at resolution construction and access"
+  (let* ((source-candidates (list :first :second))
+         (resolution
+           (org-kit::make-link-resolution
+            :status :ambiguous :candidates source-candidates))
+         (returned-candidates (link-resolution-candidates resolution))
+         (invalid-status
+           (link-resolution-test-catch-error
+            (lambda ()
+              (org-kit::make-link-resolution :status :unknown)))))
+    (setf (first source-candidates) :changed
+          (first returned-candidates) :changed)
+    (with-soft-assertions
+      (expect (link-resolution-p resolution) :to-be t)
+      (expect (link-resolution-p nil) :to-be nil)
+      (expect (link-resolution-status resolution) :to-be :ambiguous)
+      (expect (link-resolution-target resolution) :to-be nil)
+      (expect (link-resolution-candidates resolution) :to-equal '(:first :second))
+      (expect (typep invalid-status 'type-error) :to-be t))))
 
   (it "matches targets and names before headings and normalizes heading text like Org"
     (let* ((document
@@ -375,6 +394,66 @@
                   :to-be :unsupported-link-function)
           (expect (org-link-resolution-error-context condition)
                   :to-equal "calc:input")))))
+  (it "keeps malformed search keys and reports invalid link resolution inputs"
+  (let* ((malformed-document (parse-org "* Report [12/x]"))
+         (malformed-link
+           (make-node :link :properties (list :type "fuzzy" :path "Report [12/x]")))
+         (malformed-result (resolve-link malformed-link malformed-document))
+         (source-document
+           (parse-org
+            (format nil
+                    "#+BEGIN_SRC text~%needle in the source block~%#+END_SRC~%~%[[file:::needle]]")))
+         (source-block
+           (let ((found nil))
+             (map-nodes (lambda (node)
+                          (when (and (null found) (eq (node-type node) :src-block))
+                            (setf found node)))
+                        (document-root source-document))
+             found))
+         (source-link (link-resolution-test-link source-document))
+         (missing-path (make-node :link :properties '(:type "file")))
+         (missing-path-condition
+           (link-resolution-test-catch-error
+            (lambda () (resolve-link missing-path malformed-document))))
+         (missing-parent-link
+           (make-node :link :properties '(:type "file" :path "::*Heading")))
+         (missing-parent-condition
+           (link-resolution-test-catch-error
+            (lambda () (resolve-link missing-parent-link nil))))
+         (invalid-id-link (make-node :link :properties '(:type "id" :path " ")))
+         (invalid-id-result (resolve-link invalid-id-link malformed-document))
+         (unknown-link
+           (make-node :link :properties '(:type "unknown" :path "value")))
+         (unknown-result (resolve-link unknown-link malformed-document))
+         (non-node-condition
+           (link-resolution-test-catch-error
+            (lambda () (resolve-link 42 malformed-document))))
+         (invalid-index-condition
+           (link-resolution-test-catch-error
+            (lambda ()
+              (org-kit::resolve-link-with-index malformed-link nil)))))
+    (setf (node-property source-block :value) nil)
+    (let ((source-result (resolve-link source-link source-document))
+          (report (format nil "~A" missing-path-condition)))
+      (with-soft-assertions
+        (expect (link-resolution-status malformed-result) :to-be :resolved)
+        (expect (node-property (link-resolution-target malformed-result) :raw-value)
+                :to-equal "Report [12/x]")
+        (expect (link-resolution-status source-result) :to-be :resolved)
+        (expect (node-type (link-resolution-target source-result)) :to-be :src-block)
+        (expect (typep missing-path-condition 'org-link-resolution-error) :to-be t)
+        (when (typep missing-path-condition 'org-link-resolution-error)
+          (expect (org-link-resolution-error-reason missing-path-condition)
+                  :to-be :invalid-file-path)
+          (expect (search "invalid-file-path" report) :not :to-be nil))
+        (expect (typep missing-parent-condition 'org-link-resolution-error) :to-be t)
+        (when (typep missing-parent-condition 'org-link-resolution-error)
+          (expect (org-link-resolution-error-reason missing-parent-condition)
+                  :to-be :missing-parent-document))
+        (expect (link-resolution-status invalid-id-result) :to-be :unresolved)
+        (expect (link-resolution-status unknown-result) :to-be :unresolved)
+        (expect (typep non-node-condition 'type-error) :to-be t)
+        (expect (typep invalid-index-condition 'type-error) :to-be t)))))
   (it "enforces cumulative regexp search work per indexed document"
     (let* ((main-document (parse-org "[[file:manual.org::/.*/]]"))
            (link (link-resolution-test-link main-document))

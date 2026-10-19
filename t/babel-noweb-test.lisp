@@ -667,6 +667,47 @@
         (expect (babel-noweb-test-expand duplicate-document "consumer" :eval)
                 :to-equal "first"))))
 
+  (it "bounds explicit stream writes and initializes fresh expansion state"
+    (let* ((document
+             (parse-org ""
+                        :limits (make-limits
+                                 :max-babel-expanded-characters 5)))
+           (context (org-kit::make-babel-noweb-context :document document))
+           (stream
+             (make-instance 'org-kit::babel-noweb-bounded-output-stream
+                            :context context))
+           (source-blocks (org-kit::babel-noweb-context-source-blocks context))
+           (reference-groups
+             (org-kit::babel-noweb-context-reference-groups context))
+           (active-blocks (org-kit::babel-noweb-context-active-blocks context))
+           (block (make-node :src-block)))
+      (setf (gethash (copy-seq "fragment") source-blocks) block
+            (gethash (copy-seq "group") reference-groups) (list block)
+            (gethash block active-blocks) t)
+      (with-soft-assertions
+        (expect (gethash "fragment" source-blocks) :to-be block)
+        (expect (gethash "group" reference-groups) :to-equal (list block))
+        (expect (gethash block active-blocks) :to-be t)
+        (expect (org-kit::babel-noweb-context-expanded-characters context)
+                :to-be 0)
+        (sb-gray:stream-write-string stream "zdata" 1)
+        (expect (sb-gray:stream-write-char stream #\!) :to-be #\!)
+        (expect (get-output-stream-string
+                 (org-kit::babel-noweb-bounded-output-stream-output stream))
+                :to-equal "data!")
+        (let ((condition
+                (babel-noweb-test-condition
+                 (lambda () (sb-gray:stream-write-string stream "x")))))
+          (expect (typep condition 'org-resource-limit-error) :to-be t)
+          (when (typep condition 'org-resource-limit-error)
+            (expect (org-resource-limit-error-limit-name condition)
+                    :to-be :max-babel-expanded-characters)
+            (expect (org-resource-limit-error-limit condition) :to-be 5)
+            (expect (org-resource-limit-error-actual condition) :to-be 6))
+          (expect (get-output-stream-string
+                   (org-kit::babel-noweb-bounded-output-stream-output stream))
+                  :to-equal "")))))
+
   (it "normalizes empty and one-newline bodies"
     (with-soft-assertions
       (expect (org-kit::babel-noweb-normalize-body "") :to-equal "")

@@ -190,6 +190,40 @@
                 '(("call-target" (("amount" . 11)
                                   ("label" . "from call"))))))))
 
+  (it "rejects positional call arguments without a target variable"
+    (let* ((document
+             (parse-org
+              (babel-vars-test-lines
+               "#+NAME: call-target"
+               "#+BEGIN_SRC emacs-lisp"
+               "unused"
+               "#+END_SRC"
+               ""
+               "#+NAME: call-alias"
+               "#+CALL: call-target(11)"
+               ""
+               "#+NAME: consumer"
+               "#+BEGIN_SRC emacs-lisp"
+               "unused"
+               "#+END_SRC")))
+           (consumer (babel-vars-test-named-src-block document "consumer"))
+           (resolver-calls nil)
+           (condition
+             (babel-vars-test-condition
+              (lambda ()
+                (babel-vars-test-resolve-with-variables
+                 document consumer '(("VAR" . "call-result=call-alias"))
+                 :result-resolver
+                 (lambda (block-name variables)
+                   (push (list block-name variables) resolver-calls)
+                   42))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-babel-error) :to-be t)
+        (when (typep condition 'org-babel-error)
+          (expect (org-babel-error-reason condition)
+                  :to-equal :invalid-variable-assignment))
+        (expect resolver-calls :to-be nil))))
+
   (it "signals a named error when a referenced result has no resolver"
     (let* ((document
              (parse-org
@@ -654,7 +688,8 @@
               '(("VAR" . "integer=42")
                 ("VAR" . "negative=-7")
                 ("VAR" . "ratio=3/4")
-                ("VAR" . "decimal=1.25e1"))))
+                ("VAR" . "decimal=1.25e1")
+                ("VAR" . "malformed-exponent=1e+"))))
            (fullwidth-condition
              (babel-vars-test-condition
               (lambda ()
@@ -677,7 +712,8 @@
                 '(("integer" . 42)
                   ("negative" . -7)
                   ("ratio" . "3/4")
-                  ("decimal" . 12.5d0)))
+                  ("decimal" . 12.5d0)
+                  ("malformed-exponent" . "1e+")))
         (expect (typep fullwidth-condition 'org-babel-error) :to-be t)
         (expect (typep arabic-condition 'org-babel-error) :to-be t)
         (expect (typep unsupported-condition 'org-babel-error) :to-be t)
@@ -692,6 +728,21 @@
                   :to-equal :unsupported-result))))))
 
 (describe "Babel variable helper edge cases"
+  (it "initializes fresh resolver indexes with string-key lookup semantics"
+    (let* ((document (parse-org ""))
+           (context (org-kit::make-babel-resolution-context
+                     :document document))
+           (names (org-kit::babel-resolution-context-names context))
+           (active-names
+             (org-kit::babel-resolution-context-active-names context)))
+      (setf (gethash (copy-seq "target") names) :source-block
+            (gethash (copy-seq "reference") active-names) t)
+      (with-soft-assertions
+        (expect (gethash "target" names) :to-be :source-block)
+        (expect (gethash "reference" active-names) :to-be t)
+        (expect (org-kit::babel-resolution-context-expanded-characters context)
+                :to-be 0))))
+
   (it "rejects empty numeric tokens and replaces repeated variables"
     (let* ((document (parse-org ""))
            (context

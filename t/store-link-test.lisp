@@ -28,7 +28,13 @@
       (when condition
         (expect (org-kit::org-store-link-error-reason condition) :to-be reason)
         (expect (stringp (org-kit::org-store-link-error-context condition))
-                :to-be t)))))
+                :to-be t)
+        (let ((report (format nil "~A" condition)))
+          (expect (search (string-downcase (symbol-name reason)) report)
+                  :not :to-be nil)
+          (expect (search (org-kit::org-store-link-error-context condition)
+                          report)
+                  :not :to-be nil))))))
 
 (describe "store-link"
   (it "stores local ID, CUSTOM_ID, and heading links in exact Org syntax"
@@ -101,6 +107,15 @@
       (store-link-test-expect-error
        (lambda () (org-kit:store-link empty-title :style :heading))
        :missing-heading-title)))
+  (it "uses the printed non-node value as invalid-target context"
+  (let ((condition
+          (handler-case (org-kit:store-link 42)
+            (org-kit::org-store-link-error (caught) caught))))
+    (with-soft-assertions
+      (expect (org-kit::org-store-link-error-reason condition)
+              :to-be :invalid-heading)
+      (expect (org-kit::org-store-link-error-context condition) :to-equal "42")
+      (expect (search "42" (format nil "~A" condition)) :not :to-be nil))))
 
   (it "emits the same fuzzy target syntax for headings with duplicate titles"
     (let* ((document (parse-org (format nil "* Same~%* Same~%")))

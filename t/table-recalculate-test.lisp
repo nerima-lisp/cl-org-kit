@@ -440,14 +440,25 @@
                    (org-kit::table-recalculate-remote-state limited-context table)))
                 :to-equal (list :limit :max-formula-work (1- used) used)))))
 
-  (it "returns a cached state for a previously computed table"
+  (it "returns cached state and rejects an active table cycle"
     (let* ((table :cached-table)
            (state (org-kit::make-table-recalculate-state))
-           (cache (make-hash-table :test #'eq))
+           (cache (make-hash-table :test (function eq)))
            (context (org-kit::make-table-recalculate-context :cache cache)))
       (setf (gethash table cache) state)
       (expect (eq (org-kit::table-recalculate-compute-state context table) state)
-              :to-be t)))
+              :to-be t))
+    (let* ((document (parse-org (format nil "| value |~%|---|~%| 1 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table)))
+      (table-recalculate-test-expect-table-error
+       (table-recalculate-test-caught-condition
+        (lambda ()
+          (org-kit::table-recalculate-compute-state
+           (org-kit::make-table-recalculate-context
+            :active (list table)
+            :cache (make-hash-table :test (function eq)))
+           table)))
+       :cyclic-remote-reference)))
 
   (it "evaluates duration modes from HH:MM and HH:MM:SS cell references"
     (let* ((source
@@ -1143,10 +1154,15 @@
       (with-soft-assertions
         (expect (table-recalculate-test-condition
                  (lambda () (table-recalculate table-el-document table-el)))
-                :to-equal '(:table :unsupported-table-type))
+                :to-equal (list :table :unsupported-table-type))
+        (expect (table-recalculate-test-condition
+                 (lambda ()
+                   (org-kit::table-recalculate-remote-state
+                    (org-kit::make-table-recalculate-context) table-el)))
+                :to-equal (list :table :unsupported-table-type))
         (expect (table-recalculate-test-condition
                  (lambda () (table-recalculate document foreign-table)))
-                :to-equal '(:edit :foreign-node))
+                :to-equal (list :edit :foreign-node))
         (expect (document-text document) :to-equal
                 (format nil "| a |~%|---|~%| 1 |~%")))))
 
