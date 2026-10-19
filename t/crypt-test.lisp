@@ -160,7 +160,8 @@
                   :to-equal
                   (concatenate 'string
                                (format nil "* Entry~%SCHEDULED: <2026-10-20 Tue>~%~%")
-                               (crypt-test-armor expected-payload)))
+                               (crypt-test-armor expected-payload)
+                               (format nil "~%")))
           (expect (document-text document) :to-equal source)))))
 
   (it "skips only the planning line immediately after the heading"
@@ -185,7 +186,8 @@
                   :to-equal
                   (concatenate 'string
                                (format nil "* Entry~%SCHEDULED: <2026-10-20 Tue>~%")
-                               (crypt-test-armor expected-payload)))
+                               (crypt-test-armor expected-payload)
+                               (format nil "~%")))
           (expect (document-text document) :to-equal source)))))
 
   (it "does not re-encrypt a payload with an exact complete armor block"
