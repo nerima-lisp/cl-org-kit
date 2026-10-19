@@ -1,14 +1,42 @@
 # Clock
 
-Clock APIs use explicit time values and an explicit `org-time-context`. The
-context provides the time zone and daylight-saving-time policy; these calls do
-not consult the system clock.
+Clock APIs use explicit time values and an explicit `org-time-context`, created
+with `make-time-context` from a reference time, time zone, and daylight-saving
+policy. The context anchors checks of running clocks; edit calls also take their
+own `:at` value. These calls do not consult the system clock. When clocks jump
+forward at a daylight-saving transition, a gap leaves some local date-times
+nonexistent. When clocks move back, an overlap makes some local date-times occur
+twice. For these cases,
+`:dst-policy` accepts `:compatible` (the default), `:earlier`, `:later`, or
+`:strict`:
+
+Fixed-zone offsets passed to `make-fixed-time-zone` are in minutes, so an offset
+of `0` means UTC.
+
+| Policy | Overlap | Gap |
+| --- | --- | --- |
+| `:compatible` | Choose the earlier occurrence | Shift forward by the gap |
+| `:earlier` | Choose the earlier occurrence | Shift back by the gap |
+| `:later` | Choose the later occurrence | Shift forward by the gap |
+| `:strict` | Reject the local date-time | Reject the local date-time |
+
+Examples require the project and its runtime dependencies on ASDF's
+`CL_SOURCE_REGISTRY`. For repository development, see
+[Development](../project/development.md); for ASDF setup prerequisites, see
+[Getting Started](../getting-started.md#asdf).
 
 ## Start and stop a clock
 
-`clock-in` and `clock-out` make format-preserving edits. Each returns two
-values: an `edit-result` and a timestamp or interval string. Use the updated
-document from the result before making another edit.
+`clock-in` and `clock-out` make format-preserving edits that leave unrelated
+source text in its original form. Each returns two values: an `edit-result` and
+a string. `clock-in` returns the start timestamp;
+`clock-out` returns the interval string in `START--END => H:MM` form. Use the
+updated document from the result before making another edit. Both calls require
+explicit `:at` and `:time-context` arguments; `:at` must be an `org-time-value`.
+The context's zone and daylight-saving policy resolve an offset-free `:at`; an
+explicit offset on `:at` determines its instant. The reference time does not
+limit these edits. It supplies the endpoint for running-clock checks and the
+current time for timer values.
 
 ~~~lisp
 (require :asdf)
@@ -47,44 +75,57 @@ document from the result before making another edit.
                  (org-kit:edit-result-updated-document finished))))))))
 ~~~
 
-Set these properties with a document line such as
-`#+PROPERTY: CLOCK_INTO_DRAWER LOGBOOK`, or in a heading `:PROPERTIES:` drawer.
-Heading properties are inherited from ancestors. The `:drawer` argument to
-`clock-in` overrides `CLOCK_INTO_DRAWER` for one call. It accepts a drawer name
-string or a nonnegative integer threshold; the string `"t"` follows
-`LOG_INTO_DRAWER`. A numeric `:drawer` override uses the same threshold rule as
-a numeric `CLOCK_INTO_DRAWER` setting.
-With no `CLOCK_INTO_DRAWER` setting, `clock-in` writes to a LOGBOOK drawer. A
-drawer name selects that drawer; `t` follows `LOG_INTO_DRAWER`, falling back to
-LOGBOOK. A numeric `CLOCK_INTO_DRAWER` value is a threshold: `clock-in` uses
-LOGBOOK when adding the new clock would bring the heading's clock count to at
-least that number; below the threshold it writes the CLOCK line without a drawer.
-It refuses to start a second running clock on the same heading. `clock-out`
-requires exactly one running clock. Both return edits without changing the input
-document.
+Set `CLOCK_INTO_DRAWER` and `LOG_INTO_DRAWER` with document properties such as
+`#+PROPERTY: CLOCK_INTO_DRAWER LOGBOOK`, or in a heading's `:PROPERTIES:` drawer.
+For these properties, a heading value overrides ancestor values, with the
+nearest heading taking precedence; the document property is the fallback.
+`clock-in` uses `:drawer` when supplied; otherwise it uses the inherited
+`CLOCK_INTO_DRAWER` value, defaulting to LOGBOOK when unset. Explicit `nil` for
+`:drawer` is invalid. Pass a drawer name as a string or a nonnegative integer
+threshold. The Lisp symbol `t` is not accepted, while the string `"t"` has the
+alias behavior described below. The selected value has one of these effects:
+
+- A drawer name passed as a string selects that drawer.
+- In `CLOCK_INTO_DRAWER`, `t` means use the inherited `LOG_INTO_DRAWER` drawer
+  name, or LOGBOOK if it is unset. The string `"t"` passed as `:drawer` is a
+  case-insensitive alias for that behavior, so it cannot select a drawer
+  literally named `t`.
+- A nonnegative integer counts every existing CLOCK entry on the target heading
+  across all drawers, plus the new entry. At or above the threshold, the new
+  entry goes to LOGBOOK; otherwise it is written without a drawer. For example,
+  a threshold of 2 sends the second CLOCK entry to LOGBOOK.
+
+`clock-in` refuses to start a second running clock on the target heading;
+`clock-out` requires exactly one running clock on that heading. `clock-out`
+accepts `:drawer` but ignores it; the existing clock stays where it is. Both
+return edits without changing the input document.
 
 ## Check clock consistency
 
 `check-clock-consistency` returns findings in source order. It reports clock
 ranges whose end precedes their start, overlapping ranges, clocks that have no
 clock-out, and intervals longer than `:max-duration-minutes` when that optional
-threshold is supplied. Touching ranges do not overlap. A running clock is
-measured through the reference instant in the required `org-time-context`;
-the same instant is used to check its duration and overlap with closed clocks.
-Duration-only CLOCK rows are ignored. Malformed CLOCK rows signal
+threshold is supplied. Touching ranges do not overlap. For a running clock,
+the required `org-time-context`'s reference instant is the endpoint used to
+measure its duration and check overlap with closed clocks. This check ignores
+duration-only CLOCK rows, such as `CLOCK: => 0:30`. Malformed CLOCK rows signal
 `org-clock-error` with reason `:malformed-clock`.
 
-The number of findings is limited by the document's
-`:max-clock-consistency-issues` limit, which defaults to 100,000. If a check
-would exceed this ceiling, it signals `org-resource-limit-error`.
-
-Each result is a `clock-consistency-issue`. Its reason and first source line
-come from `clock-consistency-issue-reason` and
-`clock-consistency-issue-line`. For an overlap,
-`clock-consistency-issue-other-line` gives the second line. For a valid interval,
-`clock-consistency-issue-duration-minutes` gives its elapsed duration. The
-maximum duration is a strict threshold: a clock is too long only when it
-exceeds the supplied number of minutes.
+`check-clock-consistency` returns `clock-consistency-issue` values.
+`clock-consistency-issue-reason` and `clock-consistency-issue-line` return the
+reason and first source line; for an overlap,
+`clock-consistency-issue-other-line` returns the second line.
+`clock-consistency-issue-duration-minutes` returns elapsed minutes for
+`:too-long` and `:open-clock` results and `nil` for other reasons.
+`make-clock-consistency-issue` constructs a finding of the same type for callers
+that create their own clock findings; the existing accessors read its fields.
+Its duration accessor returns the supplied `:duration-minutes`, or `nil` when
+omitted.
+Pass `:reason` as `:end-before-start`, `:overlap`, `:open-clock`, or `:too-long`,
+and `:line` as a positive, one-based source line. `:other-line` accepts `nil` or
+a positive line. `:duration-minutes` accepts `nil` or a non-negative rational.
+Both `:other-line` and `:duration-minutes` are optional for every reason.
+Invalid values signal `type-error`.
 
 ~~~lisp
 (require :asdf)
@@ -108,9 +149,10 @@ Org timer items are description-list items with an elapsed `H:MM:SS` value, as
 in `- 0:01:23 :: Review`. The start time is supplied by the caller, and the
 reference instant in `org-time-context` supplies the current time.
 `timer-item-value` returns the elapsed string. `insert-timer-item` inserts a
-single-line description after the target heading's planning, property drawers,
-and LOGBOOK drawer, before its body, and returns the
-`edit-result` and the inserted value. The input document is unchanged; use the
+single-line description at the start of the heading body, after its planning
+entries and property drawers, and after a leading LOGBOOK drawer if present. It
+goes before any other drawer or body content. The function returns
+the `edit-result` and inserted value. The input document is unchanged; use the
 updated document from the result. A start time after the reference instant
 signals `org-clock-error` with reason `:invalid-range`.
 
@@ -150,9 +192,9 @@ This follows Org's description-list timer item syntax from the
 ## Sum clock time
 
 `sum-clocks` totals a heading and its descendants over the half-open interval
-`[FROM, TO)`. The default excludes running clocks. Duration-only CLOCK rows
-have no dated interval to clip and are included in the total by default only
-when `[FROM, TO)` is nonempty.
+`[FROM, TO)`. It requires `:time-context`. The default excludes running clocks.
+It includes a duration-only CLOCK row's full duration by default because the row
+has no dates to clip; it does so only when `[FROM, TO)` has positive length.
 
 ~~~lisp
 (require :asdf)
@@ -188,34 +230,37 @@ when `[FROM, TO)` is nonempty.
 
 The result is a `clock-summary`. `clock-summary-scoped-minutes` counts dated
 CLOCK intervals after clipping to `[FROM, TO)`. `clock-summary-unscoped-minutes`
-counts duration-only CLOCK rows, which have no timestamp to clip; they
-contribute to the total by default when `[FROM, TO)` is nonempty.
-`clock-summary-total-minutes` returns the
-sum, and `clock-summary-clipped-interval-count` counts dated intervals with
+returns the total duration-only minutes. `clock-summary-total-minutes` returns
+the sum, and `clock-summary-clipped-interval-count` counts dated intervals with
 positive length after clipping. `:include-running-p t` includes running clocks
 through the context's reference instant. `:include-unscoped-p nil` excludes
-duration-only rows. If your call has a separate `:as-of` cutoff, pass it to
-assert that it agrees with the context's reference instant. This catches a
-mismatch between the cutoff and the instant used for running clocks. `:as-of`
-must resolve to the same instant and does not provide a separate cutoff.
+duration-only rows. `sum-clocks` accepts optional `:as-of` as an assertion for
+callers that already carry a separate time value. It verifies that the value
+resolves to the same instant as the context's reference time; it does not set a
+cutoff.
 
 ## Generate a clocktable
 
 `clocktable-data` returns a `clocktable-result` for a heading subtree. It
 requires a `:range`, a `:time-context`, and accepts optional Org `:match`
-syntax and `:max-depth` (default 30). `:max-depth` filters by absolute logical
-heading level, not distance from the starting heading. Running clock rows are
-excluded. The result contains total minutes and rows in document order. Its row
-accessors are `clocktable-row-level`, `clocktable-row-title`,
-`clocktable-row-tags`, `clocktable-row-range`, and `clocktable-row-minutes`.
-The title is the unformatted heading title. Tags are unique
-effective tags from file settings, ancestor headings, and the heading itself.
-They are processed in that order, with ancestors from root to parent; a
-repeated tag appears once at the position of its most specific occurrence. For
-example, an ancestor tagged `:work:focus:` and a heading tagged `:work:` produce
-the order `focus`, then `work`. Range is the
+syntax, such as `TODO="TODO"` to select TODO headings; see the
+[agenda match example](todo-agenda.md#build-a-todo-list-and-agenda). It also
+accepts `:max-depth` (default 30), which filters by absolute logical
+heading level, not distance from the starting heading. Level 1 is a top-level
+heading; for example, a clocktable rooted at a level-2 heading with
+`:max-depth 2` includes that heading but excludes its level-3 descendants.
+Running clock rows are excluded. The result contains total minutes and rows in
+document order. Its row accessors are `clocktable-row-level`,
+`clocktable-row-title`, `clocktable-row-tags`, `clocktable-row-range`, and
+`clocktable-row-minutes`. The row title excludes the TODO keyword, priority
+marker, leading `COMMENT` marker, and trailing tags. Inline Org markup remains
+unformatted. Tags are returned in specificity order: unique file tags from
+`#+FILETAGS`, ancestor tags from root to parent, then the heading's own tags.
+Duplicate tags appear once at their most specific position. Range is the
 supplied `org-time-range`; minutes are clipped over its start-inclusive,
-end-exclusive interval and accumulated for that heading's subtree.
+end-exclusive interval. Each row's minutes include matching clocks on its
+heading and descendants in the requested subtree. The result total counts each
+matching clock once across the requested subtree.
 
 `write-clocktable` replaces the body of a parsed `clocktable` dynamic block
 with that result and returns an `edit-result`.
@@ -257,9 +302,10 @@ with that result and returns an `edit-result`.
 ~~~
 
 Invalid clock rows, ranges, or options can signal `org-clock-error` or
-`org-time-error`. Clock edits can also signal `org-edit-error`. Clock
-operations enforce the document's `:max-node-count`; clocktable writes also
-enforce `:max-output-length` and `:max-output-octets`. Their defaults are
-4,194,304 nodes, 67,108,864 output characters, and 268,435,456 output octets.
-Configure these limits by passing an `org-kit:make-limits` value as `:limits` to
-`parse-org`. Exceeding a configured limit signals `org-resource-limit-error`.
+`org-time-error`. Clock edits can also signal `org-edit-error`. Clock operations
+enforce the document's `:max-node-count`; consistency checks also enforce
+`:max-clock-consistency-issues`; clocktable writes enforce `:max-output-length`
+and `:max-output-octets`. Their defaults are 4,194,304 nodes, 100,000 findings,
+67,108,864 output characters, and 268,435,456 output octets. Configure these
+limits by passing an `org-kit:make-limits` value as `:limits` to `parse-org`.
+Exceeding a configured limit signals `org-resource-limit-error`.
