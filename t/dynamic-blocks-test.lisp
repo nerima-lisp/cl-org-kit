@@ -387,12 +387,14 @@
             (expect (write-org document :output-type :octets)
                     :to-equalp source-octets))))))
 
-  (it "reports missing and duplicate parameter names and values exactly"
+  (it "reports case-sensitive names, missing values, duplicates, and depth limits"
     (dolist (case '((":label" :missing-parameter-value "label" nil)
                     (":label :label second"
                      :missing-parameter-value "label" nil)
                     (":label first :label second"
-                     :duplicate-parameter "label" "second")))
+                     :duplicate-parameter "label" "second")
+                    (":LABEL upper"
+                     :unsupported-parameter "LABEL" "upper")))
       (destructuring-bind (arguments reason name value) case
         (org-kit:register-dynamic-block-handler
          "custom-parameter-error"
@@ -418,9 +420,22 @@
                       :to-be reason)
               (expect (org-kit::org-dynamic-block-error-name condition)
                       :to-equal name)
-              (expect (org-kit::dynamic-block-error-value condition)
+              (expect (org-kit:org-dynamic-block-error-value condition)
                       :to-equal value))
-            (expect (document-text document) :to-equal source))))))
+            (expect (document-text document) :to-equal source)))))
+    (let ((condition
+            (dynamic-block-test-capture-condition
+             (lambda ()
+               (org-kit::dynamic-block-parse-parameters
+                ":label (((nested)))" '(:label)
+                (make-limits :max-object-depth 1))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-object-depth)
+          (expect (org-resource-limit-error-actual condition)
+                  :to-be 2)))))
 
   (it "rejects lists with non-string row cells"
     (let* ((source (format nil "#+BEGIN: custom-invalid-rows~%old~%#+END:~%"))

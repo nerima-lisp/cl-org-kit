@@ -35,7 +35,6 @@
                   (org-kit:effort-duration-minutes "3d 13:35")
                   (org-kit:effort-duration-minutes "2.5h")
                   (org-kit:effort-duration-minutes "1.5min")
-                  (org-kit:effort-duration-minutes "-1h 30min")
                   (org-kit:effort-duration-minutes "1w")
                   (org-kit:effort-duration-minutes "1m")
                   (org-kit:effort-duration-minutes "1y")
@@ -47,7 +46,7 @@
                   (org-kit:effort-duration-minutes "123")
                   (org-kit:effort-duration-minutes ""))
             :to-equal '(90 2880 90 1625 335/4 150 303/2 5135 150 3/2
-                        -90 10080 43200 525960 90 90 1 5/2 123 0)))
+                        10080 43200 525960 90 90 1 5/2 123 0)))
 
   (it "sums each direct EFFORT property in the selected subtree"
     (let* ((document
@@ -123,13 +122,14 @@
           (expect (princ-to-string wrong-type-condition)
                   :to-equal "Effort target is not a heading (wrong-node-type)")))))
 
-  (it "rejects malformed clock and unit boundaries with the named reason"
+  (it "rejects malformed and signed Org durations with the named reason"
     (let ((conditions
             (mapcar (lambda (duration)
                       (effort-test-condition
                        (lambda () (org-kit:effort-duration-minutes duration))))
                     '("2q" "bogus" ":30" "1:3" "1:aa" "1:23:4"
-                      "1:23:4x" "1:23:456" "2q 1:30" "1h -30min"))))
+                      "1:23:4x" "1:23:456" "2q 1:30" "1h -30min"
+                      "-1h" "+1h"))))
       (expect (mapcar (lambda (condition)
                         (and (typep condition 'org-kit:org-effort-error)
                              (org-kit:org-effort-error-reason condition)))
@@ -137,7 +137,7 @@
               :to-equal '(:invalid-duration :invalid-duration :invalid-duration
                           :invalid-duration :invalid-duration :invalid-duration
                           :invalid-duration :invalid-duration :invalid-duration
-                          :invalid-duration))))
+                          :invalid-duration :invalid-duration :invalid-duration))))
 
   (it "rejects invalid public argument types and prints a reasonless condition"
     (let* ((document (parse-org (format nil "* Task~%")))

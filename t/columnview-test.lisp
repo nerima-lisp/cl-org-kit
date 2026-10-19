@@ -50,13 +50,13 @@
              (concatenate
               'string format-prefix
               (format nil
-                      "* Project~%:PROPERTIES:~%:Effort: 900~%:Money: 100~%:Spent: 999~%:ColonTime: 999~%:Flag: [ ]~%:Checked: [X]~%:Percent: [X]~%:Partial: [ ]~%:Minimum: 10~%:Maximum: 10~%:Mean: 10~%:OneDecimal: 10~%:TimeMinimum: 0:00~%:TimeMaximum: 0:00~%:TimeMean: 0:00~%:AgeMinimum: 1d~%:AgeMaximum: 1d~%:AgeMean: 1d~%:AgeSeconds: 99s~%:Estimate: 100-200~%:END:~%"
+                      "* Project~%:PROPERTIES:~%:Effort: 900~%:Money: 100~%:Spent: 999~%:ColonTime: 999~%:Flag: [ ]~%:Checked: [X]~%:Percent: [X]~%:Partial: [ ]~%:Minimum: 10~%:Maximum: 10~%:Mean: 10~%:OneDecimal: 10~%:TimeMinimum: 0:00~%:TimeMaximum: 0:00~%:TimeMean: 0:00~%:AgeMinimum: 1d~%:AgeMaximum: 1d~%:AgeMean: 1d~%:AgeSeconds: 0:01:39~%:Estimate: 100-200~%:END:~%"
                       )
               (format nil
-                      "** Alpha~%:PROPERTIES:~%:Effort: 1~%:Money: 1.25~%:Spent: 60~%:ColonTime: 1:00~%:Flag: [X]~%:Checked: [X]~%:Percent: [X]~%:Partial: [X]~%:Minimum: 2~%:Maximum: 2~%:Mean: 2~%:OneDecimal: 1.23~%:TimeMinimum: 1h~%:TimeMaximum: 1h~%:TimeMean: 1h~%:AgeMinimum: 1d~%:AgeMaximum: 1d~%:AgeMean: 1d~%:AgeSeconds: 1s~%:Estimate: 5-6~%:END:~%"
+                      "** Alpha~%:PROPERTIES:~%:Effort: 1~%:Money: 1.25~%:Spent: 60~%:ColonTime: 1:00~%:Flag: [X]~%:Checked: [X]~%:Percent: [X]~%:Partial: [X]~%:Minimum: 2~%:Maximum: 2~%:Mean: 2~%:OneDecimal: 1.23~%:TimeMinimum: 1h~%:TimeMaximum: 1h~%:TimeMean: 1h~%:AgeMinimum: 1d~%:AgeMaximum: 1d~%:AgeMean: 1d~%:AgeSeconds: 0:00:01~%:Estimate: 5-6~%:END:~%"
                       )
               (format nil
-                      "** Beta~%:PROPERTIES:~%:Effort: 2~%:Money: 2.5~%:Spent: 30~%:ColonTime: 0:30~%:Flag: [X]~%:Checked: [ ]~%:Percent: [ ]~%:Partial: [ ]~%:Minimum: 4~%:Maximum: 4~%:Mean: 4~%:OneDecimal: 2~%:TimeMinimum: 30min~%:TimeMaximum: 30min~%:TimeMean: 30min~%:AgeMinimum: 2d~%:AgeMaximum: 2d~%:AgeMean: 2d~%:AgeSeconds: 2s~%:Estimate: 5-6~%:END:~%")))
+                      "** Beta~%:PROPERTIES:~%:Effort: 2~%:Money: 2.5~%:Spent: 30~%:ColonTime: 0:30~%:Flag: [X]~%:Checked: [ ]~%:Percent: [ ]~%:Partial: [ ]~%:Minimum: 4~%:Maximum: 4~%:Mean: 4~%:OneDecimal: 2~%:TimeMinimum: 30min~%:TimeMaximum: 30min~%:TimeMean: 30min~%:AgeMinimum: 2d~%:AgeMaximum: 2d~%:AgeMean: 2d~%:AgeSeconds: 0:00:02~%:Estimate: 5-6~%:END:~%")))
            (document (parse-org source))
            (source-copy (copy-seq source))
            (rows (org-kit::column-view-data document)))
@@ -70,9 +70,9 @@
                  "4" "3" "3.2" "0:30" "1:00" "0:45" "1d" "2d" "1d 12h"
                  "0min" "10-12")
                 ("Alpha" "1" "1.25" "60" "1:00" "[X]" "[X]" "[X]" "[X]" "2" "2" "2"
-                 "1.23" "1h" "1h" "1h" "1d" "1d" "1d" "1s" "5-6")
+                 "1.23" "1h" "1h" "1h" "1d" "1d" "1d" "0:00:01" "5-6")
                 ("Beta" "2" "2.5" "30" "0:30" "[X]" "[ ]" "[ ]" "[ ]" "4" "4" "4"
-                 "2" "30min" "30min" "30min" "2d" "2d" "2d" "2s" "5-6")))
+                 "2" "30min" "30min" "30min" "2d" "2d" "2d" "0:00:02" "5-6")))
       (expect (equal (document-text document) source-copy) :to-be t)))
 
   (it "uses the nearest inherited COLUMNS property for a selected subtree"
@@ -119,21 +119,23 @@
                           ("Long day" "1d" "1:00:30")
                           ("Short clock" "2h" "0:00:30")))))
 
-  (it "returns empty cells for every summary family when all child values are empty"
+  (it "retains a parent value when every child summary value is empty"
     (let* ((document
              (parse-org
               (format nil
-                      "#+COLUMNS: %ITEM %Sum{+} %Money{$} %Minimum{min} %Maximum{max} %Mean{mean} %Clock{:} %TimeMinimum{:min} %TimeMaximum{:max} %TimeMean{:mean} %AgeMinimum{@min} %AgeMaximum{@max} %AgeMean{@mean} %Estimate{est+} %All{X} %Count{X/} %Percent{X%}~%* Parent~%** Empty~%")))
+                      "#+COLUMNS: %ITEM %Sum{+} %Money{$} %Minimum{min} %Maximum{max} %Mean{mean} %Clock{:} %TimeMinimum{:min} %TimeMaximum{:max} %TimeMean{:mean} %AgeMinimum{@min} %AgeMaximum{@max} %AgeMean{@mean} %Estimate{est+} %All{X} %Count{X/} %Percent{X%} %Effort{:}~%* Parent~%:PROPERTIES:~%:EFFORT: 2:00~%:END:~%** Empty~%")))
            (rows (org-kit::column-view-data document))
-           (empty-row (cons "Parent" (make-list 16 :initial-element ""))))
+           (empty-row (cons "Parent"
+                            (append (make-list 16 :initial-element "")
+                                    '("2:00")))))
       (expect (first rows)
               :to-equal '("ITEM" "Sum" "Money" "Minimum" "Maximum" "Mean"
                           "Clock" "TimeMinimum" "TimeMaximum" "TimeMean"
                           "AgeMinimum" "AgeMaximum" "AgeMean" "Estimate"
-                          "All" "Count" "Percent"))
+                          "All" "Count" "Percent" "Effort"))
       (expect (rest rows) :to-equal (list empty-row
                                           (cons "Empty"
-                                                (make-list 16 :initial-element ""))))))
+                                                (make-list 17 :initial-element ""))))))
 
   (it "reports invalid child values for every summary family with the exact reason"
     (dolist (case '(("+" "invalid") ("$" "invalid") ("min" "invalid")
@@ -202,10 +204,10 @@
                           ("Task" "TODO" "A" ":local:") ))
       (expect (document-text document) :to-equal source)))
 
-  (it "updates a columnview block in its surrounding subtree and preserves the source"
+  (it "accepts Org columnview parameters and updates its surrounding subtree"
     (let* ((source
              (format nil
-                     "#+COLUMNS: %ITEM(Task) %Count{+}~%* Project~%#+BEGIN: columnview~%stale~%#+END:~%** Alpha~%:PROPERTIES:~%:Count: 1~%:END:~%** Beta~%:PROPERTIES:~%:Count: 2~%:END:~%"))
+                     "#+COLUMNS: %ITEM(Task) %Count{+}~%* Project~%#+BEGIN: columnview :hlines 1 :id view-id~%stale~%#+END:~%** Alpha~%:PROPERTIES:~%:Count: 1~%:END:~%** Beta~%:PROPERTIES:~%:Count: 2~%:END:~%"))
            (document (parse-org source))
            (block (columnview-test-dynamic-block document))
            (source-octets (write-org document :output-type :octets))
@@ -214,16 +216,16 @@
       (expect (document-text updated)
               :to-equal
               (format nil
-                      "#+COLUMNS: %ITEM(Task) %Count{+}~%* Project~%#+BEGIN: columnview~%| Task    | Count |~%|---------+-------|~%| Project | 3     |~%| Alpha   | 1     |~%| Beta    | 2     |~%#+END:~%** Alpha~%:PROPERTIES:~%:Count: 1~%:END:~%** Beta~%:PROPERTIES:~%:Count: 2~%:END:~%"))
+                      "#+COLUMNS: %ITEM(Task) %Count{+}~%* Project~%#+BEGIN: columnview :hlines 1 :id view-id~%| Task    | Count |~%|---------+-------|~%| Project | 3     |~%| Alpha   | 1     |~%| Beta    | 2     |~%#+END:~%** Alpha~%:PROPERTIES:~%:Count: 1~%:END:~%** Beta~%:PROPERTIES:~%:Count: 2~%:END:~%"))
       (expect (length (edit-result-spans edit)) :to-be 1)
       (expect (document-text document) :to-equal source)
       (expect (write-org document :output-type :octets)
               :to-equalp source-octets)))
 
-  (it "keeps the source unchanged when a columnview definition has an unknown summary"
+  (it "rejects case-mismatched column summary names without changing the source"
     (let* ((source
              (format nil
-                     "#+COLUMNS: %ITEM %Count{unknown}~%* Project~%#+BEGIN: columnview~%stale~%#+END:~%** Alpha~%:PROPERTIES:~%:Count: 1~%:END:~%"))
+                     "#+COLUMNS: %ITEM %Count{MAX}~%* Project~%#+BEGIN: columnview~%stale~%#+END:~%** Alpha~%:PROPERTIES:~%:Count: 1~%:END:~%"))
            (document (parse-org source))
            (block (columnview-test-dynamic-block document))
            (source-octets (write-org document :output-type :octets))
@@ -427,25 +429,26 @@
       (expect (org-kit::column-view-data directory-source-document)
               :to-equal '(("CATEGORY" "FILE") ("" "folder/")))))
 
-  (it "parses signed decimals and multi-unit durations and rejects malformed values"
+  (it "parses signed numbers and shared Org durations and rejects malformed values"
     (let* ((document
              (parse-org
               (format nil
-                      "#+COLUMNS: %ITEM %Number(Sum){+} %Number(Min){min} %Number(Max){max} %Number(Mean){mean} %Number(Precise){+;%.2f} %Duration{:} %NegativeClock{:}~%* Parent~%** Negative~%:PROPERTIES:~%:Number: -.5~%:Duration: -1h 30min~%:NegativeClock: -1h~%:END:~%** Positive~%:PROPERTIES:~%:Number: +1.~%:Duration: 1h 30min~%:NegativeClock: -30min~%:END:~%")))
+                      "#+COLUMNS: %ITEM %Number(Sum){+} %Number(Min){min} %Number(Max){max} %Number(Mean){mean} %Number(Precise){+;%.2f} %Duration{:} %NegativeClock{:}~%* Parent~%** Negative~%:PROPERTIES:~%:Number: -.5~%:Duration: 1h 30min~%:NegativeClock: 1h~%:END:~%** Positive~%:PROPERTIES:~%:Number: +1.~%:Duration: 30min~%:NegativeClock: 30min~%:END:~%")))
            (rows (org-kit::column-view-data document)))
       (expect rows
               :to-equal
               '(("ITEM" "Sum" "Min" "Max" "Mean" "Precise" "Duration"
                  "NegativeClock")
-                ("Parent" "0.5" "-0.5" "1" "0.25" "0.50" "0:00"
-                 "-1:30")
+                ("Parent" "0.5" "-0.5" "1" "0.25" "0.50" "2:00"
+                 "1:30")
                 ("Negative" "-.5" "-.5" "-.5" "-.5" "-.5"
-                 "-1h 30min" "-1h")
-                ("Positive" "+1." "+1." "+1." "+1." "+1." "1h 30min"
-                 "-30min")))
+                 "1h 30min" "1h")
+                ("Positive" "+1." "+1." "+1." "+1." "+1." "30min"
+                 "30min")))
       (dolist (case '(("+" "1.2.3") (":" "1fortnight")
                       (":" "1h nope") (":" "1h -30min")
-                      (":min" "1:x")))
+                      (":" "2 hours") (":" "2 seconds")
+                      (":" "-1h") (":" "+1h") (":min" "1:x")))
         (let ((condition
                 (columnview-test-summary-error (first case) (second case))))
           (columnview-test-expect-error condition :invalid-summary-value)))))

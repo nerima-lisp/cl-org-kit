@@ -24,17 +24,20 @@ to restrict the rows to a heading and its subtree.
 The format uses `%[WIDTH]PROPERTY[(TITLE)][{SUMMARY-TYPE}]`. The supported
 summary types are `+`, `+;%.nf`, `$`, `min`, `max`, `mean`, `X`, `X/`, `X%`,
 `:`, `:min`, `:max`, `:mean`, `@min`, `@max`, `@mean`, and `est+`. Summary
-values are computed bottom-up from direct children. Existing values on a
-parent are ignored when a summary is computed. Summary types are ignored for
-special properties such as `ITEM`, `TODO`, `PRIORITY`, `TAGS`, `ALLTAGS`,
+names are case-sensitive. `+;%.nf` is the supported numeric format subset.
+Summaries are computed bottom-up from nonempty direct-child values. If every
+child value is empty, the parent's own value is kept. Summary types are ignored
+for special properties such as `ITEM`, `TODO`, `PRIORITY`, `TAGS`, `ALLTAGS`,
 `CATEGORY`, `FILE`, `SCHEDULED`, `DEADLINE`, `CLOSED`, `TIMESTAMP`,
 `TIMESTAMP_IA`, and `LEVEL`.
-Age summaries accept Org timestamps or duration values and format the computed
+Age summaries accept Org timestamps or durations accepted by
+[`effort-duration-minutes`](clock.md#effort-estimates), then format the computed
 age as a duration. Timestamp ages use the reference instant and time zone from
 `:time-context`.
 
 `#+BEGIN: columnview` is registered as a dynamic block. Use
 `update-dynamic-block` to replace its body; only the body is edited, and the
-operation returns an `edit-result`. Invalid column definitions and summary
-values signal `org-column-view-error`, with a reason such as `:invalid-columns`,
-`:invalid-summary-type`, or `:invalid-summary-value`.
+operation returns an `edit-result`. The handler accepts Org's `:hlines` and
+`:id` arguments but currently ignores their values. Invalid column definitions
+and summary values signal `org-column-view-error`, with a reason such as
+`:invalid-columns`, `:invalid-summary-type`, or `:invalid-summary-value`.

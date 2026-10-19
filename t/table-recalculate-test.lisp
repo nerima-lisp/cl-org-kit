@@ -72,7 +72,7 @@
         (expect condition :to-equal '(:table :division-by-zero))
         (expect (document-text document) :to-equal source))))
 
-  (it "reads a field-overridden cell before applying field formulas"
+  (it "reparses formula cell markup and reads field formulas from original cells"
     (let* ((source
              (format nil "| a | b | c |~%|---+---+---|~%| 1 | 2 | 0 |~%#+TBLFM: @2$2=9::$3=$2+1~%"))
            (expected
@@ -82,7 +82,41 @@
            (result (table-recalculate document table)))
       (with-soft-assertions
         (expect (document-text (edit-result-updated-document result)) :to-equal expected)
-        (expect (document-text document) :to-equal source))))
+        (expect (document-text document) :to-equal source)))
+    (let* ((source (format nil "| Value |~%|-------|~%| old |~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (work-budget (org-kit::make-table-calc-work-budget)))
+      (multiple-value-bind (standard-rows)
+          (org-kit::table-recalculate-standard-rows
+           table (document-limits document) work-budget)
+        (let* ((cell (org-kit::table-recalculate-cell standard-rows 2 1))
+               (values (make-hash-table :test #'equal))
+               (new-value "*new*")
+               (patch (org-kit::edit-make-patch (node-contents-begin cell) (node-contents-end cell) new-value)))
+          (setf (gethash (cons 2 1) values) new-value)
+          (let* ((expected-canonical
+                   (org-kit::table-recalculate-expected-canonical
+                    document values standard-rows))
+                 (result
+                   (org-kit::edit-apply-patches-result document (list patch) :target table :expected expected-canonical))
+                 (updated-document (edit-result-updated-document result))
+                 (updated-table
+                   (table-recalculate-test-find-node
+                    (document-root updated-document) :table))
+                 (updated-rows
+                   (nth-value
+                    0
+                    (org-kit::table-recalculate-standard-rows
+                     updated-table (document-limits updated-document)
+                     (org-kit::make-table-calc-work-budget))))
+                 (updated-cell (org-kit::table-recalculate-cell updated-rows 2 1)))
+            (with-soft-assertions
+              (expect (document-text updated-document)
+                      :to-equal (format nil "| Value |~%|-------|~%| *new* |~%"))
+              (expect (some (lambda (child) (eq (node-type child) :bold))
+                            (node-children updated-cell))
+                      :to-be t)))))))
 
   (it "uses earlier column results in source order"
     (let ((result

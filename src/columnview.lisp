@@ -46,38 +46,36 @@
         finally (return position)))
 
 (defun column-view-format-summary (summary source)
-  (let* ((normalized (string-upcase summary))
-         (format-start (search "+;%." normalized)))
+  (let ((format-start (search "+;%." summary)))
     (cond
-      ((string= normalized "$")
+      ((string= summary "$")
        (values :sum 2))
-      ((member normalized '("+" ":" "X" "X/" "X%" "MIN" "MAX" "MEAN"
-                            ":MIN" ":MAX" ":MEAN" "@MIN" "@MAX" "@MEAN" "EST+")
+      ((member summary '("+" ":" "X" "X/" "X%" "min" "max" "mean"
+                         ":min" ":max" ":mean" "@min" "@max" "@mean" "est+")
                :test #'string=)
-       (values (cond ((string= normalized "+") :sum)
-                     ((string= normalized ":") :time-sum)
-                     ((string= normalized "X") :checkbox-all)
-                     ((string= normalized "X/") :checkbox-count)
-                     ((string= normalized "X%") :checkbox-percent)
-                     ((string= normalized "MIN") :min)
-                     ((string= normalized "MAX") :max)
-                     ((string= normalized "MEAN") :mean)
-                     ((string= normalized ":MIN") :time-min)
-                     ((string= normalized ":MAX") :time-max)
-                     ((string= normalized ":MEAN") :time-mean)
-                     ((string= normalized "@MIN") :age-min)
-                     ((string= normalized "@MAX") :age-max)
-                     ((string= normalized "@MEAN") :age-mean)
+       (values (cond ((string= summary "+") :sum)
+                     ((string= summary ":") :time-sum)
+                     ((string= summary "X") :checkbox-all)
+                     ((string= summary "X/") :checkbox-count)
+                     ((string= summary "X%") :checkbox-percent)
+                     ((string= summary "min") :min)
+                     ((string= summary "max") :max)
+                     ((string= summary "mean") :mean)
+                     ((string= summary ":min") :time-min)
+                     ((string= summary ":max") :time-max)
+                     ((string= summary ":mean") :time-mean)
+                     ((string= summary "@min") :age-min)
+                     ((string= summary "@max") :age-max)
+                     ((string= summary "@mean") :age-mean)
                      (t :estimate-sum))
                nil))
       ((and format-start (zerop format-start)
-            (char= (char normalized (1- (length normalized))) #\F))
+            (char= (char summary (1- (length summary))) #\f))
        (let* ((precision-start (+ format-start 4))
-              (precision-end (1- (length normalized)))
-              (precision-text (subseq normalized precision-start precision-end)))
+              (precision-end (1- (length summary)))
+              (precision-text (subseq summary precision-start precision-end)))
          (unless (and (plusp (length precision-text))
-                      (every #'digit-char-p precision-text)
-                      (char= (char normalized (1- (length normalized))) #\F))
+                      (every #'digit-char-p precision-text))
            (column-view-error :invalid-summary-type source
                               "Invalid column summary type ~S" summary))
          (let ((precision (parse-integer precision-text)))
@@ -394,64 +392,14 @@
               (/ (parse-integer digits-after) (expt 10 (length digits-after)))
               0)))))
 
-(defun column-view-duration-unit-factor (unit)
-  (let ((unit (string-downcase unit)))
-    (cond ((member unit '("min" "mins" "minute" "minutes")
-                   :test #'string=) 1)
-          ((member unit '("s" "sec" "secs" "second" "seconds")
-                   :test #'string=) (/ 1 60))
-          ((member unit '("h" "hr" "hrs" "hour" "hours") :test #'string=) 60)
-          ((member unit '("d" "day" "days") :test #'string=) 1440)
-          ((member unit '("w" "week" "weeks") :test #'string=) 10080)
-          ((string= unit "m") 43200)
-          ((string= unit "y") 525960)
-          (t nil))))
-
 (defun column-view-parse-duration (column value)
-  (let* ((text (string-trim '(#\Space #\Tab #\Return #\Newline) value))
-         (colon (position #\: text)))
+  (let ((text (string-trim '(#\Space #\Tab #\Return #\Newline) value)))
     (when (zerop (length text))
       (column-view-invalid-summary-value column value))
-    (if colon
-        (multiple-value-bind (minutes valid-p) (effort-parse-duration text)
-          (if valid-p minutes
-              (column-view-invalid-summary-value column value)))
-        (multiple-value-bind (first-token number next)
-            (column-view-read-number text 0)
-          (unless first-token
-            (column-view-invalid-summary-value column value))
-          (let ((position next)
-                (negative-p (minusp number))
-                (total 0)
-                (token-count 0))
-            (loop
-              (incf token-count)
-              (setf position (column-view-skip-space text position))
-              (let ((unit-start position))
-                (loop while (and (< position (length text))
-                                 (alpha-char-p (char text position)))
-                      do (incf position))
-                (if (= unit-start position)
-                    (if (and (= token-count 1) (= position (length text)))
-                        (return-from column-view-parse-duration number)
-                        (column-view-invalid-summary-value column value))
-                    (let* ((unit (subseq text unit-start position))
-                           (factor (column-view-duration-unit-factor unit)))
-                      (unless factor
-                        (column-view-invalid-summary-value column value))
-                      (incf total (* (abs number) factor))))
-                (setf position (column-view-skip-space text position))
-                (when (= position (length text))
-                  (return))
-                (when (find (char text position) '(#\+ #\-))
-                  (column-view-invalid-summary-value column value))
-                (multiple-value-bind (token token-value next-position)
-                    (column-view-read-number text position)
-                  (unless token
-                    (column-view-invalid-summary-value column value))
-                  (setf number token-value
-                        position next-position))))
-            (if negative-p (- total) total))))))
+    (multiple-value-bind (minutes valid-p) (effort-parse-duration text)
+      (if valid-p
+          minutes
+          (column-view-invalid-summary-value column value)))))
 
 (defun column-view-format-number (number &optional precision)
   (if precision
@@ -715,17 +663,22 @@
         (loop for column in columns
               for index from 0
               for summary = (column-view-column-summary column)
+              for child-values =
+                (when child-headings
+                  (mapcar (lambda (child)
+                            (aref (gethash child values-by-heading) index))
+                          child-headings))
+              for summary-values =
+                (remove-if #'column-view-empty-value-p child-values)
               for value =
                 (if (and summary
                          (not (column-view-special-property-p
                                (column-view-column-property column)))
                          child-headings)
-                    (column-view-summary-value
-                     column
-                     (mapcar (lambda (child)
-                               (aref (gethash child values-by-heading) index))
-                             child-headings)
-                     time-context)
+                    (if summary-values
+                        (column-view-summary-value column summary-values
+                                                   time-context)
+                        (column-view-own-value document heading column))
                     (column-view-own-value document heading column))
               do (setf (aref row index) (column-view-cell-string value)))
         (setf (gethash heading values-by-heading) row)))
@@ -782,4 +735,5 @@ the reference time for age summaries over timestamp values."
 
 (eval-when (:load-toplevel :execute)
   (register-dynamic-block-handler "columnview"
-                                  #'column-view-dynamic-block-handler))
+                                  #'column-view-dynamic-block-handler
+                                  :parameters '(:hlines :id)))

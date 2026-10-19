@@ -652,7 +652,7 @@
   (it "emits Org inline percentages for the percent formula"
     (let* ((source
              (format nil
-                     "* Parent :parent:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:15] => 0:15~%#+BEGIN: clocktable :scope subtree :block 2026-10-12 :formula %~%stale~%#+END:~%** Child :child:~%CLOCK: [2026-10-12 Mon 09:15]--[2026-10-12 Mon 09:30] => 0:15~%*** Deep :deep:~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:00] => 0:30~%"))
+                     "* Parent :parent:~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:15] => 0:15~%#+BEGIN: clocktable :scope subtree :block 2026-10-12 :formula % :maxlevel 3~%stale~%#+END:~%** Child :child:~%CLOCK: [2026-10-12 Mon 09:15]--[2026-10-12 Mon 09:30] => 0:15~%*** Deep :deep:~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 10:00] => 0:30~%"))
            (document (parse-org source))
            (block (edit-clocktable-test-dynamic-block document "clocktable"))
            (edit (org-kit::update-dynamic-block document block))
@@ -667,21 +667,60 @@
         (expect (search "#+TBLFM:" updated) :to-be nil)
         (expect (document-text document) :to-equal source))))
 
-  (it "labels each step with the beginning date of its reporting period"
+  (it "labels clipped steps and bounds step expansion and cumulative output"
     (let* ((range (make-time-range
                    (make-org-time-value "2026-10-13T09:30:00")
                    (make-org-time-value "2026-10-14T00:00:00")))
-           (steps '("day" "week" "semimonth" "month" "quarter" "year")))
+           (wide-range (make-time-range
+                        (make-org-time-value "2026-10-13T00:00:00")
+                        (make-org-time-value "2026-10-25T00:00:00")))
+           (steps '("day" "week" "semimonth" "month" "quarter" "year"))
+           (range-limit-condition
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-step-ranges
+                 wide-range "week"
+                 (make-limits :max-agenda-range-days 1)))))
+           (source
+             (format nil
+                     "* Task~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%CLOCK: [2026-10-13 Tue 09:00]--[2026-10-13 Tue 09:30] => 0:30~%#+BEGIN: clocktable :tstart 2026-10-12 :tend 2026-10-14 :step day~%stale~%#+END:~%"))
+           (document (parse-org source))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (single-body
+             (org-kit::clocktable-dynamic-block-handler
+              document block
+              '(:tstart "2026-10-12" :tend "2026-10-13" :step "day")))
+           (limit (length single-body))
+           (limited-document
+             (parse-org source
+                        :limits (make-limits :max-output-length limit)))
+           (limited-block
+             (edit-clocktable-test-dynamic-block
+              limited-document "clocktable"))
+           (output-limit-condition
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (org-kit::clocktable-dynamic-block-handler
+                 limited-document limited-block
+                 '(:tstart "2026-10-12" :tend "2026-10-14" :step "day"))))))
       (expect (mapcar (lambda (step)
                         (org-kit::clocktable-step-name range step))
                       steps)
               :to-equal
               '("Daily report: [2026-10-13 Tue]"
-                "Weekly report starting on: [2026-10-12 Mon]"
-                "Semimonthly report starting on: [2026-10-01 Thu]"
-                "Monthly report starting on: [2026-10-01 Thu]"
-                "Quarterly report starting on: [2026-10-01 Thu]"
-                "Annual report starting on: [2026-01-01 Thu]"))))
+                "Weekly report starting on: [2026-10-13 Tue]"
+                "Semimonthly report starting on: [2026-10-13 Tue]"
+                "Monthly report starting on: [2026-10-13 Tue]"
+                "Quarterly report starting on: [2026-10-13 Tue]"
+                "Annual report starting on: [2026-10-13 Tue]"))
+      (expect (typep range-limit-condition 'org-resource-limit-error) :to-be t)
+      (expect (typep output-limit-condition 'org-resource-limit-error) :to-be t)
+      (when (typep output-limit-condition 'org-resource-limit-error)
+        (expect (org-resource-limit-error-limit-name output-limit-condition)
+                :to-be :max-output-length)
+        (expect (> (org-resource-limit-error-actual output-limit-condition)
+                   limit)
+                :to-be t))))
 
   (it "uses only the supplied resolver and skips zero-contribution files"
     (let* ((source
@@ -713,7 +752,7 @@
         (expect (write-org target-document :output-type :octets)
                 :to-equalp source-octets))))
 
-  (it "reports exact unsupported, invalid, and missing-time-context reasons"
+  (it "reports exact unsupported and invalid parameter reasons"
     (dolist (case '((":unknown 3" :unsupported-parameter "unknown" "3")
                     (":maxlevel -1" :invalid-value "maxlevel" "-1")
                     (":block 3" :invalid-value "block" "3")
@@ -750,9 +789,7 @@
                      :invalid-value "tend"
                      "range end is before range start")
                     (":tstart today :tend tomorrow" :invalid-value "tstart"
-                     "relative value requires :time-context")
-                    ("" :invalid-value "block"
-                     "default range requires :time-context")))
+                     "relative value requires :time-context")))
       (destructuring-bind (arguments reason parameter value) case
         (let* ((source (format nil "#+BEGIN: clocktable ~A~%stale~%#+END:~%"
                                arguments))
@@ -899,7 +936,7 @@
 
   (it "splits weekly, semimonthly, monthly, quarterly, and yearly ranges"
     (dolist (case '( ("week" "2026-10-13" "2026-10-29"
-                      "Weekly report starting on: [2026-10-12 Mon]"
+                      "Weekly report starting on: [2026-10-13 Tue]"
                       "Weekly report starting on: [2026-10-19 Mon]"
                       "Weekly report starting on: [2026-10-26 Mon]")
                     ("semimonth" "2026-10-01" "2026-12-01"
@@ -908,13 +945,13 @@
                      "Semimonthly report starting on: [2026-11-01 Sun]"
                      "Semimonthly report starting on: [2026-11-16 Mon]")
                     ("month" "2026-10-15" "2026-12-01"
-                     "Monthly report starting on: [2026-10-01 Thu]"
+                     "Monthly report starting on: [2026-10-15 Thu]"
                      "Monthly report starting on: [2026-11-01 Sun]")
                     ("quarter" "2026-10-15" "2027-02-01"
-                     "Quarterly report starting on: [2026-10-01 Thu]"
+                     "Quarterly report starting on: [2026-10-15 Thu]"
                      "Quarterly report starting on: [2027-01-01 Fri]")
                     ("year" "2025-10-15" "2027-03-01"
-                     "Annual report starting on: [2025-01-01 Wed]"
+                     "Annual report starting on: [2025-10-15 Wed]"
                      "Annual report starting on: [2026-01-01 Thu]"
                      "Annual report starting on: [2027-01-01 Fri]")))
       (destructuring-bind (step start end &rest labels) case
@@ -977,25 +1014,23 @@
         (expect (search "0.0" updated) :to-be-truthy)
         (expect (search "#+TBLFM:" updated) :to-be nil))))
 
-  (it "uses the supplied time context for an implicit current-year range"
+  (it "includes clocks from every year without requiring a time context"
     (let* ((source
              (format nil
-                     "* Previous~%CLOCK: [2025-10-12 Sun 09:00]--[2025-10-12 Sun 09:10] => 0:10~%* Current~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:25] => 0:25~%#+BEGIN: clocktable~%stale~%#+END:~%"))
-           (context
-             (make-time-context
-              :reference-time (make-org-time-value "2026-10-13T12:00:00")
-              :zone (make-fixed-time-zone 0)))
+                     "* Previous~%CLOCK: [2025-10-12 Sun 09:00]--[2025-10-12 Sun 09:10] => 0:10~%** Child~%CLOCK: [2025-10-12 Sun 09:10]--[2025-10-12 Sun 09:15] => 0:05~%*** Deep~%CLOCK: [2025-10-12 Sun 09:15]--[2025-10-12 Sun 09:18] => 0:03~%* Current~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:25] => 0:25~%#+BEGIN: clocktable~%stale~%#+END:~%"))
            (document (parse-org source))
            (block (edit-clocktable-test-dynamic-block document "clocktable"))
            (updated
-             (document-text
-              (edit-result-updated-document
-               (org-kit::update-dynamic-block
-                document block :time-context context)))))
+             (node-text
+              (org-kit::edit-clocktable-find-table
+               (edit-result-updated-document
+                (org-kit::update-dynamic-block document block))))))
       (with-soft-assertions
-        (expect (search "*0:25*" updated) :to-be-truthy)
+        (expect (search "*0:43*" updated) :to-be-truthy)
+        (expect (search "| Previous" updated) :to-be-truthy)
+        (expect (search "Child" updated) :to-be-truthy)
+        (expect (search "Deep" updated) :to-be nil)
         (expect (search "| Current" updated) :to-be-truthy)
-        (expect (search "| Previous" updated) :to-be nil)
         (expect (document-text document) :to-equal source))))
 
   (it "keeps the total while hiding all headline rows at maxlevel zero"

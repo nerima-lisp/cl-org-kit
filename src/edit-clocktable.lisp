@@ -268,8 +268,12 @@
                  (concatenate 'string raw-body
                               (format nil "#+TBLFM: ~A~A" formula newline))
                  raw-body))
-           (temporary (parse-org raw-body :limits (document-limits document)
-                                          :settings (document-settings document)))
+           (temporary
+             (progn
+               (check-limit (document-limits document)
+                            :max-output-length (length raw-body))
+               (parse-org raw-body :limits (document-limits document)
+                                   :settings (document-settings document))))
            (table (edit-clocktable-find-table temporary))
            (aligned-document
              (if table
@@ -622,14 +626,10 @@
            (clocktable-relative-block-range
             block time-context)
            (clocktable-parameter-error :invalid-value :block block)))
-      (time-context
-       (let* ((today (clocktable-current-date time-context))
-              (start (cl-date-kit:make-local-date
-                      (cl-date-kit:local-date-year today) 1 1)))
-         (clocktable-date-range start (clocktable-next-year-start start 1))))
       (t
-       (clocktable-parameter-error :invalid-value :block
-                                   "default range requires :time-context")))))
+       (make-time-range
+        (make-org-time-value "0001-01-01T00:00:00+00:00")
+        (make-org-time-value "9999-12-31T23:59:59+00:00"))))))
 
 (defun clocktable-context-for-range (time-context range)
   (or time-context
@@ -829,14 +829,15 @@
                                (org-time-value-month value)
                                (org-time-value-day value)))
 
-(defun clocktable-step-ranges (range step-name)
+(defun clocktable-step-ranges (range step-name &optional (limits (make-limits)))
   (let* ((step (clocktable-step-kind step-name))
          (range-start (org-time-range-start range))
          (range-end (org-time-range-end range))
          (start-date (clocktable-value-date range-start))
          (end-date (clocktable-value-date range-end))
          (position (clocktable-step-period-start start-date step))
-         (ranges nil))
+         (ranges nil)
+         (count 0))
     (loop while (or (clocktable-date-before-p position end-date)
                     (and (not (clocktable-date-before-p end-date position))
                          (minusp (%time-values-compare range-start range-end))))
@@ -848,14 +849,14 @@
           for end = (if (clocktable-date-before-p end-date next)
                         range-end (clocktable-date-value next))
           do (when (minusp (%time-values-compare start end))
+               (setf count (1+ count))
+               (check-limit limits :max-agenda-range-days count)
                (push (make-time-range start end) ranges))
              (setf position next))
     (nreverse ranges)))
 
 (defun clocktable-step-name (range step)
-  (let* ((date (clocktable-step-period-start
-                (clocktable-value-date (org-time-range-start range))
-                (clocktable-step-kind step)))
+  (let* ((date (clocktable-value-date (org-time-range-start range)))
          (date-label
            (format nil "[~A ~A]"
                    (cl-date-kit:format-local-date date)
@@ -893,12 +894,14 @@
 (defun clocktable-dynamic-block-handler
     (document block parameters &key document-resolver time-context)
   (clocktable-validate-parameters parameters)
-  (let* ((range (clocktable-range-from-parameters parameters time-context))
+  (let* ((limits (document-limits document))
+         (range (clocktable-range-from-parameters parameters time-context))
          (context (clocktable-context-for-range time-context range))
          (scope-sections
            (clocktable-scope-sections document block parameters document-resolver))
          (step-name (clocktable-parameter-value parameters :step))
-         (ranges (if step-name (clocktable-step-ranges range step-name)
+         (ranges (if step-name
+                     (clocktable-step-ranges range step-name limits)
                      (list range)))
          (show-files-p (or (> (length scope-sections) 1)
                            (some (lambda (section) (fourth section))
@@ -906,28 +909,39 @@
          (show-ranges-p (not (null step-name)))
          (newline (dynamic-block-newline (document-text document) block))
          (match (clocktable-parameter-value parameters :match))
-         (maxlevel (or (clocktable-parameter-value parameters :maxlevel) 3))
+         (maxlevel (or (clocktable-parameter-value parameters :maxlevel) 2))
          (fileskip0-p (clocktable-flag parameters :fileskip0)))
-    (with-output-to-string (stream)
-      (let ((written-p nil))
-        (when show-ranges-p (terpri stream))
-        (dolist (section scope-sections)
-          (destructuring-bind (file-label source-document headings file-p) section
-            (declare (ignore file-p))
-            (dolist (subrange ranges)
-              (let ((result
-                      (clocktable-result-for-headings
-                       source-document headings subrange context match maxlevel)))
-                (unless (and show-files-p fileskip0-p
-                             (zerop (clocktable-result-total-minutes result)))
-                  (when written-p (terpri stream))
-                  (write-string
-                   (clocktable-render-section
-                    document block result newline parameters
-                    (and step-name (clocktable-step-name subrange step-name))
-                    file-label show-ranges-p show-files-p)
-                   stream)
-                  (setf written-p t))))))))))
+    (labels ((write-bounded (stream text written)
+               (let ((next (+ written (length text))))
+                 (check-limit limits :max-output-length next)
+                 (write-string text stream)
+                 next)))
+      (with-output-to-string (stream)
+        (let ((written 0)
+              (written-p nil))
+          (when show-ranges-p
+            (setf written (write-bounded stream newline written)))
+          (dolist (section scope-sections)
+            (destructuring-bind (file-label source-document headings file-p) section
+              (declare (ignore file-p))
+              (dolist (subrange ranges)
+                (let ((result
+                        (clocktable-result-for-headings
+                         source-document headings subrange context match maxlevel)))
+                  (unless (and show-files-p fileskip0-p
+                               (zerop (clocktable-result-total-minutes result)))
+                    (when written-p
+                      (setf written (write-bounded stream newline written)))
+                    (setf written
+                          (write-bounded
+                           stream
+                           (clocktable-render-section
+                            document block result newline parameters
+                            (and step-name
+                                 (clocktable-step-name subrange step-name))
+                            file-label show-ranges-p show-files-p)
+                           written)
+                          written-p t)))))))))))
 
 (eval-when (:load-toplevel :execute)
   (register-dynamic-block-handler "clocktable"

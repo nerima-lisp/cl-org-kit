@@ -45,7 +45,7 @@
    #:timer-item-value #:insert-timer-item
    ;; Dynamic block updates
    #:org-dynamic-block-error #:org-dynamic-block-error-reason
-   #:org-dynamic-block-error-name
+   #:org-dynamic-block-error-name #:org-dynamic-block-error-value
    #:org-clocktable-parameter-error #:org-clocktable-parameter-error-reason
    #:org-clocktable-parameter-error-parameter #:org-clocktable-parameter-error-value
    #:register-dynamic-block-handler #:update-dynamic-block

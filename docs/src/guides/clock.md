@@ -1,14 +1,13 @@
 # Clock
 
-Clock APIs use explicit time values and an explicit `org-time-context`, created
-with `make-time-context` from a reference time, time zone, and daylight-saving
-policy. The context anchors checks of running clocks; edit calls also take their
-own `:at` value. These calls do not consult the system clock. When clocks jump
-forward at a daylight-saving transition, a gap leaves some local date-times
-nonexistent. When clocks move back, an overlap makes some local date-times occur
-twice. For these cases,
-`:dst-policy` accepts `:compatible` (the default), `:earlier`, `:later`, or
-`:strict`:
+`clock-in`, `clock-out`, `sum-clocks`, and `clocktable-data` use explicit time
+values and an explicit `org-time-context`, created with `make-time-context` from
+a reference time, time zone, and daylight-saving policy. The context anchors
+checks of running clocks; edit calls also take their own `:at` value. These
+calls do not consult the system clock. A daylight-saving transition can create
+a gap, where local date-times do not exist, or an overlap, where they occur
+twice. The `:dst-policy` key selects `:compatible` (the default), `:earlier`,
+`:later`, or `:strict`:
 
 Fixed-zone offsets passed to `make-fixed-time-zone` are in minutes, so an offset
 of `0` means UTC.
@@ -195,7 +194,8 @@ This follows Org's description-list timer item syntax from the
 It accepts clock forms such as `1:30` and `1:23:45`, unit forms such as `2d`
 and `1h 30min`, and bare numbers interpreted as minutes. Units are `min`, `h`,
 `d`, `w`, `m`, and `y`; weeks are seven days, months are 30 days, and years
-are 365.25 days. Fractional results remain exact rationals.
+are 365.25 days. Duration values do not accept a leading sign. Fractional
+results remain exact rationals.
 `subtree-effort-minutes` adds the direct `EFFORT` property on each heading in a
 selected subtree; an inherited property is not counted repeatedly.
 
@@ -340,14 +340,20 @@ For the built-in clocktable handler, `:scope` accepts `file`, `nil`, `subtree`,
 `agenda`, `agenda-with-archives`, or `file-with-archives` scopes use the
 `document-resolver` supplied to `update-dynamic-block`. The resolver receives
 each selector and returns a parsed document or a nonempty list of parsed
-documents. The library does not open files. `:maxlevel` limits displayed
-depth while deeper clock time remains in its visible ancestor row. `:block`
-or `:tstart` with `:tend` selects the time range; `:step` splits that range
+documents. The library does not open files. Clocktable parameter names are
+case-sensitive. `:maxlevel` limits displayed
+depth while deeper clock time remains in its visible ancestor row. Its default
+is 2. `:block` or `:tstart` with `:tend` selects the time range. If no range
+parameter is supplied, the clocktable includes clocks from all dates and can be
+updated without a time context. Floating clock timestamps use UTC in that case;
+pass `:time-context` to choose another zone. `:step` splits a selected range
 into `day`, `week`, `semimonth`, `month`, `quarter`, or `year` sections. `:match`
 filters headings. `:tags`, `:emphasize`, and `:fileskip0` control table
 formatting, and `:formula` accepts a table formula or `%` for time percentages.
 Unsupported or invalid clocktable parameters signal
 `org-clocktable-parameter-error` with the parameter name and reason.
+Dynamic-block errors expose their bounded parameter value through
+`org-dynamic-block-error-value`.
 
 Invalid clock rows, ranges, or options can signal `org-clock-error` or
 `org-time-error`. Clock edits can also signal `org-edit-error`. Clock operations

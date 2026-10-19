@@ -32,7 +32,8 @@
   "Return the normalized block or parameter name associated with the failure."
   (slot-value condition 'name))
 
-(defun dynamic-block-error-value (condition)
+(defun org-dynamic-block-error-value (condition)
+  "Return the bounded value associated with CONDITION."
   (slot-value condition 'value))
 
 (defun org-clocktable-parameter-error-reason (condition)
@@ -131,7 +132,7 @@ PARAMETERS is a list of keyword names accepted from the block."
        (values (parse-integer atom) end t))
       (t (values atom end t)))))
 
-(defun dynamic-block-parse-list-value (text start)
+(defun dynamic-block-parse-list-value (text start limits depth)
   (let ((position (1+ start))
         (values nil))
     (loop
@@ -143,25 +144,28 @@ PARAMETERS is a list of keyword names accepted from the block."
         (return-from dynamic-block-parse-list-value
           (values (nreverse values) (1+ position) t)))
       (multiple-value-bind (value next valid-p)
-          (dynamic-block-parse-parameter-value text position)
+          (dynamic-block-parse-parameter-value text position limits (1+ depth))
         (unless valid-p
           (return-from dynamic-block-parse-list-value
             (values nil position nil)))
         (push value values)
         (setf position next)))))
 
-(defun dynamic-block-parse-parameter-value (text start)
+(defun dynamic-block-parse-parameter-value
+    (text start &optional (limits (make-limits)) (depth 0))
+  (check-limit limits :max-object-depth depth)
   (let ((position (dynamic-block-skip-space text start)))
     (cond
       ((>= position (length text)) (values nil position nil))
       ((char= (char text position) #\")
        (dynamic-block-parse-string-value text position))
       ((char= (char text position) #\()
-       (dynamic-block-parse-list-value text position))
+       (dynamic-block-parse-list-value text position limits depth))
       ((char= (char text position) #\)) (values nil position nil))
       (t (dynamic-block-parse-atom-value text position)))))
 
-(defun dynamic-block-parse-parameters (text allowed-parameters)
+(defun dynamic-block-parse-parameters
+    (text allowed-parameters &optional (limits (make-limits)))
   "Parse dynamic block parameter text into a keyword property list.
 
 Quoted strings and parenthesized lists are parsed without evaluating Lisp.
@@ -186,9 +190,10 @@ Only names declared by the registered handler are accepted."
                         :reason :invalid-parameters))
                (unless name-end
                  (setf name-end (length text)))
-               (let* ((name-text (string-downcase
-                                  (subseq text name-start name-end)))
-                      (name (find-symbol (string-upcase name-text) :keyword))
+               (let* ((name-text (subseq text name-start name-end))
+                      (name (and (string= name-text
+                                          (string-downcase name-text))
+                                 (find-symbol (string-upcase name-text) :keyword)))
                       (value-start (dynamic-block-skip-space text name-end)))
                  (when (or (= value-start (length text))
                            (char= (char text value-start) #\:))
@@ -197,7 +202,8 @@ Only names declared by the registered handler are accepted."
                           :reason :missing-parameter-value
                           :name name-text))
                  (multiple-value-bind (value next valid-p)
-                     (dynamic-block-parse-parameter-value text value-start)
+                     (dynamic-block-parse-parameter-value
+                      text value-start limits 0)
                    (unless valid-p
                      (error 'org-dynamic-block-error
                             :message "Malformed dynamic block parameter value"
@@ -371,7 +377,8 @@ TIME-CONTEXT supplies the explicit reference time for time-dependent handlers."
              (handler-case
                  (dynamic-block-parse-parameters
                   argument-text
-                  (gethash name *dynamic-block-handler-parameters*))
+                  (gethash name *dynamic-block-handler-parameters*)
+                  (document-limits document))
                (org-dynamic-block-error (condition)
                  (if (string= name "clocktable")
                      (let ((reason
@@ -382,7 +389,7 @@ TIME-CONTEXT supplies the explicit reference time for time-dependent handlers."
                            (parameter
                              (or (org-dynamic-block-error-name condition)
                                  "syntax"))
-                           (value (dynamic-block-error-value condition)))
+                           (value (org-dynamic-block-error-value condition)))
                        (error 'org-clocktable-parameter-error
                               :message (if (eq reason :unsupported-parameter)
                                            "Unsupported clocktable parameter"
