@@ -1211,13 +1211,13 @@
                          nil)))
                    (t
                     (let ((children
-                             (unless (eq policy :prune-children)
-                               (nth-value
-                                0 (prepare-siblings
-                                   (node-children node) source-document
-                                   selected-scope depth (1+ element-depth)
-                                   active-includes
-                                   active-macros fragment-p)))))
+                            (unless (eq policy :prune-children)
+                              (nth-value
+                               0 (prepare-siblings
+                                  (node-children node) source-document
+                                  selected-scope depth (1+ element-depth)
+                                  active-includes
+                                  active-macros fragment-p)))))
                       (values
                        (list (%make-export-view
                               :node node :children children
@@ -1329,7 +1329,8 @@
                       (%export-render-context-footnotes filter-context)
                       (export-preparation-footnotes preparation)
                       (%export-render-context-preparation filter-context) preparation)
-                (export-initialize-render-states filter-context))
+                (let ((*export-current-export-phase* :body))
+                  (export-initialize-render-states filter-context)))
               preparation)))))))
 
 (defun export-collect-views (views)
@@ -1414,14 +1415,20 @@
               (export-error backend :unknown-backend nil "Unknown export backend"))
             (unless (or (null include-resolver) (functionp include-resolver))
               (error 'type-error :datum include-resolver :expected-type '(or null function)))
-            (unless (member allow-raw-html '(nil t))
-              (error 'type-error :datum allow-raw-html :expected-type 'boolean))
-            (unless (member allow-raw-latex '(nil t))
-              (error 'type-error :datum allow-raw-latex :expected-type 'boolean))
             (multiple-value-list (export-registry-snapshot backend))))
          (descriptor (first registry-snapshot))
          (ancestry (second registry-snapshot))
          (root-descriptor (first ancestry))
+         (builtin-preamble-body-phase-p
+          (and (member backend (quote (:html :latex)) :test (function eq))
+               descriptor
+               (%export-backend-descriptor-builtin-p descriptor)))
+         (builtin-html-p
+          (and (eq backend :html)
+               descriptor
+               (%export-backend-descriptor-builtin-p descriptor)))
+         (renderer-result-check-p
+          (member backend '(:html :gfm :ascii :latex) :test #'eq))
          (preparation-backend
           (cond
            ((null descriptor) backend)
@@ -1453,7 +1460,24 @@
                             :allow-raw-latex allow-raw-latex
                             :context caller-context
                             :filter-context render-context)))
-         (initialized-render-context render-context)
+         (initialized-render-context
+          (progn
+            (when (%export-backend-descriptor-builtin-p root-descriptor)
+              (let ((*export-current-export-phase* :preparation))
+                (dolist (view
+                         (export-collect-views
+                          (export-preparation-root-views preparation)))
+                  (let* ((node (export-view-node view))
+                         (policy
+                          (export-resolved-node-policy ancestry
+                                                       (node-type node))))
+                    (when (and (consp policy)
+                               (eq (car policy) :unsupported))
+                      (export-unsupported-syntax
+                       backend node (node-begin node)
+                       (getf (cdr policy) :feature)
+                       (getf (cdr policy) :message)))))))
+            render-context))
          (text
           (let ((*export-requested-backend* backend))
             (if (and (%export-backend-descriptor-builtin-p descriptor)
@@ -1482,7 +1506,10 @@
                      (preamble
                       (export-run-renderer-stage
                        (first preamble-and-owner) preamble-context ""
-                       (document-limits document) backend :preamble))
+                       (document-limits document) backend
+                       (if builtin-preamble-body-phase-p :body :preamble)
+                       :kind (if renderer-result-check-p :renderer-result
+                               :native-write)))
                      (body-context
                       (and (first renderer-and-owner)
                            (export-context-for-owner
@@ -1491,7 +1518,7 @@
                      (body
                       (let ((*export-current-export-phase* :body)
                             (*export-current-output-offset*
-                              (length preamble)))
+                             (length preamble)))
                         (export-check-output-stage
                          (export-check-render-string
                           (if (first renderer-and-owner)
@@ -1499,7 +1526,8 @@
                             (export-render-preparation
                              preparation preparation-backend)))
                          (document-limits document) backend :body
-                         :base-offset (length preamble))))
+                         :base-offset (length preamble)
+                         :kind (if (or builtin-html-p (eq backend :latex)) :renderer-result :native-write))))
                      (body
                       (export-run-filter-stage
                        backend :body body initialized-render-context
@@ -1513,8 +1541,11 @@
                      (trailer
                       (export-run-renderer-stage
                        (first trailer-and-owner) trailer-context ""
-                       (document-limits document) backend :trailer
-                       :base-offset (+ (length preamble) (length body))))
+                       (document-limits document) backend
+                       (if builtin-preamble-body-phase-p :body :trailer)
+                       :base-offset (+ (length preamble) (length body))
+                       :kind (if renderer-result-check-p :renderer-result
+                               :native-write)))
                      (template-and-owner
                       (multiple-value-list
                        (export-render-context-template
@@ -1537,5 +1568,5 @@
                 (export-run-filter-stage
                  backend :final-output output initialized-render-context
                  (document-limits document) :final-output))))))
-         (export-write-output text (document-limits document) output-type
-                              :stream stream :backend backend)))
+    (export-write-output text (document-limits document) output-type
+                         :stream stream :backend backend)))

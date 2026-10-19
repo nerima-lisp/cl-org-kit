@@ -1029,10 +1029,24 @@
 
 (defun export-latex-render-body (context)
   (let* ((state (export-latex-set-render-context context))
-         (preparation (export-latex-state-preparation state)))
-    (export-latex-rendered-views
-     state (export-preparation-root-views preparation)
-     *export-current-output-offset*)))
+         (preparation (export-latex-state-preparation state))
+         (views (export-preparation-root-views preparation))
+         (ancestry (org-kit::%export-render-context-ancestry context))
+         (legacy-path-p
+           (and (eq (export-render-context-backend context) :latex)
+                (= (length ancestry) 1)
+                (null (org-kit::%export-backend-descriptor-filters
+                       (first ancestry))))))
+    (if legacy-path-p
+        (let ((legacy-state
+                (%make-export-latex-state
+                 :preparation preparation
+                 :limits (export-render-context-limits context))))
+          (export-latex-index-references legacy-state)
+          (export-latex-rendered-views
+           legacy-state views *export-current-output-offset*))
+        (export-latex-rendered-views
+         state views *export-current-output-offset*))))
 
 (defun export-latex-render-trailer (context)
   (declare (ignore context))

@@ -217,8 +217,9 @@
   (let* ((output (export-html-state-output state))
          (next-length (+ (export-html-state-output-offset state)
                          (fill-pointer output) additional-length)))
-    (check-limit (export-html-state-limits state) :max-output-length
-                 next-length)))
+    (export-check-output-actual
+     next-length (export-html-state-limits state) :html
+     *export-current-export-phase* :kind :native-write)))
 
 (defun export-html-escaped-output-length (context text start end)
   (loop for position from start below end
@@ -246,6 +247,12 @@
 
 (defun export-html-write (state text)
   (export-html-write-range state text 0 (length text)))
+
+(defun export-html-append-checked-result (state text)
+  (let ((output (export-html-state-output state)))
+    (loop for character across text
+          do (vector-push-extend character output)))
+  state)
 
 (defun export-html-write-spaces (state count)
   (let ((output (export-html-state-output state)))
@@ -1706,8 +1713,11 @@
                                    :table-cell-p table-cell-p
                                    :preserve-source-breaks-p
                                    preserve-source-breaks-p)))
-                        (export-html-write
-                         state (export-node-strip-post-blank node result)))
+                        (let ((result
+                                (export-node-strip-post-blank node result)))
+                          (if (eq (export-render-context-backend context) :html)
+                              (export-html-append-checked-result state result)
+                              (export-html-write state result))))
                    (setf (export-html-state-output-offset state) base-offset)))))
       (setf (export-html-state-trim-list-indent-p state) previous-trim
             (export-html-state-standalone-image-node state) previous-image-node

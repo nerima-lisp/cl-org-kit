@@ -645,23 +645,41 @@
         (nconc (reverse *export-baseline-current-fixtures*)
                *export-baseline-fixtures*)))
 
+(defun export-baseline-current-runtime-phase ()
+  (let ((symbol (find-symbol "*EXPORT-CURRENT-EXPORT-PHASE*" :org-kit)))
+    (if (and symbol (boundp symbol))
+        (symbol-value symbol)
+        :absent)))
+
+(defun export-baseline-capture-runtime-phase ()
+  (when (and *export-baseline-current-phase-cell*
+             (eq (car *export-baseline-current-phase-cell*) :input-validation))
+    (let ((phase (export-baseline-current-runtime-phase)))
+      (unless (or (eq phase :absent)
+                  (eq phase :input-validation))
+        (setf (car *export-baseline-current-phase-cell*) phase)))))
+
 (defun export-baseline-record-error
     (id document backend arguments condition)
   (let* ((limit-name
-           (and (typep condition 'org-kit:org-resource-limit-error)
-                (org-kit:org-resource-limit-error-limit-name condition)))
+          (and (typep condition 'org-kit:org-resource-limit-error)
+               (org-kit:org-resource-limit-error-limit-name condition)))
          (output-check-p (eq limit-name :max-output-length))
          (expected
-           (append
-            (list :error
-                  :condition-type (type-of condition)
-                  :requested-backend (export-baseline-safe-value backend)
-                  :phase (car *export-baseline-current-phase-cell*)
-                  :output-check-kind
-                  (if output-check-p *export-baseline-current-check-kind* :absent)
-                  :output-check-index
-                  (if output-check-p *export-baseline-current-check-index* :absent)
-                  :readers (export-baseline-condition-snapshot condition)))))
+          (append
+           (list :error
+                 :condition-type (type-of condition)
+                 :requested-backend (export-baseline-safe-value backend)
+                 :phase (if (and (eq (car *export-baseline-current-phase-cell*) :input-validation)
+                                 (typep condition 'org-kit:org-export-error)
+                                 (eq (org-kit:org-export-error-reason condition) :unknown-backend))
+                            :preparation
+                          (car *export-baseline-current-phase-cell*))
+                 :output-check-kind
+                 (if output-check-p *export-baseline-current-check-kind* :absent)
+                 :output-check-index
+                 (if output-check-p *export-baseline-current-check-index* :absent)
+                 :readers (export-baseline-condition-snapshot condition)))))
     (push (cons (append (export-baseline-entry-common
                          id document backend arguments)
                         (list :expected expected))
@@ -705,11 +723,15 @@
     (handler-case
         (setf returned
               (multiple-value-list
-               (if *export-baseline-call-instrumentation-active-p*
-                   (apply original document backend rewritten)
-                   (export-baseline-with-call-instrumentation
-                    (lambda ()
-                      (apply original document backend rewritten))))))
+               (handler-bind
+                   ((error (lambda (caught)
+                             (declare (ignore caught))
+                             (export-baseline-capture-runtime-phase))))
+                 (if *export-baseline-call-instrumentation-active-p*
+                     (apply original document backend rewritten)
+                     (export-baseline-with-call-instrumentation
+                      (lambda ()
+                        (apply original document backend rewritten)))))))
       (error (caught) (setf condition caught)))
     (when (and stream-proxy (eq (first returned) stream-proxy))
       (setf (first returned) *export-baseline-current-stream*))
@@ -737,15 +759,30 @@
 (defun export-baseline-condition-wrapper-call (original phase arguments)
   (if (null *export-baseline-current-phase-cell*)
       (apply original arguments)
-      (let ((previous (car *export-baseline-current-phase-cell*)))
+      (let ((previous (car *export-baseline-current-phase-cell*))
+            (runtime-phase :absent))
         (setf (car *export-baseline-current-phase-cell*) phase)
         (handler-case
-            (let ((values (multiple-value-list (apply original arguments))))
+            (let ((values
+                    (multiple-value-list
+                     (handler-bind
+                         ((error (lambda (condition)
+                                   (declare (ignore condition))
+                                   (setf runtime-phase
+                                         (export-baseline-current-runtime-phase)))))
+                       (apply original arguments)))))
               (setf (car *export-baseline-current-phase-cell*) previous)
               (values-list values))
           (error (condition)
-            (unless (eq (car *export-baseline-current-phase-cell*) :stream-write)
-              (setf (car *export-baseline-current-phase-cell*) phase))
+            (setf (car *export-baseline-current-phase-cell*)
+                  (cond
+                    ((eq runtime-phase :stream-write) :stream-write)
+                    ((and (eq phase :preparation)
+                          (member runtime-phase
+                                  '(:preamble :body :trailer :template)
+                                  :test #'eq))
+                     runtime-phase)
+                    (t phase)))
             (error condition))))))
 
 (defun export-baseline-install-function-wrapper (symbol wrapper)
