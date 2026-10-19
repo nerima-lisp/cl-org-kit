@@ -65,3 +65,36 @@ body
 
   (it "validates context as a proper keyword plist"
     (signals org-kit-error (org-lint (parse-org "Text.") :context '(:not-a-pair)))))
+(describe "Org lint validation edge cases"
+  (it "rejects invalid documents and diagnostic positions"
+  (signals type-error (org-lint nil))
+  (let ((position (read-from-string "0")))
+    (signals type-error
+      (org-kit::%make-org-lint-diagnostic :position position))))
+  (it "rejects malformed context plist shapes"
+    (let ((document (parse-org "Text.")))
+      (signals org-kit-error (org-lint document :context :invalid))
+      (signals org-kit-error
+        (org-lint document :context (quote (:known-ids nil . malformed))))
+      (signals org-kit-error
+        (org-lint document :context (quote (known-ids nil))))
+      (signals org-kit-error
+        (org-lint document :context (quote (:known-ids nil :dangling))))
+      (let ((cycle (list :known-ids nil)))
+        (setf (cdr (last cycle)) cycle)
+        (signals org-kit-error (org-lint document :context cycle)))))
+  (it "rejects malformed checker selections"
+    (let ((document (parse-org "Text.")))
+      (signals type-error
+        (org-lint document :checkers (quote ("known" . malformed))))
+      (signals type-error
+        (org-lint document :checkers (quote (42))))
+      (let ((cycle (list "known")))
+        (setf (cdr (last cycle)) cycle)
+        (expect (org-kit::%lint-string-list-p cycle) :to-be nil))))
+  (it "rejects diagnostic offsets outside the document"
+    (let ((document (parse-org "Text.")))
+      (expect (org-kit::%lint-report document "test" -1 "message") :to-be nil)
+      (expect (org-kit::%lint-report document "test" 6 "message") :to-be nil)
+      (expect (org-kit::%lint-report document "test" "1" "message") :to-be nil)))
+)
