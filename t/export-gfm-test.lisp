@@ -1531,4 +1531,43 @@
           (expect (> (org-resource-limit-error-actual condition) 128)
                   :to-be t))
         (expect (< allocated (floor input-length 2)) :to-be t))))
+  (it "dispatches GFM block and inline nodes through derived registry callbacks"
+      (let* ((document (parse-org "before *bold* after"))
+             (backend :fr106-gfm-node-dispatch)
+             (registered-p nil)
+             (paragraph-wrapper-calls 0)
+             (bold-transcoder-calls 0)
+             (bold-frame-mode nil)
+             (output nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :gfm
+               :node-wrapper
+               (lambda (node view frame context render-next)
+                 (declare (ignore view frame context))
+                 (if (eq (node-type node) :paragraph)
+                     (progn
+                       (incf paragraph-wrapper-calls)
+                       (funcall render-next "<paragraph>" "</paragraph>"))
+                   (funcall render-next "" "")))
+               :transcoders
+               (list
+                (cons :bold
+                      (lambda (node view frame context)
+                        (declare (ignore node view context))
+                        (incf bold-transcoder-calls)
+                        (setf bold-frame-mode (export-render-frame-mode frame))
+                        "INLINE-OVERRIDE"))))
+              (setf registered-p t
+                    output (export-org document backend))
+              (with-soft-assertions
+               (expect output
+                       :to-equal
+                       "<paragraph>before INLINE-OVERRIDE after</paragraph>")
+               (expect paragraph-wrapper-calls :to-be 1)
+               (expect bold-transcoder-calls :to-be 1)
+               (expect bold-frame-mode :to-be :inline)))
+          (when registered-p
+            (unregister-export-backend backend)))))
 )
