@@ -526,4 +526,45 @@
         (expect (funcall failure
                          (lambda () (org-kit::renumber-ordered-list
                                      document (first lists))))
-                :to-equal '(org-edit-error :invalid-value)))))))
+                :to-equal '(org-edit-error :invalid-value))))))
+  (it "moves items across a missing final newline without joining their source lines"
+      (let* ((source (format nil "- a~%- b"))
+             (document (parse-org source))
+             (items (edit-plain-list-test-nodes document :item))
+             (result (move-list-item document (second items) (first items)
+                                     :position :before)))
+        (with-soft-assertions
+         (expect (document-text (edit-result-updated-document result))
+                 :to-equal (format nil "- b~%- a"))
+         (expect (document-text document) :to-equal source))))
+
+(it "keeps an affiliated name when moving a list item"
+    (let* ((source (format nil "#+NAME: tasks~%- first~%- second~%"))
+           (document (parse-org source))
+           (items (edit-plain-list-test-nodes document :item))
+           (result (move-list-item document (second items) (first items)
+                                   :position :before)))
+      (with-soft-assertions
+       (expect (document-text (edit-result-updated-document result))
+               :to-equal (format nil "#+NAME: tasks~%- second~%- first~%"))
+       (expect (document-text document) :to-equal source))))
+
+(it "honors explicit item counters when renumbering and changing ordered markers"
+    (let* ((source (format nil "8. a~%9. [@5] b~%10. c~%"))
+           (document (parse-org source))
+           (items (edit-plain-list-test-nodes document :item))
+           (list (first (edit-plain-list-test-nodes document :plain-list)))
+           (renumbered (renumber-ordered-list document list :start 1))
+           (bullet-document (parse-org source))
+           (bullet-list (first (edit-plain-list-test-nodes
+                                bullet-document :plain-list)))
+           (changed (set-list-bullet bullet-document bullet-list "2.")))
+      (with-soft-assertions
+       (expect (mapcar (lambda (item) (node-property item :counter)) items)
+               :to-equal '(nil 5 nil))
+       (expect (document-text (edit-result-updated-document renumbered))
+               :to-equal (format nil "1. a~%5. [@5] b~%6. c~%"))
+       (expect (document-text (edit-result-updated-document changed))
+               :to-equal (format nil "2. a~%5. [@5] b~%6. c~%"))
+       (expect (document-text document) :to-equal source)
+       (expect (document-text bullet-document) :to-equal source)))))

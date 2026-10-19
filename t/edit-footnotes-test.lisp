@@ -325,4 +325,49 @@
         (expect (handler-case (progn (insert-footnote nil 0 "body") nil)
                   (type-error () t))
                 :to-be t)
-        (expect (document-text document) :to-equal source)))))
+        (expect (document-text document) :to-equal source))))
+  (it "rejects a footnote body whose headline would escape the definition"
+      (let* ((source (format nil "Text.~%"))
+             (document (parse-org source))
+             (failure (edit-footnotes-test-error
+                       (lambda ()
+                         (insert-footnote document (length source)
+                                          (format nil "x~%* H"))))))
+        (with-soft-assertions
+         (expect failure :to-equal '(:invalid-value "footnote body"))
+         (expect (document-text document) :to-equal source))))
+
+(it "rejects a footnote insertion offset inside a source block"
+    (let* ((source (format nil "#+BEGIN_SRC lisp~%(+ 1 2)~%#+END_SRC~%"))
+           (document (parse-org source))
+           (offset (+ (search "(+ 1 2)" source) 1))
+           (failure (edit-footnotes-test-error
+                     (lambda () (insert-footnote document offset "body")))))
+      (with-soft-assertions
+       (expect (first failure) :to-equal :invalid-value)
+       (expect (document-text document) :to-equal source))))
+
+(it "renumbers an affiliated footnote definition without changing its keyword"
+    (let* ((source (format nil
+                           "Use [fn:5].~%#+NAME: note~%[fn:5] body~%"))
+           (document (parse-org source))
+           (definition (first (edit-footnotes-test-nodes
+                               document :footnote-definition)))
+           (result (renumber-footnotes document)))
+      (with-soft-assertions
+       (expect (node-property definition :label) :to-equal "5")
+       (expect (document-text (edit-result-updated-document result))
+               :to-equal (format nil
+                                 "Use [fn:1].~%#+NAME: note~%[fn:1] body~%"))
+       (expect (document-text document) :to-equal source))))
+
+(it "keeps ordinary text after two blank lines out of a moved definition"
+    (let* ((source (format nil
+                           "Use [fn:1].~%[fn:1] body~%~%~%More~%* H~%"))
+           (document (parse-org source))
+           (result (normalize-footnotes document)))
+      (with-soft-assertions
+       (expect (document-text (edit-result-updated-document result))
+               :to-equal (format nil
+                                 "Use [fn:1].~%~%~%More~%* H~%[fn:1] body~%"))
+       (expect (document-text document) :to-equal source)))))

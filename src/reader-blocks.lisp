@@ -342,9 +342,12 @@
         (values (subseq line (length prefix) close-bracket) body-start)))))
 
 (defun reader-blocks-footnote-boundary-p (context offset limit)
-  "Return true when OFFSET begins the next footnote or a headline."
+  "Return true when OFFSET begins another definition, a headline, or two blank lines."
   (or (nth-value 0 (reader-blocks-footnote-opener context offset))
-      (reader-heading-level context offset limit)))
+      (reader-heading-level context offset limit)
+      (and (reader-blank-line-p context offset)
+           (let ((next (min limit (reader-next-line context offset))))
+             (and (< next limit) (reader-blank-line-p context next))))))
 
 (defun reader-blocks-parse-footnote (context start limit depth label body-start)
   "Parse a footnote definition through its next definition or headline."

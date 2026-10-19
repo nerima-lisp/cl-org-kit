@@ -4,9 +4,10 @@
 
 (defun edit-drawer-name (name target)
   (unless (and (stringp name) (plusp (length name))
-               (not (find #\: name))
-               (not (find #\Newline name))
-               (not (find #\Return name)))
+               (every (lambda (character)
+                        (or (alphanumericp character)
+                            (find character "_-")))
+                      name))
     (edit-signal-error target :invalid-value "Drawer name is invalid"))
   (let ((normalized (string-upcase name)))
     (when (string= normalized "END")
@@ -16,7 +17,7 @@
                          "PROPERTIES and LOGBOOK use dedicated editing operations"))
     normalized))
 
-(defun edit-drawer-body-value (body target)
+(defun edit-drawer-body-value (document body target)
   (unless (stringp body)
     (edit-signal-error target :invalid-value "Drawer body must be a string"))
   (loop with start = 0
@@ -32,7 +33,22 @@
                                 "Drawer body contains an unescaped closing marker"))
         while newline
         do (setf start (1+ newline)))
-  body)
+  (let ((fragment
+          (handler-case
+              (parse-org body :settings (document-settings document)
+                              :limits (document-limits document))
+            (org-parse-error ()
+              (edit-signal-error target :invalid-value
+                                 "Drawer body is not valid Org content")))))
+    (let ((headline-p nil))
+      (map-nodes (lambda (node)
+                   (when (eq (node-type node) :headline)
+                     (setf headline-p t)))
+                 (document-root fragment))
+      (when headline-p
+        (edit-signal-error "headline" :invalid-value
+                           "Drawer body cannot contain a headline")))
+    (values body fragment)))
 
 (defun edit-drawer-line-ending (source)
   (let ((newline (position #\Newline source)))
@@ -119,13 +135,6 @@
          (close-start (edit-drawer-close-start document drawer target)))
     (values body-start close-start)))
 
-(defun edit-drawer-expected-after-patches (document patches target)
-  (edit-prepare-patches document patches :target target)
-  (let* ((source (document-text document))
-         (normalized (edit-validate-patches source patches target))
-         (edited-source (edit-splice-source source normalized)))
-    (edit-canonical-document (edit-reparse-source document edited-source target))))
-
 (defun set-drawer-body (document target name body)
   "Create a headline drawer or replace the body of its unique matching drawer.
 
@@ -134,34 +143,88 @@ without drawer markers. Return an EDIT-RESULT whose spans refer to the original
 source. PROPERTIES and LOGBOOK are reserved for their dedicated editing APIs."
   (unless (document-p document)
     (error 'type-error :datum document :expected-type 'document))
-  (let* ((headline (edit-resolve-node document target '(:headline)))
-         (normalized-name (edit-drawer-name name target))
-         (raw-body (edit-drawer-body-value body target))
-         (section (edit-drawer-headline-section headline))
-         (matches (edit-drawer-matches section normalized-name)))
-    (when (> (length matches) 1)
-      (edit-signal-error target :ambiguous-target
-                         "Drawer name occurs more than once under the headline"))
-    (if matches
-        (let ((drawer (first matches)))
-          (multiple-value-bind (start end)
-              (edit-drawer-body-range document drawer target)
-            (let* ((replacement
-                     (edit-drawer-body-with-line-ending
-                      raw-body (edit-drawer-line-ending (document-text document))))
-                   (patches (list (edit-make-patch start end replacement target)))
-                   (expected (edit-drawer-expected-after-patches
-                              document patches target)))
-              (edit-apply-patches-result document patches
-                                         :target target :expected expected))))
-        (let* ((offset (edit-drawer-insertion-offset document headline section))
-               (replacement (edit-drawer-create-text
-                             document offset normalized-name raw-body))
-               (patches (list (edit-make-patch offset offset replacement target)))
-               (expected (edit-drawer-expected-after-patches
-                          document patches target)))
-          (edit-apply-patches-result document patches
-                                     :target target :expected expected)))))
+  (let ((headline (edit-resolve-node document target '(:headline)))
+        (normalized-name (edit-drawer-name name target)))
+    (multiple-value-bind (raw-body fragment)
+        (edit-drawer-body-value document body target)
+      (let* ((section (edit-drawer-headline-section headline))
+             (matches (edit-drawer-matches section normalized-name))
+             (root-children (node-children (document-root fragment)))
+             (fragment-section
+               (and (= (length root-children) 1)
+                    (eq (node-type (first root-children)) :section)
+                    (first root-children)))
+             (content-nodes (mapcar #'edit-canonical-node
+                                    (if fragment-section
+                                        (node-children fragment-section)
+                                        root-children)))
+             (expected (edit-canonical-copy (edit-canonical-document document))))
+        (when (> (length matches) 1)
+          (edit-signal-error target :ambiguous-target
+                             "Drawer name occurs more than once under the headline"))
+        (if matches
+            (let* ((drawer (first matches))
+                   (path (edit-node-path document drawer target)))
+              (multiple-value-bind (start end)
+                  (edit-drawer-body-range document drawer target)
+                (edit-canonical-set-children expected path content-nodes)
+                (edit-apply-patches-result
+                 document
+                 (list (edit-make-patch
+                        start end
+                        (edit-drawer-body-with-line-ending
+                         raw-body (edit-drawer-line-ending (document-text document)))
+                        target))
+                 :target target :expected expected)))
+            (let* ((offset (edit-drawer-insertion-offset document headline section))
+                   (replacement (edit-drawer-create-text
+                                 document offset normalized-name raw-body))
+                   (drawer-canonical
+                     (list :type :drawer :post-blank 0
+                           :properties (list :drawer-name normalized-name)
+                           :children content-nodes)))
+              (if section
+                  (let* ((section-path (edit-node-path document section target))
+                         (children (node-children section))
+                         (first-content
+                           (find-if-not
+                            (lambda (node)
+                              (member (node-type node)
+                                      '(:planning :property-drawer) :test #'eq))
+                            children))
+                         (index (if first-content
+                                    (position first-content children :test #'eq)
+                                    (length children)))
+                         (canonical-section
+                           (edit-canonical-node-at-path expected section-path))
+                         (canonical-children
+                           (getf canonical-section :children)))
+                    (edit-canonical-set-children
+                     expected section-path
+                     (append (subseq canonical-children 0 index)
+                             (list drawer-canonical)
+                             (nthcdr index canonical-children))))
+                  (let* ((headline-path (edit-node-path document headline target))
+                         (canonical-headline
+                           (edit-canonical-node-at-path expected headline-path))
+                         (children (getf canonical-headline :children))
+                         (index (or (position-if
+                                     (lambda (child)
+                                       (eq (getf child :type) :headline))
+                                     children)
+                                    (length children)))
+                         (section-canonical
+                           (list :type :section :post-blank 0 :properties nil
+                                 :children (list drawer-canonical))))
+                    (edit-canonical-set-children
+                     expected headline-path
+                     (append (subseq children 0 index)
+                             (list section-canonical)
+                             (nthcdr index children)))))
+              (edit-apply-patches-result
+               document
+               (list (edit-make-patch offset offset replacement target))
+               :target target :expected expected)))))))
 
 (defun remove-drawer (document target name)
   "Remove the unique ordinary drawer named NAME from headline TARGET.
@@ -179,10 +242,29 @@ LOGBOOK are reserved for their dedicated editing APIs."
                          "Drawer name occurs more than once under the headline"))
     (unless matches
       (edit-signal-error target :target-not-found "Drawer was not found"))
-    (let ((drawer (first matches)))
+    (let* ((drawer (first matches))
+           (drawer-path (edit-node-path document drawer target))
+           (section-path (butlast drawer-path))
+           (drawer-index (car (last drawer-path)))
+           (section-node (edit-canonical-node-at-path
+                          (edit-canonical-document document) section-path))
+           (section-children (getf section-node :children))
+           (remaining (append (subseq section-children 0 drawer-index)
+                              (nthcdr (1+ drawer-index) section-children)))
+           (expected (edit-canonical-copy (edit-canonical-document document))))
       (edit-drawer-close-start document drawer target)
-      (let* ((patches (list (edit-make-patch (node-begin drawer) (node-end drawer)
-                                             "" target)))
-             (expected (edit-drawer-expected-after-patches document patches target)))
-        (edit-apply-patches-result document patches
-                                   :target target :expected expected)))))
+      (if remaining
+          (edit-canonical-set-children expected section-path remaining)
+          (let* ((headline-path (butlast section-path))
+                 (section-index (car (last section-path)))
+                 (canonical-headline
+                   (edit-canonical-node-at-path expected headline-path))
+                 (children (getf canonical-headline :children)))
+            (edit-canonical-set-children
+             expected headline-path
+             (append (subseq children 0 section-index)
+                     (nthcdr (1+ section-index) children)))))
+      (edit-apply-patches-result
+       document
+       (list (edit-make-patch (node-begin drawer) (node-end drawer) "" target))
+       :target target :expected expected))))

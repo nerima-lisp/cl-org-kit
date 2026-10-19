@@ -56,8 +56,11 @@ as `:invalid-value` or `:uneditable-structure`.
 definition. It chooses one greater than the largest numeric label already used
 by a reference or definition. It returns four values: the edit result, assigned
 label, undefined reference labels, and unreferenced definition labels.
-At a line start, it places the reference on its own paragraph line so the
-following Org block syntax remains intact.
+Offsets must fall in paragraph text or a headline title; block contents such as
+source blocks are not valid insertion points. At a line start, it places the
+reference on its own paragraph line so the following Org block syntax remains
+intact. The definition body may contain Org content, but it cannot contain a
+headline because that would end the definition.
 
 ```lisp
 (let* ((document (org-kit:parse-org "A sentence."))
@@ -69,18 +72,20 @@ following Org block syntax remains intact.
 ```
 
 `renumber-footnotes` renumbers numeric labels by first reference. Named labels
-remain unchanged. `normalize-footnotes` moves definitions to the document end
-in first-reference order, then keeps unreferenced definitions in their
-original order. Both functions return the edit result followed by undefined
-reference labels and unreferenced definition labels. Diagnostics describe the
-updated document and do not prevent the edit.
+remain unchanged. `normalize-footnotes` moves existing definitions to the
+document end in first-reference order, then keeps unreferenced definitions in
+their original order. It does not renumber labels or convert inline or
+anonymous footnotes. Both functions return the edit result followed by
+undefined reference labels and unreferenced definition labels. Diagnostics
+describe the updated document and do not prevent the edit.
 
 ## Drawers
 
 `set-drawer-body` creates a drawer under a headline or replaces the body of its
 unique matching drawer. Names are matched case-insensitively and written in
-uppercase. The body is raw Org content without drawer markers. `remove-drawer`
-deletes the unique matching drawer.
+uppercase. Names use only word characters, underscores, and hyphens. The body
+is raw Org content without drawer markers; it cannot contain a headline or a
+closing `:END:` marker. `remove-drawer` deletes the unique matching drawer.
 
 ```lisp
 (let* ((document (org-kit:parse-org (format nil "* Task~%Body.~%")))
@@ -90,6 +95,6 @@ deletes the unique matching drawer.
 ```
 
 `PROPERTIES` and `LOGBOOK` are reserved for their dedicated editing APIs.
-Missing or duplicate drawer names, unclosed drawers, and bodies containing a
-closing `:END:` marker signal `org-edit-error` with a reason. Output and
-encoding limits apply to all structural edits.
+Missing or duplicate drawer names, unclosed drawers, and invalid names or
+bodies signal `org-edit-error` with a reason. Output and encoding limits apply
+to all structural edits.

@@ -3,8 +3,7 @@
 (in-package #:org-kit)
 
 (defun edit-list-resolve-target (document target)
-  (unless (document-p document)
-    (error 'type-error :datum document :expected-type 'document))
+  (edit-list-check-document document)
   (let* ((node (edit-resolve-node document target '(:plain-list :item)))
          (list (if (eq (node-type node) :item)
                    (node-parent node)
@@ -103,22 +102,11 @@
          (preview-source (edit-splice-source source normalized)))
     (edit-reparse-source document preview-source target)))
 
-(defun edit-list-apply-structural-patches (document patches target
+(defun edit-list-apply-structural-patches (document patches target expected
                                             &optional validator)
-  (let* ((preview (edit-list-preview-document document patches target))
-         (expected (edit-canonical-document preview)))
-    (when validator
-      (funcall validator preview))
-    (edit-apply-patches-result document patches :target target :expected expected)))
-
-(defun edit-list-find-item-at (document offset)
-  (let ((found nil))
-    (map-nodes (lambda (node)
-                 (when (and (eq (node-type node) :item)
-                            (= (node-post-affiliated node) offset))
-                   (setf found node)))
-               (document-root document))
-    found))
+  (when validator
+    (funcall validator (edit-list-preview-document document patches target)))
+  (edit-apply-patches-result document patches :target target :expected expected))
 
 (defun edit-list-find-node-at (document type offset)
   (let ((found nil))
@@ -131,7 +119,7 @@
 
 (defun edit-list-assert-item-parent (document item-offset parent-type
                                     parent-offset target)
-  (let* ((item (edit-list-find-item-at document item-offset))
+  (let* ((item (edit-list-find-node-at document :item item-offset))
          (parent (and item (node-parent item)))
          (expected-parent (edit-list-find-node-at document parent-type
                                                   parent-offset)))
@@ -142,7 +130,7 @@
 
 (defun edit-list-assert-item-nested-under (document item-offset
                                            parent-item-offset target)
-  (let* ((item (edit-list-find-item-at document item-offset))
+  (let* ((item (edit-list-find-node-at document :item item-offset))
          (list (and item (node-parent item)))
          (parent-item (edit-list-find-node-at document :item parent-item-offset)))
     (unless (and list (eq (node-type list) :plain-list)
@@ -210,12 +198,11 @@ target types signal reason :WRONG-NODE-TYPE."
     (let* ((items (node-children list))
            (node-is-list (eq node list))
            (allowed-positions (if node-is-list '(:first :last) '(:before :after)))
-           (offset nil)
            (source (document-text document)))
       (unless (member position allowed-positions)
         (edit-signal-error target :invalid-value
                            "Invalid list item insertion position"))
-    (multiple-value-bind (fragment fragment-list fragment-item)
+      (multiple-value-bind (fragment fragment-list fragment-item)
           (edit-list-fragment document raw-item target)
         (unless (eq (node-property fragment-list :type) (node-property list :type))
           (edit-signal-error target :invalid-value
@@ -226,21 +213,35 @@ target types signal reason :WRONG-NODE-TYPE."
                (shift (- list-indent fragment-indent))
                (adjusted (if (zerop shift)
                              raw-item
-                             (edit-list-adjust-indentation raw-item shift target))))
-          (setf offset
-                (if node-is-list
-                    (if (eq position :first)
-                        (node-begin (first items))
-                        (node-end (car (last items))))
-                    (if (eq position :before)
-                        (node-begin node)
-                        (node-end node))))
+                             (edit-list-adjust-indentation raw-item shift target)))
+               (index (if node-is-list
+                          (if (eq position :first) 0 (length items))
+                          (+ (position node items :test #'eq)
+                             (if (eq position :after) 1 0))))
+               (offset
+                 (if node-is-list
+                     (if (eq position :first)
+                         (node-begin (first items))
+                         (node-end (car (last items))))
+                     (if (eq position :before)
+                         (node-begin node)
+                         (node-end node))))
+               (expected (edit-canonical-copy (edit-canonical-document document)))
+               (path (edit-node-path document list target))
+               (canonical-list (edit-canonical-node-at-path expected path))
+               (children (getf canonical-list :children))
+               (canonical-item (edit-canonical-node fragment-item)))
+          (edit-canonical-set-children
+           expected path
+           (append (subseq children 0 index)
+                   (list canonical-item)
+                   (nthcdr index children)))
           (edit-list-apply-structural-patches
            document
            (list (edit-make-patch offset offset
                                   (edit-list-insertion-text source offset adjusted)
                                   target))
-           target))))))
+           target expected))))))
 
 (defun delete-list-item (document target)
   "Delete TARGET, including its nested list content, and return an edit result.
@@ -253,9 +254,35 @@ reason :WRONG-NODE-TYPE; a node that cannot be edited signals reason
   (edit-list-check-document document)
   (let* ((item (edit-resolve-node document target '(:item)))
          (start (node-begin item))
-         (end (node-end item)))
+         (end (node-end item))
+         (path (edit-node-path document item target))
+         (parent-path (butlast path))
+         (index (car (last path)))
+         (expected (edit-canonical-copy (edit-canonical-document document))))
+    (labels ((prune-empty (node-path)
+               (when node-path
+                 (let* ((node (edit-canonical-node-at-path expected node-path))
+                        (type (getf node :type)))
+                   (when (and (null (getf node :children))
+                              (member type '(:plain-list :section)))
+                     (let* ((ancestor-path (butlast node-path))
+                            (ancestor (edit-canonical-node-at-path
+                                       expected ancestor-path))
+                            (ancestor-children (getf ancestor :children))
+                            (node-index (car (last node-path))))
+                       (edit-canonical-set-children
+                        expected ancestor-path
+                        (append (subseq ancestor-children 0 node-index)
+                                (nthcdr (1+ node-index) ancestor-children)))
+                       (prune-empty ancestor-path)))))))
+      (let* ((parent (edit-canonical-node-at-path expected parent-path))
+             (children (getf parent :children)))
+        (edit-canonical-set-children
+         expected parent-path
+         (append (subseq children 0 index) (nthcdr (1+ index) children)))
+        (prune-empty parent-path)))
     (edit-list-apply-structural-patches
-     document (list (edit-make-patch start end "" target)) target)))
+     document (list (edit-make-patch start end "" target)) target expected)))
 
 (defun edit-list-item-source-end (items item)
   (let* ((index (position item items :test #'eq))
@@ -292,20 +319,46 @@ move returns an empty span list."
                          "List items can only move within the same plain list"))
     (when (eq item anchor)
       (return-from move-list-item
-        (edit-list-apply-structural-patches document nil target)))
+        (edit-list-apply-structural-patches
+         document nil target (edit-canonical-document document))))
     (let* ((items (node-children list))
            (ordered (edit-list-insert-relative items item anchor position))
            (source (document-text document))
+           (newline (edit-list-line-ending source (node-begin list)))
            (replacement
              (with-output-to-string (stream)
-               (dolist (ordered-item ordered)
-                 (write-string source stream
-                               :start (node-begin ordered-item)
-                               :end (edit-list-item-source-end items ordered-item)))))
-           (start (node-begin list))
-           (end (node-end list)))
+               (loop for ordered-item in ordered
+                     for index from 0
+                     for chunk = (subseq source (node-begin ordered-item)
+                                         (edit-list-item-source-end items ordered-item))
+                     do (write-string chunk stream)
+                        (when (and (< index (1- (length ordered)))
+                                   (not (and (plusp (length chunk))
+                                             (char= (char chunk (1- (length chunk)))
+                                                    #\Newline))))
+                          (write-string newline stream)))))
+           (start (node-post-affiliated list))
+           (end (node-end list))
+           (replacement
+             (if (and (= end (length source))
+                      (not (document-final-newline-p document))
+                      (>= (length replacement) (length newline))
+                      (string= newline replacement
+                               :start2 (- (length replacement) (length newline))))
+                 (subseq replacement 0 (- (length replacement) (length newline)))
+                 replacement))
+           (expected (edit-canonical-copy (edit-canonical-document document)))
+           (path (edit-node-path document list target))
+           (canonical-items (getf (edit-canonical-node-at-path expected path)
+                                  :children)))
+      (edit-canonical-set-children
+       expected path
+       (mapcar (lambda (ordered-item)
+                 (nth (position ordered-item items :test #'eq) canonical-items))
+               ordered))
       (edit-list-apply-structural-patches
-       document (list (edit-make-patch start end replacement target)) target))))
+       document (list (edit-make-patch start end replacement target))
+       target expected))))
 
 (defun indent-list-item (document target &key (amount 2))
   "Indent TARGET by AMOUNT spaces beneath its preceding sibling item.
@@ -333,9 +386,33 @@ amount and reason :UNEDITABLE-STRUCTURE when the item has no preceding sibling."
              (edit-list-adjust-indentation
               (subseq source start end) amount target))
            (parent-item (nth (1- index) items))
-           (patch (edit-make-patch start end replacement target)))
+           (expected (edit-canonical-copy (edit-canonical-document document)))
+           (list-path (edit-node-path document list target))
+           (canonical-list (edit-canonical-node-at-path expected list-path))
+           (canonical-items (getf canonical-list :children))
+           (canonical-item (nth index canonical-items))
+           (remaining-items
+             (append (subseq canonical-items 0 index)
+                     (nthcdr (1+ index) canonical-items)))
+           (parent-path (append list-path (list (1- index))))
+           (canonical-parent (edit-canonical-node-at-path expected parent-path))
+           (parent-children (getf canonical-parent :children))
+           (last-child (car (last parent-children)))
+           (list-type (node-property list :type)))
+      (edit-canonical-set-children expected list-path remaining-items)
+      (if (and last-child
+               (eq (getf last-child :type) :plain-list)
+               (eq (getf (getf last-child :properties) :type) list-type))
+          (setf (getf last-child :children)
+                (append (getf last-child :children) (list canonical-item)))
+          (setf (getf canonical-parent :children)
+                (append parent-children
+                        (list (list :type :plain-list :post-blank 0
+                                    :properties (list :type list-type)
+                                    :children (list canonical-item))))))
       (edit-list-apply-structural-patches
-       document (list patch) target
+       document (list (edit-make-patch start end replacement target))
+       target expected
        (lambda (preview)
          (edit-list-assert-item-nested-under
           preview start (node-post-affiliated parent-item) target))))))
@@ -370,7 +447,8 @@ and the replaced nested-list source span."
       (unless (plusp amount)
         (edit-signal-error target :uneditable-structure
                            "Nested item has no removable indentation"))
-      (let* ((remaining-items (remove item nested-items :test #'eq))
+      (let* ((item-index (position item nested-items :test #'eq))
+             (remaining-items (remove item nested-items :test #'eq))
              (remaining-source
                (with-output-to-string (stream)
                  (dolist (remaining-item remaining-items)
@@ -384,11 +462,38 @@ and the replaced nested-list source span."
                         (edit-list-item-source-end nested-items item))
                 (- amount) target))
              (replacement (concatenate 'string remaining-source target-source))
-             (target-offset (+ start (length remaining-source))))
+             (target-offset (+ start (length remaining-source)))
+             (expected (edit-canonical-copy (edit-canonical-document document)))
+             (nested-path (edit-node-path document nested-list target))
+             (parent-path (butlast nested-path))
+             (parent-index (car (last nested-path)))
+             (canonical-nested (edit-canonical-node-at-path expected nested-path))
+             (canonical-nested-items (getf canonical-nested :children))
+             (canonical-item (nth item-index canonical-nested-items))
+             (remaining-canonical
+               (append (subseq canonical-nested-items 0 item-index)
+                       (nthcdr (1+ item-index) canonical-nested-items)))
+             (parent-canonical (edit-canonical-node-at-path expected parent-path))
+             (outer-path (butlast parent-path))
+             (parent-item-index (car (last parent-path)))
+             (outer-canonical (edit-canonical-node-at-path expected outer-path))
+             (outer-children (getf outer-canonical :children)))
+        (if remaining-canonical
+            (edit-canonical-set-children expected nested-path remaining-canonical)
+            (edit-canonical-set-children
+             expected parent-path
+             (append (subseq (getf parent-canonical :children) 0 parent-index)
+                     (nthcdr (1+ parent-index)
+                             (getf parent-canonical :children)))))
+        (edit-canonical-set-children
+         expected outer-path
+         (append (subseq outer-children 0 (1+ parent-item-index))
+                 (list canonical-item)
+                 (nthcdr (1+ parent-item-index) outer-children)))
         (edit-list-apply-structural-patches
          document
          (list (edit-make-patch start end replacement target))
-         target
+         target expected
          (lambda (preview)
            (edit-list-assert-item-parent
             preview target-offset :plain-list
@@ -430,11 +535,12 @@ and the replaced nested-list source span."
 
 TARGET is a list or one of its items. BULLET is -, +, *, a number followed by
 . or ), such as 1. or 1). Ordered numbering starts at the supplied number and
-increases for each item. Existing checkboxes, descriptions, and marker spacing
-remain intact. Top-level star bullets receive one leading space so the Org
-reader recognizes them as list markers rather than headlines. Invalid markers
-signal ORG-EDIT-ERROR with reason :INVALID-VALUE; unsupported source markers use
-reason :UNEDITABLE-STRUCTURE. The result contains the updated document and the
+increases for each item, using an item's explicit [@N] counter as its number.
+Existing checkboxes, descriptions, and marker spacing remain intact. Top-level
+star bullets receive one leading space so the Org reader recognizes them as
+list markers rather than headlines. Invalid markers signal ORG-EDIT-ERROR with
+reason :INVALID-VALUE; unsupported source markers use reason
+:UNEDITABLE-STRUCTURE. The result contains the updated document and the
 original-source spans of changed markers."
   (multiple-value-bind (list node) (edit-list-resolve-target document target)
     (declare (ignore node))
@@ -450,7 +556,10 @@ original-source spans of changed markers."
              (new-markers '())
              (number start-number))
         (loop for item in items
-              do (multiple-value-bind (start end old-bullet)
+              do (when (and (eq kind :ordered)
+                            (integerp (node-property item :counter)))
+                   (setf number (node-property item :counter)))
+                 (multiple-value-bind (start end old-bullet)
                      (edit-list-item-marker-span document item target)
                    (let* ((separator (edit-list-marker-separator old-bullet target))
                           (new-bullet
@@ -505,12 +614,12 @@ original-source spans of changed markers."
 
 TARGET is the ordered list or one of its items. START must be a nonnegative
 integer. Each item's period or closing parenthesis and source spacing are
-preserved. Checkboxes, descriptions, and explicit item counters are unchanged.
-An unordered target or invalid START signals ORG-EDIT-ERROR with reason
+preserved. An item's explicit [@N] counter sets its number and the following
+item continues from that value. Checkboxes, descriptions, and counters remain
+intact. An unordered target or invalid START signals ORG-EDIT-ERROR with reason
 :INVALID-VALUE; malformed ordered markers use reason :UNEDITABLE-STRUCTURE. The
 result contains the updated document and the original-source spans of changed
 markers."
-  (edit-list-check-document document)
   (multiple-value-bind (list node) (edit-list-resolve-target document target)
     (declare (ignore node))
     (unless (eq (node-property list :type) :ordered)
@@ -521,12 +630,14 @@ markers."
            (expected (edit-canonical-copy (edit-canonical-document document)))
            (path (edit-node-path document list target))
            (canonical-items (getf (edit-canonical-node-at-path expected path)
-                                 :children))
+                                  :children))
            (patches '())
            (number start))
       (loop for item in items
             for canonical-item in canonical-items
-            do (multiple-value-bind (marker-start marker-end old-bullet)
+            do (when (integerp (node-property item :counter))
+                 (setf number (node-property item :counter)))
+               (multiple-value-bind (marker-start marker-end old-bullet)
                    (edit-list-item-marker-span document item target)
                  (multiple-value-bind (old-number delimiter separator)
                      (edit-list-ordered-marker-details old-bullet target)

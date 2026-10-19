@@ -219,4 +219,29 @@
         (expect (edit-drawers-test-error
                  (lambda () (remove-drawer document headline "NOTES")))
                 :to-equal '(:ambiguous-target "headline"))
-        (expect (document-text document) :to-equal source)))))
+        (expect (document-text document) :to-equal source))))
+  (it "rejects drawer bodies that escape their section and names with spaces"
+      (let* ((create-source (format nil "* A~%body~%"))
+             (create-document (parse-org create-source))
+             (create-headline (edit-drawers-test-headline create-document))
+             (replace-source (format nil "* A~%:NOTES:~%old~%:END:~%"))
+             (replace-document (parse-org replace-source))
+             (replace-headline (edit-drawers-test-headline replace-document)))
+        (with-soft-assertions
+         (expect (edit-drawers-test-error
+                  (lambda ()
+                    (set-drawer-body create-document create-headline "NOTES"
+                                     (format nil "x~%* B"))))
+                 :to-equal '(:invalid-value "headline"))
+         (expect (edit-drawers-test-error
+                  (lambda ()
+                    (set-drawer-body replace-document replace-headline "NOTES"
+                                     (format nil "x~%* B"))))
+                 :to-equal '(:invalid-value "headline"))
+         (expect (edit-drawers-test-error
+                  (lambda ()
+                    (set-drawer-body create-document create-headline
+                                     "MY NOTES" "body")))
+                 :to-equal '(:invalid-value "headline"))
+         (expect (document-text create-document) :to-equal create-source)
+         (expect (document-text replace-document) :to-equal replace-source)))))
