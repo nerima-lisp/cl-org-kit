@@ -233,6 +233,29 @@
    #:org-export-unsupported-syntax-source
    #:org-export-unsupported-syntax-position
    #:org-export-unsupported-syntax-feature
+   ;; FR-106 export backend registry
+   #:register-export-backend #:register-derived-export-backend
+   #:unregister-export-backend
+   #:register-export-link-type #:unregister-export-link-type
+   #:export-render-view #:export-render-node
+   #:export-render-parent-view #:export-render-parent-node
+   #:export-render-parent-renderer #:export-render-parent-preamble
+   #:export-render-parent-trailer #:export-render-parent-template
+   #:export-render-context-backend #:export-render-context-document
+   #:export-render-context-metadata #:export-render-context-options
+   #:export-render-context-limits #:export-render-context-root-views
+   #:export-render-context-toc #:export-render-context-footnotes
+   #:export-render-context-raw-output-p #:export-render-context-extension
+   #:export-render-context-owner-backend #:export-render-context-state
+   #:export-render-frame-mode #:export-render-frame-table-cell-p
+   #:export-render-frame-preserve-source-breaks-p
+   #:export-render-frame-output-offset
+   #:export-option-explicit-p #:export-option-value
+   #:export-backend-derived-p
+   #:export-view-node #:export-view-children #:export-view-source-document
+   #:make-export-view
+   #:make-export-link-result #:export-link-result-kind
+   #:export-link-result-destination #:export-link-result-description
    ;; BibTeX conversion
    #:org-bibtex-error #:org-bibtex-error-reason
    #:org-bibtex-error-position #:org-bibtex-error-context

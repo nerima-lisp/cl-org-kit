@@ -1,6 +1,10 @@
 ;;;; t/export-core-test.lisp
 (in-package #:cl-org-kit/test)
 
+(eval-when (:load-toplevel :execute)
+  (load (asdf:system-relative-pathname
+         "cl-org-kit" "t/fixtures/export-baseline/fr-106/baseline.lisp")))
+
 (defun export-core-test-lines (&rest lines)
   (format nil "~{~A~^~%~}" lines))
 
@@ -410,7 +414,7 @@
            (paragraphs (export-core-test-view-nodes preparation :paragraph)))
       (expect (length paragraphs) :to-be 1)))
 
-  (it "omits nodes mapped to the omit operation"
+  (it "prunes children for common node policies"
     (let ((preparation
             (export-core-test-preparation
              (export-core-test-lines
@@ -418,11 +422,157 @@
       (let ((comment-view
               (first (export-core-test-view-nodes preparation :comment-block))))
         (with-soft-assertions
-          (expect (getf (org-kit::export-view-payload comment-view) :operation)
-                  :to-be :omit)
           (expect (org-kit::export-view-children comment-view) :to-be nil)
           (expect (export-core-test-view-nodes preparation :paragraph)
                   :to-be-truthy)))))
+
+  (it "applies prune-children to special preparation paths"
+    (let ((backend :api-export-special-node-pruning)
+          (registered-p nil)
+          (include-calls 0))
+      (unwind-protect
+           (progn
+             (register-export-backend
+              backend :renderer #'identity
+              :node-policies
+              (list (cons :headline :prune-children)
+                    (cons :keyword :prune-children)
+                    (cons :macro :prune-children)
+                    (cons :src-block :prune-children)))
+             (setf registered-p t)
+             (let* ((source
+                      (export-core-test-lines
+                       "* {{{unknown-title-macro}}}"
+                       "Child paragraph."
+                       "{{{unknown-body-macro}}}"
+                       "#+INCLUDE: \"child.org\""
+                       "#+BEGIN_SRC text :exports both"
+                       "source text"
+                       "#+END_SRC"
+                       "#+RESULTS:" ": result text"))
+                    (preparation
+                      (org-kit::export-prepare
+                       (parse-org source) backend
+                       :include-resolver
+                       (lambda (path source-name)
+                         (declare (ignore path source-name))
+                         (incf include-calls)
+                         "Included text.")))
+                    (headline
+                      (first (export-core-test-view-nodes
+                              preparation :headline)))
+                    (source-block
+                      (first (export-core-test-view-nodes
+                              preparation :src-block))))
+               (with-soft-assertions
+                 (expect headline :to-be-truthy)
+                 (when headline
+                   (expect (org-kit::export-view-children headline)
+                           :to-be nil)
+                   (expect (getf (org-kit::export-view-payload headline)
+                                 :title-macros)
+                           :to-be nil))
+                 (expect (export-core-test-view-nodes preparation :macro)
+                         :to-be-truthy)
+                 (expect
+                  (every (lambda (view)
+                           (null (org-kit::export-view-children view)))
+                         (export-core-test-view-nodes preparation :macro))
+                  :to-be t)
+                 (expect (export-core-test-view-nodes preparation :keyword)
+                         :to-be-truthy)
+                 (expect include-calls :to-be 0)
+                 (expect source-block :to-be-truthy)
+                 (when source-block
+                   (expect (org-kit::export-view-children source-block)
+                           :to-be nil)))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+  (it "skips headline title macros when child preparation is pruned"
+    (let ((backend :api-export-pruned-headline-title)
+          (registered-p nil)
+          (preparation nil)
+          (condition nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :ascii
+              :node-policies (list (cons :headline :prune-children)))
+             (setf registered-p t)
+             (setf condition
+                   (export-core-test-catch-error
+                    (lambda ()
+                      (setf preparation
+                            (org-kit::export-prepare
+                             (parse-org "* {{{unknown-title-macro}}}")
+                             backend)))))
+             (let ((headline
+                     (first (export-core-test-view-nodes
+                             preparation :headline))))
+               (with-soft-assertions
+                 (expect condition :to-be nil)
+                 (expect headline :to-be-truthy)
+                 (when headline
+                   (expect (org-kit::export-view-children headline)
+                           :to-be nil)
+                   (expect (getf (org-kit::export-view-payload headline)
+                                 :title-macros)
+                           :to-be nil)))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+
+  (it "defers unsupported special nodes to registry dispatch"
+    (let ((renderer
+            (lambda (context)
+              (with-output-to-string (output)
+                (dolist (view (export-render-context-root-views context))
+                  (write-string (export-render-view context view) output))))))
+      (labels ((export-with-policy (backend type source)
+                 (let ((registered-p nil))
+                   (unwind-protect
+                        (progn
+                          (register-export-backend
+                           backend :renderer renderer
+                           :node-policies
+                           (list
+                            (cons type
+                                  (list :unsupported
+                                        :feature :registry-policy-test
+                                        :message "Unsupported by test policy"))))
+                          (setf registered-p t)
+                          (export-core-test-catch-error
+                           (lambda () (export-org (parse-org source) backend))))
+                     (when registered-p
+                       (unregister-export-backend backend))))))
+        (let ((keyword-condition
+                (export-with-policy
+                 :api-export-unsupported-keyword :keyword
+                 "#+INCLUDE: \"child.org\""))
+              (macro-condition
+                (export-with-policy
+                 :api-export-unsupported-macro :macro
+                 "{{{unknown-macro}}}"))
+              (source-condition
+                (export-with-policy
+                 :api-export-unsupported-source-block :src-block
+                 (export-core-test-lines
+                  "#+BEGIN_SRC text :exports unsupported"
+                  "source text" "#+END_SRC"))))
+          (with-soft-assertions
+            (dolist (condition
+                     (list keyword-condition macro-condition source-condition))
+              (expect (typep condition 'org-export-unsupported-syntax)
+                      :to-be t)
+              (when (typep condition 'org-export-unsupported-syntax)
+                (expect (org-export-unsupported-syntax-feature condition)
+                        :to-be :registry-policy-test)
+                (expect (org-export-unsupported-syntax-backend condition)
+                        :to-be (cond
+                                 ((eq condition keyword-condition)
+                                  :api-export-unsupported-keyword)
+                                 ((eq condition macro-condition)
+                                  :api-export-unsupported-macro)
+                                 (t :api-export-unsupported-source-block))))))))))
 
   (it "applies explicit tag selection and exclusion before building the TOC"
     (let* ((source
@@ -592,7 +742,7 @@
           (unsupported
             (export-core-test-catch-error
              (lambda ()
-               (export-core-test-preparation "%%(org-calendar-holiday)")))))
+               (export-org (parse-org "%%(org-calendar-holiday)") :html)))))
       (with-soft-assertions
         (expect (typep unknown-backend 'org-export-error) :to-be t)
         (when (typep unknown-backend 'org-export-error)
@@ -608,26 +758,41 @@
           (expect (stringp (org-export-unsupported-syntax-source unsupported))
                   :to-be t)))))
 
-  (it "maps every known node type and rejects unsupported or unknown syntax"
-    (let* ((mapped-types (mapcar #'first org-kit::*export-node-operations*))
-           (known-types (node-types))
+  (it "registers every node type and rejects unsupported or unknown syntax"
+    (let* ((known-types (sort (copy-list (node-types)) #'string<
+                              :key #'symbol-name))
+           (mapped-types
+             (mapcar
+              (lambda (backend)
+                (let ((descriptor
+                        (org-kit::export-registry-descriptor backend)))
+                  (and descriptor
+                       (sort
+                        (mapcar
+                         #'car
+                         (org-kit::%export-backend-descriptor-transcoders
+                          descriptor))
+                        #'string< :key #'symbol-name))))
+              '(:html :gfm :ascii :latex)))
            (unknown-keyword-source
              (export-core-test-lines "Body" "" "#+UNSUPPORTED: value"))
-           (unsupported
+           (prepared-unsupported
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation "%%(org-calendar-holiday)"))))
+           (unsupported
+             (export-core-test-catch-error
+              (lambda ()
+                (export-org (parse-org "%%(org-calendar-holiday)") :html))))
            (unknown-keyword
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation unknown-keyword-source)))))
       (with-soft-assertions
-        (expect (sort (copy-list mapped-types) #'string< :key #'symbol-name)
-                :to-equal
-                (sort (copy-list known-types) #'string< :key #'symbol-name))
-        (expect (org-kit::export-node-operation :headline :html) :to-be :heading)
-        (expect (org-kit::export-node-operation :clock :gfm) :to-be :omit)
-        (expect (org-kit::export-node-operation :export-block :ascii) :to-be :literal)
+        (expect (every (lambda (types) (equal types known-types)) mapped-types)
+                :to-be t)
+        (expect (typep prepared-unsupported 'org-kit::export-preparation)
+                :to-be t)
         (expect (typep unsupported 'org-export-unsupported-syntax) :to-be t)
         (when (typep unsupported 'org-export-unsupported-syntax)
           (expect (org-export-unsupported-syntax-feature unsupported)
@@ -638,6 +803,21 @@
                   :to-be :unknown-keyword)
           (expect (org-export-unsupported-syntax-position unknown-keyword)
                   :to-be (search "#+UNSUPPORTED" unknown-keyword-source))))))
+
+  (it "retains common citation processor keywords during preparation"
+    (let* ((preparation
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+CITE_EXPORT: basic" "#+BIBLIOGRAPHY: references.bib"
+               "#+PRINT_BIBLIOGRAPHY: t" "" "Body")))
+           (keys
+             (loop for view in (export-core-test-all-views preparation)
+                   for node = (org-kit::export-view-node view)
+                   when (eq (node-type node) :keyword)
+                     collect (node-property node :key))))
+      (with-soft-assertions
+        (expect keys :to-equal '("CITE_EXPORT" "BIBLIOGRAPHY"
+                                 "PRINT_BIBLIOGRAPHY")))))
 
   (it "bounds condition source excerpts"
     (let* ((source
@@ -1156,11 +1336,7 @@
                 :to-equal '(t t t t nil nil))
         (expect result-child-counts :to-equal '(1 0 1 0 0 0))
         (expect separated-result :to-be-truthy)
-        (expect (and separated-result-view
-                     (eq (getf (org-kit::export-view-payload separated-result-view)
-                               :operation)
-                         :code-block))
-                :to-be t)
+        (expect separated-result-view :to-be-truthy)
         (expect (and separated-result
                      (string= (node-property separated-result :value)
                               "separated-result"))

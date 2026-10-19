@@ -99,6 +99,7 @@
                ;; F agenda
                ;; Unit E1 export core
                (:file "export-types")
+               (:file "export-registry")
                (:file "export-core")
                ;; Unit E2 HTML export
                (:file "export-html")
@@ -227,6 +228,7 @@
                ;; Unit E1 export core
                (:file "clocktable-test")
                (:file "export-core-test")
+               (:file "export-registry-test")
                ;; Unit E2 HTML export
                (:file "export-html-test")
                ;; Unit E3 GFM export

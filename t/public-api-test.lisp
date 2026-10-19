@@ -242,13 +242,38 @@
     "EXPORT-CONTEXT" "MAKE-EXPORT-CONTEXT" "EXPORT-CONTEXT-P"
     "EXPORT-CONTEXT-TITLE" "EXPORT-CONTEXT-AUTHOR" "EXPORT-CONTEXT-DATE"
     "EXPORT-CONTEXT-LANGUAGE" "EXPORT-CONTEXT-TIME-CONTEXT"
+    "EXPORT-CONTEXT-EXTENSIONS"
     "ORG-EXPORT-ERROR" "ORG-EXPORT-ERROR-BACKEND" "ORG-EXPORT-ERROR-REASON"
     "ORG-EXPORT-ERROR-SOURCE"
+    "ORG-EXPORT-REGISTRATION-ERROR"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-BACKEND"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-SOURCE"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-POSITION"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-FEATURE"
+    ;; FR-106 export backend registry
+    "REGISTER-EXPORT-BACKEND" "REGISTER-DERIVED-EXPORT-BACKEND"
+    "UNREGISTER-EXPORT-BACKEND"
+    "REGISTER-EXPORT-LINK-TYPE" "UNREGISTER-EXPORT-LINK-TYPE"
+    "EXPORT-RENDER-VIEW" "EXPORT-RENDER-NODE"
+    "EXPORT-RENDER-PARENT-VIEW" "EXPORT-RENDER-PARENT-NODE"
+    "EXPORT-RENDER-PARENT-RENDERER" "EXPORT-RENDER-PARENT-PREAMBLE"
+    "EXPORT-RENDER-PARENT-TRAILER" "EXPORT-RENDER-PARENT-TEMPLATE"
+    "EXPORT-RENDER-CONTEXT-BACKEND" "EXPORT-RENDER-CONTEXT-DOCUMENT"
+    "EXPORT-RENDER-CONTEXT-METADATA" "EXPORT-RENDER-CONTEXT-OPTIONS"
+    "EXPORT-RENDER-CONTEXT-LIMITS" "EXPORT-RENDER-CONTEXT-ROOT-VIEWS"
+    "EXPORT-RENDER-CONTEXT-TOC" "EXPORT-RENDER-CONTEXT-FOOTNOTES"
+    "EXPORT-RENDER-CONTEXT-RAW-OUTPUT-P" "EXPORT-RENDER-CONTEXT-EXTENSION"
+    "EXPORT-RENDER-CONTEXT-OWNER-BACKEND" "EXPORT-RENDER-CONTEXT-STATE"
+    "EXPORT-RENDER-FRAME-MODE" "EXPORT-RENDER-FRAME-TABLE-CELL-P"
+    "EXPORT-RENDER-FRAME-PRESERVE-SOURCE-BREAKS-P"
+    "EXPORT-RENDER-FRAME-OUTPUT-OFFSET"
+    "EXPORT-OPTION-EXPLICIT-P" "EXPORT-OPTION-VALUE"
+    "EXPORT-BACKEND-DERIVED-P"
+    "EXPORT-VIEW-NODE" "EXPORT-VIEW-CHILDREN"
+    "EXPORT-VIEW-SOURCE-DOCUMENT" "MAKE-EXPORT-VIEW"
+    "MAKE-EXPORT-LINK-RESULT" "EXPORT-LINK-RESULT-KIND"
+    "EXPORT-LINK-RESULT-DESTINATION" "EXPORT-LINK-RESULT-DESCRIPTION"
     ;; Unit E2 HTML export
     "EXPORT-ORG"
     ;; Org crypt
@@ -543,6 +568,83 @@ check cannot prevent a rename during an operation or after the check.")))
               :to-equal
               "Sort HEADING's direct headline children by a built-in Org key.
 Missing values stay last in both directions, and ties retain source order.")))
+
+  (it "copies export context extensions without copying their values"
+    (let* ((value (list :processor-state))
+           (extensions (list (cons :citation-processor value)))
+           (context (make-export-context :extensions extensions))
+           (readback (export-context-extensions context)))
+      (setf (caar extensions) :changed)
+      (expect (caar readback) :to-be :citation-processor)
+      (expect (cdar readback) :to-be value)
+      (setf (caar readback) :changed-again)
+      (expect (caar extensions) :to-be :changed)))
+
+  (it "copies export context metadata on input and access"
+    (let* ((title (copy-seq "Stable title"))
+           (context (make-export-context :title title))
+           (readback (export-context-title context)))
+      (setf (char title 0) #\X)
+      (expect readback :to-equal "Stable title")
+      (setf (char readback 0) #\Y)
+      (expect (export-context-title context) :to-equal "Stable title")))
+
+  (it "registers derived backends and applies their filter chains"
+    (let* ((document (parse-org "A custom export."))
+           (base-output (export-org document :gfm))
+           (seen-output nil)
+           (registered-filter-p nil)
+           (registered-empty-p nil)
+           (later-filter-ran-p nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              :api-test-filter :gfm
+              :filters
+              (list
+               (cons :final-output
+                     (list (lambda (value context)
+                             (declare (ignore context))
+                             (setf seen-output value)
+                             nil)
+                           (lambda (value context)
+                             (declare (ignore context))
+                             (concatenate 'string "filtered:" value))))))
+             (setf registered-filter-p t)
+             (expect (export-org document :api-test-filter)
+                     :to-equal (concatenate 'string "filtered:" base-output))
+             (expect seen-output :to-equal base-output)
+             (register-derived-export-backend
+              :api-test-empty-filter :gfm
+              :filters
+              (list
+               (cons :final-output
+                     (list (lambda (value context)
+                             (declare (ignore value context))
+                             "")
+                           (lambda (value context)
+                             (declare (ignore context))
+                             (setf later-filter-ran-p t)
+                             value)))))
+             (setf registered-empty-p t)
+             (expect (export-org document :api-test-empty-filter) :to-equal "")
+             (expect later-filter-ran-p :to-be nil))
+        (when registered-empty-p
+          (unregister-export-backend :api-test-empty-filter))
+        (when registered-filter-p
+          (unregister-export-backend :api-test-filter)))))
+
+  (it "reports duplicate backend names with the registration condition"
+    (let ((condition
+            (handler-case
+                (progn
+                  (register-derived-export-backend :html :gfm)
+                  nil)
+              (org-export-registration-error (condition) condition))))
+      (expect (typep condition 'org-export-registration-error) :to-be t)
+      (when (typep condition 'org-export-registration-error)
+        (expect (org-export-error-backend condition) :to-be :html)
+        (expect (org-export-error-reason condition) :to-be :duplicate-backend))))
 
   (it "keeps the package name stable and nickname-free"
     (expect (package-name (find-package "ORG-KIT")) :to-equal "ORG-KIT")

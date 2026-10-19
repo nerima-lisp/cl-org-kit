@@ -377,6 +377,10 @@ SOURCE is a bounded, escaped excerpt when one is available."))
   "Return the bounded, escaped source excerpt associated with the export failure."
   (slot-value condition 'source))
 
+(define-condition org-export-registration-error (org-export-error)
+  ()
+  (:documentation "Signalled when an export backend or link handler registration is invalid."))
+
 (define-condition org-export-unsupported-syntax (org-kit-error)
   ((backend :initarg :backend :initform nil)
    (source :initarg :source :initform nil)

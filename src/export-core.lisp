@@ -1,72 +1,13 @@
 ;;;; src/export-core.lisp
 (in-package #:org-kit)
 
-(defparameter *export-node-operations*
-  '((:org-data :root :root :root :root)
-    (:headline :heading :heading :heading :heading)
-    (:inlinetask :heading :heading :heading :heading)
-    (:section :section :section :section :section)
-    (:paragraph :paragraph :paragraph :paragraph :paragraph)
-    (:center-block :centered-block :paragraph :paragraph :centered-block)
-    (:quote-block :blockquote :blockquote :quote :blockquote)
-    (:special-block :special-block :children :children :special-block)
-    (:drawer :children :children :children :children)
-    (:property-drawer :omit :omit :omit :omit)
-    (:node-property :omit :omit :omit :omit)
-    (:planning :omit :omit :omit :omit)
-    (:dynamic-block :literal-block :literal-block :literal-block :literal-block)
-    (:footnote-definition :footnote-definition :footnote-definition
-                          :footnote-definition :footnote-definition)
-    (:plain-list :list :list :list :list)
-    (:item :list-item :list-item :list-item :list-item)
-    (:table :table :table :table :table)
-    (:table-row :table-row :table-row :table-row :table-row)
-    (:table-cell :table-cell :table-cell :table-cell :table-cell)
-    (:babel-call :literal :literal :literal :literal)
-    (:inline-babel-call :literal :literal :literal :literal)
-    (:clock :omit :omit :omit :omit)
-    (:comment :omit :omit :omit :omit)
-    (:comment-block :omit :omit :omit :omit)
-    (:diary-sexp :unsupported :unsupported :unsupported :literal)
-    (:example-block :code-block :code-block :code-block :code-block)
-    (:fixed-width :code-block :code-block :code-block :code-block)
-    (:src-block :source-block :source-block :source-block :source-block)
-    (:export-block :export-construct :export-construct :literal
-                   :export-construct)
-    (:export-snippet :export-construct :export-construct :literal
-                     :export-construct)
-    (:horizontal-rule :horizontal-rule :horizontal-rule :horizontal-rule
-                      :horizontal-rule)
-    (:keyword :keyword :keyword :keyword :keyword)
-    (:latex-environment :literal :literal :literal :literal)
-    (:latex-fragment :literal :literal :literal :literal)
-    (:verse-block :verse :verse :verse :verse)
-    (:bold :bold :bold :bold :bold)
-    (:italic :italic :italic :italic :italic)
-    (:strike-through :strike-through :strike-through :literal-children
-                     :strike-through)
-    (:underline :underline :underline :literal-children :underline)
-    (:subscript :subscript :subscript :literal-children :subscript)
-    (:superscript :superscript :superscript :literal-children :superscript)
-    (:code :code :code :quoted-literal :code)
-    (:verbatim :code :code :quoted-literal :code)
-    (:citation :literal :literal :literal :literal)
-    (:citation-reference :literal :literal :literal :literal)
-    (:entity :entity :entity :entity :entity)
-    (:footnote-reference :footnote-reference :footnote-reference
-                         :footnote-reference :footnote-reference)
-    (:inline-src-block :inline-code :inline-code :literal :inline-code)
-    (:line-break :line-break :line-break :line-break :line-break)
-    (:link :link :link :link :link)
-    (:macro :macro :macro :macro :macro)
-    (:plain-text :text :text :text :text)
-    (:radio-target :target :target :omit :target)
-    (:target :target :target :omit :target)
-    (:statistics-cookie :literal :literal :literal :literal)
-    (:timestamp :timestamp :timestamp :timestamp :timestamp)))
+(defvar *export-requested-backend* nil)
+(defvar *export-current-output-check-kind* :native-write)
+(defvar *export-current-output-check-index* 0)
+(defvar *export-output-check-counts* nil)
 
 (defun export-backend-p (backend)
-  (member backend '(:html :gfm :ascii :latex) :test #'eq))
+  (export-backend-registered-p backend))
 
 (defun export-bounded-source (source)
   (let* ((node (and (node-p source) source))
@@ -111,32 +52,17 @@
 (defun export-error (backend reason source message)
   (error 'org-export-error
          :message message
-         :backend backend
+         :backend (or *export-requested-backend* backend)
          :reason reason
          :source (export-bounded-source source)))
 
 (defun export-unsupported-syntax (backend source position feature message)
   (error 'org-export-unsupported-syntax
          :message message
-         :backend backend
+         :backend (or *export-requested-backend* backend)
          :source (export-bounded-source source)
          :position position
          :feature feature))
-
-(defun export-node-operation (type backend &optional source)
-  "Return TYPE's BACKEND action; diary sexps signal unsupported syntax."
-  (let ((entry (assoc type *export-node-operations*)))
-    (let ((operation
-            (ecase backend
-              (:html (second entry))
-              (:gfm (third entry))
-              (:ascii (fourth entry))
-              (:latex (fifth entry)))))
-      (if (eq operation :unsupported)
-          (export-unsupported-syntax backend source
-                                     (export-source-position source) :diary-sexp
-                                     "Diary sexp export is unsupported")
-          operation))))
 
 (defun export-control-character-p (character)
   (let ((code (char-code character)))
@@ -269,20 +195,66 @@
             (otherwise
              (export-error backend :invalid-output nil
                            "Unsupported export output type")))))
-    (check-limit limits :max-output-length (length text))
     (if octet-output-p
         (let ((octet-count (export-utf8-length text backend)))
           (check-limit limits :max-output-octets octet-count)
           (let ((octets (cl-codec-kit:string-to-octets text :encoding :utf-8)))
             (if (eq output-type :stream)
-                (progn (write-sequence octets stream) stream)
+                (let ((*export-current-export-phase* :stream-write))
+                  (write-sequence octets stream)
+                  stream)
                 octets)))
         (if (eq output-type :stream)
             (progn
               (export-utf8-length text backend)
-              (write-string text stream)
+              (let ((*export-current-export-phase* :stream-write))
+                (write-string text stream))
               stream)
             text))))
+
+(defun export-check-output-stage (text limits backend phase
+                                  &key (base-offset 0) (kind :native-write)
+                                    (actual-offset nil actual-offset-p))
+  (declare (ignore backend))
+  (unless (stringp text)
+    (error 'type-error :datum text :expected-type 'string))
+  (let* ((counts (or *export-output-check-counts* (make-hash-table)))
+         (*export-output-check-counts* counts)
+         (actual (if actual-offset-p actual-offset
+                     (+ base-offset (length text))))
+         (index (1+ (gethash kind counts 0)))
+         (*export-current-export-phase* phase)
+         (*export-current-output-check-kind* kind)
+         (*export-current-output-check-index* index))
+    (unless (and (integerp actual) (not (minusp actual)))
+      (error 'type-error :datum actual :expected-type '(integer 0 *)))
+    (setf (gethash kind counts) index)
+    (check-limit limits :max-output-length actual))
+  text)
+
+(defun export-check-output-actual (actual limits backend phase
+                                  &key (kind :native-write))
+  (export-check-output-stage "" limits backend phase
+                             :kind kind :actual-offset actual)
+  actual)
+
+(defun export-run-renderer-stage
+    (renderer context fallback limits backend phase
+     &key (base-offset 0) (kind :native-write))
+  (let ((*export-current-export-phase* phase)
+        (*export-current-output-offset* base-offset))
+    (export-check-output-stage
+     (export-check-render-string
+      (if renderer (funcall renderer context) fallback))
+     limits backend phase :base-offset base-offset :kind kind)))
+
+(defun export-run-filter-stage
+    (backend stage value context limits phase &key (base-offset 0))
+  (let ((*export-current-export-phase* phase)
+        (*export-current-output-offset* base-offset))
+    (export-check-output-stage
+     (export-apply-filter-stage backend stage value context)
+     limits backend phase :base-offset base-offset :kind :filter-commit)))
 
 (defun export-trim (string)
   (string-trim '(#\Space #\Tab #\Newline #\Return #\Page) string))
@@ -340,47 +312,12 @@
                                    "Unsupported tag expression")))
     tags))
 
-(defparameter *export-option-specifications*
-  '(("toc" :toc :toc)
-    ("h" :heading-depth :integer)
-    ("num" :num :boolean-integer)
-    ("^" :^ :sub-superscript)
-    ("title" :title :boolean)
-    ("author" :author :boolean)
-    ("date" :date :boolean)
-    ("\\n" :preserve-breaks :boolean)
-    ("timestamp" :timestamp :boolean)
-    ("arch" :arch :archive-mode)
-    ("expand-links" :expand-links :boolean)
-    ("broken-links" :broken-links :disabled-only)
-    ("c" :clock :boolean)
-    ("creator" :creator :creator-mode)
-    ("d" :drawers :drawer-list)
-    ("email" :email :boolean)
-    ("*" :emphasis :boolean)
-    ("e" :entities :boolean)
-    (":" :fixed-width :boolean)
-    ("f" :footnotes :boolean)
-    ("inline" :inline-tasks :boolean)
-    ("tex" :latex :latex-mode)
-    ("p" :planning :boolean)
-    ("pri" :priority :boolean)
-    ("prop" :properties :selection-list)
-    ("'" :smart-quotes :boolean)
-    ("-" :special-strings :boolean)
-    ("stat" :statistics-cookies :boolean)
-    ("|" :tables :boolean)
-    ("tags" :tags :tag-mode)
-    ("tasks" :tasks :tasks-mode)
-    ("<" :timestamp-range :timestamp-range)
-    ("todo" :todo :boolean)))
-
 (defun export-invalid-option (source backend message)
   (export-unsupported-syntax backend source (export-source-position source)
                              :invalid-option message))
 
-(defun export-option-specification (key source backend)
-  (or (assoc key *export-option-specifications* :test #'string=)
+(defun export-option-specification (token source backend ancestry)
+  (or (export-resolved-option-specification ancestry token)
       (export-unsupported-syntax backend source (export-source-position source)
                                  :unknown-option
                                  "Unknown export option")))
@@ -496,8 +433,8 @@
                                    "Exclusion lists are unsupported here"))
         (cons :include items))))
 
-(defun export-option-value (specification value source backend)
-  (let ((kind (third specification)))
+(defun export-parse-option-value (parser value source backend)
+  (let ((kind parser))
     (ecase kind
       (:boolean (export-option-boolean value source backend))
       (:integer (export-option-integer value source backend))
@@ -570,15 +507,19 @@
         (values (string-downcase (subseq token 0 colon))
                 (subseq token (1+ colon))))))
 
-(defun export-parse-options (value source backend)
+(defun export-parse-options (value source backend ancestry)
   (let ((options nil))
     (dolist (token (export-option-tokens value source backend))
       (multiple-value-bind (key option-value)
           (export-option-token-parts token source backend)
-        (let* ((specification (export-option-specification key source backend))
-               (option-key (second specification))
+        (let* ((specification
+                 (export-option-specification key source backend ancestry))
+               (option-key (getf specification :key))
+               (parser (getf specification :parser))
                (parsed-value
-                 (export-option-value specification option-value source backend))
+                 (if (functionp parser)
+                     (funcall parser option-value source backend)
+                     (export-parse-option-value parser option-value source backend)))
                (existing (assoc option-key options)))
           (if existing
               (setf (cdr existing) parsed-value)
@@ -618,7 +559,7 @@
               (list :template template :function-p function-p :source source))))
     macros))
 
-(defun export-document-settings (document backend context)
+(defun export-document-settings (document backend context filter-context)
   (let* ((records (export-keyword-records document))
          (context (or context (make-export-context)))
          (metadata nil)
@@ -635,12 +576,22 @@
         (declare (ignore source))
         (when present-p
           (setf (getf metadata (cdr specification)) value))))
-    (dolist (record (export-records-for-key records "OPTIONS"))
-      (dolist (option (export-parse-options (third record) (first record) backend))
-        (let ((existing (assoc (car option) options)))
-          (if existing
-              (setf (cdr existing) (cdr option))
-              (setf options (append options (list option)))))))
+    (let* ((ancestry
+             (if filter-context
+                 (%export-render-context-ancestry filter-context)
+                 (nth-value 1 (export-registry-snapshot backend))))
+           (parser-backend
+             (if filter-context
+                 (%export-render-context-backend filter-context)
+                 backend)))
+      (dolist (record (export-records-for-key records "OPTIONS"))
+        (dolist (option
+                 (export-parse-options (third record) (first record)
+                                       parser-backend ancestry))
+          (let ((existing (assoc (car option) options)))
+            (if existing
+                (setf (cdr existing) (cdr option))
+                (setf options (append options (list option))))))))
     (multiple-value-bind (value present-p source)
         (export-single-keyword-value records "SELECT_TAGS" backend)
       (when present-p
@@ -661,11 +612,43 @@
           (getf metadata :language)
           (or (export-context-language context) (getf metadata :language) "en")
           (getf metadata :time-context) (export-context-time-context context))
-    (values metadata options
-            (and select-tags
-                 (or select-present-p
-                     (export-document-has-tag-p document select-tags)))
-            select-tags exclude-tags (export-build-macro-table records backend))))
+    (let* ((select-active-p
+             (and select-tags
+                  (or select-present-p
+                      (export-document-has-tag-p document select-tags))))
+           (macros (export-build-macro-table records backend)))
+      (when filter-context
+        (setf (%export-render-context-metadata filter-context) metadata
+              (%export-render-context-options filter-context) options
+              (%export-render-context-limits filter-context)
+              (document-limits document)
+              (%export-render-context-extensions filter-context)
+              (export-context-extensions context))
+        (let ((preparation
+                (%export-render-context-preparation filter-context)))
+          (when (export-preparation-p preparation)
+            (setf (export-preparation-document preparation) document
+                  (export-preparation-backend preparation) backend
+                  (export-preparation-metadata preparation) metadata
+                  (export-preparation-options preparation) options)))
+        (progn
+          (setf options
+                (export-apply-filter-stage
+                 (%export-render-context-backend filter-context)
+                 :options options filter-context
+                 :validator
+                 (lambda (filtered-options)
+                   (export-valid-explicit-options-alist-p
+                    filtered-options
+                    (%export-render-context-ancestry filter-context)))
+                 :expected-type '(satisfies export-explicit-options-alist-p))))
+        (setf (%export-render-context-options filter-context) options)
+        (let ((preparation
+                (%export-render-context-preparation filter-context)))
+          (when (export-preparation-p preparation)
+            (setf (export-preparation-options preparation) options))))
+      (values metadata options select-active-p
+              select-tags exclude-tags macros))))
 
 (defun export-macro-parameter-index (template position source backend)
   (let ((digit-position (1+ position)))
@@ -798,6 +781,75 @@
   (let ((count 0))
     (map-nodes (lambda (node) (declare (ignore node)) (incf count)) root)
     count))
+(defun export-explicit-options-alist-p (options)
+  (and (export-proper-list-p options)
+       (every (lambda (entry)
+                (and (consp entry) (keywordp (car entry))))
+              options)
+       (= (length options)
+          (length (remove-duplicates options :key #'car :test #'eq)))))
+
+(defun export-valid-explicit-options-alist-p (options ancestry)
+  (and (export-explicit-options-alist-p options)
+       (let ((specifications (export-resolved-option-specifications ancestry)))
+         (every (lambda (entry)
+                  (find (car entry) specifications
+                        :key (lambda (specification)
+                               (getf specification :key))
+                        :test #'eq))
+                options))))
+
+(defun export-acyclic-view-p (view)
+  (and (%export-view-p view)
+       (let ((active (make-hash-table :test #'eq)))
+         (labels ((visit (current)
+                    (and (%export-view-p current)
+                         (not (gethash current active))
+                         (let ((children (%export-view-children current)))
+                           (and (export-proper-list-p children)
+                                (progn
+                                  (setf (gethash current active) t)
+                                  (prog1 (every #'visit children)
+                                    (remhash current active))))))))
+           (visit view)))))
+
+(deftype acyclic-export-view ()
+  '(satisfies export-acyclic-view-p))
+
+(defun export-validate-filtered-root-views (views limits)
+  (unless (export-proper-list-p views)
+    (error 'type-error :datum views :expected-type 'list))
+  (let ((active (make-hash-table :test #'eq))
+        (count 0))
+    (labels ((visit (view depth)
+               (unless (%export-view-p view)
+                 (error 'type-error :datum view :expected-type 'export-view))
+               (when (gethash view active)
+                 (error 'type-error :datum view
+                        :expected-type 'acyclic-export-view))
+               (let ((node (%export-view-node view))
+                     (children (%export-view-children view))
+                     (source-document
+                       (%export-view-source-document view)))
+                 (unless (node-p node)
+                   (error 'type-error :datum node :expected-type 'node))
+                 (unless (export-proper-list-p children)
+                   (error 'type-error :datum children :expected-type 'list))
+                 (unless (or (null source-document)
+                             (document-p source-document))
+                   (error 'type-error :datum source-document
+                          :expected-type '(or null document)))
+                 (check-limit limits :max-element-depth depth)
+                 (incf count)
+                 (check-limit limits :max-export-expanded-nodes count)
+                 (setf (gethash view active) t)
+                 (unwind-protect
+                     (dolist (child children)
+                       (visit child (1+ depth)))
+                   (remhash view active)))))
+      (dolist (view views)
+        (visit view 1)))
+    t))
 
 (defun export-limits-with-node-budget (limits node-budget)
   (let ((arguments nil))
@@ -817,40 +869,40 @@
                      (list (car argument) (cdr argument)))
                    (nreverse arguments)))))
 
-(defun export-validate-keywords (records backend &key fragment-p)
+(defun export-global-keyword-p (key)
+  (and (not (member key '("INCLUDE" "RESULTS" "NAME" "CAPTION" "HEADER"
+                           "LATEX" "ATTR_LATEX")
+                         :test #'string=))
+       (or (member key '("TITLE" "AUTHOR" "DATE" "LANGUAGE" "OPTIONS"
+                         "SELECT_TAGS" "EXCLUDE_TAGS" "MACRO" "ATTR_HTML"
+                         "ARCHIVE" "COLUMNS" "PRIORITIES" "CONSTANTS"
+                         "EXPORT_FILE_NAME" "DESCRIPTION" "KEYWORDS"
+                         "SUBTITLE" "EMAIL" "CREATOR" "CITE_EXPORT"
+                         "BIBLIOGRAPHY" "PRINT_BIBLIOGRAPHY"
+                         "LATEX_CLASS" "LATEX_CLASS_OPTIONS" "LATEX_HEADER"
+                         "LATEX_HEADER_EXTRA")
+                       :test #'string=)
+           (reader-heading-setting-kind key))))
+
+(defun export-validate-keywords (records backend &key fragment-p ancestry)
+  (let ((accepted
+          (export-resolved-string-set
+           (or ancestry (export-backend-ancestry backend))
+           #'%export-backend-descriptor-accepted-keywords)))
   (dolist (record records)
     (let ((key (second record))
           (source (first record)))
       (cond
-        ((and (eq backend :latex)
-              (member key '("LATEX_CLASS" "LATEX_CLASS_OPTIONS"
-                             "LATEX_HEADER" "LATEX_HEADER_EXTRA")
-                      :test #'string=))
-         (when fragment-p
-           (export-unsupported-syntax
-            backend source (export-source-position source) :fragment-keyword-scope
-            "Global export keywords in fragments are unsupported")))
-        ((and (eq backend :latex)
-              (member key '("LATEX" "ATTR_LATEX") :test #'string=))
-         nil)
-        ((or (member key '("TITLE" "AUTHOR" "DATE" "LANGUAGE" "OPTIONS"
-                           "SELECT_TAGS" "EXCLUDE_TAGS" "MACRO" "ATTR_HTML"
-                           "ARCHIVE" "COLUMNS" "PRIORITIES" "CONSTANTS"
-                           "EXPORT_FILE_NAME" "DESCRIPTION" "KEYWORDS"
-                           "SUBTITLE" "EMAIL" "CREATOR")
-                 :test #'string=)
+        ((or (member key accepted :test #'string-equal)
              (reader-heading-setting-kind key))
-         (when fragment-p
+         (when (and fragment-p (export-global-keyword-p key))
            (export-unsupported-syntax
             backend source (export-source-position source) :fragment-keyword-scope
-                                      "Global export keywords in fragments are unsupported")))
-        ((member key '("INCLUDE" "RESULTS" "NAME" "CAPTION" "HEADER")
-                 :test #'string=)
-         nil)
+                                    "Global export keywords in fragments are unsupported")))
         (t
          (export-unsupported-syntax backend source (export-source-position source)
                                     :unknown-keyword
-                                    "Unknown export keyword"))))))
+                                    "Unknown export keyword")))))))
 
 (defun export-option-selects-name-p (value name)
   (if (eq (first value) :exclude)
@@ -908,7 +960,7 @@
                       (not (export-option-selects-name-p selection todo-keyword)))
                      (t nil)))))))
 
-(defun export-prepare (document backend &key include-resolver allow-raw-html allow-raw-latex context)
+(defun export-prepare (document backend &key include-resolver allow-raw-html allow-raw-latex context filter-context)
   "Prepare a private export view without serializing or modifying DOCUMENT."
   (unless (document-p document)
     (error 'type-error :datum document :expected-type 'document))
@@ -922,6 +974,9 @@
     (unless (member allow-raw-latex '(nil t))
       (error 'type-error :datum allow-raw-latex :expected-type 'boolean)))
   (let* ((root (document-root document))
+         (ancestry (if filter-context
+                       (%export-render-context-ancestry filter-context)
+                       (nth-value 1 (export-registry-snapshot backend))))
          (limits (document-limits document)))
     (unless root
       (error 'type-error :datum root :expected-type 'node))
@@ -930,7 +985,7 @@
       (check-limit limits :max-export-expanded-nodes expanded-node-count)
         (multiple-value-bind (metadata options select-active-p select-tags exclude-tags
                               macros)
-          (export-document-settings document backend context)
+          (export-document-settings document backend context filter-context)
         (labels
             ((account-tree (tree-root)
                (map-nodes
@@ -1045,6 +1100,9 @@
                (loop for segment in (node-property node :title)
                      when (and (node-p segment)
                                (eq (node-type segment) :macro))
+                       when (eq :default
+                                (export-resolved-node-policy
+                                 ancestry (node-type segment)))
                        collect
                        (progn
                          (check-limit limits :max-element-depth element-depth)
@@ -1057,7 +1115,8 @@
              (prepare-node (node source-document selected-scope depth element-depth
                                 active-includes active-macros fragment-p)
                (check-limit limits :max-element-depth element-depth)
-               (let ((type (node-type node)))
+               (let* ((type (node-type node))
+                      (policy (export-resolved-node-policy ancestry type)))
                  (cond
                    ((export-option-pruned-p node options)
                     (values nil nil))
@@ -1077,19 +1136,23 @@
                                         (export-tag-intersection-p tags select-tags)))
                                  (nested-scope (or selected-scope selected-here-p))
                                  (title-macros
-                                   (prepare-title-macros
-                                    node source-document nested-scope depth
-                                    (1+ element-depth) active-includes
-                                    active-macros)))
+                                   (if (eq policy :prune-children)
+                                       nil
+                                       (prepare-title-macros
+                                        node source-document nested-scope depth
+                                        (1+ element-depth) active-includes
+                                        active-macros))))
                             (multiple-value-bind
                                   (children selected-descendant-p)
                                 (if archive-headline-only-p
                                     (values nil nil)
-                                    (prepare-siblings
-                                     (node-children node) source-document
-                                     nested-scope depth (1+ element-depth)
-                                     active-includes
-                                     active-macros fragment-p))
+                                    (if (eq policy :prune-children)
+                                        (values nil nil)
+                                        (prepare-siblings
+                                         (node-children node) source-document
+                                         nested-scope depth (1+ element-depth)
+                                         active-includes
+                                         active-macros fragment-p)))
                               (if (or (not select-active-p) nested-scope
                                       selected-descendant-p)
                                   (values
@@ -1104,35 +1167,52 @@
                     (values nil nil))
                    ((and (eq type :keyword)
                          (string= (node-property node :key) "INCLUDE"))
-                    (prepare-include node source-document selected-scope depth
-                                     element-depth
-                                     active-includes active-macros))
+                    (if (eq policy :default)
+                        (prepare-include node source-document selected-scope depth
+                                         element-depth
+                                         active-includes active-macros)
+                        (values
+                         (list (%make-export-view
+                                :node node :children nil
+                                :source-document source-document))
+                         nil)))
                    ((eq type :keyword)
-                    (let ((key (string-upcase
-                                (or (node-property node :key) ""))))
-                      (export-validate-keywords
-                       (list (list node key (or (node-property node :value) "")))
-                       backend :fragment-p fragment-p)
-                      (if (and (eq backend :latex)
-                               (member key '("LATEX" "ATTR_LATEX")
-                                       :test #'string=))
-                          (values
-                           (list (%make-export-view
-                                  :node node :children nil
-                                  :payload
-                                  (list :operation
-                                        (export-node-operation type backend node))
-                                  :source-document source-document))
-                           nil)
-                          (values nil nil))))
+                    (if (and (consp policy) (eq (car policy) :unsupported))
+                        (values
+                         (list (%make-export-view
+                                :node node :children nil
+                                :source-document source-document))
+                         nil)
+                        (let ((key (string-upcase
+                                    (or (node-property node :key) ""))))
+                          (export-validate-keywords
+                           (list (list node key (or (node-property node :value) "")))
+                           backend :fragment-p fragment-p :ancestry ancestry)
+                          (if (member
+                               key
+                               (export-resolved-string-set
+                                ancestry
+                                #'%export-backend-descriptor-retained-keywords)
+                               :test #'string-equal)
+                              (values
+                               (list (%make-export-view
+                                      :node node :children nil
+                                      :source-document source-document))
+                               nil)
+                              (values nil nil)))))
                    ((eq type :macro)
-                    (prepare-macro node source-document selected-scope depth
-                                   element-depth
-                                   active-includes active-macros))
+                    (if (eq policy :default)
+                        (prepare-macro node source-document selected-scope depth
+                                       element-depth
+                                       active-includes active-macros)
+                        (values
+                         (list (%make-export-view
+                                :node node :children nil
+                                :source-document source-document))
+                         nil)))
                    (t
-                    (let* ((operation (export-node-operation type backend node))
-                           (children
-                             (unless (eq operation :omit)
+                    (let ((children
+                             (unless (eq policy :prune-children)
                                (nth-value
                                 0 (prepare-siblings
                                    (node-children node) source-document
@@ -1142,7 +1222,6 @@
                       (values
                        (list (%make-export-view
                               :node node :children children
-                              :payload (list :operation operation)
                               :source-document source-document))
                        nil))))))
              (prepare-siblings (nodes source-document selected-scope depth
@@ -1156,8 +1235,13 @@
                        do (cond
                             ((eq (node-type node) :src-block)
                              (check-limit limits :max-element-depth element-depth)
-                             (let* ((requested-mode
-                                      (export-src-export-mode node backend))
+                             (let* ((policy
+                                      (export-resolved-node-policy
+                                       ancestry (node-type node)))
+                                    (requested-mode
+                                      (unless (and (consp policy)
+                                                   (eq (car policy) :unsupported))
+                                        (export-src-export-mode node backend)))
                                     (results-node (first remaining))
                                     (adjacent-p
                                       (export-results-adjacent-p
@@ -1166,7 +1250,8 @@
                                    ;; Org drops adjacent results that the
                                    ;; mode does not export, so they must not
                                    ;; contribute footnotes or selection.
-                                   (when (and adjacent-p
+                                   (when (and (not (eq policy :prune-children))
+                                              adjacent-p
                                               (member requested-mode
                                                       '(:results :both)
                                                       :test #'eq))
@@ -1183,10 +1268,11 @@
                                    (push (%make-export-view
                                           :node node
                                           :children result-views
-                                          :payload (list :exports
-                                                         requested-mode
-                                                         :adjacent-results
-                                                         adjacent-p)
+                                          :payload (and requested-mode
+                                                        (list :exports
+                                                              requested-mode
+                                                              :adjacent-results
+                                                              adjacent-p))
                                           :source-document source-document)
                                          views)
                                    (when adjacent-p
@@ -1207,15 +1293,45 @@
                                       (list source-name)
                                       nil))
                  (root-views
-                   (prepare-siblings (node-children root) document
-                                     (not select-active-p) 0 1
-                                     active-includes nil nil)))
-            (%make-export-preparation
-             :document document :backend backend :metadata metadata :options options
-             :root-views root-views :toc (export-collect-toc root-views options)
-             :footnotes (export-collect-footnotes root-views backend)
-             :allow-raw-html allow-raw-html
-             :allow-raw-latex allow-raw-latex)))))))
+                  (prepare-siblings (node-children root) document
+                                    (not select-active-p) 0 1
+                                    active-includes nil nil)))
+            (when filter-context
+              (setf (%export-render-context-options filter-context) options
+                    (%export-render-context-root-views filter-context) root-views)
+              (let ((preparation
+                     (%export-render-context-preparation filter-context)))
+                (when (export-preparation-p preparation)
+                  (setf (export-preparation-document preparation) document
+                        (export-preparation-backend preparation) backend
+                        (export-preparation-metadata preparation) metadata
+                        (export-preparation-options preparation) options
+                        (export-preparation-root-views preparation) root-views)))
+              (setf root-views
+                    (export-apply-filter-stage
+                     (%export-render-context-backend filter-context)
+                     :parse-tree root-views filter-context
+                     :validator
+                     (lambda (filtered-views)
+                       (export-validate-filtered-root-views filtered-views limits))
+                     :expected-type 'list))
+              (setf (%export-render-context-root-views filter-context) root-views))
+            (let ((preparation
+                   (%make-export-preparation
+                    :document document :backend backend :metadata metadata :options options
+                    :root-views root-views :toc (export-collect-toc root-views options)
+                    :footnotes (export-collect-footnotes root-views backend)
+                    :allow-raw-html allow-raw-html
+                    :allow-raw-latex allow-raw-latex)))
+              (when filter-context
+                (setf (%export-render-context-root-views filter-context) root-views
+                      (%export-render-context-toc filter-context)
+                      (export-preparation-toc preparation)
+                      (%export-render-context-footnotes filter-context)
+                      (export-preparation-footnotes preparation)
+                      (%export-render-context-preparation filter-context) preparation)
+                (export-initialize-render-states filter-context))
+              preparation)))))))
 
 (defun export-collect-views (views)
   (labels ((collect (view)
@@ -1284,13 +1400,143 @@
                 "No renderer is available for this export backend"))
 
 (defun export-org (document backend
-                   &key include-resolver allow-raw-html allow-raw-latex
-                     (output-type :string) stream context)
+                            &key include-resolver allow-raw-html allow-raw-latex
+                            (output-type :string) stream context)
   "Export DOCUMENT with BACKEND and return its requested output representation."
-  (let* ((preparation
-           (export-prepare document backend :include-resolver include-resolver
-                           :allow-raw-html allow-raw-html
-                           :allow-raw-latex allow-raw-latex :context context))
-         (text (export-render-preparation preparation backend)))
-    (export-write-output text (document-limits document) output-type
-                         :stream stream :backend backend)))
+  (let* ((*export-output-check-counts* (make-hash-table))
+         (*export-current-export-phase* :input-validation)
+         (registry-snapshot
+          (progn
+            (unless (document-p document)
+              (error 'type-error :datum document :expected-type 'document))
+            (unless (keywordp backend)
+              (error 'type-error :datum backend :expected-type 'keyword))
+            (unless (export-backend-p backend)
+              (export-error backend :unknown-backend nil "Unknown export backend"))
+            (unless (or (null include-resolver) (functionp include-resolver))
+              (error 'type-error :datum include-resolver :expected-type '(or null function)))
+            (unless (member allow-raw-html '(nil t))
+              (error 'type-error :datum allow-raw-html :expected-type 'boolean))
+            (unless (member allow-raw-latex '(nil t))
+              (error 'type-error :datum allow-raw-latex :expected-type 'boolean))
+            (multiple-value-list (export-registry-snapshot backend))))
+         (descriptor (first registry-snapshot))
+         (ancestry (second registry-snapshot))
+         (root-descriptor (first ancestry))
+         (preparation-backend
+          (cond
+           ((null descriptor) backend)
+           ((and root-descriptor
+                 (%export-backend-descriptor-builtin-p root-descriptor))
+            (%export-backend-descriptor-name root-descriptor))
+           ((eq backend :html) backend)
+           (t :html)))
+         (caller-context (or context (make-export-context)))
+         (render-context
+          (and descriptor
+               (%make-export-render-context
+                :backend backend :document document
+                :metadata nil :options nil :limits nil
+                :root-views nil :toc nil :footnotes nil
+                :preparation
+                (%make-export-preparation
+                 :allow-raw-html allow-raw-html
+                 :allow-raw-latex allow-raw-latex)
+                :raw-output-options
+                (%export-backend-descriptor-raw-output-options descriptor)
+                :extensions nil :ancestry ancestry
+                :owner-backend backend :state nil :states nil)))
+         (preparation
+          (let ((*export-requested-backend* backend))
+            (export-prepare document preparation-backend
+                            :include-resolver include-resolver
+                            :allow-raw-html allow-raw-html
+                            :allow-raw-latex allow-raw-latex
+                            :context caller-context
+                            :filter-context render-context)))
+         (initialized-render-context render-context)
+         (text
+          (let ((*export-requested-backend* backend))
+            (if (and (%export-backend-descriptor-builtin-p descriptor)
+                     (null (%export-backend-descriptor-renderer descriptor))
+                     (null (%export-backend-descriptor-preamble-renderer descriptor))
+                     (null (%export-backend-descriptor-trailer-renderer descriptor))
+                     (null (%export-backend-descriptor-template descriptor)))
+                (export-render-preparation preparation backend)
+              (let* ((renderer-and-owner
+                      (multiple-value-list
+                       (export-render-context-renderer
+                        initialized-render-context)))
+                     (preamble-and-owner
+                      (multiple-value-list
+                       (export-render-context-preamble-renderer
+                        initialized-render-context)))
+                     (trailer-and-owner
+                      (multiple-value-list
+                       (export-render-context-trailer-renderer
+                        initialized-render-context)))
+                     (preamble-context
+                      (and (first preamble-and-owner)
+                           (export-context-for-owner
+                            initialized-render-context
+                            (second preamble-and-owner))))
+                     (preamble
+                      (export-run-renderer-stage
+                       (first preamble-and-owner) preamble-context ""
+                       (document-limits document) backend :preamble))
+                     (body-context
+                      (and (first renderer-and-owner)
+                           (export-context-for-owner
+                            initialized-render-context
+                            (second renderer-and-owner))))
+                     (body
+                      (let ((*export-current-export-phase* :body)
+                            (*export-current-output-offset*
+                              (length preamble)))
+                        (export-check-output-stage
+                         (export-check-render-string
+                          (if (first renderer-and-owner)
+                              (funcall (first renderer-and-owner) body-context)
+                            (export-render-preparation
+                             preparation preparation-backend)))
+                         (document-limits document) backend :body
+                         :base-offset (length preamble))))
+                     (body
+                      (export-run-filter-stage
+                       backend :body body initialized-render-context
+                       (document-limits document) :body
+                       :base-offset (length preamble)))
+                     (trailer-context
+                      (and (first trailer-and-owner)
+                           (export-context-for-owner
+                            initialized-render-context
+                            (second trailer-and-owner))))
+                     (trailer
+                      (export-run-renderer-stage
+                       (first trailer-and-owner) trailer-context ""
+                       (document-limits document) backend :trailer
+                       :base-offset (+ (length preamble) (length body))))
+                     (template-and-owner
+                      (multiple-value-list
+                       (export-render-context-template
+                        initialized-render-context)))
+                     (template-context
+                      (and (first template-and-owner)
+                           (export-context-for-owner
+                            initialized-render-context
+                            (second template-and-owner))))
+                     (output
+                      (export-run-renderer-stage
+                       (and (first template-and-owner)
+                            (lambda (ignored-context)
+                              (declare (ignore ignored-context))
+                              (funcall (first template-and-owner)
+                                       template-context preamble body trailer)))
+                       initialized-render-context
+                       (concatenate 'string preamble body trailer)
+                       (document-limits document) backend :template)))
+                (export-run-filter-stage
+                 backend :final-output output initialized-render-context
+                 (document-limits document) :final-output))))))
+         (export-write-output text (document-limits document) output-type
+                              :stream stream :backend backend)))
