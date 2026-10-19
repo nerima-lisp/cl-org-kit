@@ -339,10 +339,18 @@ missing parent directories.")
               :to-equal "Return a copy of ENTRY's text string or octet-vector content.")
       (expect (documentation 'apply-write-plan 'function)
               :to-equal
-              "Validate PLAN in full, then atomically replace each file below ROOT.
-All paths are relative POSIX paths. Every entry and limit is checked before
-directory or file creation. Each file uses a same-directory temporary file and
-rename; a multi-file plan is not transactional.")))
+              "Validate PLAN in full, then replace each target below ROOT through a
+same-directory temporary file and rename. ROOT must name an existing
+directory; a symlink used as ROOT resolves to its target. All paths are relative
+POSIX paths. Every entry and limit is checked before directory or file creation.
+Returns normalized relative paths in plan order; a multi-file plan is not
+transactional. The caller must prevent other actors from renaming or replacing
+path components during application. The library rejects absolute paths, `..`,
+NUL, and symlink components below the resolved root. After each write, it
+compares the opened parent's device and inode with a root-relative re-open. That
+check reports a missing or different parent. A path restored before the check
+is not detected. The check cannot prevent a rename during a write or after the
+check.")))
 
   (it "pins the E public API documentation"
     (with-soft-assertions

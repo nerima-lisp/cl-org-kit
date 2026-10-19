@@ -700,7 +700,7 @@
              (expect (org-write-plan-error-reason condition)
                      :to-be :containment-lost))
            (expect rename-calls :to-be 1)
-           (expect (probe-file (write-plan-test-path outside-parent "first.txt"))
+           (expect (probe-file (write-plan-test-path outside "parent/first.txt"))
                    :to-be-truthy)
            (expect (probe-file first-target) :to-be nil)
            (expect (probe-file later-target) :to-be nil))))))
@@ -882,9 +882,11 @@
               (parent-fd nil)
               (temporary-name nil)
               (temporary-fd nil)
+              (octets (make-array 1 :element-type '(unsigned-byte 8)
+                                  :initial-element 65))
               (record
-                (list (make-write-plan-entry "target.txt" #(65))
-                      "target.txt" '("target.txt") #(65)
+                (list (make-write-plan-entry "target.txt" octets)
+                      "target.txt" '("target.txt") octets
                       "target.txt" '("target.txt"))))
          (labels ((record-openat (fd)
                     (push (sb-posix:fcntl fd sb-posix:f-getfd) openat-flags)
