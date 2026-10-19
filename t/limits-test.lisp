@@ -5,6 +5,8 @@
   '((:max-input-length 67108864)
     (:max-heading-depth 256)
     (:max-element-depth 512)
+    (:max-search-regex-length 4096)
+    (:max-search-work 67108864)
     (:max-object-depth 128)
     (:max-node-count 4194304)
     (:max-output-length 67108864)

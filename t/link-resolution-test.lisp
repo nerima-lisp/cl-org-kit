@@ -89,6 +89,75 @@
         (expect (link-resolution-candidates unresolved) :to-equal nil)
         (expect (link-resolution-status empty-documents) :to-be :unresolved))))
 
+  (it "matches targets and names before headings and normalizes heading text like Org"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Target Match~%<<Target Match>>~%* Named Match~%#+NAME: Named Match~%#+BEGIN_EXAMPLE~%named~%#+END_EXAMPLE~%* Section   Title [2/4]~%* Progress Report [75%]~%")))
+           (target-link (nth-value 0
+                                   (link-resolution-test-parse-link
+                                    "[[target   match]]")))
+           (name-link (nth-value 0
+                                 (link-resolution-test-parse-link
+                                  "[[named  match]]")))
+           (heading-link (nth-value 0
+                                    (link-resolution-test-parse-link
+                                     "[[section title]]")))
+           (starred-link (nth-value 0
+                                    (link-resolution-test-parse-link
+                                     "[[*Section title]]")))
+           (progress-link (nth-value 0
+                                     (link-resolution-test-parse-link
+                                      "[[progress report]]")))
+           (target-result (resolve-link target-link document))
+           (name-result (resolve-link name-link document))
+           (heading-result (resolve-link heading-link document))
+           (starred-result (resolve-link starred-link document))
+           (progress-result (resolve-link progress-link document)))
+      (with-soft-assertions
+        (expect (node-type (link-resolution-target target-result))
+                :to-be :target)
+        (expect (node-property (link-resolution-target name-result) :name)
+                :to-equal "Named Match")
+        (expect (node-type (link-resolution-target heading-result))
+                :to-be :headline)
+        (expect (node-type (link-resolution-target starred-result))
+                :to-be :headline)
+        (expect (node-property (link-resolution-target starred-result) :raw-value)
+                :to-equal "Section   Title [2/4]")
+        (expect (node-property (link-resolution-target progress-result) :raw-value)
+                :to-equal "Progress Report [75%]"))))
+
+  (it "matches CUSTOM_ID values with exact case and uses one index for repeated resolution"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Target~%:PROPERTIES:~%:CUSTOM_ID: Case-Sensitive~%:END:~%[[#case-sensitive]]")))
+           (wrong-case-link (link-resolution-test-link document "custom-id"))
+           (index (org-kit::make-link-resolution-index document))
+           (wrong-case-result (org-kit::resolve-link-with-index
+                               wrong-case-link index))
+           (repeated-result (org-kit::resolve-link-with-index
+                             wrong-case-link index)))
+      (with-soft-assertions
+        (expect (link-resolution-status wrong-case-result) :to-be :unresolved)
+        (expect (link-resolution-status repeated-result) :to-be :unresolved))))
+
+  (it "reports consistent document errors from link and ID indexing"
+    (let* ((link (nth-value 0 (link-resolution-test-parse-link "[[id:missing]]")))
+           (documents (list (parse-org "* Target") 42))
+           (link-error (link-resolution-test-catch-error
+                        (lambda () (resolve-link link documents))))
+           (id-error (link-resolution-test-catch-error
+                      (lambda () (make-org-id-index documents)))))
+      (with-soft-assertions
+        (expect (typep link-error 'org-id-error) :to-be t)
+        (expect (typep id-error 'org-id-error) :to-be t)
+        (when (and (typep link-error 'org-id-error)
+                   (typep id-error 'org-id-error))
+          (expect (org-id-error-reason link-error)
+                  :to-be (org-id-error-reason id-error))))))
+
   (it "uses the file resolver and handles all supported file search options"
     (let* ((file-document
              (parse-org
@@ -138,6 +207,30 @@
           (expect (document-source-name (link-resolution-target source-result))
                   :to-equal "manual.org")))))
 
+  (it "reuses a per-document search index for repeated file links"
+    (let* ((main-document (parse-org "[[file:manual.org::<<spot>>]]"))
+           (link (link-resolution-test-link main-document))
+           (file-document (parse-org "<<spot>>"))
+           (index (org-kit::make-link-resolution-index main-document))
+           (resolver (lambda (path parent-source)
+                       (declare (ignore path parent-source))
+                       file-document))
+           (first-result (org-kit::resolve-link-with-index
+                          link index :file-resolver resolver))
+           (cached-index
+             (gethash file-document
+                      (org-kit::%link-resolution-index-document-indices index)))
+           (second-result (org-kit::resolve-link-with-index
+                           link index :file-resolver resolver)))
+      (with-soft-assertions
+        (expect (link-resolution-status first-result) :to-be :resolved)
+        (expect (node-type (link-resolution-target first-result)) :to-be :target)
+        (expect cached-index :to-be-truthy)
+        (expect (gethash file-document
+                         (org-kit::%link-resolution-index-document-indices index))
+                :to-be cached-index)
+        (expect (link-resolution-status second-result) :to-be :resolved))))
+
   (it "searches the current document for file links with an empty path"
     (let* ((document
              (parse-org
@@ -174,6 +267,29 @@
         (when (typep invalid-link 'org-link-resolution-error)
           (expect (org-link-resolution-error-reason invalid-link)
                   :to-be :invalid-link-node)))))
+
+  (it "enforces the dedicated file search regex length limit"
+    (let* ((document
+             (parse-org "* Target"
+                        :limits (make-limits :max-search-regex-length 3)))
+           (link (nth-value 0
+                            (link-resolution-test-parse-link
+                             "[[file:manual.org::/needle/]]")))
+           (condition
+             (link-resolution-test-catch-error
+              (lambda ()
+                (resolve-link link document
+                              :file-resolver
+                              (lambda (path parent-source)
+                                (declare (ignore path parent-source))
+                                document))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-search-regex-length)
+          (expect (org-resource-limit-error-limit condition) :to-be 3)
+          (expect (org-resource-limit-error-actual condition) :to-be 6)))))
 
   (it "reports missing, absent and invalid file resolver results explicitly"
     (let* ((document (parse-org "[[file:missing.org]]" :source-name "main.org"))
@@ -258,4 +374,29 @@
           (expect (org-link-resolution-error-reason condition)
                   :to-be :unsupported-link-function)
           (expect (org-link-resolution-error-context condition)
-                  :to-equal "calc:input"))))))
+                  :to-equal "calc:input")))))
+  (it "enforces cumulative regexp search work per indexed document"
+    (let* ((main-document (parse-org "[[file:manual.org::/.*/]]"))
+           (link (link-resolution-test-link main-document))
+           (file-document
+             (parse-org "* Alpha"
+                        :limits (make-limits :max-search-work 5)))
+           (index (org-kit::make-link-resolution-index main-document))
+           (resolver (lambda (path parent-source)
+                       (declare (ignore path parent-source))
+                       file-document))
+           (first-result (org-kit::resolve-link-with-index
+                          link index :file-resolver resolver))
+           (condition
+             (link-resolution-test-catch-error
+              (lambda ()
+                (org-kit::resolve-link-with-index
+                 link index :file-resolver resolver)))))
+      (with-soft-assertions
+        (expect (link-resolution-status first-result) :to-be :resolved)
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-search-work)
+          (expect (org-resource-limit-error-limit condition) :to-be 5)
+          (expect (org-resource-limit-error-actual condition) :to-be 10))))))

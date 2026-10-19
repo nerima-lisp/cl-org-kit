@@ -4,6 +4,7 @@
 (defstruct (export-html-state (:constructor %make-export-html-state))
   preparation
   limits
+  resolution-index
   (output (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
   verse-output-p
   (explicit-references (make-hash-table :test #'eq))
@@ -825,20 +826,28 @@
                (push child stack)))
     (nreverse documents)))
 
+(defun export-html-link-resolution-index (state node)
+  (or (export-html-state-resolution-index state)
+      (let* ((preparation (export-html-state-preparation state))
+             (documents (if preparation
+                            (export-html-preparation-documents preparation)
+                            nil))
+             (document (node-document node)))
+        (setf (export-html-state-resolution-index state)
+              (make-link-resolution-index
+               (if (and document (not (member document documents :test #'eq)))
+                   (append documents (list document))
+                   documents))))))
+
 (defun export-html-link-resolution-reference (state node)
-  (let* ((preparation (export-html-state-preparation state))
-         (source-documents (if preparation
-                               (export-html-preparation-documents preparation)
-                               (let ((document (node-document node)))
-                                 (if document (list document) nil))))
-         (node-source-document (node-document node))
-         (documents (if (and node-source-document
-                             (not (member node-source-document source-documents
-                                          :test #'eq)))
-                        (append source-documents (list node-source-document))
-                        source-documents))
-         (resolution (resolve-link node documents)))
-    (loop for candidate in (link-resolution-candidates resolution)
+  (let ((resolution (handler-case
+                        (resolve-link-with-index
+                         node (export-html-link-resolution-index state node))
+                        (org-link-resolution-error () nil)
+                        (org-id-error () nil)
+                        (org-resource-limit-error () nil))))
+    (loop for candidate in (and resolution
+                                (link-resolution-candidates resolution))
           for reference = (gethash candidate
                                    (export-html-state-references state))
           when reference

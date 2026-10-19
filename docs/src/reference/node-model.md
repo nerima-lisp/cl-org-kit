@@ -143,16 +143,19 @@ node category. `#+CALL:` lines are `:babel-call`.
 ## Resource limits
 
 `make-limits` returns resource ceilings used by parsing, editing, queries,
-agendas, clock summaries, table operations, and export. An operation that
-exceeds an applicable ceiling signals `org-resource-limit-error` with the limit
-keyword, configured value, and measured amount. Limits passed to `parse-org`
-are kept on the document and reused by its queries, edits, and exporters.
+link resolution, agendas, clock summaries, table operations, and export. An
+operation that exceeds an applicable ceiling signals
+`org-resource-limit-error` with the limit keyword, configured value, and
+measured amount. Limits passed to `parse-org` are kept on the document and
+reused by its queries, edits, and exporters.
 
 | Keyword | Default | Bounds |
 |---|---|---|
 | `:max-input-length` | 64 MiB | input octets before decoding, characters otherwise |
 | `:max-heading-depth` | 256 | headline level |
 | `:max-element-depth` | 512 | element nesting |
+| `:max-search-regex-length` | 4,096 characters | regular-expression search pattern length |
+| `:max-search-work` | 64 Mi characters | candidate text submitted to regular-expression searches per document and link-resolution index |
 | `:max-object-depth` | 128 | object nesting |
 | `:max-node-count` | 4 Mi nodes | nodes in one document |
 | `:max-output-length` | 64 Mi characters | characters emitted |

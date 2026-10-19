@@ -7,6 +7,8 @@
   (max-input-length 0 :read-only t)
   (max-heading-depth 0 :read-only t)
   (max-element-depth 0 :read-only t)
+  (max-search-regex-length 0 :read-only t)
+  (max-search-work 0 :read-only t)
   (max-object-depth 0 :read-only t)
   (max-node-count 0 :read-only t)
   (max-output-length 0 :read-only t)
@@ -35,6 +37,8 @@
 (defun make-limits (&key (max-input-length (* 64 1024 1024))
                          (max-heading-depth 256)
                          (max-element-depth 512)
+                         (max-search-regex-length 4096)
+                         (max-search-work (* 64 1024 1024))
                          (max-object-depth 128)
                          (max-node-count (* 4 1024 1024))
                          (max-output-length (* 64 1024 1024))
@@ -58,21 +62,23 @@
 
 Input length counts octets or decoded characters; output length counts Unicode
 characters or encoded octets. Node counts and heading, element, and object
-depths are measured per document. Agenda entries and repeats count generated
+depths are measured per document. Search regex length is measured in characters.
+Regex search work counts candidate text characters cumulatively per searched
+document and link-resolution index. Agenda entries and repeats count generated
 results per agenda call, and agenda ranges use inclusive days. Export character
 and node budgets count cumulative expansion per export call, with the root at
 depth zero. Formula token, AST-depth, precision, and exponent limits are per
 formula; work is per table recalculation. Write-plan entries count files in one
 application, and write-plan bytes count combined UTF-8 string content and
 octet-vector content. Write-plan path bytes count UTF-8 octets in each submitted
-path, and path depth counts non-empty components other than dot.
-
-Agenda, repeat, export, and formula limits are definitions pending downstream
-consumers; these definitions do not enforce limits by themselves. Each keyword
+path, and path depth counts non-empty components other than dot. Each keyword
 overrides its corresponding default with a non-negative integer."
   (%make-limits :max-input-length (checked-limit-value max-input-length)
                 :max-heading-depth (checked-limit-value max-heading-depth)
                 :max-element-depth (checked-limit-value max-element-depth)
+                :max-search-regex-length
+                (checked-limit-value max-search-regex-length)
+                :max-search-work (checked-limit-value max-search-work)
                 :max-object-depth (checked-limit-value max-object-depth)
                 :max-node-count (checked-limit-value max-node-count)
                 :max-output-length (checked-limit-value max-output-length)
@@ -100,7 +106,6 @@ overrides its corresponding default with a non-negative integer."
                 (checked-limit-value max-write-plan-path-depth)))
 
 (defun limits-p (object)
-  "Return true when OBJECT is a LIMITS object."
   (%limits-p object))
 
 (defun limit-value (limits name)
@@ -109,6 +114,8 @@ overrides its corresponding default with a non-negative integer."
     (:max-input-length (%limits-max-input-length limits))
     (:max-heading-depth (%limits-max-heading-depth limits))
     (:max-element-depth (%limits-max-element-depth limits))
+    (:max-search-regex-length (%limits-max-search-regex-length limits))
+    (:max-search-work (%limits-max-search-work limits))
     (:max-object-depth (%limits-max-object-depth limits))
     (:max-node-count (%limits-max-node-count limits))
     (:max-output-length (%limits-max-output-length limits))

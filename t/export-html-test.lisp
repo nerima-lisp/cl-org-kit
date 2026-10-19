@@ -827,6 +827,51 @@
                (setf search-start (+ position (length "href=\"#visible-id\""))))
       (expect href-count :to-be 4)))
 
+  (it "builds a link resolution index once for an HTML export"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+OPTIONS: toc:nil num:nil~%* Heading~%[[Heading]] [[*Heading]] [[file:::*Heading]]")))
+           (symbol (find-symbol "MAKE-LINK-RESOLUTION-INDEX" "ORG-KIT"))
+           (original (symbol-function symbol))
+           (calls 0)
+           (output nil))
+      (unwind-protect
+           (progn
+             (setf (symbol-function symbol)
+                   (lambda (documents)
+                     (incf calls)
+                     (funcall original documents)))
+             (setf output (export-org document :html)))
+        (setf (symbol-function symbol) original))
+      (with-soft-assertions
+        (expect (typep output 'string) :to-be t)
+        (expect calls :to-be 1))))
+
+  (it "exports links whose resolution is unsupported, malformed, or over budget"
+    (let ((documents
+            (list
+             (parse-org
+              (format nil "#+LINK: f %(g)~%~%[[f:x]]"))
+             (parse-org "[[file:::/[/]]")
+             (parse-org
+              (format nil
+                      "* Empty ID~%:PROPERTIES:~%:ID:~%:END:~%~%[[id:missing]]"))
+             (parse-org
+              (format nil
+                      "#+OPTIONS: toc:nil num:nil~%* Heading~%[[file:::/./]] [[file:::/./]]")
+              :limits (make-limits :max-search-work 7)))))
+      (dolist (document documents)
+        (let ((output nil)
+              (condition nil))
+          (handler-case
+              (setf output (export-org document :html))
+            (error (caught)
+              (setf condition caught)))
+          (with-soft-assertions
+            (expect condition :to-be nil)
+            (expect (typep output 'string) :to-be t))))))
+
   (it "renders nested tables of contents and block footnote children"
     (let* ((toc
              (export-org
