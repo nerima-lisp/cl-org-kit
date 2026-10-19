@@ -1,7 +1,12 @@
 ;;;; src/write-plan.lisp
 (in-package #:org-kit)
 
-(defconstant +write-plan-fd-cloexec+ 1)
+(defconstant +write-plan-f-dupfd-cloexec+
+  (or (let ((symbol (find-symbol "F-DUPFD-CLOEXEC" :sb-posix)))
+        (and symbol (boundp symbol) (symbol-value symbol)))
+      #+darwin 67
+      #+linux 1030
+      (error "F_DUPFD_CLOEXEC is not defined for this platform.")))
 
 (defconstant +write-plan-o-cloexec+
   (or (let ((symbol (find-symbol "O-CLOEXEC" :sb-posix)))
@@ -406,17 +411,7 @@ missing parent directories."
    "openat"))
 
 (defun write-plan-duplicate-close-on-exec (fd)
-  (let ((duplicate-fd (sb-posix:dup fd)))
-    (handler-case
-        (progn
-          (sb-posix:fcntl
-           duplicate-fd sb-posix:f-setfd
-           (logior (sb-posix:fcntl duplicate-fd sb-posix:f-getfd)
-                   +write-plan-fd-cloexec+))
-          duplicate-fd)
-      (error (condition)
-        (ignore-errors (sb-posix:close duplicate-fd))
-        (error condition)))))
+  (sb-posix:fcntl fd +write-plan-f-dupfd-cloexec+ 0))
 
 (defun write-plan-root-components (root)
   (let ((start 1)
