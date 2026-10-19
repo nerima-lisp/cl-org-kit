@@ -737,7 +737,9 @@
                   (export-single-keyword-value
                    records "LATEX_CLASS_OPTIONS" :latex))))
          (headers (and allow-raw-latex
-                       (export-latex-keyword-values document "LATEX_HEADER")))
+                       (append
+                        (export-latex-keyword-values document "LATEX_HEADER")
+                        (export-latex-keyword-values document "LATEX_HEADER_EXTRA"))))
          (metadata (export-preparation-metadata preparation))
          (title (getf metadata :title))
          (author (getf metadata :author))

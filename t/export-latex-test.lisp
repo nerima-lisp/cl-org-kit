@@ -331,7 +331,7 @@
                 "#+LATEX_CLASS: report"
                 "#+LATEX_CLASS_OPTIONS: 10pt"
                 "#+LATEX_HEADER: \\usepackage{amsmath}"
-                "#+LATEX_HEADER: \\input{/etc/passwd}"))
+                "#+LATEX_HEADER_EXTRA: \\input{/etc/passwd}"))
              (header-expected
                (format nil "~{~A~%~}"
                        '("\\documentclass[10pt]{report}"
@@ -589,9 +589,12 @@
         (expect (search "\\maketitle" output) :to-be nil))))
 
   (it "rejects global LaTeX keywords in included fragments"
-    (let* ((fragments '("#+LATEX_CLASS: article"
-                        "#+LATEX_CLASS_OPTIONS: [10pt]"
-                        "#+LATEX_HEADER: \\usepackage{amsmath}"))
+    (let* ((fragments
+             (list
+              "#+LATEX_CLASS: article"
+              "#+LATEX_CLASS_OPTIONS: [10pt]"
+              "#+LATEX_HEADER: \\usepackage{amsmath}"
+              "#+LATEX_HEADER_EXTRA: extra"))
            (conditions
              (mapcar
               (lambda (fragment)

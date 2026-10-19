@@ -824,7 +824,7 @@
       (cond
         ((and (eq backend :latex)
               (member key '("LATEX_CLASS" "LATEX_CLASS_OPTIONS"
-                             "LATEX_HEADER")
+                             "LATEX_HEADER" "LATEX_HEADER_EXTRA")
                       :test #'string=))
          (when fragment-p
            (export-unsupported-syntax
