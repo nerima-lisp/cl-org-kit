@@ -214,4 +214,9 @@
    #:org-export-unsupported-syntax-position
    #:org-export-unsupported-syntax-feature
    ;; Unit E2 HTML export
-   #:export-org))
+   #:export-org
+   ;; Org crypt
+   #:org-crypt-error #:org-crypt-error-reason #:org-crypt-error-cause
+   #:crypt-encrypt-entry #:crypt-decrypt-entry
+   #:crypt-encrypt-entries #:crypt-decrypt-entries
+))

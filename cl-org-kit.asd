@@ -95,7 +95,9 @@
                (:file "export-ascii")
                ;; Unit E5 LaTeX export
                (:file "export-latex")
-               (:file "agenda"))
+               (:file "agenda")
+               (:file "crypt")
+)
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -187,7 +189,9 @@
                ;; Unit E4 ASCII export
                (:file "export-ascii-test")
                ;; Unit E5 LaTeX export
-               (:file "export-latex-test"))
+               (:file "export-latex-test")
+               (:file "crypt-test")
+)
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)

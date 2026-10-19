@@ -15,11 +15,12 @@ The 0.1.0 public API includes:
 - Org pipe-table formatting, row and column editing, stable sorting, and
   supported formula recalculation
 - HTML, GitHub Flavored Markdown, and ASCII export
+- Org crypt subtree encryption and decryption through caller-supplied callbacks
 
 Start with [Getting Started](getting-started.md), then see the
 [TODO and Agenda](guides/todo-agenda.md), [Clock](guides/clock.md),
 [Structure Edits](guides/structure-edits.md), [Tables](guides/tables.md),
 [Links](guides/links.md), [Org IDs](guides/org-id.md), [Babel](guides/babel.md),
-and [Export](guides/export.md) guides. The
+[Export](guides/export.md), and [Org crypt](guides/crypt.md) guides. The
 [API stability scope](reference/api-stability.md) describes what 0.1.0 treats
 as public. Contributor workflow is in [Development](project/development.md).

@@ -221,7 +221,12 @@
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-POSITION"
     "ORG-EXPORT-UNSUPPORTED-SYNTAX-FEATURE"
     ;; Unit E2 HTML export
-    "EXPORT-ORG")
+    "EXPORT-ORG"
+    ;; Org crypt
+    "ORG-CRYPT-ERROR" "ORG-CRYPT-ERROR-REASON" "ORG-CRYPT-ERROR-CAUSE"
+    "CRYPT-ENCRYPT-ENTRY" "CRYPT-DECRYPT-ENTRY"
+    "CRYPT-ENCRYPT-ENTRIES" "CRYPT-DECRYPT-ENTRIES"
+)
   "Every symbol the ORG-KIT package exports. The node contract is documented in
 docs/src/reference/node-model.md.")
 

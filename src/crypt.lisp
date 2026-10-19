@@ -1,0 +1,445 @@
+;;;; Format-preserving org-crypt transformations.
+(in-package #:org-kit)
+
+(defparameter *crypt-begin-marker* "-----BEGIN PGP MESSAGE-----")
+(defparameter *crypt-end-marker* "-----END PGP MESSAGE-----")
+
+(defun crypt-headlines (document)
+  (let ((headlines '()))
+    (map-nodes (lambda (node)
+                 (when (eq (node-type node) :headline)
+                   (push node headlines)))
+               (document-root document))
+    (nreverse headlines)))
+
+(defun crypt-find-headline-at (document position)
+  (find position (crypt-headlines document)
+        :key #'node-post-affiliated :test #'=))
+
+(defun crypt-line-bounds (source start limit)
+  (let* ((newline (position #\Newline source :start start :end limit))
+         (line-end (or newline limit))
+         (content-end (if (and newline (> line-end start)
+                               (char= (char source (1- line-end)) #\Return))
+                          (1- line-end)
+                          line-end)))
+    (values content-end (if newline (1+ newline) limit))))
+
+(defun crypt-horizontal-space-p (character)
+  (find character '(#\Space #\Tab)))
+
+(defun crypt-blank-line-p (line)
+  (every #'crypt-horizontal-space-p line))
+
+(defun crypt-trim-horizontal (line)
+  (string-trim '(#\Space #\Tab) line))
+
+(defun crypt-planning-line-p (line)
+  (let ((line (string-left-trim '(#\Space #\Tab) line)))
+    (some (lambda (prefix)
+            (and (>= (length line) (length prefix))
+                 (string-equal line prefix :end1 (length prefix))))
+          '("DEADLINE:" "SCHEDULED:" "CLOSED:"))))
+
+(defun crypt-clock-line-p (line)
+  (let ((line (string-left-trim '(#\Space #\Tab) line)))
+    (and (>= (length line) 6)
+         (string-equal line "CLOCK:" :end1 6))))
+
+(defun crypt-drawer-end (source start limit)
+  (loop with cursor = start
+        while (< cursor limit)
+        do (multiple-value-bind (line-end next)
+               (crypt-line-bounds source cursor limit)
+             (when (string-equal (crypt-trim-horizontal
+                                  (subseq source cursor line-end))
+                                 ":END:")
+               (return-from crypt-drawer-end next))
+             (setf cursor next))
+        finally (return nil)))
+
+(defun crypt-leading-metadata-end (document heading)
+  (let* ((source (document-text document))
+         (headline-end (nth-value 1
+                                  (crypt-line-bounds
+                                   source (node-post-affiliated heading)
+                                   (length source))))
+         (position headline-end)
+         (limit (length source)))
+    (loop while (< position limit)
+          do (when (crypt-find-headline-at document position)
+               (return position))
+             (multiple-value-bind (line-end next)
+                 (crypt-line-bounds source position limit)
+               (let* ((line (subseq source position line-end))
+                      (trimmed (crypt-trim-horizontal line))
+                      (drawer-end
+                        (cond ((string-equal trimmed ":PROPERTIES:")
+                               (crypt-drawer-end source next limit))
+                              ((string-equal trimmed ":LOGBOOK:")
+                               (crypt-drawer-end source next limit)))))
+                 (cond ((crypt-blank-line-p line)
+                        (setf position next))
+                       (drawer-end
+                        (setf position drawer-end))
+                       ((or (crypt-planning-line-p line)
+                            (crypt-clock-line-p line))
+                        (setf position next))
+                       (t (return position)))))
+          finally (return position))))
+
+(defun crypt-subtree-end (document heading)
+  (let* ((source (document-text document))
+         (position (node-post-affiliated heading))
+         (level (node-property heading :level))
+         (next-heading
+           (find-if (lambda (candidate)
+                      (and (> (node-post-affiliated candidate) position)
+                           (<= (node-property candidate :level) level)))
+                    (crypt-headlines document)))
+         (limit (if next-heading (node-begin next-heading) (length source)))
+         (cursor position)
+         (last-content-end position))
+    (loop while (< cursor limit)
+          do (multiple-value-bind (line-end next)
+                 (crypt-line-bounds source cursor limit)
+               (unless (crypt-blank-line-p
+                        (subseq source cursor line-end))
+                 (setf last-content-end line-end))
+               (setf cursor next)))
+    last-content-end))
+
+(defun crypt-entry-payload-span (document heading)
+  (let ((start (crypt-leading-metadata-end document heading))
+        (end (crypt-subtree-end document heading)))
+    (values start (max start end))))
+
+(defun crypt-armor-line-kind (source start limit)
+  (multiple-value-bind (line-end next)
+      (crypt-line-bounds source start limit)
+    (declare (ignore next))
+    (let* ((line (subseq source start line-end))
+           (indent-end (position-if-not #'crypt-horizontal-space-p line))
+           (indent-end (or indent-end (length line)))
+           (marker (subseq line indent-end)))
+      (cond ((string= marker *crypt-begin-marker*) :begin)
+            ((string= marker *crypt-end-marker*) :end)
+            (t nil)))))
+
+(defun crypt-headline-at-line-p (document position)
+  (not (null (crypt-find-headline-at document position))))
+
+(defun crypt-find-armor-span (document start end)
+  (let ((source (document-text document)))
+    (when (and (< start end)
+               (eq (crypt-armor-line-kind source start end) :begin))
+      (multiple-value-bind (first-line-end cursor)
+          (crypt-line-bounds source start end)
+        (declare (ignore first-line-end))
+        (loop while (< cursor end)
+              do (when (crypt-headline-at-line-p document cursor)
+                   (return-from crypt-find-armor-span nil))
+                 (multiple-value-bind (line-end next)
+                     (crypt-line-bounds source cursor end)
+                   (when (eq (crypt-armor-line-kind source cursor end) :end)
+                     (return-from crypt-find-armor-span
+                       (values start line-end)))
+                   (setf cursor next))
+              finally (return nil))))))
+
+(defun crypt-remove-armor-indentation (source start end)
+  (with-output-to-string (output)
+    (loop with cursor = start
+          while (< cursor end)
+          do (multiple-value-bind (line-end next)
+                 (crypt-line-bounds source cursor end)
+               (let ((indent-end cursor))
+                 (loop while (and (< indent-end line-end)
+                                  (crypt-horizontal-space-p
+                                   (char source indent-end)))
+                       do (incf indent-end))
+                 (write-string source output :start indent-end :end line-end)
+                 (write-string source output :start line-end :end next))
+               (setf cursor next)))))
+
+(defun crypt-heading-line-level (line)
+  (let ((length (length line)))
+    (loop for position from 0 below length
+          while (char= (char line position) #\*)
+          finally (return
+                    (and (plusp position)
+                         (< position length)
+                         (crypt-horizontal-space-p (char line position))
+                         position)))))
+
+(defun crypt-plaintext-heading-shift (plaintext heading-level)
+  (let ((cursor 0)
+        (minimum-level nil)
+        (heading-count 0))
+    (loop while (< cursor (length plaintext))
+          do (multiple-value-bind (line-end next)
+                 (crypt-line-bounds plaintext cursor (length plaintext))
+               (let ((level (crypt-heading-line-level
+                             (subseq plaintext cursor line-end))))
+                 (when level
+                   (incf heading-count)
+                   (setf minimum-level (if minimum-level
+                                           (min minimum-level level)
+                                           level))))
+               (setf cursor next)))
+    (let ((shift (if (and minimum-level (<= minimum-level heading-level))
+                     (1+ (- heading-level minimum-level))
+                     0)))
+      (values shift heading-count))))
+
+(defun crypt-shift-plaintext-headings (document start end plaintext heading-level)
+  (multiple-value-bind (shift heading-count)
+      (crypt-plaintext-heading-shift plaintext heading-level)
+    (when (plusp shift)
+      (let* ((source (document-text document))
+             (new-length (+ (- (length source) (- end start))
+                            (length plaintext) (* shift heading-count))))
+        (check-limit (document-limits document) :max-output-length new-length)
+      (return-from crypt-shift-plaintext-headings
+        (with-output-to-string (output)
+          (loop with cursor = 0
+                while (< cursor (length plaintext))
+                do (multiple-value-bind (line-end next)
+                       (crypt-line-bounds plaintext cursor (length plaintext))
+                     (let* ((line (subseq plaintext cursor line-end))
+                            (level (crypt-heading-line-level line)))
+                       (when level
+                         (loop repeat shift do (write-char #\* output)))
+                       (write-string line output)
+                       (write-string plaintext output
+                                     :start line-end :end next))
+                     (setf cursor next)))))))
+    plaintext))
+
+(defun crypt-signal-callback-failure (condition)
+  (error 'org-crypt-error
+         :message "Org crypt callback failed"
+         :reason :callback-failed
+         :cause condition))
+
+(defun crypt-invoke (registry kind text)
+  (handler-case
+      (let ((result (invoke-callback registry kind "org-crypt" (copy-seq text))))
+        (unless (stringp result)
+          (error 'org-crypt-error
+                 :message "Org crypt callback returned a non-string value"
+                 :reason :invalid-callback-result))
+        result)
+    (org-callback-error (condition)
+      (error 'org-crypt-error
+             :message (if (eq (org-callback-error-reason condition) :unregistered)
+                          "Org crypt callback is not registered"
+                          "Org crypt callback failed")
+             :reason (if (eq (org-callback-error-reason condition) :unregistered)
+                         :missing-callback
+                         :callback-failed)
+             :cause condition))
+    (org-crypt-error (condition) (error condition))
+    (error (condition) (crypt-signal-callback-failure condition))))
+
+(defun crypt-check-document-and-registry (document registry)
+  (unless (document-p document)
+    (error 'type-error :datum document :expected-type 'document))
+  (unless (callback-registry-p registry)
+    (error 'type-error :datum registry :expected-type 'callback-registry)))
+
+(defun crypt-check-output-length (document start end replacement)
+  (check-limit (document-limits document) :max-output-length
+               (+ (- (length (document-text document)) (- end start))
+                  (length replacement))))
+
+(defun crypt-apply-patches-result (document patches)
+  (let* ((prepared (edit-prepare-patches document patches))
+         (updated-source
+           (edit-splice-source (edit-prepared-patches-source prepared)
+                               (edit-prepared-patches-patches prepared)))
+         (updated-document (edit-reparse-source document updated-source nil)))
+    (edit-apply-patches-result document patches
+                               :expected
+                               (edit-canonical-document updated-document))))
+
+(defun crypt-no-op-result (document)
+  (crypt-apply-patches-result document nil))
+
+(defun crypt-transform-entry (document target registry direction)
+  (crypt-check-document-and-registry document registry)
+  (let* ((heading (edit-resolve-node document target '(:headline)))
+         (source (document-text document)))
+    (multiple-value-bind (body-start body-end)
+        (crypt-entry-payload-span document heading)
+      (multiple-value-bind (armor-start armor-end)
+          (and (< body-start body-end)
+               (crypt-find-armor-span document body-start body-end))
+        (case direction
+          (:encrypt
+           (if (or (>= body-start body-end) armor-start)
+               (crypt-no-op-result document)
+               (let ((replacement (crypt-invoke
+                                   registry :crypt-encrypt
+                                   (subseq source body-start body-end))))
+                 (crypt-check-output-length document body-start body-end replacement)
+                 (crypt-apply-patches-result
+                  document
+                  (list (edit-make-patch body-start body-end replacement heading))))))
+          (:decrypt
+           (if (null armor-start)
+               (crypt-no-op-result document)
+               (let* ((armor (crypt-remove-armor-indentation
+                              source armor-start armor-end))
+                      (plaintext (crypt-invoke registry :crypt-decrypt armor))
+                      (replacement
+                        (crypt-shift-plaintext-headings
+                         document armor-start armor-end plaintext
+                         (node-property heading :level))))
+                 (crypt-check-output-length document armor-start armor-end replacement)
+                 (crypt-apply-patches-result
+                  document
+                  (list (edit-make-patch armor-start armor-end replacement heading)))))))))))
+
+(defun crypt-encrypt-entry (document target registry)
+  "Encrypt TARGET's body with the caller-owned registry and return an edit result.
+TARGET is a headline node. Existing armor and empty bodies produce an unchanged
+edit result. This operation does not require a crypt tag."
+  (crypt-transform-entry document target registry :encrypt))
+
+(defun crypt-decrypt-entry (document target registry)
+  "Decrypt TARGET's first PGP armor block and return an edit result.
+The callback receives armor with line indentation removed. Text after the
+footer remains in the document. This operation does not require a crypt tag."
+  (crypt-transform-entry document target registry :decrypt))
+
+(defun crypt-tag-name (tag)
+  (typecase tag
+    (string tag)
+    (symbol (string-downcase (symbol-name tag)))
+    (t (error 'type-error :datum tag :expected-type '(or string symbol)))))
+
+(defun crypt-tagged-p (document heading tag inherit)
+  (member tag (effective-heading-tags document heading :inherit inherit)
+          :test #'string=))
+
+(defun crypt-matching-headlines (document tag inherit)
+  (remove-if-not (lambda (heading)
+                   (crypt-tagged-p document heading tag inherit))
+                 (crypt-headlines document)))
+
+(defun crypt-matching-roots (document tag inherit)
+  (let ((matching (crypt-matching-headlines document tag inherit)))
+    (remove-if (lambda (heading)
+                 (loop for parent = (node-parent heading) then (node-parent parent)
+                       while parent
+                       thereis (and (eq (node-type parent) :headline)
+                                    (member parent matching :test #'eq))))
+               matching)))
+
+(defun crypt-headlines-in-subtree (heading)
+  (let ((headlines '()))
+    (map-nodes (lambda (node)
+                 (when (eq (node-type node) :headline)
+                   (push node headlines)))
+               heading)
+    (nreverse headlines)))
+
+(defun crypt-selected-starts (document root tag inherit)
+  (mapcar #'node-post-affiliated
+          (remove-if-not (lambda (heading)
+                           (crypt-tagged-p document heading tag inherit))
+                         (crypt-headlines-in-subtree root))))
+
+(defun crypt-process-encrypt-root (document starts registry)
+  (let ((current-document document)
+        (changed-p nil))
+    (dolist (start (sort (copy-list starts) #'>))
+      (let ((heading (crypt-find-headline-at current-document start)))
+        (when heading
+          (let ((result (crypt-encrypt-entry current-document heading registry)))
+            (when (edit-result-spans result)
+              (setf changed-p t))
+            (setf current-document (edit-result-updated-document result))))))
+    (values current-document changed-p)))
+
+(defun crypt-decrypt-root (document root-start registry tag inherit)
+  (let ((current-document document)
+        (processed '())
+        (processed-count 0)
+        (root-changed-p nil))
+    (loop
+      for root = (crypt-find-headline-at current-document root-start)
+      while root
+      for candidate =
+        (find-if
+         (lambda (heading)
+           (let ((start (node-post-affiliated heading)))
+             (and (not (member start processed :test #'=))
+                  (crypt-tagged-p current-document heading tag inherit)
+                  (multiple-value-bind (body-start body-end)
+                      (crypt-entry-payload-span current-document heading)
+                    (and (< body-start body-end)
+                         (multiple-value-bind (armor-start armor-end)
+                             (crypt-find-armor-span current-document
+                                                    body-start body-end)
+                           (declare (ignore armor-end))
+                           armor-start))))))
+         (crypt-headlines-in-subtree root))
+      while candidate
+      do (let ((start (node-post-affiliated candidate)))
+           (push start processed)
+           (incf processed-count)
+           (check-limit (document-limits current-document) :max-node-count
+                        processed-count)
+           (let ((result (crypt-decrypt-entry current-document candidate registry)))
+             (when (edit-result-spans result)
+               (setf root-changed-p t))
+             (setf current-document (edit-result-updated-document result))))
+      finally (return (values current-document root-changed-p)))))
+
+(defun crypt-bulk-transform (document registry direction tag inherit)
+  (crypt-check-document-and-registry document registry)
+  (unless (or (null inherit) (eq inherit t))
+    (error 'type-error :datum inherit :expected-type 'boolean))
+  (let* ((tag (crypt-tag-name tag))
+         (roots (crypt-matching-roots document tag inherit))
+         (root-ranges
+           (mapcar (lambda (root)
+                     (multiple-value-bind (start end)
+                         (crypt-entry-payload-span document root)
+                       (list (node-post-affiliated root) start end
+                             (crypt-selected-starts document root tag inherit))))
+                   roots))
+         (ordered-roots (sort (copy-list root-ranges) #'> :key #'first))
+         (current-document document)
+         (patches '()))
+    (dolist (range ordered-roots)
+      (destructuring-bind (root-start body-start body-end starts) range
+        (multiple-value-bind (updated changed-p)
+            (ecase direction
+              (:encrypt
+               (crypt-process-encrypt-root current-document starts registry))
+              (:decrypt
+               (crypt-decrypt-root current-document root-start registry
+                                   tag inherit)))
+          (when changed-p
+            (let* ((heading (crypt-find-headline-at updated root-start))
+                   (updated-end (crypt-subtree-end updated heading))
+                   (updated-source (document-text updated)))
+              (push (edit-make-patch
+                     body-start body-end
+                     (subseq updated-source body-start updated-end))
+                    patches)))
+          (setf current-document updated))))
+    (crypt-apply-patches-result document (nreverse patches))))
+
+(defun crypt-encrypt-entries (document registry &key (tag "crypt") (inherit t))
+  "Encrypt tagged entries and return one atomic edit result.
+TAG defaults to \"crypt\". INHERIT defaults to true, matching Org tag search."
+  (crypt-bulk-transform document registry :encrypt tag inherit))
+
+(defun crypt-decrypt-entries (document registry &key (tag "crypt") (inherit t))
+  "Decrypt tagged entries and return one atomic edit result.
+TAG defaults to \"crypt\". INHERIT defaults to true, matching Org tag search."
+  (crypt-bulk-transform document registry :decrypt tag inherit))
