@@ -291,3 +291,220 @@
      "Beamer frame name may cause error when exporting.  Consider customizing `org-beamer-frame-environment'."))
   (it "does not run when the frame environment is absent"
     (lint-context-test-no-findings "\\begin{frame}" "beamer-frame")))
+(describe "Org lint parsing and material edge cases"
+  (it "classifies remote paths and extracts include targets"
+    (expect (org-kit::%lint-context-remote-path-p "//server/path") :to-be t)
+    (expect (org-kit::%lint-context-remote-path-p "git+ssh:repo/path") :to-be t)
+    (expect (org-kit::%lint-context-remote-path-p "A:/local/path") :to-be nil)
+    (expect (org-kit::%lint-context-remote-path-p "1scheme:path") :to-be nil)
+    (expect (org-kit::%lint-context-remote-path-p "bad_scheme:path") :to-be nil)
+    (expect (org-kit::%lint-context-file-part "part.org::*Heading") :to-equal "part.org")
+    (expect (org-kit::%lint-context-file-part "part.org") :to-equal "part.org")
+    (expect (org-kit::%lint-context-strip-quotes "  \"part.org\"  ") :to-equal "part.org")
+    (expect (org-kit::%lint-context-strip-quotes "\"part.org") :to-equal "\"part.org")
+    (expect (org-kit::%lint-context-babel-name " :Var ") :to-equal "var")
+    (expect (org-kit::%lint-context-babel-name " Name ") :to-equal "name"))
+  (it "parses quoted and unquoted include paths and search parts"
+    (expect (org-kit::%lint-include-path "  \"part file.org\" src  ") :to-equal "part file.org")
+    (expect (org-kit::%lint-include-path "part.org src") :to-equal "part.org")
+    (expect (org-kit::%lint-include-path "part.org::Heading") :to-equal "part.org::Heading")
+    (expect (org-kit::%lint-include-path "  ") :to-be nil)
+    (expect (org-kit::%lint-include-path "\"\"") :to-be nil)
+    (expect (org-kit::%lint-include-path "\"unterminated") :to-be nil)
+    (expect (org-kit::%lint-include-search-part "part.org::Heading") :to-equal "Heading")
+    (expect (org-kit::%lint-include-search-part "part.org::  ") :to-be nil)
+    (expect (org-kit::%lint-include-search-part "part.org") :to-be nil))
+  (it "tokenizes export options and macro placeholders"
+    (expect (org-kit::%lint-export-option-name "html:toc") :to-equal "toc")
+    (expect (org-kit::%lint-export-option-name "toc") :to-equal "toc")
+    (expect (org-kit::%lint-options-items "toc:yes bare html:")
+            :to-equal (list (cons "toc" "yes") (cons "html" "")))
+    (expect (multiple-value-list (org-kit::%lint-export-option-entry "html:toc"))
+            :to-equal (list "toc" "html"))
+    (expect (multiple-value-list (org-kit::%lint-export-option-entry "toc"))
+            :to-equal (list "toc" nil))
+    (expect (org-kit::%lint-placeholder-numbers "$3 $1 $3 $0 $$2")
+            :to-equal (list 1 2 3))
+    (expect (org-kit::%lint-template-arity "$1 and $3") :to-equal (cons 3 3))
+    (expect (org-kit::%lint-template-arity "no placeholders") :to-equal (cons 0 0)))
+  (it "parses macro definitions and all arity message forms"
+    (let* ((document (parse-org "#+MACRO: local $1"))
+           (node (first (org-kit::%lint-nodes document :keyword))))
+      (expect (multiple-value-list (org-kit::%lint-macro-keyword-data node))
+              :to-equal (list "local" "$1")))
+    (expect (org-kit::%lint-macro-entry (list (cons "local" "$1")) "local")
+            :to-equal "$1")
+    (expect (org-kit::%lint-macro-entry nil "local") :to-be nil)
+    (expect (org-kit::%lint-macro-name-arity "keyword" "$1") :to-equal (cons 1 1))
+    (expect (org-kit::%lint-macro-name-arity "modification-time" "$1")
+            :to-equal (cons 1 2))
+    (expect (org-kit::%lint-macro-name-arity "n" "$1") :to-equal (cons 0 2))
+    (expect (org-kit::%lint-macro-name-arity "custom" "$1") :to-equal (cons 1 1))
+    (expect (org-kit::%lint-macro-arity-message "m" nil (cons 2 2))
+            :to-equal "Missing arguments in macro \"m\"")
+    (expect (org-kit::%lint-macro-arity-message "m" (list "a") (cons 2 2))
+            :to-equal "Missing argument in macro \"m\"")
+    (expect (org-kit::%lint-macro-arity-message "m" (list "a" "b") (cons 2 2))
+            :to-be nil)
+    (expect (org-kit::%lint-macro-arity-message "m" (list "a" "b" "c") (cons 2 2))
+            :to-equal "Spurious argument in macro \"m\": c")
+    (expect (org-kit::%lint-macro-arity-message "m" (list "a" "b" "c" "d") (cons 2 2))
+            :to-equal "Spurious arguments in macro \"m\": c, d"))
+  (it "covers caller material parser and backend paths"
+  (expect (org-kit::%lint-context-remote-path-p ":local") :to-be nil)
+  (expect (org-kit::%lint-context-remote-path-p "a:b") :to-be nil)
+  (expect (multiple-value-list (org-kit::%lint-macro-keyword-data
+                                (first (org-kit::%lint-nodes
+                                        (parse-org "#+MACRO: local") :keyword))))
+          :to-equal (list "local" ""))
+  (expect (multiple-value-list (org-kit::%lint-cite-declaration-tokens
+                                "\"csl processor\" plain"))
+          :to-equal (list (list (cons "csl processor" t) (cons "plain" nil)) t))
+  (expect (multiple-value-list (org-kit::%lint-cite-declaration-tokens "\"unclosed"))
+          :to-equal (list nil nil))
+  (expect (org-kit::%lint-symbol-name-p "proc_2?") :to-be t)
+  (expect (org-kit::%lint-symbol-name-p "2proc") :to-be nil)
+  (let ((document (parse-org "plain")))
+    (expect (org-kit::%lint-macro-definition-template
+             document '(:macro-definitions (("caller" . "$1"))) "caller")
+            :to-equal "$1")
+    (expect (org-kit::%lint-macro-definition-template
+             document '(:macro-templates (("custom" . "$2"))) "custom")
+            :to-equal "$2"))
+  (lint-context-test-no-findings
+   "[[file://server/share]]" "link-to-local-file"
+   (list :file-exists-p (lambda (path) (declare (ignore path)) nil)))
+  (lint-context-test-no-findings
+   "#+SETUPFILE: https://example.org/setup.org"
+   "non-existent-setupfile-parameter"
+   (list :file-exists-p (lambda (path) (declare (ignore path)) nil)))
+  (lint-context-test-no-findings
+   "#+INCLUDE: https://example.org/part.org" "wrong-include-link-parameter"
+   (list :file-exists-p (lambda (path) (declare (ignore path)) nil)))
+  (let ((source (lint-context-test-lines "* Heading" ":PROPERTIES:"
+                                         ":HTML_FOO: x" ":END:")))
+    (lint-context-test-finding
+     source "misspelled-export-option"
+     '(:export-options ("html:HTML_FOO"))
+     (1+ (search ":HTML_FOO:" source))
+     "Potentially misspelled export option \"HTML_FOO\" in html export backend.  Consider \"EXPORT_HTML_FOO\".")))
+  (it "covers caller-material validation boundaries"
+    (expect (org-kit::%lint-context-source-property-key
+             (parse-org "plain")
+             (org-kit::make-node :node-property :begin 0 :end 5
+                                 :properties '(:key "fallback")))
+            :to-equal "FALLBACK")
+    (let* ((document (parse-org "[[id:missing]]"))
+           (link (first (org-kit::%lint-nodes document :link))))
+      (setf (org-kit::node-property link :type) "id"
+            (org-kit::node-property link :path) "missing")
+      (expect (length (org-kit::%lint-invalid-id-link
+                       document '(:known-ids nil)))
+              :to-be 1))
+    (let* ((document (parse-org
+                      (lint-context-test-lines
+                       "#+MACRO:" "#+MACRO: local" "#+MACRO: sparse $2")))
+           (context '(:macro-definitions nil :macro-templates nil)))
+      (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                      (org-kit::%lint-invalid-macro-argument-and-template
+                       document context))
+              :to-equal '("Missing name in MACRO keyword"
+                          "Missing template in macro \"%s\""
+                          "Unused placeholders in macro \"sparse\"")))
+    (let* ((document (parse-org "{{{unknown(x)}}} {{{title}}}"))
+           (context '(:macro-definitions nil :macro-templates nil)))
+      (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                      (org-kit::%lint-invalid-macro-argument-and-template
+                       document context))
+              :to-equal '("Undefined macro \"unknown\""
+                          "Missing argument in macro \"title\"")))
+    (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                    (lint-context-test-findings
+                     "#+CITE_EXPORT:" "invalid-cite-export-declaration"
+                     '(:cite-export-processors nil)))
+            :to-equal '("Missing export processor name")))
+)
+(describe "Org lint caller material branch cases"
+  (it "handles empty Babel names and deprecated property boundaries"
+    (expect (org-kit::%lint-context-babel-name "  ") :to-equal "")
+    (lint-context-test-no-findings
+     (lint-context-test-lines
+      "#+PROPERTY: x" "#+PROPERTY: not-var value" "#+PROPERTY: var"
+      "#+PROPERTY: varX value")
+     "deprecated-header-syntax"
+     '(:babel-header-arguments ("long" "var"))))
+  (it "ignores short, ordinary, and pathless links"
+    (lint-context-test-no-findings
+     "[[x]] [[file:plain.txt]]" "invalid-id-link" '(:known-ids nil))
+    (let* ((document (parse-org "x"))
+           (link (org-kit::make-node
+                  :link :begin 0 :end 1 :properties '(:type "file"))))
+      (setf (org-kit::node-children (org-kit::document-root document))
+            (list link))
+      (expect (org-kit::%lint-invalid-id-link document '(:known-ids nil))
+              :to-equal '())
+      (expect (org-kit::%lint-link-to-local-file
+               document (list :file-exists-p (lambda (path)
+                                               (declare (ignore path))
+                                               nil)))
+              :to-equal '()))
+    (lint-context-test-no-findings
+     "[[https://example.org/page]]" "link-to-local-file"
+     (list :file-exists-p (lambda (path) (declare (ignore path)) nil))))
+  (it "recognizes a missing file nested in a link description"
+    (let* ((source "[[file:missing.png]]")
+           (document (parse-org source))
+           (inner (first (org-kit::%lint-nodes document :link)))
+           (outer (org-kit::make-node
+                   :link :begin 0 :end (length source)
+                   :properties '(:type "file" :path "outer.txt"))))
+      (setf (org-kit::node-children (org-kit::document-root document))
+            (list outer))
+      (org-kit::append-child outer inner)
+      (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                      (org-kit::%lint-link-to-local-file
+                       document
+                       (list :file-exists-p
+                             (lambda (path) (string= path "outer.txt")))))
+              :to-equal '("Link to non-existent image file \"missing.png\" in description"))))
+  (it "skips unrelated keywords and an empty OPTIONS value"
+    (let ((context (list :file-exists-p (lambda (path)
+                                          (declare (ignore path))
+                                          nil))))
+      (lint-context-test-no-findings "#+TITLE: x" "non-existent-setupfile-parameter" context)
+      (lint-context-test-no-findings "#+TITLE: x" "wrong-include-link-parameter" context))
+    (lint-context-test-no-findings
+     (lint-context-test-lines "#+TITLE: x" "#+OPTIONS:")
+     "unknown-options-item" '(:export-options nil)))
+  (it "accepts allow-listed export properties and resolves local macros"
+    (lint-context-test-no-findings
+     (lint-context-test-lines "* Heading" ":PROPERTIES:" ":SUMMARY: x" ":END:")
+     "misspelled-export-option" '(:export-options ("SUMMARY")))
+    (let* ((document (parse-org
+                      (lint-context-test-lines
+                       "#+TITLE: x" "#+MACRO:" "#+MACRO: local $1"
+                       "#+MACRO: empty" "{{{unknown(x)}}} {{{empty}}}")))
+           (context '(:macro-definitions nil :macro-templates nil)))
+      (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                      (org-kit::%lint-invalid-macro-argument-and-template
+                       document context))
+              :to-equal '("Missing name in MACRO keyword"
+                          "Missing template in macro \"%s\""
+                          "Undefined macro \"unknown\""
+                          "Undefined macro \"empty\""))))
+  (it "skips empty and remote bibliographies and rejects invalid cite names"
+    (lint-context-test-no-findings
+     (lint-context-test-lines
+      "#+TITLE: x" "#+BIBLIOGRAPHY:" "#+BIBLIOGRAPHY: https://example.org/refs.bib")
+     "non-existent-bibliography"
+     (list :file-exists-p (lambda (path) (declare (ignore path)) nil)))
+    (expect (multiple-value-list
+             (org-kit::%lint-cite-declaration-tokens "csl "))
+            :to-equal (list (list (cons "csl" nil)) t))
+    (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                    (lint-context-test-findings
+                     (lint-context-test-lines "#+TITLE: x" "#+CITE_EXPORT: bad/name")
+                     "invalid-cite-export-declaration"
+                     '(:cite-export-processors ("csl"))))
+            :to-equal '("Invalid cite export processor declaration"))))
+
