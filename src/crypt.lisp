@@ -361,9 +361,19 @@ footer remains in the document. This operation does not require a crypt tag."
   (member tag (effective-heading-tags document heading :inherit inherit)
           :test #'string=))
 
+(defun crypt-excluded-headline-p (document heading)
+  (or (member "ARCHIVE"
+              (effective-heading-tags document heading :inherit t)
+              :test #'string=)
+      (loop for ancestor = heading then (node-parent ancestor)
+            while ancestor
+            thereis (and (eq (node-type ancestor) :headline)
+                         (node-property ancestor :commentedp)))))
+
 (defun crypt-matching-headlines (document tag inherit)
   (remove-if-not (lambda (heading)
-                   (crypt-tagged-p document heading tag inherit))
+                   (and (crypt-tagged-p document heading tag inherit)
+                        (not (crypt-excluded-headline-p document heading))))
                  (crypt-headlines document)))
 
 (defun crypt-matching-roots (document tag inherit)
@@ -375,101 +385,27 @@ footer remains in the document. This operation does not require a crypt tag."
                                     (member parent matching :test #'eq))))
                matching)))
 
-(defun crypt-headlines-in-subtree (heading)
-  (let ((headlines '()))
-    (map-nodes (lambda (node)
-                 (when (eq (node-type node) :headline)
-                   (push node headlines)))
-               heading)
-    (nreverse headlines)))
-
-(defun crypt-selected-starts (document root tag inherit)
-  (mapcar #'node-post-affiliated
-          (remove-if-not (lambda (heading)
-                           (crypt-tagged-p document heading tag inherit))
-                         (crypt-headlines-in-subtree root))))
-
-(defun crypt-process-encrypt-root (document starts registry)
-  (let ((current-document document)
-        (changed-p nil))
-    (dolist (start (sort (copy-list starts) #'>))
-      (let ((heading (crypt-find-headline-at current-document start)))
-        (when heading
-          (let ((result (crypt-encrypt-entry current-document heading registry)))
-            (when (edit-result-spans result)
-              (setf changed-p t))
-            (setf current-document (edit-result-updated-document result))))))
-    (values current-document changed-p)))
-
-(defun crypt-decrypt-root (document root-start registry tag inherit)
-  (let ((current-document document)
-        (processed '())
-        (processed-count 0)
-        (root-changed-p nil))
-    (loop
-      for root = (crypt-find-headline-at current-document root-start)
-      while root
-      for candidate =
-        (find-if
-         (lambda (heading)
-           (let ((start (node-post-affiliated heading)))
-             (and (not (member start processed :test #'=))
-                  (crypt-tagged-p current-document heading tag inherit)
-                  (multiple-value-bind (body-start body-end)
-                      (crypt-entry-payload-span current-document heading)
-                    (and (< body-start body-end)
-                         (multiple-value-bind (armor-start armor-end)
-                             (crypt-find-armor-span current-document
-                                                    body-start body-end)
-                           (declare (ignore armor-end))
-                           armor-start))))))
-         (crypt-headlines-in-subtree root))
-      while candidate
-      do (let ((start (node-post-affiliated candidate)))
-           (push start processed)
-           (incf processed-count)
-           (check-limit (document-limits current-document) :max-node-count
-                        processed-count)
-           (let ((result (crypt-decrypt-entry current-document candidate registry)))
-             (when (edit-result-spans result)
-               (setf root-changed-p t))
-             (setf current-document (edit-result-updated-document result))))
-      finally (return (values current-document root-changed-p)))))
-
 (defun crypt-bulk-transform (document registry direction tag inherit)
   (crypt-check-document-and-registry document registry)
   (unless (or (null inherit) (eq inherit t))
     (error 'type-error :datum inherit :expected-type 'boolean))
   (let* ((tag (crypt-tag-name tag))
          (roots (crypt-matching-roots document tag inherit))
-         (root-ranges
-           (mapcar (lambda (root)
-                     (multiple-value-bind (start end)
-                         (crypt-entry-payload-span document root)
-                       (list (node-post-affiliated root) start end
-                             (crypt-selected-starts document root tag inherit))))
-                   roots))
-         (ordered-roots (sort (copy-list root-ranges) #'> :key #'first))
-         (current-document document)
+         (source (document-text document))
          (patches '()))
-    (dolist (range ordered-roots)
-      (destructuring-bind (root-start body-start body-end starts) range
-        (multiple-value-bind (updated changed-p)
-            (ecase direction
-              (:encrypt
-               (crypt-process-encrypt-root current-document starts registry))
-              (:decrypt
-               (crypt-decrypt-root current-document root-start registry
-                                   tag inherit)))
-          (when changed-p
-            (let* ((heading (crypt-find-headline-at updated root-start))
-                   (updated-end (crypt-subtree-end updated heading))
-                   (updated-source (document-text updated)))
-              (push (edit-make-patch
-                     body-start body-end
-                     (subseq updated-source body-start updated-end))
-                    patches)))
-          (setf current-document updated))))
+    (dolist (root roots)
+      (let* ((result (crypt-transform-entry document root registry direction))
+             (span (first (edit-result-spans result))))
+        (when span
+          (let* ((updated-source
+                   (document-text (edit-result-updated-document result)))
+                 (start (edit-span-start span))
+                 (end (edit-span-end span))
+                 (replacement-end
+                   (+ end (- (length updated-source) (length source)))))
+            (push (edit-make-patch
+                   start end (subseq updated-source start replacement-end) root)
+                  patches)))))
     (crypt-apply-patches-result document (nreverse patches))))
 
 (defun crypt-encrypt-entries (document registry &key (tag "crypt") (inherit t))

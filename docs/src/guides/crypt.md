@@ -65,7 +65,7 @@ The first payload line identifies encrypted content only when it is exactly `---
 
 ## Edit tagged entries
 
-`crypt-encrypt-entries` and `crypt-decrypt-entries` apply the operation to tagged headings and return one `edit-result` for the document.
+`crypt-encrypt-entries` and `crypt-decrypt-entries` apply the operation to tagged headings and return one `edit-result` for the document. A matching heading is processed once with its subtree, so a matching descendant is not a separate target. Headings with an inherited ARCHIVE tag and COMMENT headings with their descendants are skipped.
 
 With a parsed `document` and configured `registry`, call either function:
 

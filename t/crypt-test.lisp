@@ -299,6 +299,56 @@
           (expect (search (crypt-test-armor "secret") output) :to-be-truthy)
           (expect (document-text document) :to-equal source)))))
 
+  (it "processes a tagged parent and child through the parent once"
+    (let* ((source (format nil "* Parent :crypt:~%parent body~%** Child :crypt:~%child body~%"))
+           (document (parse-org source))
+           (registry (make-callback-registry))
+           (received '())
+           (expected-payload
+             (format nil "parent body~%** Child :crypt:~%child body")))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text)
+                           (push text received)
+                           (crypt-test-armor text)))
+      (let ((result (crypt-encrypt-entries document registry)))
+        (with-soft-assertions
+          (expect received :to-equal (list expected-payload))
+          (expect (edit-result-spans result) :to-have-length 1)
+          (expect (search (crypt-test-armor expected-payload)
+                          (document-text (edit-result-updated-document result)))
+                  :to-be-truthy)
+          (expect (document-text document) :to-equal source)))))
+
+  (it "skips crypt-tagged children under archived headings"
+    (let* ((source (format nil "* Archive :ARCHIVE:~%** Private :crypt:~%secret~%"))
+           (document (parse-org source))
+           (registry (make-callback-registry))
+           (calls 0))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text) (incf calls) (crypt-test-armor text)))
+      (let ((result (crypt-encrypt-entries document registry)))
+        (with-soft-assertions
+          (expect calls :to-be 0)
+          (expect (edit-result-spans result) :to-equal nil)
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal source)
+          (expect (document-text document) :to-equal source)))))
+
+  (it "skips crypt-tagged children under COMMENT headings"
+    (let* ((source (format nil "* COMMENT Notes~%** Private :crypt:~%secret~%"))
+           (document (parse-org source))
+           (registry (make-callback-registry))
+           (calls 0))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text) (incf calls) (crypt-test-armor text)))
+      (let ((result (crypt-encrypt-entries document registry)))
+        (with-soft-assertions
+          (expect calls :to-be 0)
+          (expect (edit-result-spans result) :to-equal nil)
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal source)
+          (expect (document-text document) :to-equal source)))))
+
   (it "applies a caller-selected tag in bulk and leaves unselected entries intact"
     (let* ((source (format nil "* One :private:~%secret~%~%* Two :crypt:~%public~%"))
            (document (parse-org source))
