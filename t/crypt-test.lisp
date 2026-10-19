@@ -384,6 +384,30 @@
           (expect (search (format nil "* Peer~%safe~%") output) :to-be-truthy)
           (expect (document-text document) :to-equal source)))))
 
+  (it "decrypts only the first armored child of a matching parent"
+    (let* ((source (format nil
+                           "* Parent :vault:~%** One~%~A~%** Two~%~A~%"
+                           (crypt-test-armor "first")
+                           (crypt-test-armor "second")))
+           (document (parse-org source))
+           (registry (make-callback-registry))
+           (received nil))
+      (register-callback registry :crypt-decrypt "org-crypt"
+                         (lambda (armor)
+                           (push armor received)
+                           "decrypted"))
+      (let* ((result (crypt-decrypt-entries document registry :tag "vault"))
+             (output (document-text (edit-result-updated-document result))))
+        (with-soft-assertions
+          (expect (nreverse received)
+                  :to-equal (list (crypt-test-armor "first")))
+          (expect (edit-result-spans result) :to-have-length 1)
+          (expect (search (format nil "** One~%decrypted") output)
+                  :to-be-truthy)
+          (expect (search (crypt-test-armor "second") output)
+                  :to-be-truthy)
+          (expect (document-text document) :to-equal source)))))
+
   (it "returns no partial bulk result when a later callback fails"
     (let* ((source (format nil "* First :vault:~%one~%* Second :vault:~%two~%"))
            (document (parse-org source))

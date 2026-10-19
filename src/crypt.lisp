@@ -392,27 +392,58 @@ footer remains in the document. This operation does not require a crypt tag."
                                     (member parent matching :test #'eq))))
                matching)))
 
+(defun crypt-headlines-in-subtree (heading)
+  (let ((headlines '()))
+    (map-nodes (lambda (node)
+                 (when (eq (node-type node) :headline)
+                   (push node headlines)))
+               heading)
+    (nreverse headlines)))
+
+(defun crypt-decrypt-root (document root registry)
+  (let ((candidate
+          (find-if
+           (lambda (heading)
+             (multiple-value-bind (body-start body-end)
+                 (crypt-entry-payload-span document heading)
+               (and (< body-start body-end)
+                    (multiple-value-bind (armor-start armor-end)
+                        (crypt-find-armor-span document body-start body-end)
+                      (declare (ignore armor-end))
+                      armor-start))))
+           (crypt-headlines-in-subtree root))))
+    (if candidate
+        (let ((result (crypt-decrypt-entry document candidate registry)))
+          (values (edit-result-updated-document result)
+                  (not (null (edit-result-spans result)))))
+        (values document nil))))
+
 (defun crypt-bulk-transform (document registry direction tag inherit)
   (crypt-check-document-and-registry document registry)
   (unless (or (null inherit) (eq inherit t))
     (error 'type-error :datum inherit :expected-type 'boolean))
   (let* ((tag (crypt-tag-name tag))
          (roots (crypt-matching-roots document tag inherit))
-         (source (document-text document))
          (patches '()))
     (dolist (root roots)
-      (let* ((result (crypt-transform-entry document root registry direction))
-             (span (first (edit-result-spans result))))
-        (when span
-          (let* ((updated-source
-                   (document-text (edit-result-updated-document result)))
-                 (start (edit-span-start span))
-                 (end (edit-span-end span))
-                 (replacement-end
-                   (+ end (- (length updated-source) (length source)))))
-            (push (edit-make-patch
-                   start end (subseq updated-source start replacement-end) root)
-                  patches)))))
+      (multiple-value-bind (updated changed-p)
+          (ecase direction
+            (:encrypt
+             (let ((result (crypt-transform-entry document root registry :encrypt)))
+               (values (edit-result-updated-document result)
+                       (not (null (edit-result-spans result))))))
+            (:decrypt (crypt-decrypt-root document root registry)))
+        (when changed-p
+          (multiple-value-bind (body-start body-end)
+              (crypt-entry-payload-span document root)
+            (let* ((updated-heading
+                     (crypt-find-headline-at updated (node-post-affiliated root)))
+                   (updated-end (crypt-subtree-end updated updated-heading))
+                   (updated-source (document-text updated)))
+              (push (edit-make-patch
+                     body-start body-end
+                     (subseq updated-source body-start updated-end) root)
+                    patches))))))
     (crypt-apply-patches-result document (nreverse patches))))
 
 (defun crypt-encrypt-entries (document registry &key (tag "crypt") (inherit t))
