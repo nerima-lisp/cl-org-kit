@@ -4,7 +4,8 @@
 (defstruct (export-ascii-output
              (:constructor %make-export-ascii-output
                  (preparation limits output count base-count indent
-                  downstream-indent line-start-p visible-controls-p display-width)))
+                  downstream-indent line-start-p visible-controls-p display-width
+                  render-context)))
   preparation
   limits
   output
@@ -14,16 +15,18 @@
   downstream-indent
   line-start-p
   visible-controls-p
-  display-width)
+  display-width
+  render-context)
 
 (defun export-ascii-output-for-preparation
-    (preparation base-count measure-only-p downstream-indent visible-controls-p)
+    (preparation base-count measure-only-p downstream-indent visible-controls-p
+     &optional render-context)
   (%make-export-ascii-output
    preparation
    (document-limits (export-preparation-document preparation))
    (unless measure-only-p
      (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
-   0 base-count 0 downstream-indent t visible-controls-p 0))
+   0 base-count 0 downstream-indent t visible-controls-p 0 render-context))
 
 (defun export-ascii-visible-character-length (output character)
   (if (and (export-ascii-output-visible-controls-p output)
@@ -36,7 +39,12 @@
          (next-length (+ (export-ascii-output-base-count output) next-count))
          (limits (export-ascii-output-limits output)))
     (when (plusp additional-length)
-      (check-limit limits :max-output-length next-length))
+      (export-check-output-actual
+       next-length limits
+       (export-preparation-backend
+        (export-ascii-output-preparation output))
+       *export-current-export-phase*
+       :kind *export-current-output-check-kind*))
     (setf (export-ascii-output-count output) next-count)
     (let ((buffer (export-ascii-output-output output)))
       (when (and buffer (> next-count (array-total-size buffer)))
@@ -50,7 +58,7 @@
           (setf (export-ascii-output-output output)
                 (adjust-array buffer capacity
                               :fill-pointer (fill-pointer buffer))))))
-  output))
+    output))
 
 (defun export-ascii-output-push-char (output character)
   (let ((buffer (export-ascii-output-output output)))
@@ -86,7 +94,8 @@
   output)
 
 (defun export-ascii-output-range-length (output text start end
-                                         &key uppercase-p substitute-tab-p)
+                                         &key uppercase-p substitute-tab-p
+                                           (indent-p t))
   (loop with line-start-p = (export-ascii-output-line-start-p output)
         with length = 0
         with display-width = 0
@@ -99,7 +108,7 @@
                               (uppercase-p (char-upcase source-character))
                               (t source-character))
         for newline-p = (char= character #\Newline)
-        do (when (and line-start-p (not newline-p))
+        do (when (and indent-p line-start-p (not newline-p))
              (incf length (export-ascii-output-indent output))
              (incf display-width (export-ascii-output-indent output)))
            (incf length (export-ascii-visible-character-length output character))
@@ -112,11 +121,12 @@
         finally (return (values length line-start-p display-width))))
 
 (defun export-ascii-output-write-range (output text start end
-                                        &key uppercase-p substitute-tab-p)
+                                        &key uppercase-p substitute-tab-p
+                                          (indent-p t))
   (multiple-value-bind (additional-length final-line-start-p ignored-width)
       (export-ascii-output-range-length
        output text start end :uppercase-p uppercase-p
-       :substitute-tab-p substitute-tab-p)
+       :substitute-tab-p substitute-tab-p :indent-p indent-p)
     (declare (ignore ignored-width))
     (export-ascii-output-reserve output additional-length)
     (loop for index from start below end
@@ -128,7 +138,8 @@
                                 (uppercase-p (char-upcase source-character))
                                 (t source-character))
           for newline-p = (char= character #\Newline)
-          do (when (and (export-ascii-output-line-start-p output)
+          do (when (and indent-p
+                        (export-ascii-output-line-start-p output)
                         (not newline-p))
                (loop repeat (export-ascii-output-indent output)
                      do (export-ascii-output-push-char output #\Space)))
@@ -216,7 +227,8 @@
    measure-only-p
    (+ (export-ascii-output-downstream-indent output)
       (export-ascii-output-indent output))
-   visible-controls-p))
+   visible-controls-p
+   (export-ascii-output-render-context output)))
 
 (defun export-ascii-output-trim-newlines (output)
   (let ((buffer (export-ascii-output-output output)))
@@ -225,10 +237,12 @@
                        (char= (char buffer (1- (fill-pointer buffer)))
                               #\Newline))
             do (vector-pop buffer))
-      (setf (export-ascii-output-count output) (fill-pointer buffer)
-            (export-ascii-output-line-start-p output)
-            (or (zerop (fill-pointer buffer))
-                (char= (char buffer (1- (fill-pointer buffer))) #\Newline)))))
+      (multiple-value-bind (length line-start-p display-width)
+          (export-ascii-output-range-length
+           output buffer 0 (fill-pointer buffer) :indent-p nil)
+        (setf (export-ascii-output-count output) length
+              (export-ascii-output-line-start-p output) line-start-p
+              (export-ascii-output-display-width output) display-width))))
   output)
 
 (defun export-ascii-output-write-trimmed-newlines (output text)
@@ -779,9 +793,11 @@
 
 (defun export-ascii-output-write-inline-views (output views preparation)
   (dolist (view views)
-    (export-ascii-output-render-view output view preparation)
-    (export-ascii-output-write-repeat
-     output #\Space (node-post-blank (export-view-node view))))
+    (export-ascii-output-render-view
+     output view preparation :mode :inline)
+    (unless (export-ascii-output-render-context output)
+      (export-ascii-output-write-repeat
+       output #\Space (node-post-blank (export-view-node view)))))
   output)
 
 (defun export-ascii-output-write-trimmed-plain-text-view
@@ -812,11 +828,30 @@
         for index from 0
         for node = (export-view-node view)
         for boundary-p = (or (zerop index) (= index last-index))
-        do (if (and boundary-p (eq (node-type node) :plain-text))
-               (export-ascii-output-write-trimmed-plain-text-view
-                output view (zerop index) (= index last-index))
-               (export-ascii-output-render-view output view preparation))
-           (unless (= index last-index)
+        for plain-text-boundary-p =
+          (and boundary-p (eq (node-type node) :plain-text))
+        for dispatched-p =
+          (and (export-ascii-output-render-context output)
+               (or (not plain-text-boundary-p)
+                   (export-ascii-output-plain-text-rendering-overridden-p
+                    output)))
+        do (cond
+             ((and dispatched-p plain-text-boundary-p)
+              (let ((captured (export-ascii-output-scratch output 0)))
+                (export-ascii-output-render-view
+                 captured view preparation :mode :inline)
+                (export-ascii-output-write-trimmed-captured-inline-view
+                 output captured (zerop index) (= index last-index))))
+             (dispatched-p
+              (export-ascii-output-render-view
+               output view preparation :mode :inline))
+             (plain-text-boundary-p
+              (export-ascii-output-write-trimmed-plain-text-view
+               output view (zerop index) (= index last-index)))
+             (t
+              (export-ascii-output-render-view
+               output view preparation :mode :inline)))
+           (when (and (not dispatched-p) (/= index last-index))
              (export-ascii-output-write-repeat
               output #\Space (node-post-blank node))))
   output)
@@ -837,20 +872,28 @@
                     (and included-heading-level
                          (> level included-heading-level)
                          included-heading-level))))
-        (let ((rendered
-                (export-ascii-output-scratch
-                 output (if previous
-                            (export-ascii-output-gap-length previous view)
-                            0))))
-          (if (and included-heading-level
-                   (not heading-p)
-                   (not (eq type :section)))
+        (let* ((rendered
+                 (export-ascii-output-scratch
+                  output (if previous
+                             (export-ascii-output-gap-length previous view)
+                             0)))
+               (indent (export-ascii-output-indent rendered))
+               (included-indent-p
+                 (and included-heading-level
+                      (not heading-p)
+                      (not (eq type :section))))
+               (post-blank-indent (+ indent (if included-indent-p 2 0))))
+          (if included-indent-p
               (export-ascii-output-with-indent
                rendered 2
                (lambda ()
                  (export-ascii-output-render-view
-                  rendered view preparation)))
-              (export-ascii-output-render-view rendered view preparation))
+                  rendered view preparation :mode :block)))
+              (export-ascii-output-render-view
+               rendered view preparation :mode :block))
+          (when (export-ascii-output-render-context output)
+            (export-ascii-output-remove-node-post-blank
+             rendered node post-blank-indent))
           (when (plusp (export-ascii-output-count rendered))
             (when previous
               (export-ascii-output-write-gap output previous view))
@@ -885,7 +928,8 @@
        (export-ascii-output-measure-text-range
         output (or (node-property node :value) "") 0
         (length (or (node-property node :value) ""))))
-      ((and (= (length children) 1)
+      ((and (not (export-ascii-output-plain-text-rendering-overridden-p output))
+            (= (length children) 1)
             (eq (node-type (export-view-node (first children))) :plain-text)
             (node-document (export-view-node (first children)))
             (node-begin (export-view-node (first children)))
@@ -1188,7 +1232,8 @@
   (let* ((children (export-view-children view))
          (child (first children))
          (width (export-ascii-current-width (export-view-node view))))
-    (unless (and (= (length children) 1)
+    (unless (and (not (export-ascii-output-plain-text-rendering-overridden-p output))
+                 (= (length children) 1)
                  (eq (node-type (export-view-node child)) :plain-text)
                  (export-ascii-output-write-plain-text-paragraph
                   output (export-view-node child) preparation width))
@@ -1479,7 +1524,7 @@
          (when safe-p (export-ascii-output-write-char output #\>))))))
   output)
 
-(defun export-ascii-output-render-view (output view preparation)
+(defun export-ascii-output-render-view-native (output view preparation)
   (let* ((node (export-view-node view))
          (type (node-type node))
          (children (export-view-children view))
@@ -1696,10 +1741,10 @@
                   (fill-pointer (export-ascii-output-output line)) 72)))))
   output)
 
-(defun export-ascii-render-preparation (preparation)
+(defun export-ascii-render-preparation (preparation &optional render-context)
   ;; Reserve the final newline while nested views preflight their output.
   (let* ((output (export-ascii-output-for-preparation
-                  preparation 1 nil 0 t))
+                  preparation 1 nil 0 t render-context))
          (numbers (export-ascii-numbering preparation)))
     (export-ascii-output-write-document-title output preparation)
     (export-ascii-output-write-toc output preparation numbers)
@@ -1712,7 +1757,166 @@
     (export-ascii-output-newlines output 1)
     (export-ascii-output-string output)))
 
-(defmethod export-render-preparation
-    ((preparation export-preparation) (backend (eql :ascii)))
-  (declare (ignore backend))
-  (export-ascii-render-preparation preparation))
+(progn
+  (defun export-ascii-output-plain-text-rendering-overridden-p (output)
+    (let ((context (export-ascii-output-render-context output)))
+      (and context
+           (let ((ancestry (%export-render-context-ancestry context)))
+             (or (export-resolved-map-value
+                  ancestry #'%export-backend-descriptor-transcoders :plain-text)
+                 (export-resolved-filters-in-ancestry ancestry :plain-text)
+                 (export-resolved-filters-in-ancestry
+                  ancestry '(:element :plain-text)))))))
+
+  (defun export-ascii-output-view-from-node (node)
+    (%make-export-view
+     :node node
+     :children (mapcar #'export-ascii-output-view-from-node
+                       (node-children node))
+     :source-document (node-document node)))
+
+  (defun export-ascii-output-render-view
+      (output view preparation &key (mode :block) table-cell-p
+                                     preserve-source-breaks-p)
+    (let ((context (export-ascii-output-render-context output)))
+      (if context
+          (export-render-view-to-sink
+           context output view :mode mode :table-cell-p table-cell-p
+           :preserve-source-breaks-p preserve-source-breaks-p)
+          (export-ascii-output-render-view-native output view preparation)))
+    output)
+
+  (defun export-ascii-output-write-trimmed-captured-inline-view
+      (output captured trim-leading-p trim-trailing-p)
+    (let* ((buffer (export-ascii-output-output captured))
+           (start 0)
+           (end (fill-pointer buffer)))
+      (when trim-leading-p
+        (loop while (and (< start end)
+                         (find (char buffer start)
+                               '(#\Space #\Tab #\Newline #\Return)))
+              do (incf start)))
+      (when trim-trailing-p
+        (loop while (and (> end start)
+                         (find (char buffer (1- end))
+                               '(#\Space #\Tab #\Newline #\Return)))
+              do (decf end)))
+      (export-ascii-output-write-range output buffer start end))
+    output)
+
+  (defun export-ascii-output-remove-node-post-blank
+      (output node post-blank-indent)
+    (let* ((buffer (export-ascii-output-output output))
+           (post-blank (node-post-blank node)))
+      (when (and buffer (plusp post-blank))
+        (let* ((end (fill-pointer buffer))
+               (post-blank-start (- end post-blank)))
+          (when (and (not (minusp post-blank-start))
+                     (loop for index from post-blank-start below end
+                           always (char= (char buffer index) #\Space)))
+            (setf (fill-pointer buffer) post-blank-start)
+            (let* ((end (fill-pointer buffer))
+                   (indent-start (- end post-blank-indent)))
+              (when (and (plusp post-blank-indent)
+                         (not (minusp indent-start))
+                         (or (zerop indent-start)
+                             (char= (char buffer (1- indent-start)) #\Newline))
+                         (loop for index from indent-start below end
+                               always (char= (char buffer index) #\Space)))
+                (setf (fill-pointer buffer) indent-start)))
+            (setf (export-ascii-output-line-start-p output) t)
+            (multiple-value-bind (length line-start-p display-width)
+                (export-ascii-output-range-length
+                 output buffer 0 (fill-pointer buffer) :indent-p nil)
+              (setf (export-ascii-output-count output) length
+                    (export-ascii-output-line-start-p output) line-start-p
+                    (export-ascii-output-display-width output) display-width)))))
+      output))
+
+  (defun export-ascii-native-sink-renderer (sink node view frame context)
+    (declare (ignore frame))
+    (export-ascii-output-render-view-native
+     sink (or view (export-ascii-output-view-from-node node))
+     (%export-render-context-preparation context))
+    nil)
+
+  (defun export-ascii-native-sink-scratch (sink frame context)
+    (let* ((active-sink (or sink *export-current-native-sink*))
+           (preparation (%export-render-context-preparation context))
+           (scratch
+             (export-ascii-output-for-preparation
+              preparation (export-render-frame-output-offset frame) nil
+              (if active-sink
+                  (export-ascii-output-downstream-indent active-sink)
+                  0)
+              (if active-sink
+                  (export-ascii-output-visible-controls-p active-sink)
+                  t)
+              context)))
+      (when active-sink
+        (setf (export-ascii-output-indent scratch)
+              (export-ascii-output-indent active-sink)
+              (export-ascii-output-line-start-p scratch)
+              (export-ascii-output-line-start-p active-sink)))
+      scratch))
+
+  (defun export-ascii-native-sink-string (sink context)
+    (declare (ignore context))
+    (export-ascii-output-string sink))
+
+  (defun export-ascii-native-sink-write-string (sink text context)
+    (declare (ignore context))
+    (export-ascii-output-write-string sink text)
+    nil)
+
+  (defun export-ascii-native-sink-append-node-result (sink text context)
+    (declare (ignore context))
+    (multiple-value-bind (range-length line-start-p display-width)
+        (export-ascii-output-range-length sink text 0 (length text) :indent-p nil)
+      (declare (ignore range-length))
+      (let* ((next-count (+ (export-ascii-output-count sink) (length text)))
+             (buffer (export-ascii-output-output sink)))
+        (when buffer
+          (when (> next-count (array-total-size buffer))
+            (let* ((capacity (max next-count
+                                  (if (zerop (array-total-size buffer))
+                                      16
+                                      (* 2 (array-total-size buffer)))))
+                   (resized (adjust-array buffer capacity
+                                          :fill-pointer (fill-pointer buffer))))
+              (setf (export-ascii-output-output sink) resized
+                    buffer resized)))
+          (loop for character across text
+                do (vector-push character buffer)))
+        (incf (export-ascii-output-count sink) (length text))
+        (incf (export-ascii-output-display-width sink) display-width)
+        (setf (export-ascii-output-line-start-p sink) line-start-p))
+      nil))
+
+  (defun export-ascii-native-sink-output-offset (sink context)
+    (declare (ignore context))
+    (if sink
+        (+ (export-ascii-output-base-count sink)
+           (export-ascii-output-count sink))
+        *export-current-output-offset*))
+
+  (defun export-ascii-render-body (context)
+    (export-ascii-render-preparation
+     (%export-render-context-preparation context) context))
+
+  (defmethod export-render-preparation
+      ((preparation export-preparation) (backend (eql :ascii)))
+    (declare (ignore backend))
+    (export-ascii-render-preparation preparation))
+
+  (eval-when (:load-toplevel :execute)
+    (%register-builtin-export-backend
+     :ascii
+     :renderer #'export-ascii-render-body
+     :native-sink-renderer #'export-ascii-native-sink-renderer
+     :native-sink-scratch #'export-ascii-native-sink-scratch
+     :native-sink-string #'export-ascii-native-sink-string
+     :native-sink-write-string #'export-ascii-native-sink-write-string
+     :native-sink-append-node-result
+     #'export-ascii-native-sink-append-node-result
+     :native-sink-output-offset #'export-ascii-native-sink-output-offset)))

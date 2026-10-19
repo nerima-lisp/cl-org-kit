@@ -2221,4 +2221,137 @@
            (output (export-org (parse-org source) :ascii)))
       (with-soft-assertions
         (expect (search (format nil "first line~%    second line") output)
-                :not :to-be nil)))))
+                :not :to-be nil))))
+  (it "dispatches nested ASCII overrides through the sink"
+      (let ((backend :ascii-test-nested-override)
+            (calls 0)
+            (registered-p nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :ascii
+               :transcoders
+               (list (cons :bold
+                           (lambda (node view frame context)
+                             (declare (ignore node view frame context))
+                             (incf calls)
+                             "OVERRIDE"))))
+              (setf registered-p t)
+              (let ((output
+                     (export-org
+                      (parse-org
+                       (export-ascii-test-source
+                        "#+OPTIONS: toc:nil num:nil"
+                        ""
+                        "before *inside* after"))
+                      backend)))
+                (with-soft-assertions
+                 (expect output :to-equal
+                         (format nil "before OVERRIDE after~%"))
+                 (expect calls :to-be 1))))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "applies plain-text filters inside wrappers in paragraph and table fast paths"
+      (let ((backend :ascii-test-plain-wrapper-order)
+            (registered-p nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :ascii
+               :filters
+               (list
+                (cons :plain-text
+                      (list (lambda (value context)
+                              (declare (ignore context))
+                              (concatenate 'string "F(" value ")")))))
+               :node-wrapper
+               (lambda (node view frame context render-next)
+                 (declare (ignore view frame context))
+                 (if (eq (node-type node) :plain-text)
+                     (funcall render-next "[" "]")
+                   (funcall render-next "" ""))))
+              (setf registered-p t)
+              (let* ((paragraph-output
+                      (export-org
+                       (parse-org
+                        (export-ascii-test-source
+                         "#+OPTIONS: toc:nil num:nil"
+                         ""
+                         "word"))
+                       backend))
+                     (table-output
+                      (export-org
+                       (parse-org
+                        (export-ascii-test-source
+                         "#+OPTIONS: toc:nil num:nil"
+                         ""
+                         "| x |"))
+                       backend)))
+                (with-soft-assertions
+                 (expect paragraph-output :to-equal (format nil "[F(word)]~%"))
+                 (expect (search "[F(x)]" table-output) :not :to-be nil))))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "passes post-blank to element filters and removes it from block layout"
+      (let* ((backend :ascii-test-post-blank-filter)
+             (registered-p nil)
+             (filtered-value nil)
+             (document
+              (parse-org
+               (export-ascii-test-source
+                "#+OPTIONS: toc:nil num:nil"
+                ""
+                "x"
+                ""
+                "")))
+             (paragraph
+              (export-ascii-test-find-node (document-root document) :paragraph))
+             (post-blank (node-post-blank paragraph))
+             (expected-filter-value
+              (concatenate 'string "x"
+                           (make-string post-blank :initial-element #\Space))))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :ascii
+               :filters
+               (list
+                (cons '(:element :paragraph)
+                      (list (lambda (value context)
+                              (declare (ignore context))
+                              (setf filtered-value value)
+                              value)))))
+              (setf registered-p t)
+              (let ((output (export-org document backend)))
+                (with-soft-assertions
+                 (expect (plusp post-blank) :to-be t)
+                 (expect filtered-value :to-equal expected-filter-value)
+                 (expect output :to-equal (format nil "x~%")))))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "counts raw element-filter output against the output limit"
+    (let ((backend :ascii-test-raw-filter-limit)
+          (registered-p nil)
+          (document
+            (parse-org
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              ""
+              "word")
+             :limits (make-limits :max-output-length 2))))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :ascii
+              :filters
+              (list
+               (cons (list :element :plain-text)
+                     (list (lambda (value context)
+                             (declare (ignore value context))
+                             (string (code-char 27)))))))
+             (setf registered-p t)
+             (with-soft-assertions
+               (expect (export-org document backend)
+                       :to-equal (format nil "~C~%" (code-char 27)))))
+        (when registered-p
+          (unregister-export-backend backend))))))
