@@ -1054,7 +1054,7 @@
                               (declare (ignore value context))
                               "final"))))))
         3)
-       :final-output :filter-commit 1 5))))
+       :final-output :filter-commit 2 5))))
   (it "checks the template aggregate once without recounting its components"
   (let ((template-result "OUT")
         (template-components nil)
