@@ -461,4 +461,69 @@
           (expect (org-resource-limit-error-limit-name caught)
                   :to-be :max-output-length))
         (expect scanner-calls :to-be 0)
+        (expect (document-text document) :to-equal source))))
+  (it "encrypts multiple selected targets in one bulk result"
+    (let* ((source (format nil
+                           "* One :vault:~%one body~%~%* Keep :other:~%keep body~%~%* Two :vault:~%two body~%"))
+           (document (parse-org source))
+           (registry (make-callback-registry))
+           (received nil)
+           (expected-output
+             (format nil
+                     "* One :vault:~%~A~%~%* Keep :other:~%keep body~%~%* Two :vault:~%~A~%"
+                     (crypt-test-armor "one body")
+                     (crypt-test-armor "two body"))))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text)
+                           (push text received)
+                           (crypt-test-armor text)))
+      (let* ((result (crypt-encrypt-entries document registry :tag "vault"))
+             (output (document-text (edit-result-updated-document result))))
+        (with-soft-assertions
+          (expect (nreverse received) :to-equal (list "one body" "two body"))
+          (expect (edit-result-spans result) :to-have-length 2)
+          (expect output :to-equal expected-output)
+          (expect (document-text document) :to-equal source)))))
+
+  (it "does not select inherited tags when bulk inherit is nil"
+    (let* ((source (format nil
+                           "* Parent :vault:~%parent body~%** Child~%child body~%"))
+           (document (parse-org source))
+           (registry (make-callback-registry))
+           (received nil)
+           (expected-payload (format nil "parent body~%** Child~%child body"))
+           (expected-output
+             (format nil "* Parent :vault:~%~A~%"
+                     (crypt-test-armor expected-payload))))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text)
+                           (push text received)
+                           (crypt-test-armor text)))
+      (let* ((result (crypt-encrypt-entries document registry
+                                            :tag "vault" :inherit nil))
+             (output (document-text (edit-result-updated-document result))))
+        (with-soft-assertions
+          (expect (nreverse received) :to-equal (list expected-payload))
+          (expect (edit-result-spans result) :to-have-length 1)
+          (expect output :to-equal expected-output)
+          (expect (document-text document) :to-equal source)))))
+
+  (it "rejects non-string bulk callback output without changing the document"
+    (let* ((source (format nil "* Entry :vault:~%secret~%"))
+           (document (parse-org source))
+           (registry (make-callback-registry))
+           (caught nil))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text)
+                           (declare (ignore text))
+                           :invalid-output))
+      (setf caught
+            (handler-case
+                (progn (crypt-encrypt-entries document registry :tag "vault") nil)
+              (org-crypt-error (condition) condition)))
+      (with-soft-assertions
+        (expect (typep caught (quote org-crypt-error)) :to-be t)
+        (when caught
+          (expect (org-crypt-error-reason caught)
+                  :to-be :invalid-callback-result))
         (expect (document-text document) :to-equal source)))))
