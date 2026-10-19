@@ -106,6 +106,7 @@ overrides its corresponding default with a non-negative integer."
                 (checked-limit-value max-write-plan-path-depth)))
 
 (defun limits-p (object)
+  "Return true when OBJECT is a limit configuration returned by MAKE-LIMITS."
   (%limits-p object))
 
 (defun limit-value (limits name)
