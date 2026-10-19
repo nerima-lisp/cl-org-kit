@@ -11,7 +11,7 @@ For instructions on adding a checkout and its dependencies to the ASDF source re
 
 ## Register callbacks
 
-Create a callback registry and register one function for encryption and one for decryption. Each function receives one string and returns a string. The encryption callback returns one complete PGP MESSAGE armor block; the decryption callback returns plaintext. Replace `my-encrypt-function` and `my-decrypt-function` in the examples with your application functions; the library does not provide cryptography.
+Create a callback registry and register one function for encryption and one for decryption. Each function receives one string and returns a string. The encryption callback returns one complete PGP MESSAGE armor block; the decryption callback returns plaintext. Replace `my-encrypt-function` and `my-decrypt-function` in the examples with your application functions. This form returns the configured registry for the edit calls below.
 
 ```lisp
 (let ((registry (org-kit:make-callback-registry)))
@@ -22,10 +22,11 @@ Create a callback registry and register one function for encryption and one for 
   (org-kit:register-callback
    registry :crypt-decrypt "org-crypt"
    (lambda (armor)
-     (my-decrypt-function armor))))
+     (my-decrypt-function armor)))
+  registry)
 ```
 
-The callback name is always `"org-crypt"`. Callers own the registry and the cryptographic implementation. A missing callback signals `org-crypt-error` with reason `:missing-callback`. An error signaled by a callback is wrapped in the same condition with reason `:callback-failed`. A non-string result or malformed encryption armor uses reason `:invalid-callback-result`. Callback errors are not retained: `org-crypt-error-cause` returns `nil` so it cannot expose callback data such as plaintext.
+The callback name is always `"org-crypt"`. Callers own the registry. A missing callback signals `org-crypt-error` with reason `:missing-callback`. An error signaled by a callback is wrapped in the same condition with reason `:callback-failed`. A non-string result or malformed encryption armor uses reason `:invalid-callback-result`. Callback errors are not retained: `org-crypt-error-cause` returns `nil` so it cannot expose callback data such as plaintext.
 
 ## Edit one entry
 
@@ -63,7 +64,7 @@ The first payload line identifies encrypted content only when it is exactly `---
 
 ## Edit tagged entries
 
-`crypt-encrypt-entries` and `crypt-decrypt-entries` apply the operation to tagged headings and return one `edit-result` for the document. A matching heading is processed once with its subtree, so a matching descendant is not a separate target. The tag scan omits headings with a local or inherited `ARCHIVE` tag and COMMENT subtrees; a selected ancestor is still processed as one subtree.
+`crypt-encrypt-entries` and `crypt-decrypt-entries` apply the operation to tagged headings and return one `edit-result` for the document. A matching heading is processed once with its subtree, so a matching descendant is not a separate target. The tag scan excludes headings whose local or inherited tags include `ARCHIVE` and excludes COMMENT subtrees as independent roots. A selected ancestor still spans its full subtree: encryption includes descendants in those regions, while decryption searches the subtree for the first armor block, including one inside those regions.
 
 With a parsed `document` and configured `registry`, call either function:
 
