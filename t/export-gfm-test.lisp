@@ -203,6 +203,28 @@
            (branch-document
              (parse-org
               (export-gfm-test-policy-source "renderer-branches.org")))
+           (branch-table
+             (find-if (lambda (node) (eq (node-type node) :table))
+                      (export-gfm-test-nodes branch-document)))
+           (branch-preparation (org-kit::export-prepare branch-document :gfm))
+           (branch-table-rows
+             (remove-if (lambda (row)
+                          (eq (node-property row :type) :rule))
+                        (remove-if-not
+                         (lambda (node) (eq (node-type node) :table-row))
+                         (node-children branch-table))))
+           (branch-table-view
+             (find-if (lambda (view)
+                        (eq (org-kit::export-view-node view) branch-table))
+                      (org-kit::export-collect-views
+                       (org-kit::export-preparation-root-views
+                        branch-preparation))))
+           (branch-table-view-rows
+             (remove-if
+              (lambda (view)
+                (eq (node-property (org-kit::export-view-node view) :type)
+                    :rule))
+              (org-kit::export-view-children branch-table-view)))
            (table-cells
              (remove-if-not (lambda (node) (eq (node-type node) :table-cell))
                             (export-gfm-test-nodes structure-document))))
@@ -237,7 +259,23 @@
                         :plain-list :item :table-cell :footnote-reference
                         :footnote-definition :target :radio-target))
           (expect (member type (export-gfm-test-node-types branch-document))
-                  :to-be-truthy)))))
+                  :to-be-truthy))
+        (expect (mapcar (lambda (row) (length (node-children row)))
+                        branch-table-rows)
+                :to-equal '(2 2))
+        (expect (mapcar (lambda (view)
+                          (length (org-kit::export-view-children view)))
+                        branch-table-view-rows)
+                :to-equal '(2 2))
+        (expect (mapcar (lambda (cell) (node-property cell :value))
+                        (node-children (second branch-table-rows)))
+                :to-equal '("value" ""))
+        (expect (mapcar
+                 (lambda (view)
+                   (node-property (org-kit::export-view-node view) :value))
+                 (org-kit::export-view-children
+                  (second branch-table-view-rows)))
+                :to-equal '("value" "")))))
 
   (it "protects table cells when macro-expanded code spans and link destinations contain pipes"
     (let* ((source
@@ -926,7 +964,10 @@
                 :to-be nil)
         (expect (org-kit::export-gfm-link-destination
                  expansion-state expansion-link)
-                :to-be nil))))
+                :to-be nil)
+        (expect (org-kit::export-gfm-link-abbreviation-prefix-unsafe-p
+                 expansion-link "safe" nil)
+                :to-be t))))
 
   (it "preserves entity text in a path after an allowed URL scheme"
     (let* ((source
@@ -1290,6 +1331,9 @@
                      payload))
            (document
              (parse-org source :limits (make-limits :max-output-length 1)))
+           (link
+             (find-if (lambda (node) (eq (node-type node) :link))
+                      (export-gfm-test-nodes document)))
            (input-length (length source)))
       (expect (export-org document :gfm) :to-equal "x")
       (let* ((before (progn (sb-ext:gc :full t)
@@ -1298,6 +1342,11 @@
              (allocated (- (sb-ext:get-bytes-consed) before)))
         (with-soft-assertions
           (expect actual :to-equal "x")
+          (expect (node-property link :type) :to-equal "fuzzy")
+          (expect (node-property link :format) :to-be :bracket)
+          (expect (>= (length (node-property link :path))
+                      (* 256 1024))
+                  :to-be t)
           (expect (> input-length (* 256 1024)) :to-be t)
           (expect (< allocated (floor input-length 2)) :to-be t)))))
 

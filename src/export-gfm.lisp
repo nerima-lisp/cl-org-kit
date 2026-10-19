@@ -493,13 +493,7 @@
         (node-post-blank node))))
 
 (defun export-gfm-strip-block-post-blank (view rendered)
-  (let* ((count (node-post-blank (export-view-node view)))
-         (start (- (length rendered) count)))
-    (if (and (plusp count) (not (minusp start))
-             (loop for index from start below (length rendered)
-                   always (char= (char rendered index) #\Space)))
-        (subseq rendered 0 start)
-        rendered)))
+  (export-node-strip-post-blank (export-view-node view) rendered))
 
 (defun export-gfm-render-block-view
     (state view &key preserve-source-breaks-p)
@@ -676,20 +670,33 @@
                always (not (export-control-character-p
                             (char source position)))))))
 
+(defun export-gfm-destination-part-length (part)
+  (if (and (consp part) (eq (first part) :range))
+      (- (fourth part) (third part))
+      (length part)))
+
+(defun export-gfm-destination-part-character (part index)
+  (if (and (consp part) (eq (first part) :range))
+      (char (second part) (+ (third part) index))
+      (char part index)))
+
 (defun export-gfm-destination-parts-length (parts)
-  (loop for part in parts sum (length part)))
+  (loop for part in parts sum (export-gfm-destination-part-length part)))
 
 (defun export-gfm-destination-parts-character (parts index)
   (loop with remaining = index
         for part in parts
-        when (< remaining (length part))
-          do (return (char part remaining))
-        do (decf remaining (length part))))
+        for length = (export-gfm-destination-part-length part)
+        when (< remaining length)
+          do (return (export-gfm-destination-part-character part remaining))
+        do (decf remaining length)))
 
 (defun export-gfm-destination-parts-position (parts predicate)
   (loop with position = 0
         for part in parts
-        do (loop for character across part
+        do (loop for index below (export-gfm-destination-part-length part)
+                 for character = (export-gfm-destination-part-character
+                                  part index)
                  when (funcall predicate character)
                    do (return-from export-gfm-destination-parts-position
                         position)
@@ -700,7 +707,9 @@
   (loop with position = 0
         with valid-p = t
         for part in parts
-        do (loop for character across part
+        do (loop for index below (export-gfm-destination-part-length part)
+                 for character = (export-gfm-destination-part-character
+                                  part index)
                  do (progn
                       (cond
                         ((char= character #\:)
@@ -804,6 +813,45 @@
 (defun export-gfm-expanded-bracket-path (node raw-path)
   (link-object-expand-abbreviation (node-document node) raw-path))
 
+(defun export-gfm-link-abbreviation-prefix-unsafe-p (node type target-id)
+  (multiple-value-bind (source start end)
+      (export-gfm-bracket-link-path-range node)
+    (when source
+      (let* ((document (node-document node))
+             (separator (position #\: source :start start :end end))
+             (key-end (or separator end))
+             (abbreviations
+               (and document
+                    (getf (document-settings document) :link-abbrevs)))
+             (entry
+               (find-if
+                (lambda (candidate)
+                  (let ((key (car candidate)))
+                    (and (stringp key)
+                         (= (length key) (- key-end start))
+                         (string= key source :start2 start :end2 key-end))))
+                abbreviations)))
+        (when (and entry (stringp (cdr entry)))
+          (let* ((replacement (cdr entry))
+                 (placeholder (search "%s" replacement))
+                 (destination-parts
+                   (if separator
+                       (if placeholder
+                           (list (list :range replacement 0 placeholder)
+                                 "x"
+                                 (list :range replacement
+                                       (+ placeholder 2)
+                                       (length replacement)))
+                           (list replacement "x"))
+                       (if placeholder
+                           (list (list :range replacement 0 placeholder)
+                                 (list :range replacement
+                                       (+ placeholder 2)
+                                       (length replacement)))
+                           (list replacement)))))
+            (not (export-gfm-link-destination-safe-p
+                  type target-id destination-parts destination-parts))))))))
+
 (defun export-gfm-link-parsed-destination-unsafe-p (state node)
   (when (eq (node-property node :format) :bracket)
     (let* ((type (node-property node :type))
@@ -829,9 +877,14 @@
                                              (string= "../" path :end2 3))))))
                      (list type ":" path))
                     (t (list path))))))
-      (and parts
-           (not (export-gfm-link-destination-safe-p
-                 type target-id parts parts))))))
+      (or (and (not internal-target-p)
+               (stringp type)
+               (stringp path)
+               (export-gfm-link-abbreviation-prefix-unsafe-p
+                node type target-id))
+          (and parts
+               (not (export-gfm-link-destination-safe-p
+                     type target-id parts parts)))))))
 
 (defun export-gfm-source-range-matches-parts-p (source start end parts)
   (and (= (- end start) (export-gfm-destination-parts-length parts))
@@ -922,7 +975,9 @@
   (let* ((node (export-view-node view))
          (destination (export-gfm-link-destination
                        state node :table-cell-p table-cell-p))
-         (image-p (export-gfm-image-path-p (node-property node :path)))
+         (image-p (and destination
+                        (export-gfm-image-path-p
+                         (node-property node :path))))
          (label-reserve (if destination
                             (+ (length destination) 4 (if image-p 1 0))
                             0))
@@ -1013,6 +1068,14 @@
              (:line-break (if table-cell-p "<br>" (format nil "  ~%")))
              (:footnote-reference
               (export-gfm-render-footnote-reference state view))
+             (:table-cell
+              (if children
+                  (export-gfm-render-inline-views
+                   state children :table-cell-p t
+                   :preserve-source-breaks-p preserve-source-breaks-p)
+                  (export-gfm-escape-literal
+                   (or (node-property node :value) (node-text node) "")
+                   :table-cell-p t)))
              ((:target :radio-target)
               (export-gfm-render-target state view))
              ((:babel-call :inline-babel-call :citation :citation-reference

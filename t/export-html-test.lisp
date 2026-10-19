@@ -489,10 +489,15 @@
 
   (it "renders anonymous inline footnotes at their source position"
     (let* ((document (parse-org "Before [fn::inline <&>] after."))
-           (output (export-org document :html)))
+           (output (export-org document :html))
+           (before (search "Before " output))
+           (content (search "inline &lt;&amp;&gt;" output))
+           (after (search " after." output)))
       (with-soft-assertions
-        (expect (search "Before inline &lt;&amp;&gt; after." output)
-                :not :to-be nil)
+        (expect (and before content after
+                     (< before content)
+                     (< content after))
+                :to-be t)
         (expect (search "[fn::" output) :to-be nil)
         (expect (search "id=\"footnotes\"" output) :to-be nil))))
 
@@ -1328,6 +1333,7 @@ paragraph" table-list) :not :to-be nil))))
            (registered-p nil)
            (body-filter-input-length 0)
            (expected nil)
+           (limit nil)
            (at-limit nil))
       (unwind-protect
            (progn
@@ -1341,13 +1347,14 @@ paragraph" table-list) :not :to-be nil))))
                              (setf body-filter-input-length (length value))
                              "")))))
              (setf registered-p t
-                   expected (export-org (parse-org source) backend))
+                   expected (export-org (parse-org source) backend)
+                   limit (- (+ (length expected) body-filter-input-length) 1))
              (setf at-limit
                    (export-org
                     (parse-org
                      source :limits
                      (make-limits
-                      :max-output-length (length expected)))
+                      :max-output-length limit))
                     backend))
              (with-soft-assertions
                (expect (> body-filter-input-length 4096) :to-be t)
@@ -1445,7 +1452,8 @@ paragraph" table-list) :not :to-be nil))))
   (it "dispatches heading titles and descriptive terms through registered transcoders"
       (let ((document
              (parse-org
-              (format nil "* Title *bold*~%~%- /Term/ :: description~%")))
+              (format nil
+                      "#+OPTIONS: toc:nil~%* Title *bold*~%~%- /Term/ :: description~%")))
             (backend :fr106-html-title-term)
             (registered-p nil)
             (bold-calls 0)
@@ -1488,6 +1496,10 @@ paragraph" table-list) :not :to-be nil))))
             (progn
               (register-derived-export-backend
                backend :html
+               :template
+               (lambda (context preamble body trailer)
+                 (declare (ignore context preamble trailer))
+                 body)
                :renderer
                (lambda (context)
                  (export-render-node
@@ -1506,7 +1518,7 @@ paragraph" table-list) :not :to-be nil))))
           (when registered-p
             (unregister-export-backend backend)))))
   (it "dispatches anonymous inline footnote children through the registry"
-      (let* ((document (parse-org "Before [fn::*inline*] after."))
+      (let* ((document (parse-org "Before [fn::*inline*]after."))
              (backend :fr106-html-inline-footnote)
              (registered-p nil)
              (output nil))
@@ -1514,6 +1526,10 @@ paragraph" table-list) :not :to-be nil))))
             (progn
               (register-derived-export-backend
                backend :html
+               :template
+               (lambda (context preamble body trailer)
+                 (declare (ignore context preamble trailer))
+                 body)
                :renderer
                (lambda (context)
                  (export-render-node

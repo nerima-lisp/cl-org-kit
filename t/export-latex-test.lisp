@@ -1209,8 +1209,8 @@
              (let* ((post-blank (node-post-blank paragraph))
                     (expected-filter-value
                       (concatenate 'string "word"
-                                   (make-string post-blank
-                                                :initial-element #\Space)))
+                                   (make-string (1+ post-blank)
+                                                :initial-element #\Newline)))
                     (output (export-org document backend)))
                (with-soft-assertions
                  (expect (plusp post-blank) :to-be t)
@@ -1259,7 +1259,8 @@
                (expect (search "P[\\documentclass[11pt]{scrartcl}" output)
                        :to-be-truthy)
                (expect (search "num=off;" output) :to-be-truthy)
-               (expect (search "[Plain \\# text]" output) :to-be-truthy)
+               (expect (search (format nil "[Plain \\# text.~%]") output)
+                       :to-be-truthy)
                (expect
                 (search
                  "\\href{https://doi.org/10.1234/example}{Paper \\& data}"

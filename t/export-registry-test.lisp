@@ -679,8 +679,8 @@
          (with-soft-assertions
            (expect (export-org (parse-org "Element filter.")
                                :api-registry-element-post-blank)
-                   :to-equal "item  ")
-           (expect filtered-value :to-equal "item  "))))))
+                   :to-equal (format nil "item~%~%"))
+           (expect filtered-value :to-equal (format nil "item~%~%")))))))
 
   (it "enforces transcoder and wrapper return and continuation boundaries"
     (let ((wrapper-calls 0)
@@ -1178,13 +1178,9 @@
 
   (defun export-registry-test-native-sink-scratch (sink frame context)
     (declare (ignore frame context))
-    (let ((scratch
-            (make-export-registry-test-native-sink
-             (export-registry-test-native-sink-offset sink)
-             (export-registry-test-native-sink-newline-weight sink))))
-      (setf (export-registry-test-native-sink-text scratch)
-            (copy-seq (export-registry-test-native-sink-text sink)))
-      scratch))
+    (make-export-registry-test-native-sink
+     (export-registry-test-native-sink-offset sink)
+     (export-registry-test-native-sink-newline-weight sink)))
 
   (defun export-registry-test-native-sink-string (sink context)
     (declare (ignore context))
@@ -1366,7 +1362,7 @@
                (expect (not (null event)) :to-be t)
                (expect (getf event :phase) :to-be :body)
                (expect (getf event :kind) :to-be :native-write)
-               (expect (getf event :index) :to-be 1)
+               (expect (getf event :index) :to-be 2)
                (expect (getf event :actual) :to-be last-offset)
                (expect (> last-offset (length output)) :to-be t)
                (expect (plusp (length output)) :to-be t)

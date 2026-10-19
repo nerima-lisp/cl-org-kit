@@ -1246,6 +1246,25 @@
                       :table-cell-p table-cell-p
                       :preserve-source-breaks-p preserve-source-breaks-p))
 
+(defun export-node-post-blank-character (node)
+  (if (eq (node-type-category (node-type node)) :object)
+      #\Space
+      #\Newline))
+
+(defun export-node-post-blank-string (node)
+  (make-string (node-post-blank node)
+               :initial-element (export-node-post-blank-character node)))
+
+(defun export-node-strip-post-blank (node rendered)
+  (let* ((count (node-post-blank node))
+         (start (- (length rendered) count))
+         (character (export-node-post-blank-character node)))
+    (if (and (plusp count) (not (minusp start))
+             (loop for index from start below (length rendered)
+                   always (char= (char rendered index) character)))
+        (subseq rendered 0 start)
+        rendered)))
+
 (defun export-render-view-to-sink (context sink view &key (mode :block)
                                                        table-cell-p
                                                        preserve-source-breaks-p)
@@ -1319,6 +1338,7 @@
     (let* ((sink-owner (second native-renderer-and-owner))
            (root-owner (%export-backend-descriptor-name (first ancestry)))
            (sink-context (export-context-for-owner context sink-owner))
+           (wrapper-added-text-p nil)
            (frame (%make-export-render-frame
                    :mode mode :table-cell-p table-cell-p
                    :preserve-source-breaks-p preserve-source-breaks-p
@@ -1457,6 +1477,9 @@
                                           :datum (list prefix suffix)
                                           :expected-type '(cons string string)))
                                  (incf calls)
+                                 (when (or (plusp (length prefix))
+                                           (plusp (length suffix)))
+                                   (setf wrapper-added-text-p t))
                                  (sink-write-string target prefix)
                                  (render-selected
                                   target
@@ -1483,12 +1506,8 @@
                    (render-with-wrapper scratch frame)
                    (let* ((native-result (sink-string scratch))
                           (with-post-blank
-                            (if (plusp (node-post-blank node))
-                                (concatenate
-                                 'string native-result
-                                 (make-string (node-post-blank node)
-                                              :initial-element #\Space))
-                                native-result))
+                            (concatenate 'string native-result
+                                         (export-node-post-blank-string node)))
                           (element-result
                             (if element-filters
                                 (let ((*export-current-output-offset* base-offset))
@@ -1513,10 +1532,9 @@
           (progn
             (render-with-wrapper sink frame)
             (when (plusp (node-post-blank node))
-              (sink-write-string
-               sink (make-string (node-post-blank node)
-                                 :initial-element #\Space)))
-            (when (and (first wrapper-and-owner)
+              (sink-write-string sink (export-node-post-blank-string node)))
+            (when (and wrapper-added-text-p
+                       (first wrapper-and-owner)
                        (eq (second wrapper-and-owner) root-owner))
               (export-check-output-stage
                "" limits backend *export-current-export-phase*
@@ -1622,8 +1640,7 @@
       (when (plusp (node-post-blank node))
         (setf result
               (concatenate 'string result
-                           (make-string (node-post-blank node)
-                                        :initial-element #\Space))))
+                           (export-node-post-blank-string node))))
       (setf result
             (export-apply-filter-stage
              (%export-render-context-backend context)

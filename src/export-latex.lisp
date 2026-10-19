@@ -444,11 +444,16 @@
          (type (node-property node :type))
          (path (node-property node :path))
          (label (export-latex-link-label state view base-count))
+         (scheme-end (and (stringp type) (string-equal type "fuzzy")
+                          (stringp path)
+                          (export-explicit-url-scheme-end path)))
+         (handler-type (if scheme-end (subseq path 0 scheme-end) type))
+         (handler-path (if scheme-end (subseq path (1+ scheme-end)) path))
          (context (export-latex-state-render-context state))
          (link-result
            (and context frame (stringp type) (stringp path)
                 (export-call-link-type-handler
-                 context type path
+                 context handler-type handler-path
                  (export-latex-view-plain-text-description view) frame))))
     (if link-result
         (export-latex-render-link-result state link-result path label base-count)
@@ -573,13 +578,7 @@
    state (export-view-node view)))
 
 (defun export-latex-strip-block-post-blank (view rendered)
-  (let* ((count (node-post-blank (export-view-node view)))
-         (start (- (length rendered) count)))
-    (if (and (plusp count) (not (minusp start))
-             (loop for index from start below (length rendered)
-                   always (char= (char rendered index) #\Space)))
-        (subseq rendered 0 start)
-        rendered)))
+  (export-node-strip-post-blank (export-view-node view) rendered))
 
 (defun export-latex-render-title-node (state node base-count)
   (let* ((context (export-latex-state-render-context state))
