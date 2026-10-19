@@ -614,6 +614,42 @@
               :to-equal
               '(("https" "//example.test/a b/é")
                 ("https" "//example.test/a%20b%2F%C3%A9")))))
+  (it "replaces one link abbreviation placeholder in Org precedence order"
+    (let* ((source
+             (format nil
+                     "#+LINK: repeated https://example.test/%s/%s/%h~%#+LINK: ordered https://example.test/%h?tag=%s~%#+LINK: malformed https://example.test/%()/%s~%[[repeated:a b]] [[ordered:a b]] [[malformed:a b]]"))
+           (links
+             (remove-if-not
+              (lambda (object) (eq (node-type object) :link))
+              (link-test-org-objects source))))
+      (expect (mapcar (lambda (link)
+                        (list (node-property link :type)
+                              (node-property link :path)))
+                      links)
+              :to-equal
+              '(("https" "//example.test/a b/%s/%h")
+                ("https" "//example.test/%h?tag=a b")
+                ("https" "//example.test/%()/a b")))))
+  (it "checks the input length limit after link abbreviation expansion"
+    (let* ((source "[[repeat:ab]]")
+           (replacement
+             (format nil "~{~a~}" (make-list 7 :initial-element "%s")))
+           (condition
+             (handler-case
+                 (progn
+                   (parse-org source
+                              :limits (make-limits :max-input-length 13)
+                              :link-abbrevs (list (cons "repeat" replacement)))
+                   nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (length source) :to-be 13)
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-input-length)
+          (expect (org-resource-limit-error-limit condition) :to-be 13)
+          (expect (org-resource-limit-error-actual condition) :to-be 14)))))
   (it "leaves bracket links unchanged when abbreviations are not a list"
     (let ((link (find :link
                       (link-test-org-objects "[[web:manual]]"

@@ -182,6 +182,17 @@
                    (write-char (code-char octet) output)
                    (format output "%~2,'0X" octet))))))
 
+(defun link-object-function-form-placeholder-p (replacement)
+  (loop with start = 0
+        for opening = (search "%(" replacement :start2 start)
+        while opening
+        for closing = (and opening
+                           (position #\) replacement :start (+ opening 2)))
+        when (and closing (> closing (+ opening 2)))
+          return t
+        do (setf start (+ opening 2))
+        finally (return nil)))
+
 (defun link-object-expand-abbreviation (document link)
   (let* ((separator (position #\: link))
          (key
@@ -202,25 +213,27 @@
          (replacement (and entry (cdr entry))))
     (if (not (stringp replacement))
         link
-        (if (or (search "%s" replacement)
-                (search "%h" replacement))
-            (with-output-to-string (output)
-              (loop with position = 0
-                    while (< position (length replacement))
-                    do (if (and (char= (char replacement position) #\%)
-                                (< (1+ position) (length replacement))
-                                (find (char replacement (1+ position)) "sh"))
-                           (progn
-                             (if (char= (char replacement (1+ position)) #\s)
-                                 (write-string (or tail "") output)
-                                 (write-string (link-object-url-hexify
-                                                (or tail ""))
-                                               output))
-                             (incf position 2))
-                           (progn
-                             (write-char (char replacement position) output)
-                             (incf position)))))
-            (concatenate 'string replacement (or tail ""))))))
+        (let ((expanded
+                (cond
+                  ((link-object-function-form-placeholder-p replacement)
+                   link)
+                  ((search "%s" replacement)
+                   (let ((position (search "%s" replacement)))
+                     (concatenate 'string
+                                  (subseq replacement 0 position)
+                                  (or tail "")
+                                  (subseq replacement (+ position 2)))))
+                  ((search "%h" replacement)
+                   (let ((position (search "%h" replacement)))
+                     (concatenate 'string
+                                  (subseq replacement 0 position)
+                                  (link-object-url-hexify (or tail ""))
+                                  (subseq replacement (+ position 2)))))
+                  (t (concatenate 'string replacement (or tail ""))))))
+          (check-limit (document-limits document)
+                       :max-input-length
+                       (length expanded))
+          expanded))))
 
 (defun link-object-known-scheme-end (link)
   (let ((colon (position #\: link)))
