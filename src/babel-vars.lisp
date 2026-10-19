@@ -312,6 +312,23 @@
            parameters "VAR"
            (format nil "~A=~A" (car assignment) (cdr assignment))))))
 
+(defun babel-call-variable-assignments (parameters arguments)
+  (let ((variables (babel-parameter-variables parameters))
+        (variable-index 0)
+        (assignments '()))
+    (dolist (argument (babel-split-header-list arguments #\,)
+             (nreverse assignments))
+      (if (position #\= argument)
+          (push (babel-parse-assignment argument) assignments)
+          (let ((variable (nth variable-index variables)))
+            (unless variable
+              (babel-signal-error
+               :invalid-variable-assignment
+               "Babel call positional argument has no target variable"
+               argument))
+            (push (cons (car variable) argument) assignments)
+            (incf variable-index))))))
+
 (defun babel-resolve-call-result (context call &optional additional-variables)
   (let* ((target-name (node-property call :call))
          (target (and (stringp target-name)
@@ -325,9 +342,8 @@
            (parameters (resolve-babel-parameters document target))
            (assignments (node-property call :arguments))
            (call-variables (append
-                            (and assignments
-                                 (mapcar #'babel-parse-assignment
-                                         (babel-split-header-list assignments #\,)))
+                            (babel-call-variable-assignments
+                             parameters assignments)
                             additional-variables)))
       (setf parameters
             (babel-merge-header-text

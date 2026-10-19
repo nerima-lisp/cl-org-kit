@@ -155,6 +155,41 @@
                 :to-equal
                 '(("call-target" (("amount" . 11))))))))
 
+  (it "resolves positional call arguments against target variables in order"
+    (let* ((document
+             (parse-org
+              (babel-vars-test-lines
+               "#+NAME: call-target"
+               "#+BEGIN_SRC emacs-lisp :var amount=7, label=\"default\""
+               "unused"
+               "#+END_SRC"
+               ""
+               "#+NAME: call-alias"
+               "#+CALL: call-target(11, \"from call\")"
+               ""
+               "#+NAME: consumer"
+               "#+BEGIN_SRC emacs-lisp"
+               "unused"
+               "#+END_SRC")))
+           (consumer (babel-vars-test-named-src-block document "consumer"))
+           (resolver-calls '())
+           (resolver-result '(11 "from call"))
+           (variables
+             (babel-vars-test-resolve-with-variables
+              document consumer '(("VAR" . "call-result=call-alias"))
+              :result-resolver
+              (lambda (block-name parameters)
+                (push (list block-name parameters) resolver-calls)
+                resolver-result))))
+      (with-soft-assertions
+        (expect variables
+                :to-equal
+                `(("call-result" . ,resolver-result)))
+        (expect (nreverse resolver-calls)
+                :to-equal
+                '(("call-target" (("amount" . 11)
+                                  ("label" . "from call"))))))))
+
   (it "signals a named error when a referenced result has no resolver"
     (let* ((document
              (parse-org
