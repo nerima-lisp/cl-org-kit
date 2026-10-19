@@ -825,6 +825,19 @@
                    :to-be nil)
                   (expect calls :to-be 1)))
            (setf (symbol-function symbol) original))))))
+  (it "inspects entries under roots without trailing separators"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let ((target (write-plan-test-path root "target.txt")))
+         (write-plan-test-write-text target "value")
+         (sb-posix:chmod (namestring target) #o640)
+         (expect
+          (org-kit::write-plan-inspect-entry
+           (string-right-trim "/" (org-kit::write-plan-canonical-root root))
+           "target.txt"
+           (list "target.txt")
+           nil)
+          :to-be #o640)))))
   (it "classifies preflight directory syscall errors"
     (write-plan-test-call-with-directory
      (lambda (root)
