@@ -4,9 +4,12 @@
 (defstruct (export-latex-state (:constructor %make-export-latex-state))
   preparation
   limits
+  render-context
   (references (make-hash-table :test #'equal))
   (reference-ids (make-hash-table :test #'eq))
   (active-footnotes nil))
+
+(defvar *export-latex-render-frame* nil)
 
 (declaim (ftype function export-latex-render-view
                          export-latex-render-object
@@ -15,6 +18,19 @@
 (defun export-latex-check-length (state base-count length)
   (check-limit (export-latex-state-limits state) :max-output-length
                (+ base-count length)))
+
+(defun export-latex-error-backend (state)
+  (let ((context (export-latex-state-render-context state)))
+    (if context
+        (export-render-context-backend context)
+        :latex)))
+
+(defun export-latex-raw-output-p (state)
+  (let ((context (export-latex-state-render-context state)))
+    (if context
+        (export-render-context-raw-output-p context :latex)
+        (export-preparation-allow-raw-latex
+         (export-latex-state-preparation state)))))
 
 (defun export-latex-escape-text (state text &optional (base-count 0))
   (with-output-to-string (output)
@@ -122,7 +138,8 @@
                                       (string #\Newline)
                                       (format nil "~%~%"))))
           for rendered = (export-latex-render-view
-                          state view (+ base-count length (length separator)))
+                          state view (+ base-count length (length separator))
+                          (if inline-p :inline :block))
           do (when (plusp (length rendered))
                (export-latex-check-length state base-count
                                           (+ length (length separator)
@@ -133,14 +150,27 @@
                (setf first-p nil
                      previous-view view)))))
 
-(defun export-latex-render-inline-views (state views base-count)
+(defun export-latex-render-inline-views
+    (state views base-count
+     &key (table-cell-p
+           (and *export-latex-render-frame*
+                (export-render-frame-table-cell-p
+                 *export-latex-render-frame*)))
+       (preserve-source-breaks-p
+         (and *export-latex-render-frame*
+              (export-render-frame-preserve-source-breaks-p
+               *export-latex-render-frame*))))
   (with-output-to-string (output)
     (loop with length = 0
           for tail on views
           for view = (car tail)
           for next-view = (cadr tail)
           for rendered = (export-latex-render-view state view
-                                                    (+ base-count length))
+                                                    (+ base-count length)
+                                                    :inline
+                                                    :table-cell-p table-cell-p
+                                                    :preserve-source-breaks-p
+                                                    preserve-source-breaks-p)
           for post-blank = (node-post-blank (export-view-node view))
           for next-node = (and next-view (export-view-node next-view))
           for next-text = (and next-node
@@ -157,12 +187,20 @@
                                              (char next-text 0)))))
                               ""
                               (make-string post-blank :initial-element #\Space))
+          for dispatch-owns-spacing-p =
+            (export-latex-dispatch-owns-spacing-p state view)
           do (export-latex-check-length state base-count
                                         (+ length (length rendered)
-                                           (length separator)))
+                                           (if dispatch-owns-spacing-p
+                                               0
+                                               (length separator))))
              (write-string rendered output)
-             (write-string separator output)
-             (incf length (+ (length rendered) (length separator))))))
+             (unless dispatch-owns-spacing-p
+               (write-string separator output))
+             (incf length (+ (length rendered)
+                             (if dispatch-owns-spacing-p
+                                 0
+                                 (length separator)))))))
 
 (defun export-latex-render-title (state node view base-count)
   (let ((segments (node-property node :title))
@@ -171,17 +209,23 @@
         (with-output-to-string (output)
           (loop with length = 0
                 for segment in segments
+                for macro-entry = (and (node-p segment)
+                                       (assoc segment title-macros :test #'eq))
                 for rendered =
                   (if (node-p segment)
-                      (let ((macro-entry (assoc segment title-macros :test #'eq)))
-                        (if macro-entry
-                            (export-latex-render-inline-views
-                             state (cdr macro-entry) (+ base-count length))
-                            (export-latex-render-object state segment
-                                                       (+ base-count length))))
+                      (if macro-entry
+                          (export-latex-render-inline-views
+                           state (cdr macro-entry) (+ base-count length))
+                          (export-latex-render-title-node
+                           state segment (+ base-count length)))
                       (export-latex-escape-text state segment
                                                (+ base-count length)))
-                for spaces = (if (node-p segment)
+                for dispatch-owns-spacing-p =
+                  (and (node-p segment)
+                       (not macro-entry)
+                       (export-latex-node-dispatch-owns-spacing-p state segment))
+                for spaces = (if (and (node-p segment)
+                                      (not dispatch-owns-spacing-p))
                                 (make-string (node-post-blank segment)
                                              :initial-element #\Space)
                                 "")
@@ -279,7 +323,7 @@
         (dolist (segment (node-property node :tag))
           (write-string
            (if (node-p segment)
-               (export-latex-render-object state segment base-count)
+               (export-latex-render-title-node state segment base-count)
                (export-latex-escape-text state segment base-count))
            output))
         (write-string "}]" output))
@@ -348,7 +392,7 @@
                               for cell-text =
                                 (export-latex-render-inline-views
                                  state (export-view-children cell)
-                                 (+ base-count length))
+                                 (+ base-count length) :table-cell-p t)
                               do (unless first-p (write-string " & " line))
                                  (write-string cell-text line))))
                 for row-text = (if rule-p rendered
@@ -395,12 +439,20 @@
          (references (export-latex-state-references state)))
     (gethash clean-path references)))
 
-(defun export-latex-render-link (state view base-count)
+(defun export-latex-render-link (state view base-count &optional frame)
   (let* ((node (export-view-node view))
          (type (node-property node :type))
          (path (node-property node :path))
-         (label (export-latex-link-label state view base-count)))
-    (cond
+         (label (export-latex-link-label state view base-count))
+         (context (export-latex-state-render-context state))
+         (link-result
+           (and context frame (stringp type) (stringp path)
+                (export-call-link-type-handler
+                 context type path
+                 (export-latex-view-plain-text-description view) frame))))
+    (if link-result
+        (export-latex-render-link-result state link-result path label base-count)
+      (cond
       ((and (stringp type) (stringp path)
             (member type '("fuzzy" "custom-id" "radio") :test #'string-equal))
        (let ((id (export-latex-internal-link-id state path)))
@@ -431,17 +483,115 @@
                      (export-latex-escape-text state expanded base-count)
                      label)
              label)))
-      (t label))))
+      (t label)))))
+
+(defun export-latex-view-plain-text-description (view)
+  (let* ((node (export-view-node view))
+         (type (node-type node))
+         (children (export-view-children view)))
+    (case type
+      ((:plain-text :text) (or (node-text node)
+                               (node-property node :value) ""))
+      (:entity (or (node-property node :utf-8)
+                   (node-property node :unicode)
+                   (node-text node) ""))
+      (:line-break (string #\Newline))
+      (:link (if children
+                 (export-latex-views-plain-text-description children)
+                 (or (node-property node :raw-link)
+                     (node-property node :path) "")))
+      ((:code :verbatim :inline-src-block)
+       (export-latex-source-text node))
+      (:latex-fragment (export-latex-source-text node))
+      (:macro (if children
+                  (export-latex-views-plain-text-description children)
+                  ""))
+      (otherwise
+       (if children
+           (export-latex-views-plain-text-description children)
+           (or (node-text node) ""))))))
+
+(defun export-latex-views-plain-text-description (views)
+  (with-output-to-string (output)
+    (dolist (view views)
+      (write-string (export-latex-view-plain-text-description view) output))))
+
+(defun export-latex-render-link-result (state result path label base-count)
+  (let ((destination (export-link-result-destination result))
+        (description (export-link-result-description result)))
+    (case (export-link-result-kind result)
+      (:link
+       (if (export-safe-url-p path destination)
+           (format nil "\\href{~A}{~A}"
+                   (export-latex-escape-text state destination base-count)
+                   (export-latex-escape-text state description base-count))
+           label))
+      (:image
+       (let ((scheme-end (export-explicit-url-scheme-end destination)))
+         (cond
+           ((and scheme-end
+                 (export-allowed-url-scheme-p destination scheme-end)
+                 (member (subseq destination 0 scheme-end) '("http" "https")
+                         :test #'string-equal)
+                 (export-safe-url-p path destination))
+            (format nil "\\includegraphics{~A}"
+                    (export-latex-escape-text state destination base-count)))
+           ((and (null scheme-end)
+                 (export-safe-relative-file-path-p destination))
+            (format nil "\\includegraphics{~A}"
+                    (export-latex-escape-text state destination base-count)))
+           (t label)))))))
 
 (defun export-latex-footnote-entry (label preparation)
   (find label (export-preparation-footnotes preparation)
         :key (lambda (entry) (getf entry :label)) :test #'string=))
 
-(defun export-latex-view-for-node (node)
+(defun export-latex-view-for-node (node &optional prune-children-p)
   (%make-export-view
    :node node
-   :children (mapcar #'export-latex-view-for-node (node-children node))
+   :children (unless prune-children-p
+              (mapcar #'export-latex-view-for-node (node-children node)))
    :source-document (node-document node)))
+
+(defun export-latex-node-dispatch-owns-spacing-p (state node)
+  (let ((context (export-latex-state-render-context state)))
+    (when context
+      (let ((ancestry (org-kit::%export-render-context-ancestry context)))
+        (multiple-value-bind (transcoder transcoder-owner)
+            (export-resolved-map-value
+             ancestry #'%export-backend-descriptor-transcoders (node-type node))
+          (declare (ignore transcoder))
+          (multiple-value-bind (wrapper wrapper-owner)
+              (export-resolved-component
+               ancestry #'%export-backend-descriptor-node-wrapper)
+            (declare (ignore wrapper))
+            (export-render-node-scratch-required-p
+             ancestry (node-type node) transcoder-owner wrapper-owner)))))))
+
+(defun export-latex-dispatch-owns-spacing-p (state view)
+  (export-latex-node-dispatch-owns-spacing-p
+   state (export-view-node view)))
+
+(defun export-latex-strip-block-post-blank (view rendered)
+  (let* ((count (node-post-blank (export-view-node view)))
+         (start (- (length rendered) count)))
+    (if (and (plusp count) (not (minusp start))
+             (loop for index from start below (length rendered)
+                   always (char= (char rendered index) #\Space)))
+        (subseq rendered 0 start)
+        rendered)))
+
+(defun export-latex-render-title-node (state node base-count)
+  (let* ((context (export-latex-state-render-context state))
+         (policy (and context
+                      (export-resolved-node-policy
+                       (org-kit::%export-render-context-ancestry context)
+                       (node-type node))))
+         (view (export-latex-view-for-node node
+                                           (eq policy :prune-children))))
+    (if context
+        (export-latex-render-view state view base-count :inline)
+        (export-latex-render-object state node base-count view))))
 
 (defun export-latex-render-footnote (state view base-count)
   (let* ((node (export-view-node view))
@@ -451,7 +601,7 @@
                       label (export-latex-state-preparation state))))
          (active (export-latex-state-active-footnotes state)))
     (unless (or entry (null label))
-      (export-error :latex :unresolved-footnote node
+      (export-error (export-latex-error-backend state) :unresolved-footnote node
                     "Footnote reference has no selected definition"))
     (check-limit (export-latex-state-limits state)
                  :max-export-expansion-depth (length active))
@@ -480,7 +630,7 @@
     (loop while (and (plusp end) (char= (char text (1- end)) #\Newline))
           do (decf end))
     (when (search "\\end{verbatim}" text :end2 end)
-      (export-error :latex :unsafe-verbatim-body nil
+      (export-error (export-latex-error-backend state) :unsafe-verbatim-body nil
                     "Code body contains the verbatim closing delimiter"))
     (export-latex-check-length state base-count (+ wrapper-length end))
     (format nil "\\begin{verbatim}~%~A~%\\end{verbatim}"
@@ -562,12 +712,10 @@
                                                  (node-property node :unicode)
                                                  (node-text node) "") base-count)))
       (:latex-fragment
-       (if (export-preparation-allow-raw-latex
-            (export-latex-state-preparation state))
+       (if (export-latex-raw-output-p state)
            (export-latex-source-text node) ""))
       (:export-snippet
-       (if (and (export-preparation-allow-raw-latex
-                 (export-latex-state-preparation state))
+       (if (and (export-latex-raw-output-p state)
                 (string-equal (or (node-property node :back-end) "") "latex"))
            (or (node-property node :value) "") ""))
       (:footnote-reference
@@ -581,7 +729,8 @@
                                          base-count)))
       (:line-break (format nil "\\\\{}~%"))
       (:link (export-latex-render-link
-              state (or view (export-latex-view-for-node node)) base-count))
+              state (or view (export-latex-view-for-node node)) base-count
+              *export-latex-render-frame*))
       (:macro (funcall content))
       ((:plain-text :text)
        (export-latex-escape-text state (or (node-text node) "") base-count))
@@ -607,7 +756,7 @@
        (export-latex-escape-text state (export-latex-source-text node) base-count))
       (otherwise (funcall content)))))
 
-(defun export-latex-render-view (state view &optional (base-count 0))
+(defun export-latex-render-view-legacy (state view &optional (base-count 0))
   (let* ((node (export-view-node view))
          (type (node-type node))
          (children (export-view-children view))
@@ -653,8 +802,7 @@
               (let ((key (string-upcase (or (node-property node :key) "")))
                     (value (or (node-property node :value) "")))
                 (cond ((string= key "LATEX")
-                       (if (export-preparation-allow-raw-latex
-                            (export-latex-state-preparation state))
+                       (if (export-latex-raw-output-p state)
                            value ""))
                       ((string= key "ATTR_LATEX")
                        (export-latex-render-attr-comment
@@ -672,10 +820,12 @@
                state base-count
                (loop for cell in children
                      collect (export-latex-render-inline-views
-                              state (export-view-children cell) base-count))
+                              state (export-view-children cell) base-count
+                              :table-cell-p t))
                " & "))
              (:table-cell
-              (export-latex-render-inline-views state children base-count))
+              (export-latex-render-inline-views state children base-count
+                                                :table-cell-p t))
              ((:babel-call :inline-babel-call :diary-sexp)
               (export-latex-escape-text state (export-latex-source-text node)
                                         base-count))
@@ -685,22 +835,21 @@
                                             (node-text node) "") base-count))
              (:src-block (export-latex-render-source-block state view base-count))
              (:export-block
-              (if (and (export-preparation-allow-raw-latex
-                        (export-latex-state-preparation state))
+              (if (and (export-latex-raw-output-p state)
                        (member (or (node-property node :type) "")
                                '("latex" "tex") :test #'string-equal))
                   (or (node-property node :value) "") ""))
              (:horizontal-rule "\\noindent\\rule{\\linewidth}{0.4pt}")
              (:latex-environment
-              (if (export-preparation-allow-raw-latex
-                   (export-latex-state-preparation state))
+              (if (export-latex-raw-output-p state)
                   (export-latex-source-text node) ""))
              (:verse-block
               (format nil "\\begin{verse}~%~A~%\\end{verse}"
                       (export-latex-rendered-views state children base-count)))
              (otherwise
               (export-latex-render-object state node base-count view))))
-         (attribute (node-property node :ATTR_LATEX)))
+         (attribute (and (null (export-latex-state-render-context state))
+                         (node-property node :ATTR_LATEX))))
     (let* ((attribute-comment
              (and (stringp attribute)
                   (export-latex-render-attr-comment
@@ -714,20 +863,70 @@
                    (concatenate 'string attribute-comment
                                 (string #\Newline) rendered))
                  rendered)))
-      (export-latex-check-length state base-count (length result))
+      (unless (export-latex-state-render-context state)
+        (export-latex-check-length state base-count (length result)))
       result)))
+
+(defun export-latex-render-view (state view &rest arguments)
+  (let* ((base-count (if (and arguments (not (keywordp (first arguments))))
+                         (pop arguments)
+                         0))
+         (mode (if (and arguments
+                        (member (first arguments) (list :block :inline :object)))
+                   (pop arguments)
+                   :block)))
+    (unless (loop for tail = arguments then (cddr tail)
+                  while tail
+                  always (and (cdr tail)
+                              (member (car tail)
+                                     (list :table-cell-p
+                                           :preserve-source-breaks-p))))
+      (error "Invalid LaTeX render arguments"))
+    (let* ((table-cell-p
+             (getf arguments :table-cell-p
+                   (and *export-latex-render-frame*
+                        (export-render-frame-table-cell-p
+                         *export-latex-render-frame*))))
+           (preserve-source-breaks-p
+             (getf arguments :preserve-source-breaks-p
+                   (and *export-latex-render-frame*
+                        (export-render-frame-preserve-source-breaks-p
+                         *export-latex-render-frame*))))
+           (context (export-latex-state-render-context state)))
+      (if context
+          (let* ((*export-current-output-offset* base-count)
+                 (node (export-view-node view))
+                 (result (export-render-view
+                          context view :mode mode :table-cell-p table-cell-p
+                          :preserve-source-breaks-p preserve-source-breaks-p))
+                 (post-blank (node-post-blank node)))
+            (cond
+              ((eq mode :block)
+               (export-latex-strip-block-post-blank view result))
+              ((and (plusp post-blank)
+                    (not (export-latex-node-dispatch-owns-spacing-p state node)))
+               (subseq result 0 (- (length result) post-blank)))
+              (t result)))
+          (export-latex-render-view-legacy state view base-count)))))
 
 (defun export-latex-keyword-values (document key)
   (loop for (node keyword value) in (export-keyword-records document)
         when (string= keyword key)
           collect (list node value)))
 
+(defun export-latex-document-class (state)
+  (let ((context (export-latex-state-render-context state)))
+    (when context
+      (loop for descriptor in
+            (reverse (org-kit::%export-render-context-ancestry context))
+            for class = (%export-backend-descriptor-document-class descriptor)
+            when class return class))))
+
 (defun export-latex-preamble (state)
   (let* ((preparation (export-latex-state-preparation state))
          (document (export-preparation-document preparation))
          (records (export-keyword-records document))
-         (allow-raw-latex
-           (export-preparation-allow-raw-latex preparation))
+         (allow-raw-latex (export-latex-raw-output-p state))
          (class (and allow-raw-latex
                      (nth-value 0
                        (export-single-keyword-value records "LATEX_CLASS" :latex))))
@@ -740,6 +939,7 @@
                        (append
                         (export-latex-keyword-values document "LATEX_HEADER")
                         (export-latex-keyword-values document "LATEX_HEADER_EXTRA"))))
+         (document-class (export-latex-document-class state))
          (metadata (export-preparation-metadata preparation))
          (title (getf metadata :title))
          (author (getf metadata :author))
@@ -759,7 +959,7 @@
                            class-options
                            (format nil "[~A]" class-options))
                        "[11pt]"))
-                 (class-text (or class "article")))
+                 (class-text (or class document-class "article")))
             (export-latex-check-length
              state emitted-length
              (+ (length "\\documentclass") (length class-options-text)
@@ -809,11 +1009,78 @@
                                   (length suffix)))
     (concatenate 'string preamble body suffix)))
 
-(defmethod export-render-preparation
-    ((preparation export-preparation) (backend (eql :latex)))
-  (let ((state (%make-export-latex-state
-                :preparation preparation
-                :limits (document-limits
-                         (export-preparation-document preparation)))))
+(defun export-latex-make-state (context)
+  (let* ((preparation (org-kit::%export-render-context-preparation context))
+         (state (%make-export-latex-state
+                 :preparation preparation
+                 :limits (export-render-context-limits context))))
     (export-latex-index-references state)
-    (export-latex-render-document state)))
+    state))
+
+(defun export-latex-set-render-context (context)
+  (let ((state (export-render-context-state context)))
+    (setf (export-latex-state-preparation state)
+          (org-kit::%export-render-context-preparation context)
+          (export-latex-state-limits state) (export-render-context-limits context)
+          (export-latex-state-render-context state) context)
+    state))
+
+(defun export-latex-render-preamble (context)
+  (export-latex-preamble (export-latex-set-render-context context)))
+
+(defun export-latex-render-body (context)
+  (let* ((state (export-latex-set-render-context context))
+         (preparation (export-latex-state-preparation state)))
+    (export-latex-rendered-views
+     state (export-preparation-root-views preparation)
+     *export-current-output-offset*)))
+
+(defun export-latex-render-trailer (context)
+  (declare (ignore context))
+  (format nil "~%~%\\end{document}~%"))
+
+(defun export-latex-transcode-node (node view frame context)
+  (let* ((state (export-latex-set-render-context context))
+         (base-count (export-render-frame-output-offset frame))
+         (*export-current-output-offset* base-count)
+         (*export-latex-render-frame* frame)
+         (active-view (or view (export-latex-view-for-node node))))
+    (export-latex-render-view-legacy state active-view base-count)))
+
+(defun export-latex-node-transcoders ()
+  (mapcar (lambda (type)
+            (cons type #'export-latex-transcode-node))
+          (node-types)))
+
+(defun export-latex-node-wrapper (node view frame context render-next)
+  (declare (ignore view))
+  (let* ((state (export-latex-set-render-context context))
+         (attribute (node-property node :ATTR_LATEX))
+         (prefix (if (stringp attribute)
+                     (concatenate
+                      'string
+                      (export-latex-render-attr-comment
+                       state attribute
+                       (export-render-frame-output-offset frame))
+                      (string #\Newline))
+                     "")))
+    (funcall render-next prefix ""))
+  nil)
+
+(eval-when (:load-toplevel :execute)
+  (%register-builtin-export-backend
+   :latex
+   :renderer #'export-latex-render-body
+   :preamble-renderer #'export-latex-render-preamble
+   :trailer-renderer #'export-latex-render-trailer
+   :make-state #'export-latex-make-state
+   :document-class "article"
+   :transcoders (export-latex-node-transcoders)
+   :node-wrapper #'export-latex-node-wrapper
+   :accepted-keywords
+   '("LATEX_CLASS" "LATEX_CLASS_OPTIONS" "LATEX_HEADER"
+     "LATEX_HEADER_EXTRA" "LATEX" "ATTR_LATEX")
+   :retained-keywords '("LATEX" "ATTR_LATEX")
+   :raw-output-options '((:latex . :allow-raw-latex))
+   :export-block-names '("latex" "tex")
+   :export-snippet-names '("latex")))

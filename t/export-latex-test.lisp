@@ -259,6 +259,48 @@
    :node (make-node type :properties properties :post-blank post-blank)
    :children children :payload payload :source-document document))
 
+(defvar *export-latex-test-link-observation* nil)
+
+(defun export-latex-test-derived-renderer (context)
+  (concatenate
+   'string
+   (if (export-option-explicit-p context :num)
+       (format nil "num=~A;"
+               (if (export-option-value context :num) "on" "off"))
+       "num=default;")
+   (export-render-parent-renderer context)))
+
+(defun export-latex-test-derived-preamble (context)
+  (concatenate 'string "P[" (export-render-parent-preamble context) "]"))
+
+(defun export-latex-test-derived-trailer (context)
+  (concatenate 'string "T[" (export-render-parent-trailer context) "]"))
+
+(defun export-latex-test-derived-template (context preamble body trailer)
+  (concatenate 'string "<"
+               (export-render-parent-template context preamble body trailer)
+               ">"))
+
+(defun export-latex-test-derived-plain-text (node view frame context)
+  (declare (ignore frame))
+  (concatenate 'string "["
+               (export-render-parent-node context node :view view)
+               "]"))
+
+(defun export-latex-test-derived-body-filter (body context)
+  (declare (ignore context))
+  (concatenate 'string body "|body-filter"))
+
+(defun export-latex-test-derived-link-handler (path description frame context)
+  (setf *export-latex-test-link-observation*
+        (list path description (export-render-frame-mode frame)
+              (export-render-frame-table-cell-p frame)
+              (export-render-context-backend context)))
+  (make-export-link-result
+   :kind :link
+   :destination (concatenate 'string "https://doi.org/" path)
+   :description description))
+
 (describe "LaTeX export"
   (it "matches the complete fixed expected fixture through the public API"
     (let* ((source (export-latex-test-full-source))
@@ -1132,6 +1174,139 @@
                    source-state source-example-view)
                   :to-equal
                   (format nil "\\begin{verbatim}~%x~%\\end{verbatim}"))))))
+
+  (it "passes post-blank to element filters without changing block layout"
+    (let* ((backend :fr106-latex-post-blank-test)
+           (registered-p nil)
+           (filtered-value nil)
+           (document
+             (parse-org
+              (export-latex-test-lines
+               "#+OPTIONS: toc:nil num:nil"
+               ""
+               "word"
+               ""
+               "")))
+           (expected-output (export-org document :latex))
+           (paragraph nil))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :paragraph)
+           (setf paragraph node)))
+       (document-root document))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :latex
+              :filters
+              (list
+               (cons '(:element :paragraph)
+                     (list (lambda (value context)
+                             (declare (ignore context))
+                             (setf filtered-value value)
+                             value)))))
+             (setf registered-p t)
+             (let* ((post-blank (node-post-blank paragraph))
+                    (expected-filter-value
+                      (concatenate 'string "word"
+                                   (make-string post-blank
+                                                :initial-element #\Space)))
+                    (output (export-org document backend)))
+               (with-soft-assertions
+                 (expect (plusp post-blank) :to-be t)
+                 (expect filtered-value :to-equal expected-filter-value)
+                 (expect output :to-equal expected-output))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+
+  (it "dispatches derived LaTeX components, nodes, filters, options, and links"
+    (let ((backend :fr106-latex-derived-test)
+          (registered-p nil)
+          (link-registered-p nil)
+          (output nil)
+          (*export-latex-test-link-observation* nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :latex
+              :renderer #'export-latex-test-derived-renderer
+              :preamble-renderer #'export-latex-test-derived-preamble
+              :trailer-renderer #'export-latex-test-derived-trailer
+              :template #'export-latex-test-derived-template
+              :transcoders
+              (list (cons :plain-text #'export-latex-test-derived-plain-text))
+              :filters
+              (list (cons :body (list #'export-latex-test-derived-body-filter)))
+              :document-class "scrartcl")
+             (setf registered-p t)
+             (register-export-link-type
+              backend "doi" #'export-latex-test-derived-link-handler)
+             (setf link-registered-p t)
+             (setf output
+                   (export-org
+                    (parse-org
+                     (export-latex-test-lines
+                      "#+OPTIONS: toc:nil num:nil"
+                      "Plain # text."
+                      ""
+                      "[[doi:10.1234/example][Paper & data]]"
+                      ""
+                      "| [[doi:10.1234/table][Cell]] |"))
+                    backend))
+             (with-soft-assertions
+               (expect (char output 0) :to-be #\<)
+               (expect (char output (1- (length output))) :to-be #\>)
+               (expect (search "P[\\documentclass[11pt]{scrartcl}" output)
+                       :to-be-truthy)
+               (expect (search "num=off;" output) :to-be-truthy)
+               (expect (search "[Plain \\# text]" output) :to-be-truthy)
+               (expect
+                (search
+                 "\\href{https://doi.org/10.1234/example}{Paper \\& data}"
+                 output)
+                :to-be-truthy)
+               (expect
+                (search "\\href{https://doi.org/10.1234/table}{Cell}" output)
+                :to-be-truthy)
+               (expect (search "|body-filter" output) :to-be-truthy)
+               (expect (search "T[" output) :to-be-truthy)
+               (expect *export-latex-test-link-observation*
+                       :to-equal
+                       '("10.1234/table" "Cell" :inline t
+                         :fr106-latex-derived-test))))
+        (when link-registered-p
+          (unregister-export-link-type backend "doi"))
+        (when registered-p
+          (unregister-export-backend backend)))))
+
+  (it "dispatches an unprepared title macro through its registered node policy"
+    (let ((backend :fr106-latex-title-policy-test)
+          (registered-p nil)
+          (condition nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :latex
+              :node-policies
+              (list
+               (cons :macro
+                     '(:unsupported :feature :title-macro-policy-test
+                       :message "Title macros are disabled for this backend"))))
+             (setf registered-p t)
+             (setf condition
+                   (export-latex-test-catch-error
+                    (lambda ()
+                      (export-org
+                       (parse-org "* {{{unknown-title-macro}}}") backend))))
+             (with-soft-assertions
+               (expect (typep condition 'org-export-unsupported-syntax)
+                       :to-be t)
+               (when (typep condition 'org-export-unsupported-syntax)
+                 (expect (org-export-error-backend condition) :to-be backend)
+                 (expect (org-export-unsupported-syntax-feature condition)
+                         :to-be :title-macro-policy-test))))
+        (when registered-p
+          (unregister-export-backend backend)))))
 
   (it "handles duplicate reference aliases and headers after default packages"
     (let* ((output
