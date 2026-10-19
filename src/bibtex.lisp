@@ -267,7 +267,7 @@
                  (#\( #\))
                  (otherwise
                   (bibtex-signal-error input position :malformed-delimiter
-                                       "Expected { or ( after BibTeX type")))))
+                                       "Expected { or ( after BibTeX type"))))
              (key-start (1+ position))
              (key-end key-start))
         (loop while (and (< key-end (length input))
@@ -297,7 +297,7 @@
                                            :key key
                                            :fields fields
                                            :position entry-position)
-                        next-position)))))))
+                        next-position))))))))
 
 (defun bibtex-skip-outside-comments (input position)
   (loop
@@ -443,11 +443,26 @@
                         (edit-properties-line-ending source offset)
                         ""))
          (replacement (concatenate 'string separator
-                                   (apply #'concatenate 'string subtrees))))
+                                   (apply #'concatenate 'string subtrees)))
+         (expected (edit-canonical-copy
+                    (edit-canonical-document document))))
+    (edit-canonical-set-children
+     expected nil
+     (append
+      (getf expected :children)
+      (mapcar
+       (lambda (subtree)
+         (let ((fragment
+                 (parse-org subtree
+                            :limits (document-limits document)
+                            :settings (document-settings document))))
+           (edit-canonical-node (bibtex-first-headline fragment))))
+       subtrees)))
     (edit-apply-patches-result
      document
      (list (edit-make-patch offset offset replacement))
-     :target nil)))
+     :target nil
+     :expected expected)))
 
 (defun bibtex-resolve-field-groups (groups value-function)
   (let ((fields nil)
