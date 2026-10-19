@@ -1,0 +1,9 @@
+#+BEGIN: clocktable :scope file
+dynamic body
+#+END:
+
+
+------------------------------------------------------------------------
+
+Inline source: (+ 1 2). Target and stats [2/5]. Timestamp <2026-10-14
+Wed>. Citation [cite: see;@key note]. Math \(x + 1\) and \[y=2\].

@@ -1,0 +1,28 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[normalem]{ulem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Configured title}
+\date{}
+
+\begin{document}
+\tableofcontents
+
+\section{TODO [A] Main \texttt{[one:two]}}\label{org:main}
+
+\hyperref[org:main]{Jump} \href{notes.txt}{Readme} \href{mailto:user@example.test}{Mail}
+
+
+\subsection*{Child}\label{org:child}
+
+\begin{itemize}
+\item{} [ ] unchecked
+
+\item{} [-] partial
+
+\end{itemize}
+
+\end{document}

@@ -1,0 +1,13 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[normalem]{ulem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\date{}
+
+\begin{document}
+\catcode65=12
+
+\end{document}

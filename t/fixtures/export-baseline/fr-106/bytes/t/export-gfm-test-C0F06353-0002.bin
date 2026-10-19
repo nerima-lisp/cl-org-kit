@@ -1,0 +1,13 @@
+# Code policy
+
+Inline delimiters\: ```code with `` two ticks``` and `plain verbatim` and ~~struck text~~\.
+
+
+~~~~
+Example contains ~~~ and <br>.
+~~~~
+
+
+~~~~text
+source contains ~~~ and punctuation: <&>
+~~~~

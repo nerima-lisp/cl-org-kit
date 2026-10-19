@@ -1,0 +1,15 @@
+\documentclass[10pt]{report}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[normalem]{ulem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\input{/etc/passwd}
+
+\date{}
+
+\begin{document}
+
+
+\end{document}

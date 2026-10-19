@@ -1,0 +1,21 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[normalem]{ulem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\title{Specials \# \$ \% \& \_ \{ \} \textasciitilde{} \textasciicircum{} \textbackslash{}}
+\author{Author \# \$ \% \& \_ \{ \} \textasciitilde{} \textasciicircum{} \textbackslash{}}
+\date{Date \# \$ \% \& \_ \{ \} \textasciitilde{} \textasciicircum{} \textbackslash{}}
+
+\begin{document}
+\maketitle
+Text body.
+
+
+\href{https://example.test/a\$\_\{b\}\#frag?x=1\%20\&y=two\textasciitilde{}three\textasciicircum{}four}{URL label}
+backslash fallback
+
+
+\end{document}

@@ -1,0 +1,4 @@
+#+CALL: foo()
+
+
+Inline call: call_sum(1, 2). Citation [cite/t: see;@smith2024].

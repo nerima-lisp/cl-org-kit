@@ -1,0 +1,134 @@
+\documentclass[12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[normalem]{ulem}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\input{/etc/passwd}
+
+\title{Export \#\$\%\&\_\{\}\textasciitilde{}\textasciicircum{}}
+\author{Fixture Author}
+\date{2026-10-17}
+
+\begin{document}
+\maketitle
+\typeout{raw #$%&_{}~^}
+\immediate\write18{echo review}
+
+\section*{TODO All node types \texttt{[fixture]}}\label{org:all-node-types}
+
+Text \#\$\%\&\textsubscript{}\textasciitilde{}\textasciicircum{} with \textbf{bold}, \emph{italic}, \sout{strike}, \uline{under}, \texttt{code}, \texttt{verbatim}, H\textsubscript{2O} and x\textsuperscript{2}.
+
+
+Entity \alpha; fragment $x+y$; snippet \emph{raw #$%&_{}~^}.
+Citation [cite/t: see;@smith2024;@doe-2025 p. 4;as noted].
+Links \href{https://example.test/a\_\{b\}\#frag?x=1\%20\&y=two}{safe label} and unsafe label.
+Target \label{org:local-target} and radio target \label{org:radio-phrase}radio phrase.
+Macro Hello world; footnotes \footnote{Footnote definition text.
+} and \footnote{inline note}.
+Inline Babel call call\_sum(1) and source \texttt{(+ 1 2)}.
+Statistics [50\%] and timestamp <2026-10-17 Sat>.
+A hard line break follows this text\\{}
+[continued] and continues here.
+
+
+% ATTR_LATEX: :width 0.5\textwidth :options [scale=1.1]
+\includegraphics{figure.png}
+
+
+\begin{itemize}
+\item{} [X] checked item
+
+\item unchecked item
+
+
+\begin{itemize}
+\item nested item
+
+\end{itemize}
+\item descriptive definition
+
+\end{itemize}
+
+\begin{tabular}{ll}
+
+Head & Value \\
+\hline
+Alpha & \textbf{bold} \\
+\end{tabular}
+
++---+---+
+| 1 | 2 |
++---+---+
+
+
+\begin{center}
+centered text
+
+\end{center}
+
+\begin{quote}
+quoted text
+
+\end{quote}
+
+\begin{note}
+special block text
+
+\end{note}
+
+\begin{verse}
+verse line one
+verse line two
+
+\end{verse}
+
+\begin{verbatim}
+example text #$%&_{}~^
+\end{verbatim}
+
+\begin{verbatim}
+source text #$%&_{}~^
+\end{verbatim}
+
+\textbf{raw export #$%&_{}~^}
+
+
+\begin{verbatim}
+#+BEGIN: report :scope file
+dynamic block text
+#+END:
+\end{verbatim}
+
+\begin{equation}
+x + y
+\end{equation}
+
+
+\%\%(diary-float 10 1 1)
+
+
+\#+CALL: sum(1, 2)
+
+
+\begin{verbatim}
+fixed-width line
+\end{verbatim}
+
+\noindent\rule{\linewidth}{0.4pt}
+
+drawer text
+
+
+\section*{Second heading}\label{org:second-heading}
+
+Fuzzy target.
+
+
+\subparagraph*{TODO Inline task}\label{org:inline-task}
+
+Inline task body.
+
+
+\end{document}

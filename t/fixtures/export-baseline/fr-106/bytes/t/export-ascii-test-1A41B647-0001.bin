@@ -1,0 +1,15 @@
+Before list.
+
+  - [X] checked
+  - [ ] unchecked
+  - [-] partial
+Between lists.
+
+  Term :: 
+        Definition with continuation
+
+          - nested item
+  :: 
+        :: Anonymous description
+  :: 
+After list.

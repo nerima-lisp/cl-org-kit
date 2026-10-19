@@ -1,0 +1,12 @@
+[Leading]; [Protocol relative]; [FTP]; [Unknown]; [Upper HTTPS]; [Safe
+expansion]; [Unsafe expansion]; [Single slash]; [Mailto]; [News];
+[Backslash expansion].
+
+
+[Upper HTTPS] <HTTPS://upper.test/path>
+
+[Safe expansion] <https://docs.example/chapter>
+
+[Single slash] </single-leading/path>
+
+[Mailto] <mailto:user@example.test>
