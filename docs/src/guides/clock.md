@@ -33,9 +33,10 @@ a string. `clock-in` returns the start timestamp;
 updated document from the result before making another edit. Both calls require
 explicit `:at` and `:time-context` arguments; `:at` must be an `org-time-value`.
 The context's zone and daylight-saving policy resolve an offset-free `:at`; an
-explicit offset on `:at` determines its instant. The reference time does not
-limit these edits. It supplies the endpoint for running-clock checks and the
-current time for timer values.
+explicit offset on `:at` determines its instant. An edit's `:at` may be before
+or after the context's reference time. `clock-out` still requires `:at` to be
+at or after the recorded clock start. The reference time supplies the endpoint
+for running-clock checks.
 
 ~~~lisp
 (require :asdf)
@@ -96,8 +97,8 @@ alias behavior described below. The selected value has one of these effects:
 
 `clock-in` refuses to start a second running clock on the target heading;
 `clock-out` requires exactly one running clock on that heading. `clock-out`
-accepts `:drawer` but ignores it; the existing clock stays where it is. Both
-return edits without changing the input document.
+accepts `:drawer` for API symmetry but ignores it; the existing clock stays
+where it is. Both return edits without changing the input document.
 
 ## Check clock consistency
 
@@ -274,12 +275,15 @@ unformatted. Tags are returned in specificity order: unique file tags from
 Duplicate tags appear once at their most specific position. Range is the
 supplied `org-time-range`; minutes are clipped over its start-inclusive,
 end-exclusive interval. Each row's minutes include matching clocks on its
-heading and descendants in the requested subtree. The result total counts each
-matching clock once across the requested subtree.
+heading and descendants in the requested subtree. The same clock can contribute
+to ancestor and descendant rows. The result total counts each matching clock
+once across the subtree instead of summing the row minutes.
 
 `write-clocktable` replaces the body of a parsed `clocktable` dynamic block
 with that result and returns an `edit-result`. Its `:tags-p`, `:emphasize-p`,
-and `:formula` options add the corresponding clocktable formatting.
+and `:formula` options add the corresponding clocktable formatting. Use it when
+you already have a `clocktable-result`; `update-dynamic-block` parses the block
+parameters and dispatches to the registered handler.
 
 ~~~lisp
 (require :asdf)
@@ -331,29 +335,44 @@ latter. Register a custom handler with the parameter names it accepts:
 ~~~
 
 The handler receives the parsed parameter plist and optional document resolver
-and time context. It can return replacement body text, an `edit-result`, or rows
-of string cells. `update-dynamic-block` returns an `edit-result`; unregistered
-names and undeclared parameters signal `org-dynamic-block-error`.
+and time context. It can return replacement body text, an `edit-result`, or a
+list of table rows. Each row is a list of string cells; the first row, when
+present, provides the header. `update-dynamic-block` returns an `edit-result`;
+unregistered names and undeclared parameters signal `org-dynamic-block-error`.
 
 For the built-in clocktable handler, `:scope` accepts `file`, `nil`, `subtree`,
-`tree`, and `treeN`. Other string selectors, lists of string selectors, and
-`agenda`, `agenda-with-archives`, or `file-with-archives` scopes use the
-`document-resolver` supplied to `update-dynamic-block`. The resolver receives
-each selector and returns a parsed document or a nonempty list of parsed
-documents. The library does not open files. Clocktable parameter names are
-case-sensitive. `:maxlevel` limits displayed
-depth while deeper clock time remains in its visible ancestor row. Its default
-is 2. `:block` or `:tstart` with `:tend` selects the time range. If no range
-parameter is supplied, the clocktable includes clocks from all dates and can be
-updated without a time context. Floating clock timestamps use UTC in that case;
-pass `:time-context` to choose another zone. `:step` splits a selected range
-into `day`, `week`, `semimonth`, `month`, `quarter`, or `year` sections. `:match`
+`tree`, and `treeN`. `file` and `nil` select the current document. `subtree`
+selects the nearest enclosing heading and its descendants. `tree` selects the
+top-level heading containing the block; `treeN`, for positive N, selects the
+nearest enclosing heading at absolute level N and its subtree. If no such
+heading encloses the block, `update-dynamic-block` signals
+`org-clocktable-parameter-error`. Other string selectors are
+passed unchanged to the `document-resolver`; a list of strings is resolved one
+selector at a time. `agenda`, `agenda-with-archives`, and `file-with-archives`
+map to `:agenda`, `:agenda-with-archives`, and `:file-with-archives`,
+respectively, when passed to the resolver. The library does not interpret other
+selector syntax or open files. The resolver returns a parsed document or a
+nonempty list of parsed documents.
+
+Clocktable parameter names are case-sensitive. `:maxlevel` limits displayed
+depth while deeper clock time remains in its visible ancestor row. This differs
+from `clocktable-data`'s `:max-depth`, which filters returned rows by absolute
+heading level. The default `:maxlevel` is 2. `:block` accepts a period such as
+`2026-10-12`. Alternatively, supply both `:tstart` and `:tend` as Org date
+literals, for example `:tstart "[2026-10-12 09:30]" :tend 2026-10-14`.
+`:step` requires one of these range forms. Without a range, the clocktable
+includes clocks from all dates and can be updated without a time context. Clock
+timestamps without an explicit offset use UTC in that case; pass
+`:time-context` to choose another zone. `:step` splits a selected range into
+`day`, `week`, `semimonth`, `month`, `quarter`, or `year` sections. `:match`
 filters headings. `:tags`, `:emphasize`, and `:fileskip0` control table
-formatting, and `:formula` accepts a table formula or `%` for time percentages.
+formatting. `:formula` accepts a table formula or `%` for time percentages.
 Unsupported or invalid clocktable parameters signal
 `org-clocktable-parameter-error` with the parameter name and reason.
-Dynamic-block errors expose their bounded parameter value through
-`org-dynamic-block-error-value`.
+For `org-dynamic-block-error` conditions, `org-dynamic-block-error-value`
+returns the parsed parameter value recorded on the condition.
+`org-clocktable-parameter-error-value` returns the parameter value as a string
+with control characters escaped and input truncated after 80 characters.
 
 Invalid clock rows, ranges, or options can signal `org-clock-error` or
 `org-time-error`. Clock edits can also signal `org-edit-error`. Clock operations
