@@ -290,10 +290,13 @@
              (dolist (path paths)
                (expect (probe-file (write-plan-test-path root path)) :to-be nil))))))))
 
-  (it "rejects empty, trailing-separator, NUL, and dot-only paths"
+  (it "rejects empty, trailing-separator, NUL, dot-only, and unencodable paths"
     (write-plan-test-call-with-directory
      (lambda (root)
-       (dolist (path (list "" "trailing/" (format nil "nul~Cpath" #\Null) "."))
+       (dolist (path (list "" "trailing/" (format nil "nul~Cpath" #\Null) "."
+                           (concatenate 'string "bad-"
+                                        (string (code-char #xd800))
+                                        ".txt")))
          (let ((condition
                  (write-plan-test-capture-error
                   (make-write-plan
