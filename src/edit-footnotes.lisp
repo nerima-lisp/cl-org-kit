@@ -39,9 +39,11 @@
                       (1+ previous-newline)
                       0))))))
 (defun edit-footnote-canonical-insert-paragraph-reference
-    (source paragraph offset reference prefix-p suffix-p)
+    (source paragraph offset reference prefix-p)
   (let ((children '())
-        (inserted nil))
+        (inserted nil)
+        ;; Keep empty text children so this tree matches parsing at line starts and EOF.
+        (suffix-p (or prefix-p (= offset (length source)))))
     (labels ((append-child (child)
                (if (and children child
                         (eq (getf child :type) :plain-text)
@@ -147,7 +149,14 @@
         (setf maximum (max maximum (parse-integer label)))))
     (write-to-string (1+ maximum))))
 
-(defun edit-footnote-label-patches (nodes labels target) (loop for node in nodes for label = (node-property node :label) for replacement = (and label (gethash label labels)) for label-start = (or (node-post-affiliated node) (node-begin node)) when (and replacement (not (string= label replacement))) collect (edit-make-patch (+ label-start 4) (+ label-start 4 (length label)) replacement target)))
+(defun edit-footnote-label-patches (nodes labels target)
+  (loop for node in nodes
+        for label = (node-property node :label)
+        for replacement = (and label (gethash label labels))
+        for label-start = (or (node-post-affiliated node)
+                              (node-begin node))
+        when (and replacement (not (string= label replacement)))
+          collect (edit-make-patch (+ label-start 4) (+ label-start 4 (length label)) replacement target)))
 
 (defun edit-footnote-report (result)
   (multiple-value-bind (undefined unreferenced)
@@ -159,7 +168,9 @@
 
 Return an EDIT-RESULT, the assigned label, undefined reference labels, and
 unreferenced definition labels, in that order. BODY is raw Org content without
-a trailing line ending. OFFSET must be in paragraph text or a headline title."
+a trailing line ending. OFFSET is a character index in DOCUMENT-TEXT and must
+be in paragraph text or a headline title; zero is also valid for an empty
+document."
   (unless (document-p document)
     (error 'type-error :datum document :expected-type 'document))
   (unless (and (integerp offset) (<= 0 offset (length (document-text document))))
@@ -186,6 +197,7 @@ a trailing line ending. OFFSET must be in paragraph text or a headline title."
          (newline (edit-footnote-line-ending source))
          (reference (format nil "[fn:~A]" label))
          (line-start-p (edit-footnote-line-start-p source offset))
+         ;; A bare footnote reference at line start parses as a definition.
          (reference-text (concatenate 'string
                                       (if line-start-p " " "")
                                       reference
@@ -258,13 +270,23 @@ a trailing line ending. OFFSET must be in paragraph text or a headline title."
         (paragraph
          (edit-canonical-set-children
           expected (edit-node-path document paragraph offset)
-          (edit-footnote-canonical-insert-paragraph-reference
-           source paragraph offset reference-canonical line-start-p line-start-p)))
+          (edit-footnote-canonical-insert-paragraph-reference source paragraph offset reference-canonical line-start-p)))
         (headline
-         (edit-canonical-set-property
-          expected (edit-node-path document headline offset) :title
-          (edit-footnote-canonical-insert-title-reference
-           headline offset reference-canonical)))
+         ;; The saved range uses document offsets; :raw-value contains title text.
+         (let* ((path (edit-node-path document headline offset))
+                (range (node-property headline :reader-title-range))
+                (raw-value (node-property headline :raw-value))
+                (raw-offset (- offset (car range)))
+                (updated-raw-value
+                  (concatenate 'string
+                               (subseq raw-value 0 raw-offset)
+                               reference
+                               (subseq raw-value raw-offset))))
+           (edit-canonical-set-property
+            expected path :title
+            (edit-footnote-canonical-insert-title-reference
+             headline offset reference-canonical))
+           (edit-canonical-set-property expected path :raw-value updated-raw-value)))
         (t
          (let ((plain-text (list :type :plain-text :post-blank 0
                                  :properties nil :children nil)))

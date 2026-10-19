@@ -328,7 +328,7 @@
   (map-nodes
    (lambda (node)
      (multiple-value-bind (title-range has-title-range)
-         (reader-take-property node :reader-title-range)
+         (node-property node :reader-title-range)
        (when has-title-range
          (setf (node-property node :title)
                (reader-title-segments document node title-range t))))

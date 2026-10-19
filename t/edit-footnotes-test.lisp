@@ -370,4 +370,76 @@
        (expect (document-text (edit-result-updated-document result))
                :to-equal (format nil
                                  "Use [fn:1].~%~%~%More~%* H~%[fn:1] body~%"))
-       (expect (document-text document) :to-equal source)))))
+       (expect (document-text document) :to-equal source))))
+  (it "inserts a footnote reference into a headline title"
+    (let* ((source (format nil "* Heading~%"))
+           (document (parse-org source))
+           (offset (+ (search "Heading" source) 3))
+           (result nil)
+           (label nil))
+      (multiple-value-setq (result label)
+        (insert-footnote document offset "body"))
+      (with-soft-assertions
+        (expect label :to-equal "1")
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal (format nil "* Hea[fn:1]ding~%[fn:1] body~%")))))
+  (it "inserts footnotes at document start and EOF"
+    (let* ((source "*bold* tail")
+           (document (parse-org source))
+           (result (edit-result-updated-document
+                    (insert-footnote document 0 "body"))))
+      (with-soft-assertions
+        (expect (document-text result)
+                :to-equal (format nil " [fn:1]~%*bold* tail~%[fn:1] body"))
+        (expect (length (edit-footnotes-test-nodes result :footnote-reference))
+                :to-equal 1)
+        (expect (length (edit-footnotes-test-nodes result :footnote-definition))
+                :to-equal 1)))
+    (let* ((source "*bold*")
+           (document (parse-org source))
+           (result (edit-result-updated-document
+                    (insert-footnote document (length source) "body"))))
+      (with-soft-assertions
+        (expect (document-text result)
+                :to-equal (format nil "*bold*[fn:1]~%[fn:1] body")))))
+  (it "rejects footnote insertion inside an inline object"
+    (let* ((source "*bold*")
+           (document (parse-org source))
+           (offset (+ (search "bold" source) 2)))
+      (with-soft-assertions
+        (expect (edit-footnotes-test-error
+                 (lambda () (insert-footnote document offset "body")))
+                :to-equal (list :invalid-value (write-to-string offset)))
+        (expect (document-text document) :to-equal source))))
+  (it "translates footnote body parse errors and preserves the source"
+    (let* ((document (parse-org "Text"))
+           (parse-symbol (find-symbol "PARSE-ORG" "ORG-KIT"))
+           (original-parser (symbol-function parse-symbol)))
+      (unwind-protect
+           (progn
+             (setf (symbol-function parse-symbol)
+                   (lambda (&rest arguments)
+                     (declare (ignore arguments))
+                     (error (make-condition
+                             (find-symbol "ORG-PARSE-ERROR" "ORG-KIT")))))
+             (with-soft-assertions
+               (expect (edit-footnotes-test-error
+                        (lambda () (insert-footnote document 0 "body")))
+                       :to-equal (list :invalid-value "footnote body"))
+               (expect (document-text document) :to-equal "Text")))
+        (setf (symbol-function parse-symbol) original-parser))))
+  (it "leaves unresolved references unchanged when no definitions exist"
+    (let* ((source "Text [fn:missing]")
+           (document (parse-org source))
+           (result nil)
+           (undefined nil)
+           (unreferenced nil))
+      (multiple-value-setq (result undefined unreferenced)
+        (normalize-footnotes document))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal source)
+        (expect (edit-result-spans result) :to-equal nil)
+        (expect undefined :to-equal '("missing"))
+        (expect unreferenced :to-equal nil)
+        (expect (document-text document) :to-equal source)))))
