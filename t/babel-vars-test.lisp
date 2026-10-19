@@ -253,11 +253,9 @@
              (lambda ()
                (babel-vars-test-resolve-with-variables
                 document consumer '(("VAR" . "=value"))))))
-           (zero-denominator
-            (babel-vars-test-condition
-             (lambda ()
-               (babel-vars-test-resolve-with-variables
-                document consumer '(("VAR" . "bad-number=3/0")))))))
+           (ratio-value
+            (babel-vars-test-resolve-with-variables
+             document consumer '(("VAR" . "bad-number=3/0")))))
       (with-soft-assertions
        (expect variables
                :to-equal
@@ -268,10 +266,8 @@
            (when (typep condition (quote org-babel-error))
              (expect (org-babel-error-reason condition)
                      :to-equal :invalid-variable-assignment)))
-         (expect (typep zero-denominator (quote org-babel-error)) :to-be t)
-         (when (typep zero-denominator (quote org-babel-error))
-           (expect (org-babel-error-reason zero-denominator)
-                   :to-equal :invalid-literal))))))
+         (expect ratio-value
+                 :to-equal '(("bad-number" . "3/0")))))))
 
 (it "decodes supported string escapes and rejects malformed literals"
   (let* ((document
@@ -680,7 +676,7 @@
                 :to-equal
                 '(("integer" . 42)
                   ("negative" . -7)
-                  ("ratio" . 3/4)
+                  ("ratio" . "3/4")
                   ("decimal" . 12.5d0)))
         (expect (typep fullwidth-condition 'org-babel-error) :to-be t)
         (expect (typep arabic-condition 'org-babel-error) :to-be t)
