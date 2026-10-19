@@ -116,7 +116,12 @@
                (:file "capture-target")
                (:file "archive")
                (:file "attachment")
-               )
+               ;; FR-120 Org lint
+               (:file "lint")
+               (:file "lint-document-a")
+               (:file "lint-document-b")
+               (:file "lint-context")
+)
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -136,6 +141,8 @@
                (:file "public-api-test")
                (:file "callback-registry-test")
                (:file "write-plan-test")
+               ;; FR-120 Org lint API and checker registration
+               (:file "lint-test")
                (:file "types-test")
                (:file "conditions-test")
                (:file "limits-test")
@@ -228,6 +235,10 @@
                (:file "export-ascii-test")
                ;; Unit E5 LaTeX export
                (:file "export-latex-test")
+               ;; FR-120 Org lint checker tests
+               (:file "lint-document-a-test")
+               (:file "lint-document-b-test")
+               (:file "lint-context-test")
                (:file "crypt-test")
 )
   :perform (test-op (operation component)

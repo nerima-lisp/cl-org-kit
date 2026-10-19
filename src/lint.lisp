@@ -1,0 +1,155 @@
+(in-package #:org-kit)
+
+(defstruct (org-lint-diagnostic (:constructor %make-org-lint-diagnostic)
+                                (:copier nil))
+  "A checker finding. POSITION is the 1-based character position Org reports."
+  (checker "" :type string :read-only t)
+  (position 1 :type (integer 1 *) :read-only t)
+  (message "" :type string :read-only t))
+
+(defparameter *org-lint-checkers*
+  '(("misplaced-heading" %lint-misplaced-heading :document-only nil)
+    ("duplicate-custom-id" %lint-duplicate-custom-id :document-only nil)
+    ("duplicate-name" %lint-duplicate-name :document-only nil)
+    ("duplicate-target" %lint-duplicate-target :document-only nil)
+    ("duplicate-footnote-definition" %lint-duplicate-footnote-definition :document-only nil)
+    ("orphaned-affiliated-keywords" %lint-orphaned-affiliated-keywords :document-only nil)
+    ("combining-keywords-with-affiliated" %lint-combining-keywords-with-affiliated :document-only nil)
+    ("obsolete-affiliated-keywords" %lint-obsolete-affiliated-keywords :document-only nil)
+    ("deprecated-export-blocks" %lint-deprecated-export-blocks :document-only nil)
+    ("deprecated-header-syntax" %lint-deprecated-header-syntax :caller-material (:babel-header-arguments))
+    ("missing-language-in-src-block" %lint-missing-language-in-src-block :document-only nil)
+    ("suspicious-language-in-src-block" %lint-suspicious-language-in-src-block :caller-material (:source-languages))
+    ("missing-backend-in-export-block" %lint-missing-backend-in-export-block :document-only nil)
+    ("invalid-babel-call-block" %lint-invalid-babel-call-block :document-only nil)
+    ("wrong-header-argument" nil :dependency-wait (:babel-header-arguments))
+    ("wrong-header-value" nil :dependency-wait (:babel-header-arguments))
+    ("named-result" nil :dependency-wait (:babel-header-arguments))
+    ("empty-header-argument" nil :dependency-wait (:babel-header-arguments))
+    ("deprecated-category-setup" %lint-deprecated-category-setup :document-only nil)
+    ("invalid-coderef-link" %lint-invalid-coderef-link :document-only nil)
+    ("invalid-custom-id-link" %lint-invalid-custom-id-link :document-only nil)
+    ("invalid-fuzzy-link" %lint-invalid-fuzzy-link :document-only nil)
+    ("invalid-id-link" %lint-invalid-id-link :caller-material (:known-ids))
+    ("trailing-bracket-after-link" %lint-trailing-bracket-after-link :document-only nil)
+    ("unclosed-brackets-in-link-description" %lint-unclosed-brackets-in-link-description :document-only nil)
+    ("link-to-local-file" %lint-link-to-local-file :caller-material (:file-exists-p))
+    ("non-existent-setupfile-parameter" %lint-non-existent-setupfile-parameter :caller-material (:file-exists-p))
+    ("wrong-include-link-parameter" %lint-wrong-include-link-parameter :caller-material (:file-exists-p))
+    ("obsolete-include-markup" %lint-obsolete-include-markup :document-only nil)
+    ("unknown-options-item" %lint-unknown-options-item :caller-material (:export-options))
+    ("misspelled-export-option" %lint-misspelled-export-option :caller-material (:export-options))
+    ("invalid-macro-argument-and-template" %lint-invalid-macro-argument-and-template :caller-material (:macro-definitions :macro-templates))
+    ("special-property-in-properties-drawer" %lint-special-property-in-properties-drawer :document-only nil)
+    ("obsolete-properties-drawer" %lint-obsolete-properties-drawer :document-only nil)
+    ("invalid-effort-property" %lint-invalid-effort-property :document-only nil)
+    ("invalid-id-property" %lint-invalid-id-property :document-only nil)
+    ("undefined-footnote-reference" %lint-undefined-footnote-reference :document-only nil)
+    ("unreferenced-footnote-definition" %lint-unreferenced-footnote-definition :document-only nil)
+    ("extraneous-element-in-footnote-section" %lint-extraneous-element-in-footnote-section :document-only nil)
+    ("invalid-keyword-syntax" %lint-invalid-keyword-syntax :document-only nil)
+    ("invalid-image-alignment" %lint-invalid-image-alignment :document-only nil)
+    ("invalid-block" %lint-invalid-block :document-only nil)
+    ("mismatched-planning-repeaters" %lint-mismatched-planning-repeaters :document-only nil)
+    ("misplaced-planning-info" %lint-misplaced-planning-info :document-only nil)
+    ("incomplete-drawer" %lint-incomplete-drawer :document-only nil)
+    ("indented-diary-sexp" %lint-indented-diary-sexp :document-only nil)
+    ("quote-section" %lint-quote-section :document-only nil)
+    ("file-application" %lint-file-application :document-only nil)
+    ("percent-encoding-link-escape" %lint-percent-encoding-link-escape :document-only nil)
+    ("spurious-colons" %lint-spurious-colons :document-only nil)
+    ("non-existent-bibliography" %lint-non-existent-bibliography :caller-material (:file-exists-p))
+    ("missing-print-bibliography" %lint-missing-print-bibliography :document-only nil)
+    ("invalid-cite-export-declaration" %lint-invalid-cite-export-declaration :caller-material (:cite-export-processors))
+    ("incomplete-citation" %lint-incomplete-citation :document-only nil)
+    ("item-number" %lint-item-number :document-only nil)
+    ("priority" %lint-priority :document-only nil)
+    ("LaTeX-$" %lint-latex-dollar-ambiguous :document-only nil)
+    ("beamer-frame" %lint-beamer-frame :caller-material (:beamer-frame-environment))
+    ("timestamp-syntax" %lint-timestamp-syntax :document-only nil)
+    ("clock-syntax" %lint-clock-syntax :document-only nil)
+    ("planning-inactive" %lint-planning-inactive :document-only nil))
+  "The Org 9.8.10 checker inventory and dispatch table.")
+
+(defun %lint-report (document checker offset message)
+  (when (and (integerp offset) (<= 0 offset (length (document-text document))))
+    (%make-org-lint-diagnostic :checker checker :position (1+ offset) :message message)))
+
+(defun %lint-nodes (document &optional type)
+  (let ((nodes '()))
+    (map-nodes (lambda (node)
+                 (when (or (null type) (eq (node-type node) type))
+                   (push node nodes)))
+               (document-root document))
+    (nreverse nodes)))
+
+(defun %lint-source-slice (document begin end)
+  (subseq (document-text document) begin end))
+
+(defun %lint-context-value (context key)
+  (getf context key))
+
+(defun %lint-context-present-p (context key)
+  (loop for tail on context by #'cddr
+        thereis (eq (car tail) key)))
+
+(defun %lint-valid-context-p (context)
+  (let ((seen (make-hash-table :test #'eq))
+        (tail context))
+    (loop
+      (cond ((null tail) (return t))
+            ((not (consp tail)) (return nil))
+            ((gethash tail seen) (return nil))
+            ((not (keywordp (car tail))) (return nil))
+            ((not (consp (cdr tail))) (return nil))
+            (t (setf (gethash tail seen) t
+                     tail (cddr tail)))))))
+
+(defun %lint-string-list-p (value)
+  (let ((seen (make-hash-table :test #'eq))
+        (tail value))
+    (loop
+      (cond ((null tail) (return t))
+            ((not (consp tail)) (return nil))
+            ((gethash tail seen) (return nil))
+            ((not (stringp (car tail))) (return nil))
+            (t (setf (gethash tail seen) t
+                     tail (cdr tail)))))))
+
+(defun %lint-selected-p (checker selected selected-p)
+  (or (not selected-p)
+      (member (first checker) selected :test #'string-equal)))
+
+(defun %lint-context-ready-p (checker context)
+  (every (lambda (key) (%lint-context-present-p context key)) (fourth checker)))
+
+(defun org-lint (document &key context (checkers nil checkers-p))
+  "Return findings for parsed DOCUMENT using its existing syntax tree.
+
+CONTEXT is a plist of caller-supplied state used only by checkers that require
+it. CHECKERS, when supplied, is a list of Org checker names as strings; an
+empty list selects no checkers. Each finding preserves Org's checker name,
+1-based character position, and message.
+"
+  (unless (document-p document)
+    (error 'type-error :datum document :expected-type 'document))
+  (unless (document-root document)
+    (error 'org-kit-error :message "Cannot lint a document before it has been parsed"))
+  (unless (%lint-valid-context-p context)
+    (error 'org-kit-error :message "Lint context must be an even plist with keyword keys"))
+  (unless (or (not checkers-p) (%lint-string-list-p checkers))
+    (error 'type-error :datum checkers :expected-type '(list string)))
+  (let ((unknown (when checkers-p
+                   (remove-if (lambda (name)
+                                (find name *org-lint-checkers* :key #'first :test #'string-equal))
+                              checkers))))
+    (when unknown
+      (error 'org-kit-error :message (format nil "Unknown Org lint checker: ~{~A~^, ~}" unknown))))
+  (stable-sort
+   (loop for checker in *org-lint-checkers*
+         when (and (not (null (second checker)))
+                   (member (third checker) '(:document-only :caller-material))
+                   (%lint-selected-p checker checkers checkers-p)
+                   (%lint-context-ready-p checker context))
+           append (funcall (symbol-function (second checker)) document context))
+   #'< :key #'org-lint-diagnostic-position))

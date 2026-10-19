@@ -26,6 +26,7 @@ nav:
       - Org crypt: guides/crypt.md
       - Callbacks and Write Plans: guides/callbacks-and-write-plans.md
       - Capture, Refile, Archive, and Attachments: guides/capture-refile-archive-attachments.md
+      - Lint: guides/lint.md
   - Reference:
       - Node Model: reference/node-model.md
       - API Stability: reference/api-stability.md

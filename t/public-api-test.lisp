@@ -234,6 +234,10 @@
     "LINK-RESOLUTION" "MAKE-LINK-RESOLUTION" "LINK-RESOLUTION-P"
     "LINK-RESOLUTION-STATUS" "LINK-RESOLUTION-TARGET"
     "LINK-RESOLUTION-CANDIDATES" "RESOLVE-LINK" "STORE-LINK"
+    ;; FR-120 Org lint
+    "ORG-LINT" "ORG-LINT-DIAGNOSTIC" "ORG-LINT-DIAGNOSTIC-P"
+    "ORG-LINT-DIAGNOSTIC-CHECKER" "ORG-LINT-DIAGNOSTIC-POSITION"
+    "ORG-LINT-DIAGNOSTIC-MESSAGE"
     ;; Unit E1 export context and conditions
     "EXPORT-CONTEXT" "MAKE-EXPORT-CONTEXT" "EXPORT-CONTEXT-P"
     "EXPORT-CONTEXT-TITLE" "EXPORT-CONTEXT-AUTHOR" "EXPORT-CONTEXT-DATE"
@@ -327,7 +331,11 @@ docs/src/reference/node-model.md.")
     (make-capture-template-result . capture-template-result)
     (capture-template-result-p . capture-template-result)
     (make-capture-target-result . capture-target-result)
-    (capture-target-result-p . capture-target-result)))
+    (capture-target-result-p . capture-target-result)
+    (org-lint-diagnostic-p . org-lint-diagnostic)
+    (org-lint-diagnostic-checker . org-lint-diagnostic)
+    (org-lint-diagnostic-position . org-lint-diagnostic)
+    (org-lint-diagnostic-message . org-lint-diagnostic)))
 
 (defun public-function-documentation (symbol)
   (or (documentation symbol 'function)

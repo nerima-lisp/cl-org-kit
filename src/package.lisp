@@ -218,6 +218,10 @@
    ;; Effort estimates
    #:org-effort-error #:org-effort-error-reason
    #:effort-duration-minutes #:subtree-effort-minutes
+   ;; Org linting
+   #:org-lint #:org-lint-diagnostic #:org-lint-diagnostic-p
+   #:org-lint-diagnostic-checker #:org-lint-diagnostic-position
+   #:org-lint-diagnostic-message
    ;; Unit E1 export context and conditions
    #:export-context #:make-export-context #:export-context-p
    #:export-context-title #:export-context-author #:export-context-date
