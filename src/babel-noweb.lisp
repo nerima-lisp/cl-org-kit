@@ -94,9 +94,57 @@
    :max-babel-expanded-characters
    (+ (babel-noweb-context-expanded-characters context) length)))
 
+(defun babel-noweb-check-output-chunk (context written amount)
+  (let* ((limits (document-limits (babel-noweb-context-document context)))
+         (limit-name :max-babel-expanded-characters)
+         (limit (limit-value limits limit-name))
+         (current (+ (babel-noweb-context-expanded-characters context)
+                     written))
+         (remaining (- limit current))
+         (actual (+ current amount)))
+    (check-limit
+     limits limit-name
+     (if (> amount remaining) (1+ limit) actual))))
+
 (defun babel-noweb-count-output-length (context length)
   (babel-noweb-check-output-length context length)
   (incf (babel-noweb-context-expanded-characters context) length))
+
+(defclass babel-noweb-bounded-output-stream
+    (sb-gray:fundamental-character-output-stream)
+  ((context :initarg :context :reader babel-noweb-bounded-output-context)
+   (output :initform (make-string-output-stream)
+           :reader babel-noweb-bounded-output-stream-output)
+   (length :initform 0 :accessor babel-noweb-bounded-output-stream-length)))
+
+(defmethod sb-gray:stream-write-char
+    ((stream babel-noweb-bounded-output-stream) character)
+  (babel-noweb-check-output-length
+   (babel-noweb-bounded-output-context stream)
+   (1+ (babel-noweb-bounded-output-stream-length stream)))
+  (write-char character (babel-noweb-bounded-output-stream-output stream))
+  (incf (babel-noweb-bounded-output-stream-length stream))
+  character)
+
+(defmethod sb-gray:stream-write-string
+    ((stream babel-noweb-bounded-output-stream) string &optional (start 0) end)
+  (let* ((end (or end (length string)))
+         (amount (- end start)))
+    (babel-noweb-check-output-chunk
+     (babel-noweb-bounded-output-context stream)
+     (babel-noweb-bounded-output-stream-length stream)
+     amount)
+    (write-string string (babel-noweb-bounded-output-stream-output stream)
+                  :start start :end end)
+    (incf (babel-noweb-bounded-output-stream-length stream) amount)
+    string))
+
+(defun babel-noweb-format-result (context value)
+  (let ((stream (make-instance 'babel-noweb-bounded-output-stream
+                               :context context)))
+    (format stream "~S" value)
+    (get-output-stream-string
+     (babel-noweb-bounded-output-stream-output stream))))
 
 (defun babel-noweb-write-range (context stream current-length text start end)
   (let ((length (- end start)))
@@ -226,7 +274,7 @@
           (let ((value
                   (babel-noweb-resolve-result-reference
                    context name arguments)))
-            (if (stringp value) value (format nil "~S" value))))
+            (if (stringp value) value (babel-noweb-format-result context value))))
         (let* ((named (gethash reference
                                (babel-noweb-context-source-blocks context)))
                (group (unless named

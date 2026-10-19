@@ -349,6 +349,69 @@
           (expect (org-resource-limit-error-limit-name condition)
                   :to-equal :max-babel-expanded-characters)))))
 
+  (it "bounds resolver result traversal for lists and vectors"
+    (let* ((document
+             (parse-org
+              (babel-noweb-test-lines
+               "#+NAME: calculation"
+               "#+BEGIN_SRC emacs-lisp"
+               "unused"
+               "#+END_SRC"
+               ""
+               "#+NAME: consumer"
+               "#+BEGIN_SRC text :noweb yes"
+               "<<calculation()>>"
+               "#+END_SRC")))
+           (result-values (list (loop repeat 1000001 collect 1)
+                                (make-array 1000001 :initial-element 1))))
+      (dolist (value result-values)
+        (let ((condition
+                (babel-noweb-test-condition
+                 (lambda ()
+                   (babel-noweb-test-expand
+                    document "consumer" :eval
+                    (lambda (block-name variables)
+                      (declare (ignore block-name variables))
+                      value))))))
+          (with-soft-assertions
+            (expect (typep condition 'org-resource-limit-error) :to-be t)
+            (when (typep condition 'org-resource-limit-error)
+              (expect (org-resource-limit-error-limit-name condition)
+                      :to-equal :max-babel-result-elements)
+              (expect (org-resource-limit-error-limit condition) :to-be 1000000)
+              (expect (org-resource-limit-error-actual condition)
+                      :to-be 1000001)))))))
+
+  (it "checks the character budget while formatting resolver results"
+    (let* ((document
+             (parse-org
+              (babel-noweb-test-lines
+               "#+NAME: calculation"
+               "#+BEGIN_SRC emacs-lisp"
+               "unused"
+               "#+END_SRC"
+               ""
+               "#+NAME: consumer"
+               "#+BEGIN_SRC text :noweb yes"
+               "<<calculation()>>"
+               "#+END_SRC")
+              :limits (make-limits :max-babel-expanded-characters 16)))
+           (condition
+             (babel-noweb-test-condition
+              (lambda ()
+                (babel-noweb-test-expand
+                 document "consumer" :eval
+                 (lambda (block-name variables)
+                   (declare (ignore block-name variables))
+                   (loop repeat 10000 collect 1)))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-equal :max-babel-expanded-characters)
+          (expect (org-resource-limit-error-limit condition) :to-be 16)
+          (expect (org-resource-limit-error-actual condition) :to-be 17)))))
+
   (it "requires a result resolver for call references"
     (let* ((document
              (parse-org

@@ -21,6 +21,7 @@
   (max-export-expanded-characters 0 :read-only t)
   (max-babel-expansion-depth 0 :read-only t)
   (max-babel-expanded-characters 0 :read-only t)
+  (max-babel-result-elements 0 :read-only t)
   (max-export-expanded-nodes 0 :read-only t)
   (max-formula-tokens 0 :read-only t)
   (max-formula-ast-depth 0 :read-only t)
@@ -54,6 +55,7 @@
                          (max-export-expanded-characters (* 64 1024 1024))
                          (max-babel-expansion-depth 32)
                          (max-babel-expanded-characters (* 64 1024 1024))
+                         (max-babel-result-elements 1000000)
                          (max-export-expanded-nodes (* 4 1024 1024))
                          (max-formula-tokens 10000)
                          (max-formula-ast-depth 256)
@@ -106,6 +108,8 @@ limits documented for that operation."
                 (checked-limit-value max-babel-expansion-depth)
                 :max-babel-expanded-characters
                 (checked-limit-value max-babel-expanded-characters)
+                :max-babel-result-elements
+                (checked-limit-value max-babel-result-elements)
                 :max-export-expanded-nodes
                 (checked-limit-value max-export-expanded-nodes)
                 :max-formula-tokens (checked-limit-value max-formula-tokens)
@@ -147,6 +151,7 @@ limits documented for that operation."
      (%limits-max-export-expanded-characters limits))
     (:max-babel-expansion-depth (%limits-max-babel-expansion-depth limits))
     (:max-babel-expanded-characters (%limits-max-babel-expanded-characters limits))
+    (:max-babel-result-elements (%limits-max-babel-result-elements limits))
     (:max-export-expanded-nodes (%limits-max-export-expanded-nodes limits))
     (:max-formula-tokens (%limits-max-formula-tokens limits))
     (:max-formula-ast-depth (%limits-max-formula-ast-depth limits))

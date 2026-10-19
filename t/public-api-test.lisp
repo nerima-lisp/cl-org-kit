@@ -306,6 +306,11 @@ docs/src/reference/node-model.md.")
         (expect (set-difference actual expected :test #'string=) :to-equal '())
         (expect (set-difference expected actual :test #'string=) :to-equal '()))))
 
+  (it "accepts the public Babel result element limit"
+    (expect (limit-value (make-limits :max-babel-result-elements 7)
+                         :max-babel-result-elements)
+            :to-be 7))
+
   (it "documents every exported symbol"
     (with-soft-assertions
       (dolist (name (sort (external-symbol-names) #'string<))

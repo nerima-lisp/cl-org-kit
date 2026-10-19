@@ -71,6 +71,8 @@ For example, a host can look up values it computed earlier by block name:
 A `#+CALL` result resolves through its named source block and passes that block's name to the callback.
 Without a callback, an executable result reference signals `org-babel-error`.
 Its reason is `:missing-result-resolver`.
+The `:max-babel-result-elements` limit bounds callback results resolved by both
+`resolve-babel-variables` and `expand-babel-noweb`.
 
 `#+NAME` can name an Org pipe table or a simple list for local resolution.
 `#+RESULTS: name` can name a static result table or list in the same way.

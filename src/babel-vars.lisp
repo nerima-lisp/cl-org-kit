@@ -118,8 +118,12 @@
 
 (defun babel-check-result-value (context value)
   (let ((active (make-hash-table :test #'eq))
-        (limits (document-limits (babel-resolution-context-document context))))
-    (labels ((walk (object depth)
+        (limits (document-limits (babel-resolution-context-document context)))
+        (elements 0))
+    (labels ((count-element ()
+               (check-limit limits :max-babel-result-elements (incf elements)))
+             (walk (object depth)
+               (count-element)
                (check-limit limits :max-object-depth depth)
                (typecase object
                  (string
@@ -139,6 +143,8 @@
                                                    "Babel result contains a circular list"
                                                    "resolver result"))
                              (setf (gethash tail tail-seen) t)
+                             (unless (eq tail object)
+                               (count-element))
                              (walk (car tail) (1+ depth))
                              (setf tail (cdr tail)))
                     (unless (null tail) (walk tail (1+ depth))))

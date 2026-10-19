@@ -183,6 +183,7 @@ the document and reused by its queries, edits, and exporters.
 | `:max-export-expanded-nodes` | 4 Mi nodes | cumulative expanded nodes per export |
 | `:max-babel-expansion-depth` | 32 | recursive noweb expansion depth |
 | `:max-babel-expanded-characters` | 64 Mi characters | cumulative noweb expansion per call |
+| `:max-babel-result-elements` | 1,000,000 | objects visited per callback result, including containers and each list cell |
 | `:max-formula-tokens` | 10,000 | tokens in one table formula |
 | `:max-formula-ast-depth` | 256 | syntax tree depth for one formula |
 | `:max-formula-precision` | 34 | significant decimal digits |
