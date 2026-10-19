@@ -119,6 +119,6 @@ paths, `..`, NUL, and symlink components; those checks
 do not remove the concurrent-rename trust boundary. A concurrent rename can
 move an already-written file.
 
-The lexical duplicate check does not account for filesystem Unicode
-normalization, so a filesystem may treat distinct Unicode spellings of a name
-as aliases.
+Preflight conflict keys are case-folded and normalized to NFC, so canonically
+equivalent spellings of a path are treated as duplicates. Filesystem operations
+retain each entry's original path spelling.

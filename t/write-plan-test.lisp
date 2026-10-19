@@ -290,6 +290,26 @@
              (dolist (path paths)
                (expect (probe-file (write-plan-test-path root path)) :to-be nil))))))))
 
+  (it "rejects NFC and NFD equivalent paths before writes"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((composed-path "é.txt")
+              (decomposed-path
+                (concatenate 'string "e" (string (code-char #x301)) ".txt"))
+              (paths (list composed-path decomposed-path))
+              (plan (make-write-plan
+                     (mapcar (lambda (path)
+                               (make-write-plan-entry path "value"))
+                             paths)))
+              (condition (write-plan-test-capture-error plan root)))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when condition
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :duplicate-path))
+           (dolist (path paths)
+             (expect (probe-file (write-plan-test-path root path)) :to-be nil)))))))
+
   (it "rejects empty, trailing-separator, NUL, dot-only, and unencodable paths"
     (write-plan-test-call-with-directory
      (lambda (root)

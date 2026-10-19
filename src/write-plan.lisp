@@ -184,6 +184,9 @@ missing parent directories."
          (components (write-plan-split-path raw limits)))
     (values (format nil "~{~A~^/~}" components) components)))
 
+(defun write-plan-conflict-key (string)
+  (sb-unicode:normalize-string (sb-unicode:casefold string) :nfc))
+
 (defun write-plan-check-path-conflicts (records)
   (let ((paths (make-hash-table :test 'equal))
         (prefixes (make-hash-table :test 'equal)))
@@ -360,8 +363,9 @@ missing parent directories."
             do (multiple-value-bind (path components)
                    (write-plan-normalized-path (%write-plan-entry-path entry)
                                                limits)
-                 (let* ((key (string-downcase path))
-                        (key-components (mapcar #'string-downcase components))
+                 (let* ((key (write-plan-conflict-key path))
+                        (key-components (mapcar #'write-plan-conflict-key
+                                                components))
                         (encoded (write-plan-encode-entry entry index total limits))
                         (next-total (fourth encoded)))
                    (setf total next-total)
