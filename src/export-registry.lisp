@@ -137,16 +137,19 @@
                             :description (copy-seq description)))
 
 (defun export-link-result-kind (result)
+  "Return the kind of RESULT: :link or :image."
   (unless (%export-link-result-p result)
     (error 'type-error :datum result :expected-type 'export-link-result))
   (%export-link-result-kind result))
 
 (defun export-link-result-destination (result)
+  "Return a fresh copy of the destination stored in RESULT."
   (unless (%export-link-result-p result)
     (error 'type-error :datum result :expected-type 'export-link-result))
   (copy-seq (%export-link-result-destination result)))
 
 (defun export-link-result-description (result)
+  "Return a fresh copy of the description stored in RESULT."
   (unless (%export-link-result-p result)
     (error 'type-error :datum result :expected-type 'export-link-result))
   (copy-seq (%export-link-result-description result)))
@@ -693,6 +696,7 @@
             option-specifications accepted-keywords retained-keywords
             raw-output-options export-block-names export-snippet-names
             link-type-handlers filters)
+  "Register a root backend with its renderer and export policies."
   (let ((*export-registration-backend* name))
     (export-registration-check-backend-name name)
     (export-registration-check-callback renderer)
@@ -732,6 +736,7 @@
             option-specifications accepted-keywords retained-keywords
             raw-output-options export-block-names export-snippet-names
             link-type-handlers filters)
+  "Register NAME as a derived backend of PARENT with local overrides."
   (let ((*export-registration-backend* name))
     (export-registration-check-backend-name name)
     (export-registration-check-backend-name parent)
@@ -775,6 +780,7 @@
     result))
 
 (defun unregister-export-backend (name)
+  "Remove a registered non-built-in backend with no registered descendants."
   (unless (keywordp name)
     (error 'type-error :datum name :expected-type 'keyword))
   (sb-thread:with-mutex (*export-backend-registry-lock*)
@@ -801,6 +807,7 @@
         finally (return nil)))
 
 (defun export-backend-derived-p (backend ancestor)
+  "Return true when BACKEND is a strict descendant of ANCESTOR."
   (unless (keywordp backend)
     (error 'type-error :datum backend :expected-type 'keyword))
   (unless (keywordp ancestor)
@@ -912,27 +919,36 @@
   frame)
 
 (defun export-render-context-backend (context)
+  "Return the backend requested for CONTEXT."
   (%export-render-context-backend (export-render-context-check context)))
 (defun export-render-context-document (context)
+  "Return the document associated with CONTEXT."
   (%export-render-context-document (export-render-context-check context)))
 (defun export-render-context-metadata (context)
+  "Return a copy of the metadata stored in CONTEXT."
   (export-copy-snapshot-value
    (%export-render-context-metadata (export-render-context-check context))))
 (defun export-render-context-options (context)
+  "Return a copy of the options stored in CONTEXT."
   (export-copy-snapshot-value
    (%export-render-context-options (export-render-context-check context))))
 (defun export-render-context-limits (context)
+  "Return the resource limits applied to this export."
   (%export-render-context-limits (export-render-context-check context)))
 (defun export-render-context-root-views (context)
+  "Return a fresh list of the prepared root views."
   (copy-list (%export-render-context-root-views
               (export-render-context-check context))))
 (defun export-render-context-toc (context)
+  "Return a copy of the table-of-contents data."
   (export-copy-snapshot-value
    (%export-render-context-toc (export-render-context-check context))))
 (defun export-render-context-footnotes (context)
+  "Return a copy of the footnote data."
   (export-copy-snapshot-value
    (%export-render-context-footnotes (export-render-context-check context))))
 (defun export-render-context-raw-output-p (context kind)
+  "Return true when raw output of KIND is enabled for this export."
   (export-render-context-check context)
   (unless (member kind '(:html :latex) :test #'eq)
     (error 'type-error :datum kind :expected-type '(member :html :latex)))
@@ -948,22 +964,29 @@
             (export-preparation-allow-raw-latex preparation))
            (otherwise nil)))))
 (defun export-render-context-extension (context key)
+  "Return the extension value registered for KEY."
   (export-render-context-check context)
   (unless (keywordp key)
     (error 'type-error :datum key :expected-type 'keyword))
   (cdr (assoc key (%export-render-context-extensions context) :test #'eq)))
 (defun export-render-context-owner-backend (context)
+  "Return the backend that owns the active callback state."
   (%export-render-context-owner-backend (export-render-context-check context)))
 (defun export-render-context-state (context)
+  "Return the state object for the active backend."
   (%export-render-context-state (export-render-context-check context)))
 
 (defun export-render-frame-mode (frame)
+  "Return the node-rendering mode stored in FRAME."
   (%export-render-frame-mode (export-render-frame-check frame)))
 (defun export-render-frame-table-cell-p (frame)
+  "Return whether FRAME is rendering a table cell."
   (%export-render-frame-table-cell-p (export-render-frame-check frame)))
 (defun export-render-frame-preserve-source-breaks-p (frame)
+  "Return whether FRAME preserves source line breaks."
   (%export-render-frame-preserve-source-breaks-p (export-render-frame-check frame)))
 (defun export-render-frame-output-offset (frame)
+  "Return the logical output position at the start of FRAME."
   (%export-render-frame-output-offset (export-render-frame-check frame)))
 
 (defun export-context-for-owner (context owner)
@@ -1031,6 +1054,7 @@
           :key #'%export-backend-descriptor-name :test #'eq)))
 
 (defun export-render-parent-renderer (context)
+  "Invoke the parent backend renderer for CONTEXT."
   (let* ((parent (export-render-parent-descriptor context))
          (ancestry (export-ancestry-through
                     (%export-render-context-ancestry context)
@@ -1051,6 +1075,7 @@
       result)))
 
 (defun export-render-parent-preamble (context)
+  "Render the parent backend preamble for CONTEXT."
   (let* ((parent (export-render-parent-descriptor context))
          (ancestry (export-ancestry-through
                     (%export-render-context-ancestry context)
@@ -1070,6 +1095,7 @@
       result)))
 
 (defun export-render-parent-trailer (context)
+  "Render the parent backend trailer for CONTEXT."
   (let* ((parent (export-render-parent-descriptor context))
          (ancestry (export-ancestry-through
                     (%export-render-context-ancestry context)
@@ -1089,6 +1115,7 @@
       result)))
 
 (defun export-render-parent-template (context preamble body trailer)
+  "Combine PREAMBLE, BODY, and TRAILER with the parent backend template."
   (dolist (component (list preamble body trailer))
     (unless (stringp component)
       (error 'type-error :datum component :expected-type 'string)))
@@ -1112,12 +1139,14 @@
       result)))
 
 (defun export-option-explicit-p (context key)
+  "Return true when CONTEXT contains an explicit value for KEY."
   (export-render-context-check context)
   (unless (keywordp key)
     (error 'type-error :datum key :expected-type 'keyword))
   (not (null (assoc key (%export-render-context-options context) :test #'eq))))
 
 (defun export-option-value (context key)
+  "Return the explicit or registered default value for KEY."
   (export-render-context-check context)
   (unless (keywordp key)
     (error 'type-error :datum key :expected-type 'keyword))
@@ -1208,6 +1237,7 @@
 
 (defun export-render-view (context view &key (mode :block) table-cell-p
                                            preserve-source-breaks-p)
+  "Render VIEW with CONTEXT and return its string."
   (export-render-context-check context)
   (export-check-render-not-creating-state)
   (unless (%export-view-p view)
@@ -1506,6 +1536,7 @@
 
 (defun export-render-node (context node &key view (mode :block) table-cell-p
                                          preserve-source-breaks-p)
+  "Render NODE with CONTEXT and return its string."
   (export-render-context-check context)
   (export-check-render-not-creating-state)
   (unless (node-p node)
@@ -1611,6 +1642,7 @@
                                             (table-cell-p nil table-cell-p-p)
                                             (preserve-source-breaks-p nil
                                                                      preserve-breaks-p))
+  "Render NODE using the parent backend for the current callback."
   (export-render-context-check context)
   (export-check-render-not-creating-state)
   (unless (node-p node)
@@ -1663,6 +1695,7 @@
 
 (defun export-render-parent-view (context view &key (mode :block) table-cell-p
                                              preserve-source-breaks-p)
+  "Render VIEW using the parent backend for the current callback."
   (export-render-context-check context)
   (export-check-render-not-creating-state)
   (unless (%export-view-p view)
@@ -1696,6 +1729,7 @@
       result)))
 
 (defun register-export-link-type (backend type function)
+  "Register TYPE on BACKEND with a (path description frame context) handler."
   (unless (keywordp backend)
     (error 'type-error :datum backend :expected-type 'keyword))
   (unless (stringp type)
@@ -1792,6 +1826,7 @@
          :description (%export-link-result-description result))))))
 
 (defun unregister-export-link-type (backend type)
+  "Remove the handler registered for TYPE on BACKEND."
   (unless (keywordp backend)
     (error 'type-error :datum backend :expected-type 'keyword))
   (unless (stringp type)
