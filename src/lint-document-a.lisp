@@ -248,7 +248,8 @@
 (defun %lint-missing-language-in-src-block (document context)
   (declare (ignore context))
   (loop for node in (%lint-nodes document :src-block)
-        unless (or (node-property node :language)
+        for language = (node-property node :language)
+        unless (or (and (stringp language) (plusp (length language)))
                    (not (%lint-a-offset-p document (node-post-affiliated node))))
           collect (%lint-report document "missing-language-in-src-block"
                                 (node-post-affiliated node)
@@ -280,26 +281,26 @@
                                 (node-post-affiliated node)
                                 "Invalid syntax in babel call block")
         else when (and (%lint-a-offset-p document (node-post-affiliated node))
-                       (%lint-a-outer-bracketed-p end-header))
+                       (%lint-outer-bracketed-p end-header))
           collect (%lint-report document "invalid-babel-call-block"
                                 (node-post-affiliated node)
                                 "Babel call's end header must not be wrapped within brackets")))
 
 (defun %lint-deprecated-category-setup (document context)
   (declare (ignore context))
-  (let ((seen nil))
-    (loop for node in (%lint-nodes document :keyword)
-          for key = (node-property node :key)
-          when (and (string= (or key "") "CATEGORY")
-                    (%lint-a-offset-p document (node-post-affiliated node)))
-            collect (when seen
-                      (%lint-report
-                       document "deprecated-category-setup"
-                       (node-post-affiliated node)
-                       "Spurious CATEGORY keyword.  Set :CATEGORY: property instead"))
-            and do (setf seen t)
-          into reports
-          finally (return (remove nil reports)))))
+  (let ((seen nil)
+        (reports nil))
+    (dolist (node (%lint-nodes document :keyword))
+      (when (and (string= (or (node-property node :key) "") "CATEGORY")
+                 (%lint-a-offset-p document (node-post-affiliated node)))
+        (when seen
+          (push (%lint-report
+                 document "deprecated-category-setup"
+                 (node-post-affiliated node)
+                 "Spurious CATEGORY keyword.  Set :CATEGORY: property instead")
+                reports))
+        (setf seen t)))
+    (nreverse reports)))
 
 (defun %lint-a-coderef-line-p (line reference)
   (let* ((end (position-if-not (lambda (character)
@@ -630,11 +631,12 @@
 
 (defun %lint-extraneous-element-in-footnote-section (document context)
   (declare (ignore context))
-  (let ((allowed '(:comment :comment-block :footnote-definition
-                   :property-drawer :section)))
+  (let ((allowed (quote (:comment :comment-block :footnote-definition
+                   :property-drawer :section))))
     (loop for heading in (%lint-nodes document :headline)
           for title = (node-property heading :raw-value)
           when (and (string= (or title "") "Footnotes")
+                    (%lint-a-offset-p document (node-begin heading))
                     (some (lambda (node)
                             (and (not (eq node heading))
                                  (%lint-a-under-p node heading)
@@ -643,13 +645,13 @@
                                  (member (node-type node)
                                          (append (node-types :greater-element)
                                                  (node-types :lesser-element))
-                                         :test #'eq)
-                                 (not (member (node-type node) allowed :test #'eq))
+                                         :test (function eq))
+                                 (not (member (node-type node) allowed
+                                              :test (function eq)))
                                  (not (and (eq (node-type node) :headline)
-                                           (node-property node :commentedp)))
-                                 (%lint-a-offset-p document (node-begin heading)))
+                                           (node-property node :commentedp)))))
                           (%lint-nodes document)))
             collect (%lint-report
                      document "extraneous-element-in-footnote-section"
                      (node-begin heading)
-                     "Extraneous elements in footnote section are not exported")))))
+                     "Extraneous elements in footnote section are not exported"))))

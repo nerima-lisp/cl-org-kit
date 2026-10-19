@@ -196,7 +196,7 @@
      (format nil "CLOCK: [2026-10-19 Mon]~%")
      "clock-syntax")
     (expect-document-b-clean
-     (format nil "CLOCK: [2026-10-19 Mon 09:00]--[2026-10-19 Mon 10:00] => 1:00~%")
+     (format nil "CLOCK: [2026-10-19 Mon 09:00-10:00] =>  1:00~%")
      "clock-syntax"))
 
   (it "detects inactive scheduled timestamps and accepts active planning"

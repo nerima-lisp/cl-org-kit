@@ -26,25 +26,45 @@
 
   (it "reports every duplicate CUSTOM_ID property"
     (lint-document-a-expect-finding
-     "* A\n:PROPERTIES:\n:CUSTOM_ID: x\n:END:\n* B\n:PROPERTIES:\n:CUSTOM_ID: x\n:END:"
+     "* A
+:PROPERTIES:
+:CUSTOM_ID: x
+:END:
+* B
+:PROPERTIES:
+:CUSTOM_ID: x
+:END:"
      "duplicate-custom-id"
      '(("duplicate-custom-id" 18 "Duplicate CUSTOM_ID property \"x\"")
        ("duplicate-custom-id" 55 "Duplicate CUSTOM_ID property \"x\""))))
 
   (it "accepts a unique CUSTOM_ID property"
     (lint-document-a-expect-none
-     "* A\n:PROPERTIES:\n:CUSTOM_ID: x\n:END:" "duplicate-custom-id"))
+     "* A
+:PROPERTIES:
+:CUSTOM_ID: x
+:END:" "duplicate-custom-id"))
 
   (it "reports every duplicate NAME keyword"
     (lint-document-a-expect-finding
-     "#+NAME: x\n#+BEGIN_SRC emacs-lisp\n1\n#+END_SRC\n#+NAME: x\n#+BEGIN_SRC emacs-lisp\n2\n#+END_SRC"
+     "#+NAME: x
+#+BEGIN_SRC emacs-lisp
+1
+#+END_SRC
+#+NAME: x
+#+BEGIN_SRC emacs-lisp
+2
+#+END_SRC"
      "duplicate-name"
      '(("duplicate-name" 1 "Duplicate NAME \"x\"")
        ("duplicate-name" 46 "Duplicate NAME \"x\""))))
 
   (it "accepts a unique NAME keyword"
     (lint-document-a-expect-none
-     "#+NAME: x\n#+BEGIN_SRC emacs-lisp\n1\n#+END_SRC" "duplicate-name"))
+     "#+NAME: x
+#+BEGIN_SRC emacs-lisp
+1
+#+END_SRC" "duplicate-name"))
 
   (it "reports each duplicate target"
     (lint-document-a-expect-finding
@@ -57,7 +77,9 @@
 
   (it "reports every duplicate footnote definition"
     (lint-document-a-expect-finding
-     "[fn:x] a\n\n[fn:x] b" "duplicate-footnote-definition"
+     "[fn:x] a
+
+[fn:x] b" "duplicate-footnote-definition"
      '(("duplicate-footnote-definition" 1 "Duplicate footnote definition \"x\"")
        ("duplicate-footnote-definition" 11 "Duplicate footnote definition \"x\""))))
 
@@ -71,60 +93,91 @@
 
   (it "accepts an affiliated keyword attached to a block"
     (lint-document-a-expect-none
-     "#+CAPTION: caption\n#+BEGIN_SRC emacs-lisp\n1\n#+END_SRC"
+     "#+CAPTION: caption
+#+BEGIN_SRC emacs-lisp
+1
+#+END_SRC"
      "orphaned-affiliated-keywords"))
 
   (it "reports an independent keyword immediately before affiliated metadata"
     (lint-document-a-expect-finding
-     "#+TITLE: title\n#+CAPTION: cap\n#+BEGIN_SRC emacs-lisp\n1\n#+END_SRC"
+     "#+TITLE: title
+#+CAPTION: cap
+#+BEGIN_SRC emacs-lisp
+1
+#+END_SRC"
      "combining-keywords-with-affiliated"
      '(("combining-keywords-with-affiliated" 1
        "Independent keyword TITLE may be confused with affiliated keywords below"))))
 
   (it "accepts an independent keyword separated by a blank line"
     (lint-document-a-expect-none
-     "#+TITLE: title\n\n#+CAPTION: cap\n#+BEGIN_SRC emacs-lisp\n1\n#+END_SRC"
+     "#+TITLE: title
+
+#+CAPTION: cap
+#+BEGIN_SRC emacs-lisp
+1
+#+END_SRC"
      "combining-keywords-with-affiliated"))
 
   (it "reports an obsolete affiliated keyword on an attached element"
     (lint-document-a-expect-finding
-     "#+DATA: x\n#+BEGIN_SRC emacs-lisp\n1\n#+END_SRC"
+     "#+DATA: x
+#+BEGIN_SRC emacs-lisp
+1
+#+END_SRC"
      "obsolete-affiliated-keywords"
      '(("obsolete-affiliated-keywords" 1
        "Obsolete affiliated keyword: \"DATA\".  Use \"NAME\" instead"))))
 
   (it "does not report an obsolete keyword separated from the next element"
     (lint-document-a-expect-none
-     "#+DATA: x\n\n#+BEGIN_SRC emacs-lisp\n1\n#+END_SRC"
+     "#+DATA: x
+
+#+BEGIN_SRC emacs-lisp
+1
+#+END_SRC"
      "obsolete-affiliated-keywords"))
 
   (it "reports a deprecated export block"
     (lint-document-a-expect-finding
-     "#+BEGIN_HTML\nx\n#+END_HTML" "deprecated-export-blocks"
+     "#+BEGIN_HTML
+x
+#+END_HTML" "deprecated-export-blocks"
      '(("deprecated-export-blocks" 1
        "Deprecated syntax for export block.  Use \"BEGIN_EXPORT HTML\" instead"))))
 
   (it "accepts the current export block syntax"
     (lint-document-a-expect-none
-     "#+BEGIN_EXPORT HTML\nx\n#+END_EXPORT" "deprecated-export-blocks"))
+     "#+BEGIN_EXPORT HTML
+x
+#+END_EXPORT" "deprecated-export-blocks"))
 
   (it "reports a source block without a language"
     (lint-document-a-expect-finding
-     "#+BEGIN_SRC\nx\n#+END_SRC" "missing-language-in-src-block"
+     "#+BEGIN_SRC
+x
+#+END_SRC" "missing-language-in-src-block"
      '(("missing-language-in-src-block" 1 "Missing language in source block"))))
 
   (it "accepts a source block with a language"
     (lint-document-a-expect-none
-     "#+BEGIN_SRC emacs-lisp\nx\n#+END_SRC" "missing-language-in-src-block"))
+     "#+BEGIN_SRC emacs-lisp
+x
+#+END_SRC" "missing-language-in-src-block"))
 
   (it "reports an export block without a backend"
     (lint-document-a-expect-finding
-     "#+BEGIN_EXPORT\nx\n#+END_EXPORT" "missing-backend-in-export-block"
+     "#+BEGIN_EXPORT
+x
+#+END_EXPORT" "missing-backend-in-export-block"
      '(("missing-backend-in-export-block" 1 "Missing backend in export block"))))
 
   (it "accepts an export block with a backend"
     (lint-document-a-expect-none
-     "#+BEGIN_EXPORT HTML\nx\n#+END_EXPORT" "missing-backend-in-export-block"))
+     "#+BEGIN_EXPORT HTML
+x
+#+END_EXPORT" "missing-backend-in-export-block"))
 
   (it "reports a Babel call block with no call name"
     (lint-document-a-expect-finding
@@ -136,9 +189,9 @@
 
   (it "reports repeated CATEGORY setup keywords"
     (lint-document-a-expect-finding
-     "#+CATEGORY: first\n#+CATEGORY: second" "deprecated-category-setup"
-     '(("deprecated-category-setup" 18
-       "Spurious CATEGORY keyword.  Set :CATEGORY: property instead"))))
+     "#+CATEGORY: first
+#+CATEGORY: second" "deprecated-category-setup"
+     '(("deprecated-category-setup" 19 "Spurious CATEGORY keyword.  Set :CATEGORY: property instead"))))
 
   (it "accepts a single CATEGORY setup keyword"
     (lint-document-a-expect-none "#+CATEGORY: only" "deprecated-category-setup"))
@@ -150,7 +203,10 @@
 
   (it "accepts a coderef link found in a source block"
     (lint-document-a-expect-none
-     "#+BEGIN_SRC emacs-lisp\n1 (ref:here)\n#+END_SRC\n[[(here)]]"
+     "#+BEGIN_SRC emacs-lisp
+1 (ref:here)
+#+END_SRC
+[[(here)]]"
      "invalid-coderef-link"))
 
   (it "reports a custom ID link without a local custom ID"
@@ -160,7 +216,11 @@
 
   (it "accepts a link to a local custom ID"
     (lint-document-a-expect-none
-     "* Heading\n:PROPERTIES:\n:CUSTOM_ID: here\n:END:\n[[#here]]"
+     "* Heading
+:PROPERTIES:
+:CUSTOM_ID: here
+:END:
+[[#here]]"
      "invalid-custom-id-link"))
 
   (it "reports a fuzzy link without a local destination"
@@ -191,46 +251,73 @@
 
   (it "reports a special property stored in a property drawer"
     (lint-document-a-expect-finding
-     "* A\n:PROPERTIES:\n:TODO: TODO\n:END:"
+     "* A
+:PROPERTIES:
+:TODO: TODO
+:END:"
      "special-property-in-properties-drawer"
      '(("special-property-in-properties-drawer" 18
        "Special property \"TODO\" found in a properties drawer"))))
 
   (it "accepts a regular property in a property drawer"
     (lint-document-a-expect-none
-     "* A\n:PROPERTIES:\n:EFFORT: 1h\n:END:"
+     "* A
+:PROPERTIES:
+:EFFORT: 1h
+:END:"
      "special-property-in-properties-drawer"))
 
   (it "reports a misplaced PROPERTIES drawer"
     (lint-document-a-expect-finding
-     ":PROPERTIES:\n:X: y\n:END:" "obsolete-properties-drawer"
+     ":PROPERTIES:
+:X: y
+:END:" "obsolete-properties-drawer"
      '(("obsolete-properties-drawer" 1 "Incorrect contents for PROPERTIES drawer"))))
 
   (it "accepts a standard headline property drawer"
     (progn
       (lint-document-a-expect-none
-       "* A\n:PROPERTIES:\n:X: y\n:END:" "obsolete-properties-drawer")
+       "* A
+:PROPERTIES:
+:X: y
+:END:" "obsolete-properties-drawer")
       (lint-document-a-expect-none
-       "* A\nSCHEDULED: <2024-01-01 Mon>\n:PROPERTIES:\n:X: y\n:END:"
+       "* A
+SCHEDULED: <2024-01-01 Mon>
+:PROPERTIES:
+:X: y
+:END:"
        "obsolete-properties-drawer")))
 
   (it "reports an invalid EFFORT duration"
     (lint-document-a-expect-finding
-     "* A\n:PROPERTIES:\n:EFFORT: soon\n:END:" "invalid-effort-property"
+     "* A
+:PROPERTIES:
+:EFFORT: soon
+:END:" "invalid-effort-property"
      '(("invalid-effort-property" 18 "Invalid effort duration format: \"soon\""))))
 
   (it "accepts a valid EFFORT duration"
     (lint-document-a-expect-none
-     "* A\n:PROPERTIES:\n:EFFORT: 1d 2:00\n:END:" "invalid-effort-property"))
+     "* A
+:PROPERTIES:
+:EFFORT: 1d 2:00
+:END:" "invalid-effort-property"))
 
   (it "reports an ID property containing a double colon"
     (lint-document-a-expect-finding
-     "* A\n:PROPERTIES:\n:ID: a::b\n:END:" "invalid-id-property"
+     "* A
+:PROPERTIES:
+:ID: a::b
+:END:" "invalid-id-property"
      '(("invalid-id-property" 18 "IDs should not include \"::\": \"a::b\""))))
 
   (it "accepts an ID property without a double colon"
     (lint-document-a-expect-none
-     "* A\n:PROPERTIES:\n:ID: ab\n:END:" "invalid-id-property"))
+     "* A
+:PROPERTIES:
+:ID: ab
+:END:" "invalid-id-property"))
 
   (it "reports a standard footnote reference with no definition"
     (lint-document-a-expect-finding
@@ -239,7 +326,9 @@
 
   (it "accepts a standard footnote reference with a definition"
     (lint-document-a-expect-none
-     "a[fn:x]\n\n[fn:x] definition" "undefined-footnote-reference"))
+     "a[fn:x]
+
+[fn:x] definition" "undefined-footnote-reference"))
 
   (it "reports an unreferenced footnote definition"
     (lint-document-a-expect-finding
@@ -248,14 +337,18 @@
 
   (it "accepts a footnote definition with a reference"
     (lint-document-a-expect-none
-     "a[fn:x]\n\n[fn:x] definition" "unreferenced-footnote-definition"))
+     "a[fn:x]
+
+[fn:x] definition" "unreferenced-footnote-definition"))
 
   (it "reports extraneous content in the footnote section"
     (lint-document-a-expect-finding
-     "* Footnotes\nText" "extraneous-element-in-footnote-section"
+     "* Footnotes
+Text" "extraneous-element-in-footnote-section"
      '(("extraneous-element-in-footnote-section" 1
        "Extraneous elements in footnote section are not exported"))))
 
   (it "accepts only footnote definitions in the footnote section"
     (lint-document-a-expect-none
-     "* Footnotes\n[fn:x] definition" "extraneous-element-in-footnote-section")))
+     "* Footnotes
+[fn:x] definition" "extraneous-element-in-footnote-section")))

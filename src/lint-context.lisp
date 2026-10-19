@@ -55,9 +55,7 @@
                   (node-end node)))
          (line (subseq text start end))
          (separator (position #\: line :start 1)))
-    (if separator
-        (subseq line 1 separator)
-        (node-property node :key ""))))
+    (string-upcase (if separator (subseq line 1 separator) (node-property node :key "")))))
 
 (defun %lint-deprecated-header-syntax (document context)
   (let ((arguments
@@ -114,13 +112,18 @@
 (defun %lint-invalid-id-link (document context)
   (let ((known-ids (%lint-context-value context :known-ids)))
     (loop for node in (%lint-nodes document :link)
+          for type = (node-property node :type "")
           for path = (node-property node :path)
-          when (and (string= (node-property node :type "") "id")
-                    path
-                    (not (member path known-ids :test #'string=)))
+          for id = (cond
+                     ((string-equal type "id") path)
+                     ((and (stringp path)
+                           (<= 3 (length path))
+                           (string-equal "id:" path :end2 3))
+                      (subseq path 3)))
+          when (and id (not (member id known-ids :test (function string=))))
             append (%lint-context-node-report
                     document "invalid-id-link" node
-                    (format nil "Unknown ID ~S" path)))))
+                    (format nil "Unknown ID ~S" id)))))
 
 (defun %lint-link-to-local-file (document context)
   (let ((exists-p (%lint-context-value context :file-exists-p)))
@@ -457,7 +460,7 @@
                                                '(#\Space #\Tab))))
                          do (incf index))
                    (push (cons (subseq value start index) nil) tokens))))
-        finally (return (values (nreverse tokens)
+        finally (return (values (reverse tokens)
                                 (and valid (<= (length tokens) 3))))))
 
 (defun %lint-symbol-name-p (name)

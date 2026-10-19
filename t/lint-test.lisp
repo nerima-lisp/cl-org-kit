@@ -41,12 +41,18 @@
     (expect (org-lint (parse-org "Plain text.")) :to-equal '()))
 
   (it "accepts an explicit empty checker selection"
-    (expect (org-lint (parse-org "#+BEGIN_SRC\nbody\n#+END_SRC\n")
+    (expect (org-lint (parse-org "#+BEGIN_SRC
+body
+#+END_SRC
+")
                       :checkers '())
             :to-equal '()))
 
   (it "does not run a context-dependent checker without its required material"
-    (expect (org-lint (parse-org "#+BEGIN_SRC not-a-language\nbody\n#+END_SRC\n")
+    (expect (org-lint (parse-org "#+BEGIN_SRC not-a-language
+body
+#+END_SRC
+")
                       :checkers '("suspicious-language-in-src-block"))
             :to-equal '()))
 

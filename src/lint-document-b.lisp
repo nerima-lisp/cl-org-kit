@@ -25,8 +25,7 @@
         for end = (node-end node)
         when (and begin end (<= begin offset) (< offset end)
                   (or (null best)
-                      (< (- end begin)
-                         (- (node-end best) (node-begin best))))) do
+                      (<= (- end begin) (- (node-end best) (node-begin best))))) do
           (setf best node)
         finally (return best)))
 
@@ -60,7 +59,8 @@
   (let ((found nil))
     (%lint-b-lines
      document
-     (lambda (line-start _line-end line)
+     (lambda (line-start line-end line)
+       (declare (ignore line-end))
        (when (and (> line-start start)
                   (< line-start end)
                   (string-equal
@@ -99,7 +99,8 @@
         thereis (and (char= (char text start) #\[)
                      (%lint-b-citation-prefix-end text start))))
 
-(defun %lint-obsolete-include-markup (document _context)
+(defun %lint-obsolete-include-markup (document context)
+  (declare (ignore context))
   (loop for node in (%lint-nodes document :keyword)
         for value = (node-property node :value)
         when (and (string= (node-property node :key "") "INCLUDE")
@@ -133,11 +134,13 @@
                                "Obsolete markup \"~A\" in INCLUDE keyword.  Use \"export ~A\" instead"
                                markup markup)))))))
 
-(defun %lint-invalid-keyword-syntax (document _context)
+(defun %lint-invalid-keyword-syntax (document context)
+  (declare (ignore context))
   (let ((reports nil))
     (%lint-b-lines
      document
-     (lambda (start _end line)
+     (lambda (start end line)
+       (declare (ignore end))
        (let* ((prefix-start (%lint-b-leading-space-count line))
               (keyword-start (+ prefix-start 2)))
          (when (and (%lint-b-prefix-p line "#+" prefix-start)
@@ -160,7 +163,8 @@
                          reports)))))))))
     (nreverse reports)))
 
-(defun %lint-latex-dollar-ambiguous (document _context)
+(defun %lint-latex-dollar-ambiguous (document context)
+  (declare (ignore context))
   (loop for fragment in (%lint-nodes document :latex-fragment)
         for begin = (node-begin fragment)
         for value = (node-property fragment :value)
@@ -187,10 +191,16 @@
                               (not (zerop (mod year 100)))))
                      29 28)))))
       (when (<= day month-length)
-        (nth (nth-value 6
+        (case (nth-value 6
                (decode-universal-time
                 (encode-universal-time 0 0 12 day month year 0) 0))
-             '("Sun" "Mon" "Tue" "Wed" "Thu" "Fri" "Sat"))))))
+          (0 "Mon")
+          (1 "Tue")
+          (2 "Wed")
+          (3 "Thu")
+          (4 "Fri")
+          (5 "Sat")
+          (6 "Sun"))))))
 
 (defun %lint-b-unit-char (unit)
   (case unit
@@ -277,7 +287,8 @@
            (write-string (%lint-b-timestamp-adjustments timestamp) stream)
            (write-char closing stream)))))))
 
-(defun %lint-timestamp-syntax (document _context)
+(defun %lint-timestamp-syntax (document context)
+  (declare (ignore context))
   (loop for timestamp in (%lint-nodes document :timestamp)
         for expected = (%lint-b-timestamp-canonical timestamp)
         for raw = (node-text timestamp)
@@ -297,27 +308,26 @@
       (let* ((line (node-text clock))
              (arrow (and line (search "=>" line)))
              (duration (and arrow
-                            (string-trim '(#\Space #\Tab #\Return #\Newline)
+                            (string-trim (quote (#\Space #\Tab #\Return #\Newline))
                                          (subseq line (+ arrow 2)))))
              (formatted-duration
-               (when (and duration (plusp (length duration)))
-                 (let ((colon (position #\: duration)))
-                   (when colon
-                     (let ((hours (subseq duration 0 colon))
-                           (minutes (subseq duration (1+ colon))))
-                       (format nil "~A:~A"
-                               (if (< (length hours) 2)
-                                   (concatenate 'string " " hours)
-                                   hours)
-                               (if (< (length minutes) 2)
-                                   (concatenate 'string "0" minutes)
-                                   minutes)))))))
-        (concatenate 'string "CLOCK: " timestamp-text
+              (when (and duration (plusp (length duration)))
+                (let ((colon (position #\: duration)))
+                  (when colon
+                    (let ((hours (subseq duration 0 colon))
+                          (minutes (subseq duration (1+ colon))))
+                      (format nil "~A:~A"
+                              (if (< (length hours) 2) (concatenate (quote string) " " hours) hours)
+                              (if (< (length minutes) 2)
+                                  (concatenate (quote string) "0" minutes)
+                                minutes))))))))
+        (concatenate (quote string) "CLOCK: " timestamp-text
                      (if formatted-duration
-                         (concatenate 'string " => " formatted-duration)
-                         "")))))))
+                         (concatenate (quote string) " => " formatted-duration)
+                       ""))))))
 
-(defun %lint-clock-syntax (document _context)
+(defun %lint-clock-syntax (document context)
+  (declare (ignore context))
   (loop for clock in (%lint-nodes document :clock)
         for expected = (%lint-b-clock-canonical clock)
         for raw = (node-text clock)
@@ -330,7 +340,8 @@
              (format nil "Potentially malformed CLOCK: line~%           ~A~%Parsed as: ~A"
                      actual expected))))
 
-(defun %lint-planning-inactive (document _context)
+(defun %lint-planning-inactive (document context)
+  (declare (ignore context))
   (loop for planning in (%lint-nodes document :planning)
         for scheduled = (node-property planning :scheduled)
         for deadline = (node-property planning :deadline)
@@ -349,7 +360,8 @@
              document "planning-inactive" (node-begin planning)
              "Inactive timestamp in DEADLINE will not appear in agenda.")))
 
-(defun %lint-mismatched-planning-repeaters (document _context)
+(defun %lint-mismatched-planning-repeaters (document context)
+  (declare (ignore context))
   (loop for planning in (%lint-nodes document :planning)
         for scheduled = (node-property planning :scheduled)
         for deadline = (node-property planning :deadline)
@@ -376,11 +388,13 @@
              document "mismatched-planning-repeaters" (node-begin planning)
              "Different repeaters in SCHEDULED and DEADLINE timestamps.")))
 
-(defun %lint-misplaced-planning-info (document _context)
+(defun %lint-misplaced-planning-info (document context)
+  (declare (ignore context))
   (let ((reports nil))
     (%lint-b-lines
      document
-     (lambda (start _end line)
+     (lambda (start end line)
+       (declare (ignore end))
        (let* ((indent (%lint-b-leading-space-count line))
               (line-node (%lint-b-node-at document start)))
          (when (and (or (%lint-b-prefix-p line "CLOSED:" indent)
@@ -395,17 +409,18 @@
                  reports)))))
     (nreverse reports)))
 
-(defun %lint-incomplete-drawer (document _context)
+(defun %lint-incomplete-drawer (document context)
+  (declare (ignore context))
   (let ((reports nil))
     (%lint-b-lines
      document
-     (lambda (start _end line)
+     (lambda (start end line)
+       (declare (ignore end))
        (let* ((drawer-line (%lint-b-drawer-line-p line))
               (node (%lint-b-node-at document start))
               (inside-drawer (%lint-b-ancestor-type-p node '(:drawer)))
               (incomplete-root-drawer
-                (and (eq (node-type node) :drawer)
-                     (= (node-begin node) start)
+                (and node (eq (node-type node) :drawer) (= (node-begin node) start)
                      (not (%lint-b-drawer-close-p document start
                                                   (node-end node)))))
               (protected (%lint-b-ancestor-type-p
@@ -427,11 +442,13 @@
             reports))))))
     (nreverse reports)))
 
-(defun %lint-indented-diary-sexp (document _context)
+(defun %lint-indented-diary-sexp (document context)
+  (declare (ignore context))
   (let ((reports nil))
     (%lint-b-lines
      document
-     (lambda (start _end line)
+     (lambda (start end line)
+       (declare (ignore end))
        (let* ((indent (%lint-b-leading-space-count line))
               (node (%lint-b-node-at document start)))
          (when (and (plusp indent)
@@ -444,7 +461,8 @@
                  reports)))))
     (nreverse reports)))
 
-(defun %lint-quote-section (document _context)
+(defun %lint-quote-section (document context)
+  (declare (ignore context))
   (loop for node in (%lint-nodes document)
         for title = (node-property node :raw-value "")
         when (and (member (node-type node) '(:headline :inlinetask) :test #'eq)
@@ -456,7 +474,8 @@
           collect (%lint-report document "quote-section" (node-begin node)
                                 "Deprecated QUOTE section")))
 
-(defun %lint-file-application (document _context)
+(defun %lint-file-application (document context)
+  (declare (ignore context))
   (loop for link in (%lint-nodes document :link)
         for type = (node-property link :type)
         when (and (stringp type) (%lint-b-prefix-p type "file+"))
@@ -465,7 +484,8 @@
                           (format nil "Deprecated \"file+~A\" link type"
                                   (subseq type (length "file+"))))))
 
-(defun %lint-percent-encoding-link-escape (document _context)
+(defun %lint-percent-encoding-link-escape (document context)
+  (declare (ignore context))
   (loop for link in (%lint-nodes document :link)
         for path = (node-property link :path)
         when (and (eq (node-property link :format) :bracket)
@@ -484,7 +504,8 @@
                           (node-begin link)
                           "Link escaped with obsolete percent-encoding syntax")))
 
-(defun %lint-spurious-colons (document _context)
+(defun %lint-spurious-colons (document context)
+  (declare (ignore context))
   (loop for headline in (%lint-nodes document :headline)
         for tags = (node-property headline :tags)
         for line = (let* ((start (node-begin headline))
@@ -506,7 +527,8 @@
           collect (%lint-report document "spurious-colons" (node-begin headline)
                                 "Tags contain a spurious colon")))
 
-(defun %lint-missing-print-bibliography (document _context)
+(defun %lint-missing-print-bibliography (document context)
+  (declare (ignore context))
   (when (and (%lint-nodes document :citation)
              (not (loop for keyword in (%lint-nodes document :keyword)
                         thereis (string= (node-property keyword :key "")
@@ -515,7 +537,8 @@
                         (length (document-text document))
                         "Possibly missing \"PRINT_BIBLIOGRAPHY\" keyword"))))
 
-(defun %lint-incomplete-citation (document _context)
+(defun %lint-incomplete-citation (document context)
+  (declare (ignore context))
   (loop for text-node in (%lint-nodes document :plain-text)
         for text = (node-text text-node)
         for paragraph = (loop for node = (node-parent text-node) then (node-parent node)
@@ -540,7 +563,8 @@
              (when digit
                (parse-integer bullet :start digit :junk-allowed t))))))))
 
-(defun %lint-item-number (document _context)
+(defun %lint-item-number (document context)
+  (declare (ignore context))
   (let ((reports nil))
     (dolist (list-node (%lint-nodes document :plain-list))
       (loop with expected = 1
@@ -558,9 +582,10 @@
                            "Bullet counter \"~A\" is not the same with item position ~D.  Consider adding manual [@~D] counter."
                            bullet expected bullet-number))
                   reports)
-            do (when (integerp counter)
-                 (setf expected counter))
-               (incf expected)))
+            do (setf expected
+                     (1+ (if (integerp counter)
+                             counter
+                             (or bullet-number expected))))))
     (nreverse reports)))
 
 (defun %lint-b-priority-string (priority)
@@ -568,7 +593,8 @@
       (string (code-char priority))
       (format nil "~D" priority)))
 
-(defun %lint-priority (document _context)
+(defun %lint-priority (document context)
+  (declare (ignore context))
   (let ((reports nil))
     (dolist (headline (%lint-nodes document :headline))
       (let* ((priority (node-property headline :priority))
@@ -601,8 +627,8 @@
                    (if closed
                        (format nil "Invalid priority '~A'" body)
                        (format nil "Malformed priority '~A'"
-                               (subseq raw-value start)))
-                  reports)))))))))
+                               (subseq raw-value start))))
+                  reports))))))))
     (nreverse reports)))
 
 (defun %lint-b-attribute-value (text name)
@@ -623,7 +649,8 @@
                (when value-start
                  (return (subseq text value-start value-end))))))
 
-(defun %lint-invalid-image-alignment (document _context)
+(defun %lint-invalid-image-alignment (document context)
+  (declare (ignore context))
   (loop for paragraph in (%lint-nodes document :paragraph)
         for attributes = (node-property paragraph :ATTR_ORG)
         when (stringp attributes)
@@ -641,14 +668,16 @@
                                "\"~A\" not a supported value for #+ATTR_ORG keyword attribute \":~A\"."
                                value message-key)))))
 
-(defun %lint-invalid-block (document _context)
+(defun %lint-invalid-block (document context)
+  (declare (ignore context))
   (let ((reports nil)
-        (allowed-types '(:center-block :comment-block :dynamic-block :example-block
-                         :export-block :quote-block :special-block :src-block
-                         :verse-block)))
+        (allowed-types (quote (:center-block :comment-block :dynamic-block
+                              :example-block :export-block :quote-block
+                              :special-block :src-block :verse-block))))
     (%lint-b-lines
      document
-     (lambda (start _end line)
+     (lambda (start end line)
+       (declare (ignore end))
        (let* ((indent (%lint-b-leading-space-count line))
               (marker-start (+ indent 2)))
          (when (and (%lint-b-prefix-p line "#+" indent)
@@ -664,19 +693,19 @@
                             (1+ after-kind))
                            ((and (< after-kind (length line))
                                  (char= (char line after-kind) #\_))
-                            (or (position-if #'%lint-b-horizontal-space-p
+                            (or (position-if (function %lint-b-horizontal-space-p)
                                              line :start (1+ after-kind))
                                 (length line)))
                            ((or (= after-kind (length line))
                                 (%lint-b-horizontal-space-p
                                  (char line after-kind)))
-                            after-kind)))
+                            after-kind))))
                   (node (and suffix-end (%lint-b-node-at document start)))
-                  (trimmed (string-trim '(#\Space #\Tab) line)))
+                  (trimmed (string-trim (quote (#\Space #\Tab)) line)))
              (when (and suffix-end
                         (if (string= kind "END")
                             (let ((trailing-start
-                                    (position-if-not #'%lint-b-horizontal-space-p
+                                    (position-if-not (function %lint-b-horizontal-space-p)
                                                      line :start suffix-end)))
                               (and trailing-start
                                    (not (= trailing-start (length line)))))
@@ -688,6 +717,6 @@
                  (if (string= kind "END")
                      (format nil "Invalid block closing line \"~A\"" trimmed)
                      (format nil "Possible incomplete block \"~A\"" trimmed)))
-                reports))))))))
+                reports)))))))
     (nreverse reports)))
 
