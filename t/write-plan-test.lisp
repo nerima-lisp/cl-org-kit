@@ -121,22 +121,58 @@
            (expect (logand (sb-posix:stat-mode (sb-posix:stat (namestring target))) #o777)
                    :to-be #o600))))))
 
-  (it "uses the 0644 mode default and enforces exact UTF-8 byte limits"
+  (it "uses mode defaults, preserves existing modes, and ignores the umask"
     (write-plan-test-call-with-directory
      (lambda (root)
-       (let* ((plan (make-write-plan
-                     (list (make-write-plan-entry "accent.txt" "é"))))
-              (target (write-plan-test-path root "accent.txt")))
-         (with-soft-assertions
-           (expect (apply-write-plan
-                    plan root
-                    :limits (make-limits :max-write-plan-entries 1
-                                         :max-write-plan-bytes 2))
-                   :to-equal '("accent.txt"))
-           (expect (write-plan-test-read-octets target)
-                   :to-equalp (vector #xC3 #xA9))
-           (expect (logand (sb-posix:stat-mode (sb-posix:stat (namestring target))) #o777)
-                   :to-be #o644))))))
+       (let* ((entry (make-write-plan-entry "accent.txt" "é"))
+              (plan (make-write-plan (list entry)))
+              (target (write-plan-test-path root "accent.txt"))
+              (existing-target (write-plan-test-path root "existing.txt"))
+              (new-target (write-plan-test-path root "new.txt"))
+              (explicit-target (write-plan-test-path root "explicit.txt"))
+              (existing-plan
+                (make-write-plan
+                 (list (make-write-plan-entry "existing.txt" "replacement"))))
+              (new-plan
+                (make-write-plan
+                 (list (make-write-plan-entry "new.txt" "new"))))
+              (explicit-plan
+                (make-write-plan
+                 (list (make-write-plan-entry "explicit.txt" "explicit"
+                                              :mode #o777))))
+              (old-umask (sb-posix:umask #o077)))
+         (unwind-protect
+              (progn
+                (write-plan-test-write-text existing-target "old")
+                (sb-posix:chmod (namestring existing-target) #o600)
+                (apply-write-plan
+                 plan root
+                 :limits (make-limits :max-write-plan-entries 1
+                                      :max-write-plan-bytes 2))
+                (apply-write-plan existing-plan root)
+                (apply-write-plan new-plan root)
+                (apply-write-plan explicit-plan root)
+                (with-soft-assertions
+                  (expect (write-plan-entry-mode entry) :to-be #o644)
+                  (expect (write-plan-test-read-octets target)
+                          :to-equalp (vector #xC3 #xA9))
+                  (expect (logand (sb-posix:stat-mode
+                                   (sb-posix:stat (namestring target)))
+                                  #o777)
+                          :to-be #o644)
+                  (expect (logand (sb-posix:stat-mode
+                                   (sb-posix:stat (namestring existing-target)))
+                                  #o777)
+                          :to-be #o600)
+                  (expect (logand (sb-posix:stat-mode
+                                   (sb-posix:stat (namestring new-target)))
+                                  #o777)
+                          :to-be #o644)
+                  (expect (logand (sb-posix:stat-mode
+                                   (sb-posix:stat (namestring explicit-target)))
+                                  #o777)
+                          :to-be #o777)))
+           (sb-posix:umask old-umask))))))
 
   (it "writes octet vectors unchanged and counts their exact byte length"
     (write-plan-test-call-with-directory

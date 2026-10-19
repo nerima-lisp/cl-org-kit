@@ -28,7 +28,7 @@ threads register or invoke callbacks through the same registry.
 
 ## Build and inspect a write plan
 
-`make-write-plan-entry` and `make-write-plan` create data only. Entry paths are relative POSIX paths. Content may be a string, which is encoded as UTF-8, or an octet vector, which is written unchanged. The default file mode is `#o644`. Set `:create-directories-p t` when the apply operation may create missing parent directories.
+`make-write-plan-entry` and `make-write-plan` create data only. Entry paths are relative POSIX paths. Content may be a string, which is encoded as UTF-8, or an octet vector, which is written unchanged. `write-plan-entry-mode` returns `#o644` when `:mode` is omitted. On apply, an omitted `:mode` preserves an existing regular file's mode and gives a new file mode `#o644`. An explicit `:mode` is applied exactly, regardless of the process umask. Set `:create-directories-p t` when the apply operation may create missing parent directories.
 
 ```lisp
 (defun write-report (output-root)

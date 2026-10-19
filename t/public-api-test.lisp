@@ -323,8 +323,10 @@ library does not read or evaluate EXPRESSION.")
               :to-equal
               "Return a write-plan entry without touching the filesystem.
 PATH is relative. String CONTENT is encoded as UTF-8; an octet vector is copied
-and written unchanged. MODE defaults to 0644, and CREATE-DIRECTORIES-P controls
-creation of missing parent directories.")
+and written unchanged. If MODE is omitted, an existing regular file's mode is
+preserved and a new file uses 0644. An explicit MODE is applied exactly,
+regardless of the process umask. CREATE-DIRECTORIES-P controls creation of
+missing parent directories.")
       (expect (documentation 'write-plan-entry-content 'function)
               :to-equal "Return a copy of ENTRY's text string or octet-vector content.")
       (expect (documentation 'apply-write-plan 'function)

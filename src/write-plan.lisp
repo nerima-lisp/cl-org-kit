@@ -32,13 +32,17 @@
   (path "" :read-only t)
   (content "" :read-only t)
   (mode #o644 :read-only t)
+  (mode-supplied-p nil :read-only t)
   (create-directories-p nil :read-only t))
 
-(defun make-write-plan-entry (path content &key (mode #o644) create-directories-p)
+(defun make-write-plan-entry
+    (path content &key (mode #o644 mode-supplied-p) create-directories-p)
   "Return a write-plan entry without touching the filesystem.
 PATH is relative. String CONTENT is encoded as UTF-8; an octet vector is copied
-and written unchanged. MODE defaults to 0644, and CREATE-DIRECTORIES-P controls
-creation of missing parent directories."
+and written unchanged. If MODE is omitted, an existing regular file's mode is
+preserved and a new file uses 0644. An explicit MODE is applied exactly,
+regardless of the process umask. CREATE-DIRECTORIES-P controls creation of
+missing parent directories."
   (unless (or (stringp path) (pathnamep path))
     (error 'type-error :datum path :expected-type '(or string pathname)))
   (unless (or (stringp content)
@@ -54,6 +58,7 @@ creation of missing parent directories."
                                                path))
                           :content (copy-seq content)
                           :mode mode
+                          :mode-supplied-p mode-supplied-p
                           :create-directories-p create-directories-p))
 
 (defun write-plan-entry-p (object)
@@ -200,6 +205,7 @@ creation of missing parent directories."
 
 (defun write-plan-inspect-entry (root path components create-directories-p)
   (let ((current root)
+        (existing-mode nil)
         (last-index (1- (length components))))
     (loop for component in components
           for index from 0
@@ -215,13 +221,16 @@ creation of missing parent directories."
                      (when (= kind #o120000)
                        (write-plan-error :symlink-component path))
                      (if final-p
-                         (unless (= kind #o100000)
-                           (write-plan-error :target-not-regular-file path))
+                         (progn
+                           (unless (= kind #o100000)
+                             (write-plan-error :target-not-regular-file path))
+                           (setf existing-mode
+                                 (logand (sb-posix:stat-mode stat) #o777)))
                          (unless (= kind #o040000)
                            (write-plan-error :parent-not-directory path))))
                    (unless (or final-p create-directories-p)
                      (write-plan-error :missing-parent-directory path)))))
-    t))
+    existing-mode))
 
 (defun write-plan-string-byte-count (string path limits total)
   ;; The codec's size helper encodes its input, so bound its temporary octets.
@@ -279,15 +288,17 @@ creation of missing parent directories."
                         (next-total (fourth encoded)))
                    (setf total next-total)
                    (push (list entry path components (third encoded)
-                               key key-components)
+                               key key-components nil)
                          records))))
       (setf records (nreverse records))
       (write-plan-check-path-conflicts records)
       (let ((canonical-root (write-plan-canonical-root root)))
         (dolist (record records)
-          (write-plan-inspect-entry canonical-root (second record) (third record)
-                                    (%write-plan-entry-create-directories-p
-                                     (first record))))
+          (setf (seventh record)
+                (write-plan-inspect-entry canonical-root (second record)
+                                          (third record)
+                                          (%write-plan-entry-create-directories-p
+                                           (first record)))))
         (values canonical-root records)))))
 
 (defun write-plan-syscall-result (result name)
@@ -437,7 +448,10 @@ creation of missing parent directories."
                           (finish-output stream)
                           (sb-posix:fchmod
                            fd
-                           (%write-plan-entry-mode (first record)))
+                           (if (%write-plan-entry-mode-supplied-p
+                                (first record))
+                               (%write-plan-entry-mode (first record))
+                               (or (seventh record) #o644)))
                           (sb-posix:fsync fd)
                           (close stream)
                           (setf stream-closed-p t
