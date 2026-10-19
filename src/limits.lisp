@@ -23,7 +23,9 @@
   (max-formula-exponent 0 :read-only t)
   (max-formula-work 0 :read-only t)
   (max-write-plan-entries 0 :read-only t)
-  (max-write-plan-bytes 0 :read-only t))
+  (max-write-plan-bytes 0 :read-only t)
+  (max-write-plan-path-bytes 0 :read-only t)
+  (max-write-plan-path-depth 0 :read-only t))
 
 (defun checked-limit-value (value)
   (unless (typep value '(integer 0))
@@ -49,7 +51,9 @@
                          (max-formula-exponent 6144)
                          (max-formula-work 1000000)
                          (max-write-plan-entries 100000)
-                         (max-write-plan-bytes (* 256 1024 1024)))
+                         (max-write-plan-bytes (* 256 1024 1024))
+                         (max-write-plan-path-bytes 4096)
+                         (max-write-plan-path-depth 128))
   "Return a LIMITS object whose values are non-negative integers.
 
 Input length counts octets or decoded characters; output length counts Unicode
@@ -60,7 +64,8 @@ and node budgets count cumulative expansion per export call, with the root at
 depth zero. Formula token, AST-depth, precision, and exponent limits are per
 formula; work is per table recalculation. Write-plan entries count files in one
 application, and write-plan bytes count combined UTF-8 string content and
-octet-vector content.
+octet-vector content. Write-plan path bytes count UTF-8 octets in each submitted
+path, and path depth counts non-empty components other than dot.
 
 Agenda, repeat, export, and formula limits are definitions pending downstream
 consumers; these definitions do not enforce limits by themselves. Each keyword
@@ -88,7 +93,11 @@ overrides its corresponding default with a non-negative integer."
                 :max-formula-work (checked-limit-value max-formula-work)
                 :max-write-plan-entries
                 (checked-limit-value max-write-plan-entries)
-                :max-write-plan-bytes (checked-limit-value max-write-plan-bytes)))
+                :max-write-plan-bytes (checked-limit-value max-write-plan-bytes)
+                :max-write-plan-path-bytes
+                (checked-limit-value max-write-plan-path-bytes)
+                :max-write-plan-path-depth
+                (checked-limit-value max-write-plan-path-depth)))
 
 (defun limits-p (object)
   "Return true when OBJECT is a LIMITS object."
@@ -117,7 +126,9 @@ overrides its corresponding default with a non-negative integer."
     (:max-formula-exponent (%limits-max-formula-exponent limits))
     (:max-formula-work (%limits-max-formula-work limits))
     (:max-write-plan-entries (%limits-max-write-plan-entries limits))
-    (:max-write-plan-bytes (%limits-max-write-plan-bytes limits))))
+    (:max-write-plan-bytes (%limits-max-write-plan-bytes limits))
+    (:max-write-plan-path-bytes (%limits-max-write-plan-path-bytes limits))
+    (:max-write-plan-path-depth (%limits-max-write-plan-path-depth limits))))
 
 (defun minimum-limit-value (limits name)
   "Return the minimum value of NAME in LIMITS, or its default when LIMITS is empty.

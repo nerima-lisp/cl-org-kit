@@ -457,7 +457,7 @@
                (expect (write-plan-test-read-text sentinel) :to-equal "unchanged")
                (expect (probe-file (write-plan-test-path outside "new.txt")) :to-be nil))))))))
 
-  (it "checks every entry and configured limits before creating any target"
+  (it "checks every entry and configured path and content limit before writes"
     (write-plan-test-call-with-directory
      (lambda (root)
        (let* ((count-plan
@@ -472,7 +472,22 @@
                  (list (make-write-plan-entry "large.txt" "é"))))
               (byte-error
                 (write-plan-test-capture-error
-                 byte-plan root :limits (make-limits :max-write-plan-bytes 1))))
+                 byte-plan root :limits (make-limits :max-write-plan-bytes 1)))
+              (path-byte-plan
+                (make-write-plan
+                 (list (make-write-plan-entry "é.txt" "value"))))
+              (path-byte-error
+                (write-plan-test-capture-error
+                 path-byte-plan root
+                 :limits (make-limits :max-write-plan-path-bytes 5)))
+              (path-depth-plan
+                (make-write-plan
+                 (list (make-write-plan-entry "a/b/c" "value"
+                                              :create-directories-p t))))
+              (path-depth-error
+                (write-plan-test-capture-error
+                 path-depth-plan root
+                 :limits (make-limits :max-write-plan-path-depth 2))))
          (with-soft-assertions
            (expect (typep count-error 'org-resource-limit-error) :to-be t)
            (when count-error
@@ -486,9 +501,29 @@
                      :to-be :max-write-plan-bytes)
              (expect (org-resource-limit-error-limit byte-error) :to-be 1)
              (expect (org-resource-limit-error-actual byte-error) :to-be 2))
+           (expect (typep path-byte-error 'org-resource-limit-error) :to-be t)
+           (when path-byte-error
+             (expect (org-resource-limit-error-limit-name path-byte-error)
+                     :to-be :max-write-plan-path-bytes)
+             (expect (org-resource-limit-error-limit path-byte-error)
+                     :to-be 5)
+             (expect (org-resource-limit-error-actual path-byte-error)
+                     :to-be 6))
+           (expect (typep path-depth-error 'org-resource-limit-error) :to-be t)
+           (when path-depth-error
+             (expect (org-resource-limit-error-limit-name path-depth-error)
+                     :to-be :max-write-plan-path-depth)
+             (expect (org-resource-limit-error-limit path-depth-error)
+                     :to-be 2)
+             (expect (org-resource-limit-error-actual path-depth-error)
+                     :to-be 3))
            (expect (probe-file (write-plan-test-path root "first.txt")) :to-be nil)
            (expect (probe-file (write-plan-test-path root "second.txt")) :to-be nil)
-           (expect (probe-file (write-plan-test-path root "large.txt")) :to-be nil))))))
+           (expect (probe-file (write-plan-test-path root "large.txt")) :to-be nil)
+           (expect (probe-file (write-plan-test-path root "é.txt")) :to-be nil)
+           (expect (write-plan-test-directory-exists-p
+                    (write-plan-test-path root "a"))
+                   :to-be nil))))))
 
   (it "rejects symlink swaps during application"
       (write-plan-test-call-with-directory
@@ -730,6 +765,30 @@
            (expect (write-plan-test-read-text
                     (write-plan-test-path root "parent/child.txt"))
                    :to-equal "value"))))))
+  (it "inspects path components with descriptor-relative opens"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "a/b/c/target.txt"))
+              (symbol 'org-kit::write-plan-lstat)
+              (original (symbol-function symbol))
+              (calls 0))
+         (ensure-directories-exist target)
+         (unwind-protect
+              (progn
+                (setf (symbol-function symbol)
+                      (lambda (&rest arguments)
+                        (incf calls)
+                        (apply original arguments)))
+                (with-soft-assertions
+                  (expect
+                   (org-kit::write-plan-inspect-entry
+                    (org-kit::write-plan-canonical-root root)
+                    "a/b/c/target.txt"
+                    '("a" "b" "c" "target.txt")
+                    nil)
+                   :to-be nil)
+                  (expect calls :to-be 1)))
+           (setf (symbol-function symbol) original))))))
 
   (it "covers path, UTF-8, and directory I/O failure paths"
   (progn
@@ -1158,13 +1217,19 @@
                       (write-plan-test-path root "string-root.txt"))
                      :to-equal "via string")
              (setf generic-condition
-                   (call-with-function
-                    root-open-symbol
-                    (lambda (&rest arguments)
-                      (declare (ignore arguments))
-                      (error generic-failure))
-                    (lambda ()
-                      (write-plan-test-capture-error generic-plan root))))
+      (let ((original-root-open (symbol-function root-open-symbol)))
+        (write-plan-test-call-after-preflight
+         (lambda (canonical-root)
+           (declare (ignore canonical-root))
+           (setf (symbol-function root-open-symbol)
+                 (lambda (&rest arguments)
+                   (declare (ignore arguments))
+                   (error generic-failure))))
+         (lambda ()
+           (unwind-protect
+                (write-plan-test-capture-error generic-plan root)
+             (setf (symbol-function root-open-symbol)
+                   original-root-open))))))
              (expect (typep generic-condition
                             (find-symbol "ORG-WRITE-PLAN-ERROR" "ORG-KIT"))
                      :to-be t)

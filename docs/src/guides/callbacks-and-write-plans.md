@@ -28,7 +28,18 @@ threads register or invoke callbacks through the same registry.
 
 ## Build and inspect a write plan
 
-`make-write-plan-entry` and `make-write-plan` create data only. Entry paths are relative POSIX paths. Content may be a string, which is encoded as UTF-8, or an octet vector, which is written unchanged. `write-plan-entry-mode` returns `#o644` when `:mode` is omitted. On apply, an omitted `:mode` preserves an existing regular file's mode and gives a new file mode `#o644`. An explicit `:mode` is applied exactly, regardless of the process umask. Set `:create-directories-p t` when the apply operation may create missing parent directories.
+`make-write-plan-entry` and `make-write-plan` create data without filesystem
+changes. Entry paths are relative POSIX paths. The library encodes string
+content as UTF-8 and writes octet vectors unchanged.
+
+`write-plan-entry-mode` reports `#o644` when `:mode` is omitted. Applying an
+entry also tracks whether the caller supplied `:mode`. If `:mode` is omitted,
+apply preserves an existing regular file's mode and uses `#o644` for a new file.
+If `:mode` is supplied, apply sets that mode exactly, regardless of the process
+umask.
+
+Set `:create-directories-p t` when applying the plan may need to create missing
+parent directories.
 
 ```lisp
 (defun write-report (output-root)
@@ -73,7 +84,14 @@ below `output-root`, including the target. Paths that differ only by letter case
 duplicates, which reduces aliases on case-insensitive filesystems. A plan rejected during this
 initial full preflight creates no directories or target files.
 
-`make-limits` accepts `:max-write-plan-entries` and `:max-write-plan-bytes`. The byte limit counts UTF-8-encoded string octets and exact octet-vector lengths across all entries. Exceeding either limit signals `org-resource-limit-error` before filesystem changes.
+`make-limits` accepts `:max-write-plan-entries`, `:max-write-plan-bytes`,
+`:max-write-plan-path-bytes`, and `:max-write-plan-path-depth`. The content-byte
+limit counts UTF-8 string octets and exact octet-vector lengths across all
+entries. The path-byte limit counts UTF-8 bytes in each entry path. The
+path-depth limit counts non-empty components other than `.`. Both path limits
+are checked before normalization. Their defaults are 4096 bytes and 128
+components. Exceeding any limit signals `org-resource-limit-error` before
+filesystem changes.
 
 During application, the library opens the resolved output root and walks each parent component
 with `openat` using `O_DIRECTORY | O_NOFOLLOW`. It creates missing parent directories with

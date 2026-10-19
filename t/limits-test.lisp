@@ -21,7 +21,9 @@
     (:max-formula-exponent 6144)
     (:max-formula-work 1000000)
     (:max-write-plan-entries 100000)
-    (:max-write-plan-bytes 268435456))
+    (:max-write-plan-bytes 268435456)
+    (:max-write-plan-path-bytes 4096)
+    (:max-write-plan-path-depth 128))
   "Expected finite defaults for every resource limit.")
 
 (defun limits-with-sequential-overrides (start)

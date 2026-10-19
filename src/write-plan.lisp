@@ -122,38 +122,66 @@ missing parent directories."
          :reason reason
          :cause cause))
 
-(defun write-plan-split-path (path)
-  (when (some (lambda (character)
-                (<= #xd800 (char-code character) #xdfff))
-              path)
-    (write-plan-error :invalid-path path))
-  (when (or (zerop (length path))
-            (char= (char path 0) #\/)
-            (char= (char path (1- (length path)))
-                   #\/)
-            (position #\Null path))
-    (write-plan-error (if (and (> (length path) 0)
-                               (char= (char path 0) #\/))
-                          :absolute-path
-                          :invalid-path)
-                      path))
-  (let ((parts '())
-        (start 0))
-    (loop for end = (position #\/ path :start start)
-          for part = (subseq path start end)
-          do (cond ((string= part "..")
-                    (write-plan-error :parent-component path))
-                   ((or (zerop (length part)) (string= part ".")))
-                   (t (push part parts)))
-          while end
-          do (setf start (1+ end)))
-    (unless parts
-      (write-plan-error :invalid-path path))
-    (nreverse parts)))
+(defun write-plan-split-path (path &optional (limits (make-limits)))
+  (let ((byte-count 0)
+        (depth 0)
+        (component-length 0)
+        (component-dot-only-p t)
+        (max-path-bytes (limit-value limits :max-write-plan-path-bytes))
+        (max-path-depth (limit-value limits :max-write-plan-path-depth)))
+    (labels ((finish-component ()
+               (when (and (plusp component-length)
+                          (or (/= component-length 1)
+                              (not component-dot-only-p)))
+                 (incf depth)
+                 (when (> depth max-path-depth)
+                   (check-limit limits :max-write-plan-path-depth depth)))
+               (setf component-length 0
+                     component-dot-only-p t)))
+      (loop for character across path
+            for code = (char-code character)
+            do (when (or (<= #xd800 code #xdfff) (> code #x10ffff))
+                 (write-plan-error :invalid-path path))
+               (incf byte-count
+                     (cond ((<= code #x7f) 1)
+                           ((<= code #x7ff) 2)
+                           ((<= code #xffff) 3)
+                           (t 4)))
+               (when (> byte-count max-path-bytes)
+                 (check-limit limits :max-write-plan-path-bytes byte-count))
+               (if (char= character #\/)
+                   (finish-component)
+                   (progn
+                     (incf component-length)
+                     (unless (char= character #\.)
+                       (setf component-dot-only-p nil)))))
+      (finish-component))
+    (when (or (zerop (length path))
+              (char= (char path 0) #\/)
+              (char= (char path (1- (length path))) #\/)
+              (position #\Null path))
+      (write-plan-error (if (and (> (length path) 0)
+                                 (char= (char path 0) #\/))
+                            :absolute-path
+                            :invalid-path)
+                        path))
+    (let ((parts '())
+          (start 0))
+      (loop for end = (position #\/ path :start start)
+            for part = (subseq path start end)
+            do (cond ((string= part "..")
+                      (write-plan-error :parent-component path))
+                     ((or (zerop (length part)) (string= part ".")))
+                     (t (push part parts)))
+            while end
+            do (setf start (1+ end)))
+      (unless parts
+        (write-plan-error :invalid-path path))
+      (nreverse parts))))
 
-(defun write-plan-normalized-path (path)
+(defun write-plan-normalized-path (path &optional (limits (make-limits)))
   (let* ((raw (if (pathnamep path) (sb-ext:native-namestring path) path))
-         (components (write-plan-split-path raw)))
+         (components (write-plan-split-path raw limits)))
     (values (format nil "~{~A~^/~}" components) components)))
 
 (defun write-plan-check-path-conflicts (records)
@@ -209,33 +237,81 @@ missing parent directories."
   (logand (sb-posix:stat-mode stat) #o170000))
 
 (defun write-plan-inspect-entry (root path components create-directories-p)
-  (let ((current root)
+  (let ((root-fd nil)
+        (directory-fds nil)
         (existing-mode nil)
-        (last-index (1- (length components))))
-    (loop for component in components
-          for index from 0
-          for final-p = (= index last-index)
-          do (setf current (concatenate 'string current
-                                        (if (char= (char current
-                                                        (1- (length current)))
-                                                   #\/) "" "/")
-                                        component))
-             (let ((stat (write-plan-lstat current)))
-               (if stat
+        (missing-parent-p nil))
+    (labels ((path-for-components (path-components)
+               (with-output-to-string (stream)
+                 (write-string root stream)
+                 (let ((separator-needed-p
+                         (not (char= (char root (1- (length root))) #\/))))
+                   (dolist (component path-components)
+                     (when separator-needed-p
+                       (write-char #\/ stream))
+                     (write-string component stream)
+                     (setf separator-needed-p t)))))
+             (open-parent (directory-fd component index)
+               (handler-case
+                   (write-plan-openat
+                    directory-fd component
+                    (logior sb-posix:o-rdonly
+                            sb-posix:o-directory
+                            sb-posix:o-nofollow))
+                 (sb-posix:syscall-error (condition)
+                   (let ((errno (sb-posix:syscall-errno condition)))
+                     (cond
+                       ((= errno sb-posix:enoent) nil)
+                       ((= errno sb-posix:eloop)
+                        (write-plan-error :symlink-component path condition))
+                       ((= errno sb-posix:enotdir)
+                        (let ((stat
+                                (write-plan-lstat
+                                 (path-for-components
+                                  (subseq components 0 (1+ index))))))
+                          (if (and stat
+                                   (= (write-plan-path-type stat) #o120000))
+                              (write-plan-error :symlink-component path condition)
+                              (write-plan-error :parent-not-directory path
+                                                condition))))
+                       (t (write-plan-error :io-failed path condition))))))))
+      (unwind-protect
+           (progn
+             (sb-sys:without-interrupts
+               (setf root-fd (write-plan-open-root-directory root)
+                     directory-fds (list root-fd)))
+             (loop for component in (butlast components)
+                   for index from 0
+                   do (let ((child-fd nil))
+                        (sb-sys:without-interrupts
+                          (setf child-fd
+                                (open-parent (car directory-fds)
+                                             component index))
+                          (when child-fd
+                            (push child-fd directory-fds)))
+                        (unless child-fd
+                          (if create-directories-p
+                              (progn
+                                (setf missing-parent-p t)
+                                (return))
+                              (write-plan-error :missing-parent-directory path)))))
+             (unless missing-parent-p
+               (let ((stat (write-plan-lstat
+                            (path-for-components components))))
+                 (when stat
                    (let ((kind (write-plan-path-type stat)))
                      (when (= kind #o120000)
                        (write-plan-error :symlink-component path))
-                     (if final-p
-                         (progn
-                           (unless (= kind #o100000)
-                             (write-plan-error :target-not-regular-file path))
-                           (setf existing-mode
-                                 (logand (sb-posix:stat-mode stat) #o777)))
-                         (unless (= kind #o040000)
-                           (write-plan-error :parent-not-directory path))))
-                   (unless (or final-p create-directories-p)
-                     (write-plan-error :missing-parent-directory path)))))
-    existing-mode))
+                     (unless (= kind #o100000)
+                       (write-plan-error :target-not-regular-file path))
+                     (setf existing-mode
+                           (logand (sb-posix:stat-mode stat) #o777))))))
+             existing-mode)
+        (sb-sys:without-interrupts
+          (dolist (directory-fd directory-fds)
+            (ignore-errors (sb-posix:close directory-fd)))
+          (when (and root-fd (not (member root-fd directory-fds)))
+            (ignore-errors (sb-posix:close root-fd))))))))
 
 (defun write-plan-string-byte-count (string path limits total)
   ;; The codec's size helper encodes its input, so bound its temporary octets.
@@ -286,9 +362,10 @@ missing parent directories."
       (loop for entry across entries
             for index from 0
             do (multiple-value-bind (path components)
-                   (write-plan-normalized-path (%write-plan-entry-path entry))
+                   (write-plan-normalized-path (%write-plan-entry-path entry)
+                                               limits)
                  (let* ((key (string-downcase path))
-                        (key-components (write-plan-split-path key))
+                        (key-components (mapcar #'string-downcase components))
                         (encoded (write-plan-encode-entry entry index total limits))
                         (next-total (fourth encoded)))
                    (setf total next-total)
@@ -331,29 +408,35 @@ missing parent directories."
     (nreverse components)))
 
 (defun write-plan-open-root-directory (root)
-  (let ((root-fd (sb-posix:open "/"
-                                (logior sb-posix:o-rdonly
-                                        sb-posix:o-directory
-                                        sb-posix:o-nofollow))))
-    (handler-case
-        (let ((directory-fds (list root-fd)))
-          (unwind-protect
-               (progn
-                 (dolist (component (write-plan-root-components root))
+  (let ((directory-fds nil))
+    (unwind-protect
+         (handler-case
+             (progn
+               (sb-sys:without-interrupts
+                 (push (sb-posix:open "/"
+                                     (logior sb-posix:o-rdonly
+                                             sb-posix:o-directory
+                                             sb-posix:o-nofollow))
+                       directory-fds))
+               (dolist (component (write-plan-root-components root))
+                 (sb-sys:without-interrupts
                    (push (write-plan-openat
                           (car directory-fds) component
                           (logior sb-posix:o-rdonly
                                   sb-posix:o-directory
                                   sb-posix:o-nofollow))
-                         directory-fds))
-                 (loop while (cdr directory-fds)
-                       do (sb-posix:close (pop (cdr directory-fds))))
-                 (prog1 (car directory-fds)
-                   (setf directory-fds nil)))
-            (dolist (fd directory-fds)
-              (ignore-errors (sb-posix:close fd)))))
-      (sb-posix:syscall-error (condition)
-        (write-plan-error :io-failed root condition)))))
+                         directory-fds)))
+               (loop while (cdr directory-fds)
+                     do (sb-sys:without-interrupts
+                          (sb-posix:close (cadr directory-fds))
+                          (pop (cdr directory-fds))))
+               (prog1 (car directory-fds)
+                 (setf directory-fds nil)))
+           (sb-posix:syscall-error (condition)
+             (write-plan-error :io-failed root condition)))
+      (sb-sys:without-interrupts
+        (dolist (fd directory-fds)
+          (ignore-errors (sb-posix:close fd)))))))
 
 (defun write-plan-open-child-directory (directory-fd component path create-p)
   (handler-case
@@ -381,21 +464,27 @@ missing parent directories."
           (error condition)))))
 
 (defun write-plan-open-parent-directory (root-fd record)
-  (let ((directory-fds (list (sb-posix:dup root-fd)))
+  (let ((directory-fds nil)
         (path (second record))
         (create-p (%write-plan-entry-create-directories-p (first record))))
     (unwind-protect
          (progn
+           (sb-sys:without-interrupts
+             (push (sb-posix:dup root-fd) directory-fds))
            (dolist (component (butlast (third record)))
-             (push (write-plan-open-child-directory
-                    (car directory-fds) component path create-p)
-                   directory-fds))
+             (sb-sys:without-interrupts
+               (push (write-plan-open-child-directory
+                      (car directory-fds) component path create-p)
+                     directory-fds)))
            (loop while (cdr directory-fds)
-                 do (sb-posix:close (pop (cdr directory-fds))))
+                 do (sb-sys:without-interrupts
+                      (sb-posix:close (cadr directory-fds))
+                      (pop (cdr directory-fds))))
            (prog1 (car directory-fds)
              (setf directory-fds nil)))
-      (dolist (fd directory-fds)
-        (ignore-errors (sb-posix:close fd))))))
+      (sb-sys:without-interrupts
+        (dolist (fd directory-fds)
+          (ignore-errors (sb-posix:close fd)))))))
 
 (defun write-plan-random-temporary-name (random-state)
   (concatenate 'string ".org-kit-"
@@ -428,64 +517,75 @@ missing parent directories."
 
 (defun write-plan-apply-record (root-fd record random-state)
   (let ((path (second record))
-        (parent-fd nil)
-        (parent-fd-close-attempted-p nil))
+        (parent-fd nil))
     (unwind-protect
          (handler-case
              (progn
-               (setf parent-fd
-                     (write-plan-open-parent-directory root-fd record))
-               (multiple-value-bind (temporary-name fd)
-                   (write-plan-open-temporary-file
-                    parent-fd path random-state)
-                 (let ((stream nil)
-                       (fd-open-p t)
-                       (stream-closed-p nil)
-                       (renamed-p nil))
-                   (unwind-protect
-                        (progn
+               (sb-sys:without-interrupts
+                 (setf parent-fd
+                       (write-plan-open-parent-directory root-fd record)))
+               (let ((temporary-name nil)
+                     (fd nil)
+                     (stream nil)
+                     (fd-open-p nil)
+                     (stream-closed-p nil)
+                     (renamed-p nil))
+                 (unwind-protect
+                      (progn
+                        (sb-sys:without-interrupts
+                          (multiple-value-setq (temporary-name fd)
+                            (write-plan-open-temporary-file
+                             parent-fd path random-state))
+                          (setf fd-open-p t))
+                        (sb-sys:without-interrupts
                           (setf stream
                                 (sb-sys:make-fd-stream
                                  fd :output t
                                  :element-type '(unsigned-byte 8)
-                                 :name temporary-name))
-                          (write-sequence (fourth record) stream)
-                          (finish-output stream)
-                          (sb-posix:fchmod
-                           fd
-                           (if (%write-plan-entry-mode-supplied-p
-                                (first record))
-                               (%write-plan-entry-mode (first record))
-                               (or (seventh record) #o644)))
-                          (sb-posix:fsync fd)
+                                 :name temporary-name)
+                                fd-open-p nil))
+                        (write-sequence (fourth record) stream)
+                        (finish-output stream)
+                        (sb-posix:fchmod
+                         fd
+                         (if (%write-plan-entry-mode-supplied-p
+                              (first record))
+                             (%write-plan-entry-mode (first record))
+                             (or (seventh record) #o644)))
+                        (sb-posix:fsync fd)
+                        (sb-sys:without-interrupts
                           (close stream)
-                          (setf stream-closed-p t
-                                fd-open-p nil)
-                          (write-plan-rename-temporary-file
-                           parent-fd temporary-name
-                           (car (last (third record))) path)
-                          (setf renamed-p t))
-                     (unless stream-closed-p
-                       (if stream
-                           (ignore-errors (close stream :abort t))
-                           (when fd-open-p
-                             (ignore-errors (sb-posix:close fd)))))
-                     (unless renamed-p
-                       (ignore-errors
-                         (write-plan-syscall-result
-                          (%write-plan-unlinkat
-                           parent-fd temporary-name 0)
-                          "unlinkat"))))))
-               (setf parent-fd-close-attempted-p t)
-               (sb-posix:close parent-fd)
+                          (setf stream-closed-p t))
+                        (write-plan-rename-temporary-file
+                         parent-fd temporary-name
+                         (car (last (third record))) path)
+                        (setf renamed-p t))
+                   (unless stream-closed-p
+                     (if stream
+                         (sb-sys:without-interrupts
+                           (ignore-errors (close stream :abort t)))
+                         (when fd-open-p
+                           (sb-sys:without-interrupts
+                             (ignore-errors (sb-posix:close fd))
+                             (setf fd-open-p nil)))))
+                   (unless renamed-p
+                     (ignore-errors
+                       (write-plan-syscall-result
+                        (%write-plan-unlinkat
+                         parent-fd temporary-name 0)
+                        "unlinkat")))))
+               (sb-sys:without-interrupts
+                 (sb-posix:close parent-fd)
+                 (setf parent-fd nil))
                path)
            (org-write-plan-error (condition)
              (error condition))
            (error (condition)
              (write-plan-error :io-failed path condition)))
-      (when (and parent-fd
-                 (not parent-fd-close-attempted-p))
-        (ignore-errors (sb-posix:close parent-fd))))))
+      (when parent-fd
+        (sb-sys:without-interrupts
+          (ignore-errors (sb-posix:close parent-fd))
+          (setf parent-fd nil))))))
 
 (defun apply-write-plan (plan root &key (limits (make-limits)))
   "Validate PLAN in full, then atomically replace each file below ROOT.
@@ -495,18 +595,21 @@ rename; a multi-file plan is not transactional."
   (multiple-value-bind (canonical-root records)
       (write-plan-prepare plan root limits)
     (handler-case
-        (let ((root-fd (write-plan-open-root-directory canonical-root))
-              (random-state (sb-ext:seed-random-state t))
-              (completed-p nil))
+        (let ((root-fd nil)
+              (random-state (sb-ext:seed-random-state t)))
           (unwind-protect
-               (prog1 (mapcar (lambda (record)
-                                (write-plan-apply-record root-fd record
-                                                         random-state))
-                              records)
-                 (setf completed-p t))
-            (if completed-p
-                (sb-posix:close root-fd)
-                (ignore-errors (sb-posix:close root-fd)))))
+               (progn
+                 (sb-sys:without-interrupts
+                   (setf root-fd
+                         (write-plan-open-root-directory canonical-root)))
+                 (mapcar (lambda (record)
+                           (write-plan-apply-record root-fd record
+                                                    random-state))
+                         records))
+            (sb-sys:without-interrupts
+              (when root-fd
+                (ignore-errors (sb-posix:close root-fd))
+                (setf root-fd nil)))))
       (org-write-plan-error (condition)
         (error condition))
       (error (condition)
