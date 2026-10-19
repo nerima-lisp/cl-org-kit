@@ -524,6 +524,24 @@
            (expect (write-plan-test-directory-exists-p
                     (write-plan-test-path root "a"))
                    :to-be nil))))))
+  (it "counts non-BMP path names as four UTF-8 bytes"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((path (string (code-char #x10000)))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry path "value"))))
+              (condition
+                (write-plan-test-capture-error
+                 plan root
+                 :limits (make-limits :max-write-plan-path-bytes 3))))
+         (with-soft-assertions
+           (expect (typep condition 'org-resource-limit-error) :to-be t)
+           (when condition
+             (expect (org-resource-limit-error-limit-name condition)
+                     :to-be :max-write-plan-path-bytes)
+             (expect (org-resource-limit-error-limit condition) :to-be 3)
+             (expect (org-resource-limit-error-actual condition) :to-be 4))
+           (expect (probe-file (write-plan-test-path root path)) :to-be nil))))))
 
   (it "rejects symlink swaps during application"
       (write-plan-test-call-with-directory
@@ -789,6 +807,60 @@
                    :to-be nil)
                   (expect calls :to-be 1)))
            (setf (symbol-function symbol) original))))))
+  (it "classifies preflight directory syscall errors"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((canonical-root (org-kit::write-plan-canonical-root root))
+              (root-open-symbol 'org-kit::write-plan-open-root-directory)
+              (openat-symbol 'org-kit::write-plan-openat)
+              (eloop (make-condition 'sb-posix:syscall-error
+                                     :errno sb-posix:eloop
+                                     :name "openat"))
+              (denied (make-condition 'sb-posix:syscall-error
+                                      :errno sb-posix:eacces
+                                      :name "openat")))
+         (labels ((call-with-function (symbol replacement thunk)
+                    (let ((original (symbol-function symbol)))
+                      (unwind-protect
+                           (progn
+                             (setf (symbol-function symbol) replacement)
+                             (funcall thunk))
+                        (setf (symbol-function symbol) original))))
+                  (inspect-with-error (cause)
+                    (call-with-function
+                     root-open-symbol
+                     (lambda (ignored-root)
+                       (declare (ignore ignored-root))
+                       (sb-posix:open
+                        (namestring root)
+                        (logior sb-posix:o-rdonly
+                                sb-posix:o-directory
+                                sb-posix:o-nofollow)))
+                     (lambda ()
+                       (call-with-function
+                        openat-symbol
+                        (lambda (&rest arguments)
+                          (declare (ignore arguments))
+                          (error cause))
+                        (lambda ()
+                          (handler-case
+                              (org-kit::write-plan-inspect-entry
+                               canonical-root
+                               "parent/target.txt"
+                               '("parent" "target.txt")
+                               nil)
+                            (org-write-plan-error (condition) condition))))))))
+           (let ((eloop-error (inspect-with-error eloop))
+                 (io-error (inspect-with-error denied)))
+             (with-soft-assertions
+               (expect (org-write-plan-error-reason eloop-error)
+                       :to-be :symlink-component)
+               (expect (eq (org-write-plan-error-cause eloop-error) eloop)
+                       :to-be t)
+               (expect (org-write-plan-error-reason io-error)
+                       :to-be :io-failed)
+               (expect (eq (org-write-plan-error-cause io-error) denied)
+                       :to-be t))))))))
 
   (it "covers path, UTF-8, and directory I/O failure paths"
   (progn
