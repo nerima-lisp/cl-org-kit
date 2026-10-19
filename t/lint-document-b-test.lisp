@@ -206,4 +206,318 @@
      "Inactive timestamp in SCHEDULED will not appear in agenda.")
     (expect-document-b-clean
      (format nil "* TODO Task~%SCHEDULED: <2026-10-19 Mon>~%")
-     "planning-inactive")))
+     "planning-inactive"))
+  (it "covers source-line and scalar helper boundaries"
+  (expect (not (null (org-kit::%lint-b-horizontal-space-p #\Tab))) :to-be t)
+  (expect (org-kit::%lint-b-horizontal-space-p #\Newline) :to-be nil)
+  (expect (org-kit::%lint-b-prefix-p "  #+BEGIN_SRC" "#+" 2) :to-be t)
+  (expect (org-kit::%lint-b-prefix-p "#+A" "LONG") :to-be nil)
+  (expect (org-kit::%lint-b-leading-space-count (format nil " ~CText" #\Tab)) :to-be 2)
+  (expect (org-kit::%lint-b-leading-space-count "   ") :to-be 3)
+  (expect (org-kit::%lint-b-drawer-line-p " :LOGBOOK:  ") :to-equal ":LOGBOOK:")
+  (expect (org-kit::%lint-b-drawer-line-p ":BAD NAME:") :to-be nil)
+  (expect (org-kit::%lint-b-citation-prefix-end "[cite:@item]" 0) :to-be 6)
+  (expect (org-kit::%lint-b-citation-prefix-end "[cite/foo:@item]" 0) :to-be 10)
+  (expect (org-kit::%lint-b-citation-prefix-end "[cite/:@item]" 0) :to-be nil)
+  (expect (not (null (org-kit::%lint-b-citation-prefix-p "text [cite:@item]"))) :to-be t)
+  (expect (org-kit::%lint-b-citation-prefix-p "text [cited:@item]") :to-be nil)
+  (expect (org-kit::%lint-b-weekday 2000 2 29) :to-equal "Tue")
+  (expect (org-kit::%lint-b-weekday 2024 2 29) :to-equal "Thu")
+  (expect (org-kit::%lint-b-weekday 1900 2 29) :to-be nil)
+  (expect (org-kit::%lint-b-weekday 2024 13 1) :to-be nil)
+  (expect (org-kit::%lint-b-weekday 2024 1 32) :to-be nil)
+  (expect (org-kit::%lint-b-unit-char :year) :to-be #\y)
+  (expect (org-kit::%lint-b-unit-char :unknown) :to-be nil)
+  (expect (org-kit::%lint-b-bullet-number "b)") :to-be 2)
+  (expect (org-kit::%lint-b-bullet-number "4.") :to-be 4)
+  (expect (org-kit::%lint-b-bullet-number "-") :to-be nil)
+  (expect (org-kit::%lint-b-bullet-number 4) :to-be nil)
+  (expect (org-kit::%lint-b-priority-string 90) :to-equal "Z")
+  (expect (org-kit::%lint-b-priority-string 64) :to-equal "64")
+  (expect (org-kit::%lint-b-attribute-value "x :align top y" ":align") :to-equal "top")
+  (expect (org-kit::%lint-b-attribute-value "x :align" ":align") :to-be nil))
+  (it "covers additional document checker paths"
+  (expect-document-b-diagnostic
+   (format nil "#+END:bad~%") "invalid-block" 1
+   "Invalid block closing line \"#+END:bad\"")
+  (expect-document-b-diagnostic
+   (format nil "#+BEGIN~%") "invalid-block" 1
+   "Possible incomplete block \"#+BEGIN\"")
+  (expect-document-b-diagnostic
+   (format nil "* TODO Task~%DEADLINE: [2026-10-19 Mon]~%")
+   "planning-inactive" 13
+   "Inactive timestamp in DEADLINE will not appear in agenda.")
+  (expect-document-b-clean
+   (format nil "3. [@3] third~%4. fourth~%") "item-number")
+  (let* ((document (parse-org (format nil "<2024-01-01 Mon +1d -2h>")))
+         (timestamp (first (org-kit::%lint-nodes document :timestamp))))
+    (expect (org-kit::%lint-b-timestamp-adjustments timestamp)
+            :to-equal " +1d -2h")
+    (expect (org-kit::%lint-b-timestamp-canonical timestamp)
+            :to-equal "<2024-01-01 Mon +1d -2h>"))
+  (expect-document-b-clean "[2026-10-19 Mon 09:00-10:00]"
+                           "timestamp-syntax")
+  (expect (org-kit::%lint-b-citation-prefix-end "text [cite: @item]" 5)
+          :to-be 12)
+  (expect (org-kit::%lint-b-weekday 0 1 1) :to-be nil)
+  (expect (org-kit::%lint-b-weekday 2024 4 31) :to-be nil)
+  (expect (org-kit::%lint-b-attribute-value "x :align   " ":align") :to-be nil))
+  (it "covers document checker helper boundaries"
+    (let* ((document (parse-org (format nil "first~C~%second" #\Return)))
+           (lines nil))
+      (org-kit::%lint-b-lines
+       document
+       (lambda (start end line) (push (list start end line) lines)))
+      (expect (nreverse lines)
+              :to-equal '((0 5 "first") (7 13 "second"))))
+    (expect-document-b-diagnostic
+     (format nil "#+INCLUDE: part.org HTML~%")
+     "obsolete-include-markup" 1
+     "Obsolete markup \"HTML\" in INCLUDE keyword.  Use \"export HTML\" instead")
+    (let* ((document (parse-org (format nil "#+INCLUDE: part.org HTML~%")))
+           (keyword (first (org-kit::%lint-nodes document :keyword))))
+      (setf (org-kit::%node-post-affiliated keyword) nil)
+      (expect (mapcar #'org-kit::org-lint-diagnostic-position
+                      (org-kit::org-lint document :checkers '("obsolete-include-markup")))
+              :to-equal '(1)))
+    (let* ((document (parse-org ":END:"))
+           (drawer (org-kit::make-node
+                    :drawer :begin 0 :end 5 :post-affiliated 0)))
+      (setf (org-kit::node-children (org-kit::document-root document))
+            (list drawer))
+      (expect (org-kit::org-lint document :checkers '("incomplete-drawer"))
+              :to-equal '()))
+    (let* ((document (parse-org
+                      (format nil ":LOGBOOK:~%:OTHER:~%:END:~%")))
+           (diagnostics (org-kit::org-lint
+                         document :checkers '("incomplete-drawer")))
+           (nested-entry (remove-if-not
+                          (lambda (diagnostic)
+                            (= (org-kit::org-lint-diagnostic-position diagnostic) 11))
+                          diagnostics)))
+      (expect (mapcar #'org-kit::org-lint-diagnostic-message nested-entry)
+              :to-equal '("Possible misleading drawer entry \":OTHER:\"")))
+    (expect-document-b-diagnostic
+     "* Heading ::" "spurious-colons" 1 "Tags contain a spurious colon")
+    (expect-document-b-diagnostic
+     (format nil "#+BEGIN text~%") "invalid-block" 1
+     "Possible incomplete block \"#+BEGIN text\"")
+    (dolist (day '((2024 10 4 "Fri") (2024 10 5 "Sat") (2024 10 6 "Sun")))
+      (expect (org-kit::%lint-b-weekday (first day) (second day) (third day))
+              :to-equal (fourth day)))
+    (let ((timestamp (org-kit::make-node
+                      :timestamp
+                      :properties '(:repeater-type :catch-up :repeater-value 2
+                                    :repeater-unit :week :warning-type :all
+                                    :warning-value 3 :warning-unit :month))))
+      (expect (org-kit::%lint-b-timestamp-adjustments timestamp)
+              :to-equal " ++2w -3m")
+      (setf (org-kit::node-property timestamp :repeater-type) :restart)
+      (expect (org-kit::%lint-b-timestamp-adjustments timestamp)
+              :to-equal " .+2w -3m"))
+    (let ((timestamp (org-kit::make-node
+                      :timestamp
+                      :properties '(:type :active
+                                    :year-start 2024 :month-start 1 :day-start 1
+                                    :hour-start 9 :minute-start 0
+                                    :year-end 2024 :month-end 1 :day-end 1
+                                    :hour-end 10 :minute-end 30))))
+      (expect (org-kit::%lint-b-timestamp-canonical timestamp)
+              :to-equal "<2024-01-01 Mon 09:00-10:30>")
+      (setf (org-kit::node-property timestamp :hour-end) 9
+            (org-kit::node-property timestamp :minute-end) 0)
+      (expect (org-kit::%lint-b-timestamp-canonical timestamp)
+              :to-equal "<2024-01-01 Mon 09:00>"))
+    (let* ((document (parse-org
+                      (format nil "CLOCK: [2024-01-01 Mon] => 9:5~%")))
+           (clock (first (org-kit::%lint-nodes document :clock))))
+      (expect (org-kit::%lint-b-clock-canonical clock)
+              :to-equal "CLOCK: [2024-01-01 Mon] =>  9:05"))
+    (let* ((document (parse-org "[cite:"))
+           (node (org-kit::make-node :plain-text :begin 0 :end 6)))
+      (setf (org-kit::node-children (org-kit::document-root document))
+            (list node))
+      (expect (mapcar #'org-kit::org-lint-diagnostic-position
+                      (org-kit::%lint-incomplete-citation document nil))
+              :to-equal '(1)))
+    (dolist (raw-value '("[#Q]" "[#Q"))
+      (let* ((document (parse-org "* Heading"))
+             (headline (first (org-kit::%lint-nodes document :headline))))
+        (setf (org-kit::node-property headline :priority) nil
+              (org-kit::node-property headline :raw-value) raw-value)
+        (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                        (org-kit::%lint-priority document nil))
+                :to-equal (list (if (char= (char raw-value (1- (length raw-value))) #\])
+                                    "Invalid priority 'Q'"
+                                    "Malformed priority '[#Q'")))))
+    (expect (org-kit::%lint-b-unit-char :week) :to-be #\w)
+    (expect (org-kit::%lint-b-unit-char :month) :to-be #\m)
+    (expect-document-b-diagnostic
+     (format nil "#+INCLUDE: \"part.org\" HTML~%")
+     "obsolete-include-markup" 1
+     "Obsolete markup \"HTML\" in INCLUDE keyword.  Use \"export HTML\" instead"))
+)
+(describe "document-only Org lint checker branch cases"
+  (it "covers citation, include, and keyword syntax boundaries"
+    (expect (org-kit::%lint-b-citation-prefix-end "[cit" 0) :to-be nil)
+    (expect (org-kit::%lint-b-citation-prefix-end "[xite:@item]" 0) :to-be nil)
+    (expect (org-kit::%lint-b-citation-prefix-end "[cite" 0) :to-be nil)
+    (expect (org-kit::%lint-b-citation-prefix-end "[cite/foo" 0) :to-be nil)
+    (expect-document-b-clean "#+TITLE: x" "obsolete-include-markup")
+    (dolist (source '("#+INCLUDE:" "#+INCLUDE: \"\" HTML"
+                      "#+INCLUDE: \"part.org HTML"))
+      (expect-document-b-clean source "obsolete-include-markup"))
+    (let* ((document (parse-org "x"))
+           (keyword (org-kit::make-node :keyword :begin 0 :end 1
+                                        :post-affiliated 0
+                                        :properties '(:key "INCLUDE" :value nil))))
+      (setf (org-kit::node-children (org-kit::document-root document)) (list keyword))
+      (expect (org-kit::%lint-obsolete-include-markup document nil) :to-equal '()))
+    (expect-document-b-clean
+     (format nil "#+BEGIN_SRC text~%#+END_SRC~%") "invalid-keyword-syntax")
+    (expect-document-b-clean "#+MIDDLE text" "invalid-block")
+    (expect-document-b-clean "#+BEGINX" "invalid-block")
+    (expect-document-b-clean "#+END_SRC   " "invalid-block"))
+  (it "filters synthetic LaTeX, links, and plain text nodes"
+    (let* ((document (parse-org "x"))
+           (fragment (org-kit::make-node :latex-fragment :begin 0 :end 1
+                                         :properties '(:value nil))))
+      (setf (org-kit::node-children (org-kit::document-root document)) (list fragment))
+      (expect (org-kit::%lint-latex-dollar-ambiguous document nil) :to-equal '()))
+    (let* ((document (parse-org "x"))
+           (fragment (org-kit::make-node :latex-fragment :end 1
+                                         :properties '(:value "$ab2"))))
+      (setf (org-kit::node-children (org-kit::document-root document)) (list fragment))
+      (expect (org-kit::%lint-latex-dollar-ambiguous document nil) :to-equal '()))
+    (let* ((document (parse-org "x"))
+           (link (org-kit::make-node :link :begin 0 :end 1
+                                     :properties '(:path "part%2Fpath"))))
+      (setf (org-kit::node-children (org-kit::document-root document)) (list link))
+      (expect (org-kit::%lint-file-application document nil) :to-equal '())
+      (expect (org-kit::%lint-percent-encoding-link-escape document nil)
+              :to-equal '()))
+    (let* ((document (parse-org "x"))
+           (plain-text (org-kit::make-node :plain-text)))
+      (org-kit::append-child (org-kit::document-root document) plain-text)
+      (expect (org-kit::%lint-incomplete-citation document nil) :to-equal '())))
+  (it "validates timestamp fields and date ranges"
+    (dolist (properties '((:year-start nil :month-start 1 :day-start 1)
+                          (:year-start 2024 :month-start nil :day-start 1)
+                          (:year-start 2024 :month-start 1 :day-start nil)
+                          (:year-start 2024 :month-start 4 :day-start 31)))
+      (expect (org-kit::%lint-b-timestamp-endpoint
+               (org-kit::make-node :timestamp :properties properties) nil)
+              :to-be nil))
+    (expect (org-kit::%lint-b-timestamp-endpoint
+             (org-kit::make-node
+              :timestamp
+              :properties '(:year-start 2024 :month-start 1 :day-start 1
+                            :hour-start 9 :minute-start nil))
+             nil)
+            :to-equal "2024-01-01 Mon")
+    (let ((timestamp (org-kit::make-node
+                      :timestamp
+                      :properties '(:type :active-range
+                                    :year-start 2024 :month-start 1 :day-start 1
+                                    :hour-start 9 :minute-start 0
+                                    :year-end 2025 :month-end 1 :day-end 1
+                                    :hour-end 10 :minute-end 30))))
+      (expect (org-kit::%lint-b-timestamp-canonical timestamp)
+              :to-equal "<2024-01-01 Mon 09:00>--<2025-01-01 Wed 10:30>")
+      (setf (org-kit::node-property timestamp :year-end) 2024
+            (org-kit::node-property timestamp :month-end) 2)
+      (expect (org-kit::%lint-b-timestamp-canonical timestamp)
+              :to-equal "<2024-01-01 Mon 09:00>--<2024-02-01 Thu 10:30>")
+      (setf (org-kit::node-property timestamp :month-end) 1
+            (org-kit::node-property timestamp :minute-start) nil)
+      (expect (org-kit::%lint-b-timestamp-canonical timestamp)
+              :to-equal "<2024-01-01 Mon>--<2024-01-01 Mon 10:30>"))
+    (expect (org-kit::%lint-b-timestamp-canonical
+             (org-kit::make-node :timestamp))
+            :to-be nil)
+    (expect (org-kit::%lint-b-timestamp-canonical
+             (org-kit::make-node
+              :timestamp
+              :properties '(:type :active
+                            :year-start 2024 :month-start 1 :day-start 1
+                            :hour-start 9 :minute-start 0
+                            :year-end 2024 :month-end 1 :day-end 1
+                            :hour-end nil :minute-end 30)))
+            :to-equal "<2024-01-01 Mon 09:00>")
+    (let* ((document (parse-org (format nil "CLOCK: [2024-01-01 Mon] => 10:5~%")))
+           (clock (first (org-kit::%lint-nodes document :clock))))
+      (expect (org-kit::%lint-b-clock-canonical clock)
+              :to-equal "CLOCK: [2024-01-01 Mon] => 10:05")))
+  (it "checks planning repeaters and protected source regions"
+    (let* ((document (parse-org "x"))
+           (restart (org-kit::make-node
+                     :planning :begin 0 :end 1
+                     :properties
+                     (list :scheduled (org-kit::make-node
+                                      :timestamp :properties
+                                      '(:repeater-type :restart :repeater-value 1
+                                        :repeater-unit :week))
+                           :deadline (org-kit::make-node
+                                      :timestamp :properties
+                                      '(:repeater-type :cumulate :repeater-value 2
+                                        :repeater-unit :week)))))
+           (zero (org-kit::make-node
+                  :planning :begin 0 :end 1
+                  :properties
+                  (list :scheduled (org-kit::make-node
+                                   :timestamp :properties
+                                   '(:repeater-type :cumulate :repeater-value 0
+                                     :repeater-unit :week))
+                        :deadline (org-kit::make-node
+                                   :timestamp :properties
+                                   '(:repeater-type :cumulate :repeater-value 1
+                                     :repeater-unit :week)))))
+           (different-modes (org-kit::make-node
+                             :planning :begin 0 :end 1
+                             :properties
+                             (list :scheduled (org-kit::make-node
+                                              :timestamp :properties
+                                              '(:repeater-type :cumulate :repeater-value 1
+                                                :repeater-unit :week))
+                                   :deadline (org-kit::make-node
+                                              :timestamp :properties
+                                              '(:repeater-type :catch-up :repeater-value 1
+                                                :repeater-unit :week)))))
+           (root (org-kit::document-root document)))
+      (setf (org-kit::node-children root) (list restart zero different-modes))
+      (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                      (org-kit::%lint-mismatched-planning-repeaters document nil))
+              :to-equal '("Different repeaters in SCHEDULED and DEADLINE timestamps.")))
+    (let* ((source ":LOGBOOK:")
+           (document (parse-org source))
+           (paragraph (org-kit::make-node :paragraph :begin 0 :end (length source))))
+      (setf (org-kit::node-children (org-kit::document-root document)) (list paragraph))
+      (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                      (org-kit::%lint-incomplete-drawer document nil))
+              :to-equal '("Possible incomplete drawer \":LOGBOOK:\"")))
+    (let* ((source (format nil " %%(date)"))
+           (document (parse-org source))
+           (paragraph (org-kit::make-node :paragraph :begin 0 :end (length source)))
+           (example (org-kit::make-node :example-block :begin 0 :end (length source)
+                                        :children (list paragraph))))
+      (setf (org-kit::node-children (org-kit::document-root document)) (list example))
+      (expect (org-kit::%lint-indented-diary-sexp document nil) :to-equal '())))
+  (it "handles short quote titles, malformed headlines, and bibliography checks"
+    (let* ((document (parse-org "* Heading"))
+           (headline (first (org-kit::%lint-nodes document :headline))))
+      (setf (org-kit::node-property headline :raw-value) "QUOTE")
+      (expect (org-kit::%lint-quote-section document nil) :to-equal '())
+      (setf (org-kit::node-property headline :raw-value) "COMMENT QUOTE")
+      (expect (org-kit::%lint-quote-section document nil) :to-equal '())
+      (setf (org-kit::node-property headline :raw-value) 1
+            (org-kit::node-property headline :priority) nil)
+      (expect (org-kit::%lint-priority document nil) :to-equal '()))
+    (let* ((document (parse-org "* Heading"))
+           (headline (first (org-kit::%lint-nodes document :headline))))
+      (setf (org-kit::node-property headline :tags) "tag")
+      (expect (org-kit::%lint-spurious-colons document nil) :to-equal '()))
+    (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                    (org-kit::%lint-missing-print-bibliography
+                     (parse-org (format nil "#+TITLE: x~%[cite:@reference]")) nil))
+            :to-equal '("Possibly missing \"PRINT_BIBLIOGRAPHY\" keyword")))
+)
