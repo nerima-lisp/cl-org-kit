@@ -1,6 +1,15 @@
 ;;;; src/write-plan.lisp
 (in-package #:org-kit)
 
+(defconstant +write-plan-fd-cloexec+ 1)
+
+(defconstant +write-plan-o-cloexec+
+  (or (let ((symbol (find-symbol "O-CLOEXEC" :sb-posix)))
+        (and symbol (boundp symbol) (symbol-value symbol)))
+      #+darwin #x01000000
+      #+linux #x00080000
+      (error "O_CLOEXEC is not defined for this platform.")))
+
 (sb-alien:define-alien-routine ("openat" %write-plan-openat) sb-alien:int
   (directory-fd sb-alien:int)
   (path sb-alien:c-string)
@@ -392,8 +401,22 @@ missing parent directories."
 
 (defun write-plan-openat (directory-fd path flags &optional (mode 0))
   (write-plan-syscall-result
-   (%write-plan-openat directory-fd path flags mode)
+   (%write-plan-openat directory-fd path
+                       (logior flags +write-plan-o-cloexec+) mode)
    "openat"))
+
+(defun write-plan-duplicate-close-on-exec (fd)
+  (let ((duplicate-fd (sb-posix:dup fd)))
+    (handler-case
+        (progn
+          (sb-posix:fcntl
+           duplicate-fd sb-posix:f-setfd
+           (logior (sb-posix:fcntl duplicate-fd sb-posix:f-getfd)
+                   +write-plan-fd-cloexec+))
+          duplicate-fd)
+      (error (condition)
+        (ignore-errors (sb-posix:close duplicate-fd))
+        (error condition)))))
 
 (defun write-plan-root-components (root)
   (let ((start 1)
@@ -416,7 +439,8 @@ missing parent directories."
                  (push (sb-posix:open "/"
                                      (logior sb-posix:o-rdonly
                                              sb-posix:o-directory
-                                             sb-posix:o-nofollow))
+                                             sb-posix:o-nofollow
+                                             +write-plan-o-cloexec+))
                        directory-fds))
                (dolist (component (write-plan-root-components root))
                  (sb-sys:without-interrupts
@@ -472,7 +496,8 @@ missing parent directories."
     (unwind-protect
          (progn
            (sb-sys:without-interrupts
-             (push (sb-posix:dup root-fd) directory-fds))
+             (push (write-plan-duplicate-close-on-exec root-fd)
+                   directory-fds))
            (dolist (component (butlast (third record)))
              (sb-sys:without-interrupts
                (push (write-plan-open-child-directory

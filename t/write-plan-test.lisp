@@ -1,6 +1,12 @@
 ;;;; t/write-plan-test.lisp
 (in-package #:cl-org-kit/test)
 
+(defconstant +write-plan-test-fd-cloexec+ 1)
+
+(defun write-plan-test-fd-close-on-exec-p (fd)
+  (not (zerop (logand (sb-posix:fcntl fd sb-posix:f-getfd)
+                      +write-plan-test-fd-cloexec+))))
+
 (defun write-plan-test-call-with-directory (function)
   (uiop:with-temporary-file (:pathname seed-file :stream seed-stream
                              :direction :output)
@@ -865,6 +871,70 @@
            (expect (write-plan-test-read-text
                     (write-plan-test-path root "parent/child.txt"))
                    :to-equal "value"))))))
+  (it "marks write-plan descriptors close-on-exec"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((openat-symbol 'org-kit::write-plan-openat)
+              (original-openat (symbol-function openat-symbol))
+              (openat-flags nil)
+              (root-only-fd nil)
+              (root-fd nil)
+              (parent-fd nil)
+              (temporary-name nil)
+              (temporary-fd nil)
+              (record
+                (list (make-write-plan-entry "target.txt" #(65))
+                      "target.txt" '("target.txt") #(65)
+                      "target.txt" '("target.txt"))))
+         (labels ((record-openat (fd)
+                    (push (sb-posix:fcntl fd sb-posix:f-getfd) openat-flags)
+                    fd))
+           (unwind-protect
+                (progn
+                  (setf (symbol-function openat-symbol)
+                        (lambda (&rest arguments)
+                          (record-openat
+                           (apply original-openat arguments))))
+                  (setf root-only-fd
+                        (org-kit::write-plan-open-root-directory "/"))
+                  (setf root-fd
+                        (org-kit::write-plan-open-root-directory
+                         (org-kit::write-plan-canonical-root root)))
+                  (setf parent-fd
+                        (org-kit::write-plan-open-parent-directory
+                         root-fd record))
+                  (multiple-value-setq (temporary-name temporary-fd)
+                    (org-kit::write-plan-open-temporary-file
+                     parent-fd "target.txt" (sb-ext:seed-random-state t)))
+                  (with-soft-assertions
+                    (expect (write-plan-test-fd-close-on-exec-p root-only-fd)
+                            :to-be t)
+                    (expect (write-plan-test-fd-close-on-exec-p root-fd)
+                            :to-be t)
+                    (expect (write-plan-test-fd-close-on-exec-p parent-fd)
+                            :to-be t)
+                    (expect (write-plan-test-fd-close-on-exec-p temporary-fd)
+                            :to-be t)
+                    (expect (plusp (length openat-flags)) :to-be t)
+                    (expect (every
+                             (lambda (flags)
+                               (not (zerop
+                                     (logand flags
+                                             +write-plan-test-fd-cloexec+))))
+                             openat-flags)
+                            :to-be t)))
+             (setf (symbol-function openat-symbol) original-openat)
+             (when temporary-fd
+               (ignore-errors (sb-posix:close temporary-fd)))
+             (when (and temporary-name parent-fd)
+               (ignore-errors
+                 (org-kit::%write-plan-unlinkat parent-fd temporary-name 0)))
+             (when parent-fd
+               (ignore-errors (sb-posix:close parent-fd)))
+             (when root-fd
+               (ignore-errors (sb-posix:close root-fd)))
+             (when root-only-fd
+               (ignore-errors (sb-posix:close root-only-fd)))))))))
   (it "inspects path components with descriptor-relative opens"
     (write-plan-test-call-with-directory
      (lambda (root)
