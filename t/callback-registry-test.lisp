@@ -121,3 +121,54 @@
           (expect (org-callback-error-kind caught) :to-equal "BABEL-EXECUTOR")
           (expect (org-callback-error-name caught) :to-equal "PYTHON")
           (expect (org-callback-error-reason caught) :to-be :timeout))))))
+
+(describe "callback identity condition reports"
+  (it "escapes ASCII and C1 controls and Unicode line separators in callback identities"
+    (let* ((registry (make-callback-registry))
+           (control-codes
+             (append (loop for code below 32 collect code)
+                     (loop for code from #x80 to #x9F collect code)
+                     (list #x7F #x2028 #x2029)))
+           (control-text (map 'string #'code-char control-codes))
+           (kind (concatenate 'string "KiNd" control-text))
+           (name (concatenate 'string "NaMe" control-text))
+           (condition (handler-case
+                          (progn (invoke-callback registry kind name) nil)
+                        (org-callback-error (condition) condition)))
+           (report (format nil "~A" condition))
+           (expected-control
+             (format nil "~{~A~}"
+                     (loop for code in control-codes
+                           collect (case code
+                                     (#x0A "\\n")
+                                     (#x0D "\\r")
+                                     (#x09 "\\t")
+                                     (otherwise (format nil "\\x~2,'0X" code))))))
+           (expected-kind
+             (concatenate 'string "kind" (string-downcase expected-control)))
+           (expected-name (concatenate 'string "name" expected-control))
+           (expected
+             (format nil "No callback is registered (~A/~A, unregistered)"
+                     expected-kind expected-name)))
+      (expect report :to-equal expected)))
+
+  (it "truncates callback identity inputs at the condition text limit"
+    (let* ((registry (make-callback-registry))
+           (limit org-kit::*condition-text-limit*)
+           (kind (concatenate 'string (string #\Newline)
+                              (make-string limit :initial-element (code-char 65))))
+           (name (concatenate 'string (string (code-char 0))
+                              (make-string limit :initial-element (code-char 66))))
+           (condition (handler-case
+                          (progn (invoke-callback registry kind name) nil)
+                        (org-callback-error (condition) condition)))
+           (report (format nil "~A" condition))
+           (expected-kind
+             (concatenate 'string "\\n"
+                          (make-string (1- limit) :initial-element (code-char 97)) "..."))
+           (expected-name
+             (concatenate 'string "\\x00"
+                          (make-string (1- limit) :initial-element (code-char 98)) "...")))
+      (expect report
+              :to-equal (format nil "No callback is registered (~A/~A, unregistered)"
+                                expected-kind expected-name)))))

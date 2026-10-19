@@ -5,8 +5,8 @@
   "Longest input excerpt, in characters, a condition stores before truncating.")
 
 (defun bounded-text (string)
-  "Return STRING with control characters escaped and its length capped, so an
-input excerpt stored in a condition cannot flood a log or forge a line."
+  "Escape control and line-separator characters in STRING, then cap its input
+length in characters for condition reports."
   (when string
     (with-output-to-string (out)
       (loop for char across string
@@ -19,7 +19,10 @@ input excerpt stored in a condition cannot flood a log or forge a line."
                        ((char= char #\Newline) (write-string "\\n" out))
                        ((char= char #\Return) (write-string "\\r" out))
                        ((char= char #\Tab) (write-string "\\t" out))
-                       ((or (< code 32) (= code 127))
+                       ((or (< code 32)
+                            (<= #x7F code #x9F)
+                            (= code #x2028)
+                            (= code #x2029))
                         (format out "\\x~2,'0X" code))
                        (t (write-char char out))))))))
 
@@ -114,11 +117,17 @@ amount that exceeded it."))
    (name :initarg :name)
    (reason :initarg :reason))
   (:report (lambda (condition stream)
-             (format stream "~A (~(~A~)/~A, ~(~A~))"
-                     (org-kit-error-message condition)
-                     (org-callback-error-kind condition)
-                     (org-callback-error-name condition)
-                     (org-callback-error-reason condition))))
+             (let ((kind (org-callback-error-kind condition))
+                   (name (org-callback-error-name condition)))
+               (flet ((callback-text (value)
+                        (bounded-text (if (stringp value)
+                                          value
+                                          (format nil "~A" value)))))
+                 (format stream "~A (~(~A~)/~A, ~(~A~))"
+                         (org-kit-error-message condition)
+                         (callback-text kind)
+                         (callback-text name)
+                         (org-callback-error-reason condition))))))
   (:documentation "Signalled when a callback lookup or execution fails.
 KIND and NAME identify the callback, and REASON classifies the failure."))
 
