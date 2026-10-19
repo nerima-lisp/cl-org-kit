@@ -54,9 +54,9 @@ The structural edit functions are:
 - `(table-move-column document target from to)`
 
 Structural edit row and column positions are one-based. Row positions count
-standard rows and ignore hlines. `table-move-row` takes source and destination
-positions; a row cannot move across an hline. Without hlines, all rows are in
-the same section.
+standard rows across the whole table and ignore hlines. `table-move-row` takes
+source and destination positions; a row cannot move across an hline. Without
+hlines, all rows are in the same section.
 
 `table-insert-row :values` supplies cells in column order, and
 `table-insert-column :values` supplies them in standard-row order. Missing
@@ -115,7 +115,10 @@ rectangular range formula such as `@2$2..@4$3=...` assigns across that range. A
 column formula such as `$3=...` applies to the data rows. When a table has
 hlines, rows before its first hline are treated as the header section and are
 skipped by column formulas. A field, row, or range formula takes precedence
-over a column formula for any field both formulas target.
+over a column formula for any field both formulas target, but the column formula
+still runs and can signal an error. If two field, row, or range formulas target
+the same field, recalculation signals `org-table-unsupported-syntax` with
+feature `:duplicate-target`.
 
 An expression can read a field or range from another named table in the same
 document with `remote(name, ref)`. Give the source table a `#+NAME:` immediately
