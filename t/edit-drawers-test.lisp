@@ -244,4 +244,32 @@
                                      "MY NOTES" "body")))
                  :to-equal '(:invalid-value "headline"))
          (expect (document-text create-document) :to-equal create-source)
-         (expect (document-text replace-document) :to-equal replace-source)))))
+         (expect (document-text replace-document) :to-equal replace-source))))
+  (it "places drawers before child headlines, removes the sole drawer, and translates parser errors"
+    (let* ((source (format nil "* Parent~%** Child~%"))
+           (document (parse-org source))
+           (parent (edit-drawers-test-headline document))
+           (created (set-drawer-body document parent "notes" "body"))
+           (updated (edit-result-updated-document created))
+           (updated-parent (edit-drawers-test-headline updated))
+           (removed (remove-drawer updated updated-parent "NOTES")))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal (format nil "* Parent~%:NOTES:~%body~%:END:~%** Child~%"))
+        (expect (document-text (edit-result-updated-document removed))
+                :to-equal source)))
+  (let* ((document (parse-org (format nil "* A~%")))
+         (headline (edit-drawers-test-headline document))
+         (original-parser (symbol-function 'org-kit::parse-org)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function 'org-kit::parse-org)
+                 (lambda (&rest arguments)
+                   (declare (ignore arguments))
+                   (error 'org-parse-error)))
+           (with-soft-assertions
+             (expect (edit-drawers-test-error
+                      (lambda () (set-drawer-body document headline "NOTES" "body")))
+                     :to-equal '(:invalid-value "headline"))
+             (expect (document-text document) :to-equal (format nil "* A~%"))))
+      (setf (symbol-function 'org-kit::parse-org) original-parser)))))
