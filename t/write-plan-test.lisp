@@ -542,6 +542,24 @@
              (expect (org-resource-limit-error-limit condition) :to-be 3)
              (expect (org-resource-limit-error-actual condition) :to-be 4))
            (expect (probe-file (write-plan-test-path root path)) :to-be nil))))))
+  (it "rejects a three-byte path under a two-byte limit"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((path (string (code-char #x800)))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry path "value"))))
+              (condition
+                (write-plan-test-capture-error
+                 plan root
+                 :limits (make-limits :max-write-plan-path-bytes 2))))
+         (with-soft-assertions
+           (expect (typep condition 'org-resource-limit-error) :to-be t)
+           (when condition
+             (expect (org-resource-limit-error-limit-name condition)
+                     :to-be :max-write-plan-path-bytes)
+             (expect (org-resource-limit-error-limit condition) :to-be 2)
+             (expect (org-resource-limit-error-actual condition) :to-be 3))
+           (expect (probe-file (write-plan-test-path root path)) :to-be nil))))))
 
   (it "rejects symlink swaps during application"
       (write-plan-test-call-with-directory
