@@ -681,8 +681,14 @@
         (expect (search "\\item[{a]b}] [-] \\texttt{definition}"
                 (org-kit::export-latex-render-view state descriptive-list))
         :to-be-truthy)
-        (expect (org-kit::export-latex-render-view state item)
-                :to-equal "\\item{} [-] \\texttt{definition}")
+        (progn
+          (expect (org-kit::export-latex-render-view state item)
+                  :to-equal "\\item{} [-] \\texttt{definition}")
+          (expect (org-kit::export-latex-render-view
+                   state (export-latex-test-view
+                          document :special-block :properties '(:type "proof*")))
+                  :to-equal
+                  (format nil "\\begin{proof*}~%~%\\end{proof*}")))
         (expect radio-output :to-equal "\\label{org:target}target")
         (progn
   (expect (typep unresolved-footnote 'org-export-error) :to-be t)
@@ -698,8 +704,26 @@
          (preparation (org-kit::export-latex-state-preparation state)))
     (setf (org-kit::export-preparation-footnotes preparation)
           (list (list :label "a" :definition definition)))
-    (expect (org-kit::export-latex-render-view state recursive-reference)
-            :to-equal "\\footnote{\\footnotemark}")
+    (progn
+      (expect (org-kit::export-latex-render-view state recursive-reference)
+              :to-equal "\\footnote{\\footnotemark}")
+      (let* ((nested-reference
+               (export-latex-test-view
+                document :footnote-reference :properties '(:label "b")))
+             (nested-definition
+               (export-latex-test-view document :footnote-definition))
+             (outer-definition
+               (export-latex-test-view
+                document :footnote-definition
+                :children
+                (list (export-latex-test-view
+                       document :paragraph :children (list nested-reference)))))
+             (preparation (org-kit::export-latex-state-preparation state)))
+        (setf (org-kit::export-preparation-footnotes preparation)
+              (list (list :label "a" :definition outer-definition)
+                    (list :label "b" :definition nested-definition)))
+        (expect (org-kit::export-latex-render-view state recursive-reference)
+                :to-equal "\\footnote{\\footnotemark}")))
     (expect (org-kit::export-latex-state-active-footnotes state)
             :to-be nil))
   (let* ((limited-document
