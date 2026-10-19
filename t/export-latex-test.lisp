@@ -637,7 +637,7 @@
                                      :children (list table-cell-a table-cell-b)))
            (item
              (export-latex-test-view
-              document :item :properties '(:checkbox :trans :tag ("Term"))
+              document :item :properties '(:checkbox :trans :tag ("a]b"))
               :children (list (export-latex-test-view
                                document :inline-src-block
                                :properties '(:value "definition")))))
@@ -675,7 +675,7 @@
         (expect (search "\\begin{description}"
                         (org-kit::export-latex-render-view state descriptive-list))
                 :to-be-truthy)
-        (expect (search "\\item[{Term}] [-] \\texttt{definition}"
+        (expect (search "\\item[{a]b}] [-] \\texttt{definition}"
                 (org-kit::export-latex-render-view state descriptive-list))
         :to-be-truthy)
         (expect (org-kit::export-latex-render-view state item)
