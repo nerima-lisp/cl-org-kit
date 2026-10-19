@@ -97,6 +97,56 @@
           (expect (search "ciphertext" output) :to-be-truthy)
           (expect (document-text document) :to-equal source)))))
 
+  (it "treats a property drawer after a blank line as body text"
+    (let* ((source
+             (format nil
+                     "* Entry~%SCHEDULED: <2026-10-20 Tue>~%~%:PROPERTIES:~%:ID: x~%:END:~%secret body~%"))
+           (document (parse-org source))
+           (heading (crypt-test-headline document "Entry"))
+           (registry (make-callback-registry))
+           (received nil))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text)
+                           (setf received text)
+                           (crypt-test-armor text)))
+      (let* ((result (crypt-encrypt-entry document heading registry))
+             (output (document-text (edit-result-updated-document result)))
+             (expected-payload
+               (format nil ":PROPERTIES:~%:ID: x~%:END:~%secret body")))
+        (with-soft-assertions
+          (expect received :to-equal expected-payload)
+          (expect output
+                  :to-equal
+                  (concatenate 'string
+                               (format nil "* Entry~%SCHEDULED: <2026-10-20 Tue>~%~%")
+                               (crypt-test-armor expected-payload)))
+          (expect (document-text document) :to-equal source)))))
+
+  (it "skips only the planning line immediately after the heading"
+    (let* ((source
+             (format nil
+                     "* Entry~%SCHEDULED: <2026-10-20 Tue>~%DEADLINE: <2026-10-21 Wed>~%secret body~%"))
+           (document (parse-org source))
+           (heading (crypt-test-headline document "Entry"))
+           (registry (make-callback-registry))
+           (received nil))
+      (register-callback registry :crypt-encrypt "org-crypt"
+                         (lambda (text)
+                           (setf received text)
+                           (crypt-test-armor text)))
+      (let* ((result (crypt-encrypt-entry document heading registry))
+             (output (document-text (edit-result-updated-document result)))
+             (expected-payload
+               (format nil "DEADLINE: <2026-10-21 Wed>~%secret body")))
+        (with-soft-assertions
+          (expect received :to-equal expected-payload)
+          (expect output
+                  :to-equal
+                  (concatenate 'string
+                               (format nil "* Entry~%SCHEDULED: <2026-10-20 Tue>~%")
+                               (crypt-test-armor expected-payload)))
+          (expect (document-text document) :to-equal source)))))
+
   (it "does not re-encrypt a payload with an exact complete armor block"
     (let* ((source (format nil "* Entry~%  ~A~%  ciphertext~%  ~A~%after~%"
                            "-----BEGIN PGP MESSAGE-----"
