@@ -206,9 +206,7 @@ document."
            (concatenate 'string
                         (if (= offset (length source))
                             (if line-start-p "" newline)
-                            (if (and (plusp (length source))
-                                     (not (char= (char source (1- (length source)))
-                                                 #\Newline)))
+                            (if (not (char= (char source (1- (length source))) #\Newline))
                                 newline ""))
                         "[fn:" label "] " body
                         (if (document-final-newline-p document) newline "")))
@@ -470,9 +468,7 @@ labels and unreferenced definition labels from the updated document."
                                               prepared-patches)))
              (effective-patches (if (string= source new-source) nil patches)))
         (labels ((without-definitions (canonical)
-                                      (if (eq (getf canonical :type) :footnote-definition)
-                                          nil
-                                        (let ((copy (copy-tree canonical))
+                                      (let ((copy (copy-tree canonical))
                                               (children '()))
                                           (dolist (child (getf canonical :children))
                                             (if (eq (getf child :type) :footnote-definition)
@@ -486,7 +482,7 @@ labels and unreferenced definition labels from the updated document."
                                           (setf (getf copy :children) children)
                                           (unless (and (eq (getf copy :type) :section)
                                                        (null children))
-                                            copy))))
+                                            copy)))
                  (find-last-node (tree type)
                                  (let ((found nil))
                                    (labels ((walk (node)

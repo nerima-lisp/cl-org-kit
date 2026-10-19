@@ -442,4 +442,188 @@
         (expect (edit-result-spans result) :to-equal nil)
         (expect undefined :to-equal '("missing"))
         (expect unreferenced :to-equal nil)
-        (expect (document-text document) :to-equal source)))))
+        (expect (document-text document) :to-equal source))))
+  (it "covers canonical footnote insertion boundaries"
+    (let* ((source "abc")
+           (paragraph
+             (make-node :paragraph
+                        :children
+                        (list (make-node :plain-text :begin 0 :end 1)
+                              (make-node :plain-text :begin 1 :end 3))))
+           (reference
+             (list :type :footnote-reference :post-blank 0
+                   :properties nil :children nil))
+           (children
+             (org-kit::edit-footnote-canonical-insert-paragraph-reference
+              source paragraph 2 reference nil))
+           (inline (make-node :bold :begin 0 :end 4))
+           (title-headline
+             (make-node :headline
+                        :properties
+                        (list :reader-title-range (cons 0 9)
+                              :title (list inline " tail"))))
+           (title-before-object
+             (org-kit::edit-footnote-canonical-insert-title-reference
+              title-headline 0 reference))
+           (split-headline
+             (make-node :headline
+                        :properties
+                        (list :reader-title-range (cons 0 6)
+                              :title (list "one" "two"))))
+           (split-title
+             (org-kit::edit-footnote-canonical-insert-title-reference
+              split-headline 6 reference))
+           (object-only-headline
+             (make-node :headline
+                        :properties
+                        (list :reader-title-range (cons 0 4)
+                              :title (list inline))))
+           (title-after-object
+             (org-kit::edit-footnote-canonical-insert-title-reference
+              object-only-headline 4 reference)))
+      (with-soft-assertions
+        (expect (length children) :to-equal 3)
+        (expect (getf (first children) :type) :to-equal :plain-text)
+        (expect (eq (second children) reference) :to-be t)
+        (expect (getf (third children) :type) :to-equal :plain-text)
+        (expect title-before-object
+                :to-equal (list reference
+                                (org-kit::edit-canonical-node inline)
+                                " tail"))
+        (expect split-title :to-equal (list "onetwo" reference))
+        (expect title-after-object
+                :to-equal (list (org-kit::edit-canonical-node inline)
+                                reference)))))
+  (it "rejects offsets inside inline objects in headline titles"
+    (let* ((source (format nil "* *bold* tail~%"))
+           (document (parse-org source))
+           (headline (first (edit-footnotes-test-nodes document :headline)))
+           (inline (first (remove-if-not #'node-p
+                                         (node-property headline :title))))
+           (offset (1+ (node-begin inline)))
+           (failure (edit-footnotes-test-error
+                     (lambda () (insert-footnote document offset "body")))))
+      (with-soft-assertions
+        (expect (first failure) :to-be :invalid-value)
+        (expect (document-text document) :to-equal source))))
+  (it "renumbers duplicate numeric references only once"
+    (let* ((source (format nil "Use [fn:5] and [fn:5].~%[fn:5] body~%"))
+           (document (parse-org source))
+           (result (renumber-footnotes document)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal (format nil "Use [fn:1] and [fn:1].~%[fn:1] body~%"))
+        (expect (document-text document) :to-equal source))))
+  (it "builds expected footnote definitions for a root paragraph"
+    (let* ((document (parse-org "Text"))
+           (paragraph (first (edit-footnotes-test-nodes document :paragraph)))
+           (root (document-root document))
+           (original (symbol-function 'org-kit::edit-apply-patches-result))
+           (expected-tree nil))
+      (setf (node-children root) (list paragraph))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::edit-apply-patches-result)
+                   (lambda (document patches &key target expected)
+                     (declare (ignore patches target))
+                     (setf expected-tree expected)
+                     (make-edit-result :updated-document document :spans nil)))
+             (insert-footnote document 2 "body"))
+        (setf (symbol-function 'org-kit::edit-apply-patches-result) original))
+      (with-soft-assertions
+        (expect (mapcar (lambda (child) (getf child :type))
+                        (getf expected-tree :children))
+                :to-equal '(:paragraph :section))
+        (expect (mapcar (lambda (child) (getf child :type))
+                        (getf (second (getf expected-tree :children)) :children))
+                :to-equal '(:footnote-definition)))))
+  (it "covers canonical footnote insertion boundary outcomes"
+    (let* ((source "abx")
+           (reference
+             (list :type :footnote-reference :post-blank 0
+                   :properties nil :children nil))
+           (paragraph
+             (make-node :paragraph
+                        :children
+                        (list (make-node :plain-text :begin 0 :end 2)
+                              (make-node :bold :begin 2 :end 3))))
+           (paragraph-children
+             (org-kit::edit-footnote-canonical-insert-paragraph-reference
+              source paragraph 2 reference nil))
+           (beginning-headline
+             (make-node :headline
+                        :properties
+                        (list :reader-title-range (cons 0 3)
+                              :title (list "abc"))))
+           (zero-split
+             (org-kit::edit-footnote-canonical-insert-title-reference
+              beginning-headline 0 reference))
+           (inline (make-node :bold :begin 1 :end 5))
+           (after-text-headline
+             (make-node :headline
+                        :properties
+                        (list :reader-title-range (cons 0 5)
+                              :title (list "x" inline))))
+           (after-text
+             (org-kit::edit-footnote-canonical-insert-title-reference
+              after-text-headline 1 reference))
+           (named-document (parse-org (format nil "Text [fn:note]~%"))))
+      (with-soft-assertions
+        (expect (mapcar (lambda (child) (getf child :type))
+                        paragraph-children)
+                :to-equal '(:plain-text :footnote-reference :bold))
+        (expect (second paragraph-children) :to-be reference)
+        (expect zero-split :to-equal (list reference "abc"))
+        (expect after-text
+                :to-equal (list "x" reference
+                                (org-kit::edit-canonical-node inline)))
+        (expect (org-kit::edit-footnote-numeric-label-p nil) :to-be nil)
+        (expect (org-kit::edit-footnote-numeric-label-p "") :to-be nil)
+        (expect (org-kit::edit-footnote-numeric-label-p "named") :to-be nil)
+        (expect (org-kit::edit-footnote-numeric-label-p "12") :to-be t)
+        (expect (org-kit::edit-footnote-next-label named-document)
+                :to-equal "1"))))
+  (it "keeps named footnotes unchanged when renumbering numeric labels"
+    (let* ((source (format nil
+                           "Use [fn:5] and [fn:note].~%[fn:5] numeric~%[fn:note] named~%"))
+           (document (parse-org source))
+           (result (renumber-footnotes document)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil
+                        "Use [fn:1] and [fn:note].~%[fn:1] numeric~%[fn:note] named~%"))
+        (expect (document-text document) :to-equal source))))
+  (it "preserves footnote body children when the fragment has no section"
+    (let* ((document (parse-org "Text"))
+           (body-fragment (parse-org "body"))
+           (root (document-root body-fragment))
+           (section (first (node-children root)))
+           (paragraph (first (node-children section)))
+           (original-parser (symbol-function 'org-kit::parse-org))
+           (original-apply (symbol-function 'org-kit::edit-apply-patches-result))
+           (expected-tree nil))
+      (setf (node-children root) (list paragraph))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::parse-org)
+                   (lambda (&rest arguments)
+                     (declare (ignore arguments))
+                     body-fragment))
+             (setf (symbol-function 'org-kit::edit-apply-patches-result)
+                   (lambda (document patches &key target expected)
+                     (declare (ignore patches target))
+                     (setf expected-tree expected)
+                     (make-edit-result :updated-document document :spans nil)))
+             (insert-footnote document 2 "body"))
+        (setf (symbol-function 'org-kit::parse-org) original-parser
+              (symbol-function 'org-kit::edit-apply-patches-result) original-apply))
+      (let* ((section (first (getf expected-tree :children)))
+             (definition
+               (find :footnote-definition (getf section :children)
+                     :key (lambda (node) (getf node :type)))))
+        (with-soft-assertions
+          (expect (mapcar (lambda (child) (getf child :type))
+                          (getf definition :children))
+                  :to-equal '(:paragraph))
+          (expect (document-text document) :to-equal "Text"))))))

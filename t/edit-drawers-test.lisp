@@ -272,4 +272,17 @@
                       (lambda () (set-drawer-body document headline "NOTES" "body")))
                      :to-equal '(:invalid-value "headline"))
              (expect (document-text document) :to-equal (format nil "* A~%"))))
-      (setf (symbol-function 'org-kit::parse-org) original-parser)))))
+      (setf (symbol-function 'org-kit::parse-org) original-parser))))
+  (it "covers empty insertion offsets and blank drawer lines"
+    (let* ((empty-document (parse-org ""))
+           (empty-text (org-kit::edit-drawer-create-text
+                        empty-document 0 "NOTES" ""))
+           (source (format nil "* A~%:NOTES:~%~%old~%:END:~%"))
+           (document (parse-org source))
+           (headline (edit-drawers-test-headline document))
+           (result (set-drawer-body document headline "NOTES" "new")))
+      (with-soft-assertions
+        (expect empty-text :to-equal (format nil ":NOTES:~%:END:"))
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal (format nil "* A~%:NOTES:~%new~%:END:~%"))
+        (expect (document-text document) :to-equal source)))))

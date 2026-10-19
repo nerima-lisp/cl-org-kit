@@ -102,10 +102,6 @@
                  (if prefix-p newline "")
                  ":" name ":" newline
                  body-text
-                 (if (and (plusp (length body-text))
-                          (not (char= (char body-text (1- (length body-text)))
-                                      #\Newline)))
-                     newline "")
                  ":END:"
                  (if suffix-p newline ""))))
 
