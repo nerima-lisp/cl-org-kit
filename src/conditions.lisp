@@ -239,7 +239,8 @@ otherwise a character index into the document text. NIL when unknown."
   (slot-value condition 'name))
 
 (defun org-callback-error-reason (condition)
-  "Return the keyword classifying the callback lookup failure."
+  "Return the keyword that classifies CONDITION's callback failure, including
+:TIMEOUT."
   (slot-value condition 'reason))
 
 (defun org-write-plan-error-path (condition)
