@@ -857,7 +857,7 @@
           (expect (org-resource-limit-error-limit condition) :to-be 1000)
           (expect (org-resource-limit-error-actual condition) :to-be 1008)))))
 
-  (it "limits long ASCII table cookies before padded output allocation"
+  (it-sequential "limits long ASCII table cookies before padded output allocation"
     (labels ((find-table-view (views)
                (loop for view in views
                      for found =
@@ -885,12 +885,13 @@
              (warmup-output
                (export-ascii-test-output-state preparation))
              (warmup-condition
-               (handler-case
-                   (progn
-                     (org-kit::export-ascii-output-write-table
-                      warmup-output table-view preparation)
-                     nil)
-                 (org-resource-limit-error (condition) condition)))
+               (catch 'ascii-table-limit
+                 (handler-bind
+                     ((org-resource-limit-error
+                        (lambda (condition)
+                          (throw 'ascii-table-limit condition))))
+                   (org-kit::export-ascii-output-write-table
+                    warmup-output table-view preparation))))
              (table-output
                (export-ascii-test-output-state preparation))
              (at-signal nil)
@@ -1132,7 +1133,7 @@
               :ascii)))
       (expect at-limit :to-equal (format nil "[l]~%"))))
 
-  (it "rejects an unsafe large ASCII abbreviation before copying its path"
+  (it-sequential "rejects an unsafe large ASCII abbreviation before copying its path"
     (let* ((payload (make-string (* 256 1024) :initial-element #\x))
            (source
              (format nil
@@ -1142,7 +1143,8 @@
              (parse-org source :limits (make-limits :max-output-length 8)))
            (input-length (length source)))
       (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
-      (let* ((before (sb-ext:get-bytes-consed))
+      (let* ((before (progn (sb-ext:gc :full t)
+                            (sb-ext:get-bytes-consed)))
              (actual (export-org document :ascii))
              (allocated (- (sb-ext:get-bytes-consed) before)))
         (with-soft-assertions
@@ -1306,7 +1308,7 @@
                 :to-equal (make-list (length sources)
                                      :initial-element (format nil "[l]~%"))))))
 
-  (it "checks ASCII link output before allocating a large destination"
+  (it-sequential "checks ASCII link output before allocating a large destination"
     (let* ((path (make-string (* 256 1024) :initial-element #\x))
            (source
              (concatenate 'string "[[https://budget.test/" path "]]"))
@@ -1315,7 +1317,15 @@
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :ascii))
            (input-length (length source))
-           (before (sb-ext:get-bytes-consed))
+           (before
+             (progn
+               (handler-case
+                   (progn
+                     (org-kit::export-ascii-render-preparation preparation)
+                     nil)
+                 (org-resource-limit-error (condition) condition))
+               (sb-ext:gc :full t)
+               (sb-ext:get-bytes-consed)))
            (condition
              (handler-case
                  (progn

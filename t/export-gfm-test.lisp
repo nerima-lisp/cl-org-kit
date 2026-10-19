@@ -1282,7 +1282,7 @@
               :gfm)))
       (expect actual :to-equal "x")))
 
-  (it "rejects an unsafe large GFM abbreviation before copying its path"
+  (it-sequential "rejects an unsafe large GFM abbreviation before copying its path"
     (let* ((payload (make-string (* 256 1024) :initial-element #\x))
            (source
              (format nil
@@ -1292,7 +1292,8 @@
              (parse-org source :limits (make-limits :max-output-length 1)))
            (input-length (length source)))
       (expect (export-org document :gfm) :to-equal "x")
-      (let* ((before (sb-ext:get-bytes-consed))
+      (let* ((before (progn (sb-ext:gc :full t)
+                            (sb-ext:get-bytes-consed)))
              (actual (export-org document :gfm))
              (allocated (- (sb-ext:get-bytes-consed) before)))
         (with-soft-assertions
@@ -1374,7 +1375,7 @@
           (expect (org-export-unsupported-syntax-feature unsupported)
                   :to-be :diary-sexp)))))
 
-  (it "checks GFM output before allocating a large escaped text run"
+  (it-sequential "checks GFM output before allocating a large escaped text run"
     (let* ((source (concatenate 'string
                                 "Body "
                                 (make-string (* 256 1024)
@@ -1383,7 +1384,13 @@
            (document (parse-org source :limits limits))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (sb-ext:get-bytes-consed))
+           (before
+             (progn
+               (export-gfm-test-catch-error
+                (lambda ()
+                  (org-kit::export-render-preparation preparation :gfm)))
+               (sb-ext:gc :full t)
+               (sb-ext:get-bytes-consed)))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
@@ -1398,7 +1405,7 @@
                   :to-be input-length))
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
-  (it "checks GFM output before copying a large bracket link destination"
+  (it-sequential "checks GFM output before copying a large bracket link destination"
     (let* ((path (make-string (* 256 1024) :initial-element #\x))
            (source
              (concatenate 'string "[[https://budget.test/" path "][label]]"))
@@ -1407,7 +1414,13 @@
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (sb-ext:get-bytes-consed))
+           (before
+             (progn
+               (export-gfm-test-catch-error
+                (lambda ()
+                  (org-kit::export-render-preparation preparation :gfm)))
+               (sb-ext:gc :full t)
+               (sb-ext:get-bytes-consed)))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
@@ -1423,7 +1436,7 @@
                   :to-be t))
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
-  (it "checks GFM output before copying inline code source text"
+  (it-sequential "checks GFM output before copying inline code source text"
     (let* ((body (make-string (* 256 1024) :initial-element #\x))
            (source (concatenate 'string "Before ~" body "~ after"))
            (document
@@ -1431,7 +1444,13 @@
                         :limits (make-limits :max-output-length 32)))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (sb-ext:get-bytes-consed))
+           (before
+             (progn
+               (export-gfm-test-catch-error
+                (lambda ()
+                  (org-kit::export-render-preparation preparation :gfm)))
+               (sb-ext:gc :full t)
+               (sb-ext:get-bytes-consed)))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
@@ -1447,7 +1466,7 @@
                   :to-be t))
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
-  (it "checks GFM output before copying literal link label objects"
+  (it-sequential "checks GFM output before copying literal link label objects"
     (let* ((body (make-string (* 256 1024) :initial-element #\x))
            (source
              (concatenate 'string "[[https://budget.test][~" body "~]]"))
@@ -1456,7 +1475,13 @@
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :gfm))
            (input-length (length source))
-           (before (sb-ext:get-bytes-consed))
+           (before
+             (progn
+               (export-gfm-test-catch-error
+                (lambda ()
+                  (org-kit::export-render-preparation preparation :gfm)))
+               (sb-ext:gc :full t)
+               (sb-ext:get-bytes-consed)))
            (condition
              (export-gfm-test-catch-error
               (lambda ()
@@ -1472,7 +1497,7 @@
                   :to-be t))
         (expect (< allocated (floor input-length 2)) :to-be t))))
 
-  (it "checks GFM plain link output before concatenating its destination"
+  (it-sequential "checks GFM plain link output before concatenating its destination"
     (let* ((path (make-string (* 256 1024) :initial-element #\x))
            (source (concatenate 'string "https://budget.test/" path))
            (limits (make-limits :max-output-length 128))
@@ -1483,7 +1508,12 @@
            (root (make-node :org-data :children (list link)))
            (attached (setf (document-root document) root))
            (input-length (length source))
-           (before (sb-ext:get-bytes-consed))
+           (before
+             (progn
+               (export-gfm-test-catch-error
+                (lambda () (export-org document :gfm)))
+               (sb-ext:gc :full t)
+               (sb-ext:get-bytes-consed)))
            (condition
              (export-gfm-test-catch-error
               (lambda () (export-org document :gfm))))

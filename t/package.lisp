@@ -4,7 +4,7 @@
   ;; DESCRIBE clashes with CL:DESCRIBE, so shadow-import cl-weave's.
   (:shadowing-import-from #:cl-weave #:describe)
   (:import-from #:cl-weave
-   #:it #:it-each #:it-property #:expect #:signals #:run-all
+   #:it #:it-sequential #:it-each #:it-property #:expect #:signals #:run-all
    #:with-soft-assertions
    #:gen-integer #:gen-string #:gen-member #:gen-list)
   (:export #:run-tests))
