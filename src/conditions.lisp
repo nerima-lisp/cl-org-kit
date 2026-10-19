@@ -5,8 +5,8 @@
   "Longest input excerpt, in characters, a condition stores before truncating.")
 
 (defun bounded-text (string)
-  "Escape control and line-separator characters in STRING, then cap its input
-length in characters for condition reports."
+  "Escape control characters, Unicode format controls, and line separators in
+STRING, then cap its input length in characters for condition reports."
   (when string
     (with-output-to-string (out)
       (loop for char across string
@@ -24,6 +24,8 @@ length in characters for condition reports."
                             (= code #x2028)
                             (= code #x2029))
                         (format out "\\x~2,'0X" code))
+                       ((eq (sb-unicode:general-category char) :cf)
+                        (format out "\\u~4,'0X" code))
                        (t (write-char char out))))))))
 
 (define-condition org-kit-error (error)

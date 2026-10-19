@@ -143,7 +143,14 @@
         (expect (list (org-write-plan-error-path bare)
                       (org-write-plan-error-reason bare)
                       (org-write-plan-error-cause bare))
-                :to-equal '(nil nil nil))))))
+                :to-equal '(nil nil nil)))))
+  (it "escapes Unicode format controls in write-plan paths"
+    (let* ((path (format nil "nested/~C/output.txt" (code-char #x202E)))
+           (condition (handler-case
+                          (org-kit::write-plan-error :invalid-path path)
+                        (org-write-plan-error (condition) condition))))
+      (expect (report condition)
+              :to-equal "Write plan rejected (invalid-path) for nested/\\u202E/output.txt"))))
 
 (describe "agenda and export error reports"
   (it "reports agenda and export context and exposes their fields"

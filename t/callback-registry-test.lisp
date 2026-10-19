@@ -123,12 +123,15 @@
           (expect (org-callback-error-reason caught) :to-be :timeout))))))
 
 (describe "callback identity condition reports"
-  (it "escapes ASCII and C1 controls and Unicode line separators in callback identities"
+  (it "escapes ASCII and C1 controls, line separators, and format controls in callback identities"
     (let* ((registry (make-callback-registry))
+           (format-codes
+             (list #x200F #x202E #x2069))
            (control-codes
              (append (loop for code below 32 collect code)
                      (loop for code from #x80 to #x9F collect code)
-                     (list #x7F #x2028 #x2029)))
+                     (list #x7F #x2028 #x2029)
+                     format-codes))
            (control-text (map 'string #'code-char control-codes))
            (kind (concatenate 'string "KiNd" control-text))
            (name (concatenate 'string "NaMe" control-text))
@@ -143,7 +146,10 @@
                                      (#x0A "\\n")
                                      (#x0D "\\r")
                                      (#x09 "\\t")
-                                     (otherwise (format nil "\\x~2,'0X" code))))))
+                                     (otherwise
+                                      (if (member code format-codes)
+                                          (format nil "\\u~4,'0X" code)
+                                          (format nil "\\x~2,'0X" code)))))))
            (expected-kind
              (concatenate 'string "kind" (string-downcase expected-control)))
            (expected-name (concatenate 'string "name" expected-control))
