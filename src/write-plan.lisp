@@ -237,8 +237,7 @@ missing parent directories."
   (logand (sb-posix:stat-mode stat) #o170000))
 
 (defun write-plan-inspect-entry (root path components create-directories-p)
-  (let ((root-fd nil)
-        (directory-fds nil)
+  (let ((directory-fds nil)
         (existing-mode nil)
         (missing-parent-p nil))
     (labels ((path-for-components (path-components)
@@ -278,8 +277,7 @@ missing parent directories."
       (unwind-protect
            (progn
              (sb-sys:without-interrupts
-               (setf root-fd (write-plan-open-root-directory root)
-                     directory-fds (list root-fd)))
+               (setf directory-fds (list (write-plan-open-root-directory root))))
              (loop for component in (butlast components)
                    for index from 0
                    do (let ((child-fd nil))
@@ -309,9 +307,7 @@ missing parent directories."
              existing-mode)
         (sb-sys:without-interrupts
           (dolist (directory-fd directory-fds)
-            (ignore-errors (sb-posix:close directory-fd)))
-          (when (and root-fd (not (member root-fd directory-fds)))
-            (ignore-errors (sb-posix:close root-fd))))))))
+            (ignore-errors (sb-posix:close directory-fd))))))))
 
 (defun write-plan-string-byte-count (string path limits total)
   ;; The codec's size helper encodes its input, so bound its temporary octets.
