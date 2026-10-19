@@ -1340,15 +1340,37 @@
                             (sb-ext:get-bytes-consed)))
              (actual (export-org document :gfm))
              (allocated (- (sb-ext:get-bytes-consed) before)))
-        (with-soft-assertions
-          (expect actual :to-equal "x")
-          (expect (node-property link :type) :to-equal "fuzzy")
-          (expect (node-property link :format) :to-be :bracket)
-          (expect (>= (length (node-property link :path))
-                      (* 256 1024))
-                  :to-be t)
-          (expect (> input-length (* 256 1024)) :to-be t)
-          (expect (< allocated (floor input-length 2)) :to-be t)))))
+        (let* ((baseline-source
+                 (format nil
+                         "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][x]]"
+                         "x"))
+               (baseline-document
+                 (parse-org baseline-source
+                            :limits (make-limits :max-output-length 1)))
+               (baseline-warmup
+                 (let ((*export-baseline-current-test* nil))
+                   (export-org baseline-document :gfm)))
+               (baseline-before
+                 (progn (sb-ext:gc :full t) (sb-ext:get-bytes-consed)))
+               (baseline-actual
+                 (let ((*export-baseline-current-test* nil))
+                   (export-org baseline-document :gfm)))
+               (baseline-allocated
+                 (- (sb-ext:get-bytes-consed) baseline-before))
+               (baseline-input-length (length baseline-source)))
+          (declare (ignore baseline-warmup))
+          (with-soft-assertions
+            (expect actual :to-equal "x")
+            (expect (node-property link :type) :to-equal "fuzzy")
+            (expect (node-property link :format) :to-be :bracket)
+            (expect (>= (length (node-property link :path))
+                        (* 256 1024))
+                    :to-be t)
+            (expect (> input-length (* 256 1024)) :to-be t)
+            (expect baseline-actual :to-equal "x")
+            (expect (< (- allocated baseline-allocated)
+                       (floor (- input-length baseline-input-length) 2))
+                    :to-be t))))))
 
   (it "preserves safe entity fragments and custom-id fuzzy links"
     (let ((fragment-cases

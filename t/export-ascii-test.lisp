@@ -893,7 +893,9 @@
                    (org-kit::export-ascii-output-write-table
                     warmup-output table-view preparation))))
              (table-output
-               (export-ascii-test-output-state preparation))
+               (progn
+                 (sb-ext:gc :full t)
+                 (export-ascii-test-output-state preparation)))
              (at-signal nil)
              (initial-capacity
                (array-total-size
@@ -904,8 +906,7 @@
                  (handler-bind
                      ((org-resource-limit-error
                         (lambda (condition)
-                          (setf at-signal
-                                (- (sb-ext:get-bytes-consed) before))
+                          (setf at-signal (- (sb-ext:get-bytes-consed) before))
                           (throw 'ascii-table-limit condition))))
                    (org-kit::export-ascii-output-write-table
                     table-output table-view preparation))))
@@ -1152,10 +1153,32 @@
                             (sb-ext:get-bytes-consed)))
              (actual (export-org document :ascii))
              (allocated (- (sb-ext:get-bytes-consed) before)))
-        (with-soft-assertions
-          (expect actual :to-equal (format nil "[label]~%"))
-          (expect (> input-length (* 256 1024)) :to-be t)
-          (expect (< allocated (floor input-length 2)) :to-be t)))))
+        (let* ((baseline-source
+                 (format nil
+                         "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
+                         "x"))
+               (baseline-document
+                 (parse-org baseline-source
+                            :limits (make-limits :max-output-length 8)))
+               (baseline-warmup
+                 (let ((*export-baseline-current-test* nil))
+                   (export-org baseline-document :ascii)))
+               (baseline-before
+                 (progn (sb-ext:gc :full t) (sb-ext:get-bytes-consed)))
+               (baseline-actual
+                 (let ((*export-baseline-current-test* nil))
+                   (export-org baseline-document :ascii)))
+               (baseline-allocated
+                 (- (sb-ext:get-bytes-consed) baseline-before))
+               (baseline-input-length (length baseline-source)))
+          (declare (ignore baseline-warmup))
+          (with-soft-assertions
+            (expect actual :to-equal (format nil "[label]~%"))
+            (expect (> input-length (* 256 1024)) :to-be t)
+            (expect baseline-actual :to-equal (format nil "[label]~%"))
+            (expect (< (- allocated baseline-allocated)
+                       (floor (- input-length baseline-input-length) 2))
+                    :to-be t))))))
 
   (it "checks an ASCII abbreviation without a placeholder before discarding it"
     (let* ((source
@@ -2309,7 +2332,8 @@
              (post-blank (node-post-blank paragraph))
              (expected-filter-value
               (concatenate 'string "x"
-                           (make-string post-blank :initial-element #\Space))))
+                           (make-string post-blank
+                                        :initial-element #\Newline))))
         (unwind-protect
             (progn
               (register-derived-export-backend
@@ -2337,7 +2361,7 @@
              (export-ascii-test-source
               "#+OPTIONS: toc:nil num:nil"
               ""
-              "word")
+              "x")
              :limits (make-limits :max-output-length 2))))
       (unwind-protect
            (progn

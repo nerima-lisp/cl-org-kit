@@ -1,11 +1,13 @@
 ;;;; src/export-ascii.lisp
 (in-package #:org-kit)
 
+(defvar *export-ascii-plain-text-render-range* nil)
+
 (defstruct (export-ascii-output
              (:constructor %make-export-ascii-output
                  (preparation limits output count base-count indent
                   downstream-indent line-start-p visible-controls-p display-width
-                  render-context)))
+                  render-context defer-output-limit-check-p)))
   preparation
   limits
   output
@@ -16,17 +18,19 @@
   line-start-p
   visible-controls-p
   display-width
-  render-context)
+  render-context
+  defer-output-limit-check-p)
 
 (defun export-ascii-output-for-preparation
     (preparation base-count measure-only-p downstream-indent visible-controls-p
-     &optional render-context)
+     &optional render-context defer-output-limit-check-p)
   (%make-export-ascii-output
    preparation
    (document-limits (export-preparation-document preparation))
    (unless measure-only-p
      (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
-   0 base-count 0 downstream-indent t visible-controls-p 0 render-context))
+   0 base-count 0 downstream-indent t visible-controls-p 0 render-context
+   defer-output-limit-check-p))
 
 (defun export-ascii-visible-character-length (output character)
   (if (and (export-ascii-output-visible-controls-p output)
@@ -37,8 +41,11 @@
 (defun export-ascii-output-reserve (output additional-length)
   (let* ((next-count (+ (export-ascii-output-count output) additional-length))
          (next-length (+ (export-ascii-output-base-count output) next-count))
-         (limits (export-ascii-output-limits output)))
-    (when (plusp additional-length)
+         (limits (export-ascii-output-limits output))
+         (defer-output-limit-check-p
+           (export-ascii-output-defer-output-limit-check-p output)))
+    (when (and (plusp additional-length)
+               (not defer-output-limit-check-p))
       (export-check-output-actual
        next-length limits
        (export-preparation-backend
@@ -50,11 +57,12 @@
       (when (and buffer (> next-count (array-total-size buffer)))
         (let* ((available (- (limit-value limits :max-output-length)
                              (export-ascii-output-base-count output)))
-               (capacity (min available
-                              (max next-count
-                                   (if (zerop (array-total-size buffer))
-                                       16
-                                       (* 2 (array-total-size buffer)))))))
+               (capacity (max next-count
+                              (if (zerop (array-total-size buffer))
+                                  16
+                                  (* 2 (array-total-size buffer))))))
+          (unless defer-output-limit-check-p
+            (setf capacity (min available capacity)))
           (setf (export-ascii-output-output output)
                 (adjust-array buffer capacity
                               :fill-pointer (fill-pointer buffer))))))
@@ -95,7 +103,7 @@
 
 (defun export-ascii-output-range-length (output text start end
                                          &key uppercase-p substitute-tab-p
-                                           (indent-p t))
+                                           (indent-p t) raw-output-p)
   (loop with line-start-p = (export-ascii-output-line-start-p output)
         with length = 0
         with display-width = 0
@@ -111,7 +119,10 @@
         do (when (and indent-p line-start-p (not newline-p))
              (incf length (export-ascii-output-indent output))
              (incf display-width (export-ascii-output-indent output)))
-           (incf length (export-ascii-visible-character-length output character))
+           (incf length
+                 (if raw-output-p
+                     1
+                     (export-ascii-visible-character-length output character)))
            (incf display-width
                  (if (and (export-ascii-output-visible-controls-p output)
                           (export-ascii-visible-control-character-p character))
@@ -122,30 +133,55 @@
 
 (defun export-ascii-output-write-range (output text start end
                                         &key uppercase-p substitute-tab-p
-                                          (indent-p t))
-  (multiple-value-bind (additional-length final-line-start-p ignored-width)
+                                          (indent-p t) raw-output-p)
+  (multiple-value-bind (additional-length final-line-start-p range-display-width)
       (export-ascii-output-range-length
        output text start end :uppercase-p uppercase-p
-       :substitute-tab-p substitute-tab-p :indent-p indent-p)
-    (declare (ignore ignored-width))
+       :substitute-tab-p substitute-tab-p :indent-p indent-p
+       :raw-output-p raw-output-p)
     (export-ascii-output-reserve output additional-length)
-    (loop for index from start below end
-          for source-character = (char text index)
-          for character = (cond (substitute-tab-p
-                                 (if (char= source-character #\Tab)
-                                     #\Space
-                                     source-character))
-                                (uppercase-p (char-upcase source-character))
-                                (t source-character))
-          for newline-p = (char= character #\Newline)
-          do (when (and indent-p
-                        (export-ascii-output-line-start-p output)
-                        (not newline-p))
-               (loop repeat (export-ascii-output-indent output)
-                     do (export-ascii-output-push-char output #\Space)))
-             (export-ascii-output-push-visible-char output character)
-             (setf (export-ascii-output-line-start-p output) newline-p))
-    (setf (export-ascii-output-line-start-p output) final-line-start-p))
+    (if raw-output-p
+        (let ((buffer (export-ascii-output-output output))
+              (initial-display-width
+                (export-ascii-output-display-width output)))
+          (loop for index from start below end
+                for source-character = (char text index)
+                for character = (cond (substitute-tab-p
+                                       (if (char= source-character #\Tab)
+                                           #\Space
+                                           source-character))
+                                      (uppercase-p (char-upcase source-character))
+                                      (t source-character))
+                for newline-p = (char= character #\Newline)
+                do (when (and buffer indent-p
+                              (export-ascii-output-line-start-p output)
+                              (not newline-p))
+                     (loop repeat (export-ascii-output-indent output)
+                           do (vector-push #\Space buffer)))
+                   (when buffer (vector-push character buffer))
+                   (setf (export-ascii-output-line-start-p output) newline-p))
+          (setf (export-ascii-output-display-width output)
+                (+ initial-display-width range-display-width)
+                (export-ascii-output-line-start-p output)
+                final-line-start-p))
+        (progn
+          (loop for index from start below end
+                for source-character = (char text index)
+                for character = (cond (substitute-tab-p
+                                       (if (char= source-character #\Tab)
+                                           #\Space
+                                           source-character))
+                                      (uppercase-p (char-upcase source-character))
+                                      (t source-character))
+                for newline-p = (char= character #\Newline)
+                do (when (and indent-p
+                              (export-ascii-output-line-start-p output)
+                              (not newline-p))
+                     (loop repeat (export-ascii-output-indent output)
+                           do (export-ascii-output-push-char output #\Space)))
+                   (export-ascii-output-push-visible-char output character)
+                   (setf (export-ascii-output-line-start-p output) newline-p))
+          (setf (export-ascii-output-line-start-p output) final-line-start-p))))
   output)
 
 (defun export-ascii-output-write-string (output text &key uppercase-p
@@ -192,12 +228,12 @@
            (funcall function))
       (setf (export-ascii-output-indent output) previous-indent))))
 
-(defun export-ascii-output-write-buffer (output source &optional (start 0)
-                                                              (end (fill-pointer
-                                                                    (export-ascii-output-output source))))
-  (export-ascii-output-write-range output
-                                   (export-ascii-output-output source)
-                                   start end))
+(defun export-ascii-output-write-buffer
+    (output source &optional (start 0)
+                    (end (fill-pointer
+                          (export-ascii-output-output source))))
+  (export-ascii-output-write-range
+   output (export-ascii-output-output source) start end :raw-output-p t))
 
 (defun export-ascii-output-string (output)
   (coerce (export-ascii-output-output output) 'string))
@@ -218,7 +254,9 @@
 (defun export-ascii-output-scratch
     (output additional-base-count &key measure-only-p
                  (visible-controls-p
-                   (export-ascii-output-visible-controls-p output)))
+                   (export-ascii-output-visible-controls-p output))
+                 (defer-output-limit-check-p
+                   (export-ascii-output-defer-output-limit-check-p output)))
   (export-ascii-output-for-preparation
    (export-ascii-output-preparation output)
    (+ (export-ascii-output-base-count output)
@@ -228,7 +266,8 @@
    (+ (export-ascii-output-downstream-indent output)
       (export-ascii-output-indent output))
    visible-controls-p
-   (export-ascii-output-render-context output)))
+   (export-ascii-output-render-context output)
+   defer-output-limit-check-p))
 
 (defun export-ascii-output-trim-newlines (output)
   (let ((buffer (export-ascii-output-output output)))
@@ -237,10 +276,11 @@
                        (char= (char buffer (1- (fill-pointer buffer)))
                               #\Newline))
             do (vector-pop buffer))
-      (multiple-value-bind (length line-start-p display-width)
+      (multiple-value-bind (ignored-length line-start-p display-width)
           (export-ascii-output-range-length
            output buffer 0 (fill-pointer buffer) :indent-p nil)
-        (setf (export-ascii-output-count output) length
+        (declare (ignore ignored-length))
+        (setf (export-ascii-output-count output) (fill-pointer buffer)
               (export-ascii-output-line-start-p output) line-start-p
               (export-ascii-output-display-width output) display-width))))
   output)
@@ -252,7 +292,7 @@
     (export-ascii-output-write-range output text 0 end)))
 
 (defun export-ascii-output-write-wrapped-line
-    (output text start end width &key uppercase-p)
+    (output text start end width &key uppercase-p raw-output-p)
   (let ((position start)
         (line-width 0)
         (word-start nil))
@@ -268,7 +308,8 @@
                          (export-ascii-output-write-char output #\Space)
                          (incf line-width))))
                  (export-ascii-output-write-range
-                  output text word-start word-end :uppercase-p uppercase-p)
+                  output text word-start word-end :uppercase-p uppercase-p
+                  :raw-output-p raw-output-p)
                  (incf line-width word-width))))
       (loop while (< position end)
             for whitespace-p = (export-whitespace-p (char text position))
@@ -284,19 +325,21 @@
       (when word-start (emit-word end)))))
 
 (defun export-ascii-output-write-wrapped-range
-    (output text start end width &key preserve-breaks uppercase-p)
+    (output text start end width &key preserve-breaks uppercase-p raw-output-p)
   (if preserve-breaks
       (loop with line-start = start
             for newline = (position #\Newline text :start line-start :end end)
             for line-end = (or newline end)
             do (export-ascii-output-write-wrapped-line
-                output text line-start line-end width :uppercase-p uppercase-p)
+                output text line-start line-end width
+                :uppercase-p uppercase-p :raw-output-p raw-output-p)
                (when newline
                  (export-ascii-output-newlines output 1)
                  (setf line-start (1+ newline)))
             while newline)
       (export-ascii-output-write-wrapped-line
-       output text start end width :uppercase-p uppercase-p))
+       output text start end width :uppercase-p uppercase-p
+       :raw-output-p raw-output-p))
   output)
 
 (defun export-ascii-option (options key default)
@@ -526,18 +569,18 @@
 
 (defun export-ascii-destination-parts-safe-p (parts)
   (and (plusp (export-ascii-destination-parts-length parts))
-       (not (export-ascii-destination-parts-position
-             parts #'export-control-character-p))
-       (not (export-ascii-destination-parts-position
-             parts (lambda (character) (char= character #\\))))
        (not (export-whitespace-character-p
              (export-ascii-destination-parts-character parts 0)))
        (not (export-ascii-destination-parts-prefix-equal-p parts "//"))
        (let ((scheme-end
                (export-ascii-destination-parts-explicit-scheme-end parts)))
-         (or (null scheme-end)
-             (export-ascii-destination-parts-allowed-scheme-p
-              parts scheme-end)))))
+         (and (or (null scheme-end)
+                  (export-ascii-destination-parts-allowed-scheme-p
+                   parts scheme-end))
+              (not (export-ascii-destination-parts-position
+                    parts #'export-control-character-p))
+              (not (export-ascii-destination-parts-position
+                    parts (lambda (character) (char= character #\\))))))))
 
 (defun export-ascii-destination-range-safe-p (text start end)
   (export-ascii-destination-parts-safe-p
@@ -616,24 +659,64 @@
       (write-pending end)))
   output)
 
-(defun export-ascii-link-abbreviation-entry (raw abbreviations)
-  (let* ((separator (position #\: raw))
-         (key-end (or separator (length raw))))
+(defun export-ascii-link-abbreviation-entry
+    (raw abbreviations &optional (start 0) (end (length raw)))
+  (let* ((separator (position #\: raw :start start :end end))
+         (key-end (or separator end)))
     (find-if (lambda (entry)
                (let ((key (car entry)))
                  (and (stringp key)
-                      (= key-end (length key))
-                      (string= raw key :end1 key-end))))
+                      (= (- key-end start) (length key))
+                      (string= raw key :start1 start :end1 key-end))))
              abbreviations)))
 
+(defun export-ascii-link-abbreviation-destination-safe-p
+    (raw start end abbreviations)
+  (let* ((entry
+           (export-ascii-link-abbreviation-entry
+            raw abbreviations start end))
+         (replacement (and entry (cdr entry))))
+    (if (not (stringp replacement))
+        t
+        (let* ((separator (position #\: raw :start start :end end))
+               (tail-start
+                 (and separator
+                      (+ separator
+                         (if (and (< (1+ separator) end)
+                                  (char= (char raw (1+ separator)) #\:))
+                             2
+                             1))))
+               (placeholder (search "%s" replacement))
+               (parts
+                 (if placeholder
+                     (append
+                      (list (list :range replacement 0 placeholder))
+                      (when tail-start
+                        (list (list :range raw tail-start end)))
+                      (list (list :range replacement
+                                  (+ placeholder 2)
+                                  (length replacement))))
+                     (append
+                      (list (list :range replacement 0
+                                  (length replacement)))
+                      (when tail-start
+                        (list (list :range raw tail-start end)))))))
+          (export-ascii-destination-parts-safe-p parts)))))
+
 (defun export-ascii-output-link-source-unsafe-p (node)
-  (let ((source-path (node-property node :raw-link)))
+  (let* ((source-path (node-property node :raw-link))
+         (document (node-document node))
+         (abbreviations
+           (and document
+                (getf (document-settings document) :link-abbrevs))))
     (multiple-value-bind (text start end)
         (if (stringp source-path)
             (values source-path 0 (length source-path))
             (export-ascii-link-source-path-range node))
       (when text
         (or (not (export-ascii-destination-source-safe-p text start end))
+            (not (export-ascii-link-abbreviation-destination-safe-p
+                  text start end abbreviations))
             (let* ((type (node-property node :type))
                    (path (node-property node :path))
                    (parts
@@ -669,7 +752,8 @@
                              1))))
                (placeholder (search "%s" replacement))
                (expanded (export-ascii-output-scratch
-                          output 0 :visible-controls-p nil)))
+                          output 0 :visible-controls-p nil
+                          :defer-output-limit-check-p nil)))
           (if placeholder
               (progn
                 (export-ascii-output-write-range
@@ -694,7 +778,8 @@
          (source-path (node-property node :raw-link))
          (format (node-property node :format))
          (raw-output (export-ascii-output-scratch
-                      output 0 :visible-controls-p nil))
+                      output 0 :visible-controls-p nil
+                      :defer-output-limit-check-p nil))
          (raw-text nil)
          (raw-start 0)
          (raw-end nil))
@@ -800,26 +885,33 @@
        output #\Space (node-post-blank (export-view-node view)))))
   output)
 
-(defun export-ascii-output-write-trimmed-plain-text-view
-    (output view trim-leading-p trim-trailing-p)
-  (let* ((node (export-view-node view))
-         (document (node-document node))
+(defun export-ascii-plain-text-source-range (node trim-leading-p
+                                             trim-trailing-p)
+  (let* ((document (node-document node))
+         (text (and document (document-text document)))
          (start (node-begin node))
          (end (node-end node)))
-    (when (and start end)
-      (let ((text (document-text document)))
-        (when trim-leading-p
-          (loop while (and (< start end)
-                           (find (char text start)
-                                 '(#\Space #\Tab #\Newline #\Return)))
-                do (incf start)))
-        (when trim-trailing-p
-          (loop while (and (> end start)
-                           (find (char text (1- end))
-                                 '(#\Space #\Tab #\Newline #\Return)))
-                do (decf end)))
-        (export-ascii-output-write-range
-         output text start end :substitute-tab-p t)))))
+    (when (and text start end)
+      (when trim-leading-p
+        (loop while (and (< start end)
+                         (find (char text start)
+                               '(#\Space #\Tab #\Newline #\Return)))
+              do (incf start)))
+      (when trim-trailing-p
+        (loop while (and (> end start)
+                         (find (char text (1- end))
+                               '(#\Space #\Tab #\Newline #\Return)))
+              do (decf end)))
+      (values text start end))))
+
+(defun export-ascii-output-write-trimmed-plain-text-view
+    (output view trim-leading-p trim-trailing-p)
+  (multiple-value-bind (text start end)
+      (export-ascii-plain-text-source-range
+       (export-view-node view) trim-leading-p trim-trailing-p)
+    (when text
+      (export-ascii-output-write-range
+       output text start end :substitute-tab-p t))))
 
 (defun export-ascii-output-write-trimmed-inline-views
     (output views preparation)
@@ -837,11 +929,16 @@
                     output)))
         do (cond
              ((and dispatched-p plain-text-boundary-p)
-              (let ((captured (export-ascii-output-scratch output 0)))
-                (export-ascii-output-render-view
-                 captured view preparation :mode :inline)
-                (export-ascii-output-write-trimmed-captured-inline-view
-                 output captured (zerop index) (= index last-index))))
+              (multiple-value-bind (text start end)
+                  (export-ascii-plain-text-source-range
+                   node (zerop index) (= index last-index))
+                (let ((*export-ascii-plain-text-render-range*
+                        (and text (list node text start end)))
+                      (captured (export-ascii-output-scratch output 0)))
+                  (export-ascii-output-render-view
+                   captured view preparation :mode :inline)
+                  (export-ascii-output-write-trimmed-captured-inline-view
+                   output captured (zerop index) (= index last-index)))))
              (dispatched-p
               (export-ascii-output-render-view
                output view preparation :mode :inline))
@@ -1040,8 +1137,9 @@
           do (setf (aref widths column)
                    (max (aref widths column) (aref width-hints column))))
     (values widths
-            (map 'vector (lambda (alignment) (or alignment :left)) alignments)
-            (coerce (nreverse row-metrics) 'vector))))
+            (map (quote vector)
+                 (lambda (alignment) (or alignment :left)) alignments)
+            (coerce (nreverse row-metrics) (quote vector)))))
 
 (defun export-ascii-output-table-row-length (row widths metrics)
   (if (eq (node-property (export-view-node row) :type) :rule)
@@ -1099,18 +1197,15 @@
     (if (eq table-type :table.el)
         (export-ascii-output-write-trimmed-newlines
          output (or (node-property node :value) ""))
-        (let* ((row-views
-                 (remove-if
-                  (lambda (row)
-                    (eq (node-property (export-view-node row) :type) :rule))
-                  rows))
-               (column-count
-                 (loop for row in row-views
-                       maximize (length (export-view-children row)) into maximum
-                       finally (return (or maximum 0)))))
+        (let ((column-count
+                (loop for row in rows
+                      unless (eq (node-property (export-view-node row) :type)
+                                 :rule)
+                        maximize (length (export-view-children row)) into maximum
+                      finally (return (or maximum 0)))))
           (multiple-value-bind (widths alignments row-metrics)
               (export-ascii-output-table-layout
-               output row-views column-count preparation)
+               output rows column-count preparation)
             (export-ascii-output-check-table-output-budget
              output rows widths row-metrics)
             (loop with metric-index = 0
@@ -1124,8 +1219,8 @@
                   do (unless first-p
                        (export-ascii-output-newlines output 1))
                      (export-ascii-output-write-table-row
-                      output row widths alignments preparation cell-metrics))))))
-  output)
+                      output row widths alignments preparation cell-metrics)))))
+  output))
 
 (defun export-ascii-output-write-code-box
     (output value &key fixed-width-p)
@@ -1237,7 +1332,9 @@
                  (eq (node-type (export-view-node child)) :plain-text)
                  (export-ascii-output-write-plain-text-paragraph
                   output (export-view-node child) preparation width))
-      (let ((inline (export-ascii-output-scratch output 0)))
+      (let ((inline
+              (export-ascii-output-scratch
+               output 0 :defer-output-limit-check-p t)))
         (export-ascii-output-write-trimmed-inline-views
          inline children preparation)
         (let* ((buffer (export-ascii-output-output inline))
@@ -1255,7 +1352,8 @@
            output buffer start end width
            :preserve-breaks
            (cdr (assoc :preserve-breaks
-                       (export-preparation-options preparation)))))))
+                       (export-preparation-options preparation)))
+           :raw-output-p t))))
   output))
 
 (defun export-ascii-output-render-list-item
@@ -1599,8 +1697,13 @@
       (:line-break (export-ascii-output-newlines output 1))
       (:link (export-ascii-output-render-link output view preparation))
       (:plain-text
-       (export-ascii-output-write-node-text
-        output node :substitute-tab-p t))
+       (let ((range *export-ascii-plain-text-render-range*))
+         (if (and range (eq node (first range)))
+             (export-ascii-output-write-range
+              output (second range) (third range) (fourth range)
+              :substitute-tab-p t)
+             (export-ascii-output-write-node-text
+              output node :substitute-tab-p t))))
       ((:radio-target :target) nil)
       ((:statistics-cookie :timestamp)
        (export-ascii-output-write-node-text output node))
@@ -1717,7 +1820,9 @@
             for number = (getf definition :number)
             for view = (getf definition :definition)
             do (unless first-p (export-ascii-output-newlines output 2))
-               (let ((content (export-ascii-output-scratch output 0))
+               (let ((content
+                       (export-ascii-output-scratch
+                        output 0 :defer-output-limit-check-p t))
                      (line (export-ascii-output-scratch output 0)))
                  (export-ascii-output-write-views
                   content (export-view-children view) preparation)
@@ -1738,8 +1843,8 @@
                    (export-ascii-output-write-range line buffer start end))
                  (export-ascii-output-write-wrapped-range
                   output (export-ascii-output-output line) 0
-                  (fill-pointer (export-ascii-output-output line)) 72)))))
-  output)
+                  (fill-pointer (export-ascii-output-output line)) 72))))
+  output))
 
 (defun export-ascii-render-preparation (preparation &optional render-context)
   ;; Reserve the final newline while nested views preflight their output.
@@ -1801,7 +1906,7 @@
                          (find (char buffer (1- end))
                                '(#\Space #\Tab #\Newline #\Return)))
               do (decf end)))
-      (export-ascii-output-write-range output buffer start end))
+      (export-ascii-output-write-range output buffer start end :raw-output-p t))
     output)
 
   (defun export-ascii-output-remove-node-post-blank
@@ -1813,7 +1918,9 @@
                (post-blank-start (- end post-blank)))
           (when (and (not (minusp post-blank-start))
                      (loop for index from post-blank-start below end
-                           always (char= (char buffer index) #\Space)))
+                           always
+                           (char= (char buffer index)
+                                  (export-node-post-blank-character node))))
             (setf (fill-pointer buffer) post-blank-start)
             (let* ((end (fill-pointer buffer))
                    (indent-start (- end post-blank-indent)))
@@ -1825,10 +1932,11 @@
                                always (char= (char buffer index) #\Space)))
                 (setf (fill-pointer buffer) indent-start)))
             (setf (export-ascii-output-line-start-p output) t)
-            (multiple-value-bind (length line-start-p display-width)
+            (multiple-value-bind (ignored-length line-start-p display-width)
                 (export-ascii-output-range-length
                  output buffer 0 (fill-pointer buffer) :indent-p nil)
-              (setf (export-ascii-output-count output) length
+              (declare (ignore ignored-length))
+              (setf (export-ascii-output-count output) (fill-pointer buffer)
                     (export-ascii-output-line-start-p output) line-start-p
                     (export-ascii-output-display-width output) display-width)))))
       output))
@@ -1852,7 +1960,10 @@
               (if active-sink
                   (export-ascii-output-visible-controls-p active-sink)
                   t)
-              context)))
+              context
+              (and active-sink
+                   (export-ascii-output-defer-output-limit-check-p
+                    active-sink)))))
       (when active-sink
         (setf (export-ascii-output-indent scratch)
               (export-ascii-output-indent active-sink)
@@ -1864,10 +1975,7 @@
     (declare (ignore context))
     (export-ascii-output-string sink))
 
-  (defun export-ascii-native-sink-write-string (sink text context)
-    (declare (ignore context))
-    (export-ascii-output-write-string sink text)
-    nil)
+  (defun export-ascii-native-sink-write-string (sink text context) (declare (ignore context)) (export-ascii-output-write-range sink text 0 (length text) :raw-output-p t) nil)
 
   (defun export-ascii-native-sink-append-node-result (sink text context)
     (declare (ignore context))
@@ -1900,19 +2008,20 @@
            (export-ascii-output-count sink))
         *export-current-output-offset*))
 
+  (defun export-ascii-node-policies ()
+    '((:diary-sexp :unsupported
+                   :feature :diary-sexp
+                   :message "Diary sexp export is unsupported")))
+
   (defun export-ascii-render-body (context)
     (export-ascii-render-preparation
      (%export-render-context-preparation context) context))
-
-  (defmethod export-render-preparation
-      ((preparation export-preparation) (backend (eql :ascii)))
-    (declare (ignore backend))
-    (export-ascii-render-preparation preparation))
 
   (eval-when (:load-toplevel :execute)
     (%register-builtin-export-backend
      :ascii
      :renderer #'export-ascii-render-body
+     :node-policies (export-ascii-node-policies)
      :native-sink-renderer #'export-ascii-native-sink-renderer
      :native-sink-scratch #'export-ascii-native-sink-scratch
      :native-sink-string #'export-ascii-native-sink-string
