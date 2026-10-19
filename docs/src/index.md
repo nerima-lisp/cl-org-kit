@@ -21,6 +21,7 @@ Start with [Getting Started](getting-started.md), then see the
 [TODO and Agenda](guides/todo-agenda.md), [Clock](guides/clock.md),
 [Structure Edits](guides/structure-edits.md), [Tables](guides/tables.md),
 [Links](guides/links.md), [Org IDs](guides/org-id.md), [Babel](guides/babel.md),
-[Export](guides/export.md), and [Org crypt](guides/crypt.md) guides. The
+[BibTeX](guides/bibtex.md), [Export](guides/export.md), and
+[Org crypt](guides/crypt.md) guides. The
 [API stability scope](reference/api-stability.md) describes what 0.1.0 treats
 as public. Contributor workflow is in [Development](project/development.md).

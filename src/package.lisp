@@ -213,6 +213,10 @@
    #:org-export-unsupported-syntax-source
    #:org-export-unsupported-syntax-position
    #:org-export-unsupported-syntax-feature
+   ;; BibTeX conversion
+   #:org-bibtex-error #:org-bibtex-error-reason
+   #:org-bibtex-error-position #:org-bibtex-error-context
+   #:bibtex-import #:bibtex-export
    ;; Unit E2 HTML export
    #:export-org
    ;; Org crypt

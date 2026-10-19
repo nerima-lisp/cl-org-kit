@@ -407,3 +407,29 @@ and FEATURE identifies the unsupported syntax."))
 (defun org-export-unsupported-syntax-feature (condition)
   "Return the feature name classifying unsupported export syntax."
   (slot-value condition 'feature))
+
+(define-condition org-bibtex-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (position :initarg :position :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A~@[ (~(~A~))~]~@[ at position ~D~]~@[ near \"~A\"~]"
+                     (org-kit-error-message condition)
+                     (org-bibtex-error-reason condition)
+                     (org-bibtex-error-position condition)
+                     (org-bibtex-error-context condition))))
+  (:documentation "Signalled when a BibTeX entry is malformed or cannot be converted.
+REASON classifies the failure, POSITION is a 0-based input offset, and CONTEXT
+is a bounded, escaped excerpt."))
+
+(defun org-bibtex-error-reason (condition)
+  "Return the keyword classifying why the BibTeX operation failed."
+  (slot-value condition 'reason))
+
+(defun org-bibtex-error-position (condition)
+  "Return the 0-based position of a BibTeX parse error, or NIL."
+  (slot-value condition 'position))
+
+(defun org-bibtex-error-context (condition)
+  "Return a bounded, escaped excerpt associated with the BibTeX error, or NIL."
+  (slot-value condition 'context))
