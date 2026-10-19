@@ -1136,12 +1136,11 @@
                                         (export-tag-intersection-p tags select-tags)))
                                  (nested-scope (or selected-scope selected-here-p))
                                  (title-macros
-                                   (if (eq policy :prune-children)
-                                       nil
-                                       (prepare-title-macros
-                                        node source-document nested-scope depth
-                                        (1+ element-depth) active-includes
-                                        active-macros))))
+                                   (unless (eq policy :prune-children)
+                                     (prepare-title-macros
+                                      node source-document nested-scope depth
+                                      (1+ element-depth) active-includes
+                                      active-macros))))
                             (multiple-value-bind
                                   (children selected-descendant-p)
                                 (if archive-headline-only-p

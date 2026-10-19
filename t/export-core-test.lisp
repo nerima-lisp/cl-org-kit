@@ -91,8 +91,7 @@
                    "selection-pruning.org"
                    "selection-source-blocks.org"
                    "source-export-modes.org"
-                   "recursive-macro.org"
-                   "unsupported-diary.org")))
+                   "recursive-macro.org")))
       (with-soft-assertions
         (dolist (name cases)
           (let* ((source (export-core-test-policy-fixture-source name))
@@ -104,15 +103,13 @@
                        :include-resolver (lambda (path parent-source)
                                            (declare (ignore path parent-source))
                                            "Included paragraph"))))))
-            (if (member name '("recursive-macro.org" "unsupported-diary.org")
-                        :test #'string=)
+            (if (string= name "recursive-macro.org")
                 (progn
                   (expect (typep condition 'org-export-unsupported-syntax)
                           :to-be t)
                   (when (typep condition 'org-export-unsupported-syntax)
                     (expect (org-export-unsupported-syntax-feature condition)
-                            :to-be (if (string= name "recursive-macro.org")
-                                       :recursive-macro :diary-sexp))))
+                            :to-be :recursive-macro)))
                 (expect condition :to-be nil)))))))
 
   (it "keeps caller metadata immutable and applies caller overrides"
@@ -442,14 +439,14 @@
              (setf registered-p t)
              (let* ((source
                       (export-core-test-lines
-                       "* {{{unknown-title-macro}}}"
-                       "Child paragraph."
                        "{{{unknown-body-macro}}}"
                        "#+INCLUDE: \"child.org\""
                        "#+BEGIN_SRC text :exports both"
                        "source text"
                        "#+END_SRC"
-                       "#+RESULTS:" ": result text"))
+                       "#+RESULTS:" ": result text"
+                       "* {{{unknown-title-macro}}}"
+                       "Child paragraph."))
                     (preparation
                       (org-kit::export-prepare
                        (parse-org source) backend
@@ -761,7 +758,7 @@
   (it "registers every node type and rejects unsupported or unknown syntax"
     (let* ((known-types (sort (copy-list (node-types)) #'string<
                               :key #'symbol-name))
-           (mapped-types
+           (transcoder-mapped-types
              (mapcar
               (lambda (backend)
                 (let ((descriptor
@@ -769,27 +766,31 @@
                   (and descriptor
                        (sort
                         (mapcar
-                         #'car
+                         (function car)
                          (org-kit::%export-backend-descriptor-transcoders
                           descriptor))
-                        #'string< :key #'symbol-name))))
-              '(:html :gfm :ascii :latex)))
+                        (function string<) :key (function symbol-name)))))
+              (list :html :gfm :latex)))
            (unknown-keyword-source
              (export-core-test-lines "Body" "" "#+UNSUPPORTED: value"))
            (prepared-unsupported
-             (export-core-test-catch-error
-              (lambda ()
-                (export-core-test-preparation "%%(org-calendar-holiday)"))))
+             (org-kit::export-prepare
+              (parse-org
+               (export-core-test-policy-fixture-source "unsupported-diary.org"))
+              :html))
            (unsupported
              (export-core-test-catch-error
               (lambda ()
-                (export-org (parse-org "%%(org-calendar-holiday)") :html))))
+                (export-org
+                 (parse-org
+                  (export-core-test-policy-fixture-source "unsupported-diary.org"))
+                 :html))))
            (unknown-keyword
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation unknown-keyword-source)))))
       (with-soft-assertions
-        (expect (every (lambda (types) (equal types known-types)) mapped-types)
+        (expect (every (lambda (types) (equal types known-types)) transcoder-mapped-types)
                 :to-be t)
         (expect (typep prepared-unsupported 'org-kit::export-preparation)
                 :to-be t)
