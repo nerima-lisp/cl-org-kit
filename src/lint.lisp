@@ -83,9 +83,6 @@
                (document-root document))
     (nreverse nodes)))
 
-(defun %lint-source-slice (document begin end)
-  (subseq (document-text document) begin end))
-
 (defun %lint-context-value (context key)
   (getf context key))
 

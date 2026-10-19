@@ -707,8 +707,7 @@
                             (let ((trailing-start
                                     (position-if-not (function %lint-b-horizontal-space-p)
                                                      line :start suffix-end)))
-                              (and trailing-start
-                                   (not (= trailing-start (length line)))))
+                              trailing-start)
                             (not (and node
                                       (%lint-b-ancestor-type-p node allowed-types)))))
                (push
