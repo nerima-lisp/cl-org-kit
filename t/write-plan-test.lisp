@@ -635,6 +635,50 @@
                     :to-be #o100000)))))
       )
 
+  (it "detects parent replacement after a write and stops later entries"
+    (write-plan-test-call-with-directory
+     (lambda (base)
+       (let* ((root (write-plan-test-child-directory base "root"))
+              (outside (write-plan-test-child-directory base "outside"))
+              (outside-parent (write-plan-test-path outside "parent"))
+              (first-target (write-plan-test-path root "parent/first.txt"))
+              (later-target (write-plan-test-path root "parent/later.txt"))
+              (rename-symbol 'org-kit::write-plan-rename-temporary-file)
+              (original-rename (symbol-function rename-symbol))
+              (rename-calls 0)
+              (condition nil))
+         (unwind-protect
+              (progn
+                (setf (symbol-function rename-symbol)
+                      (lambda (&rest arguments)
+                        (let ((result (apply original-rename arguments)))
+                          (when (= (incf rename-calls) 1)
+                            (sb-posix:rename
+                             (namestring (write-plan-test-path root "parent"))
+                             (namestring outside-parent)))
+                          result)))
+                (setf condition
+                      (write-plan-test-capture-error
+                       (make-write-plan
+                        (list (make-write-plan-entry
+                               "parent/first.txt" "first"
+                               :create-directories-p t)
+                              (make-write-plan-entry
+                               "parent/later.txt" "later"
+                               :create-directories-p t)))
+                       root)))
+           (setf (symbol-function rename-symbol) original-rename))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when condition
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :containment-lost))
+           (expect rename-calls :to-be 1)
+           (expect (probe-file (write-plan-test-path outside-parent "first.txt"))
+                   :to-be-truthy)
+           (expect (probe-file first-target) :to-be nil)
+           (expect (probe-file later-target) :to-be nil))))))
+
   (it "copies and validates write-plan data"
     (let* ((source-path (copy-seq "entry.txt"))
            (source-content (copy-seq "payload"))

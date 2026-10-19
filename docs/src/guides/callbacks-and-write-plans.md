@@ -105,9 +105,20 @@ If a parent disappears after preflight and directory creation is disabled, the r
 applying a later entry can leave earlier entries applied.
 
 The final parent descriptor keeps file creation and rename attached to the
-directory opened for that entry, even if an ancestor pathname later changes.
-The API does not lock directory entries while walking the path, so callers must
-prevent concurrent renames or replacements of path components during
-application. The lexical duplicate check does not account for filesystem
-Unicode normalization, so a filesystem may treat distinct Unicode spellings
-of a name as aliases.
+directory opened for that entry. After each write, the library opens the parent
+path again from the root descriptor and compares its device and inode with the
+descriptor used for the write. If they differ or the path cannot be reopened,
+it signals `org-write-plan-error` with reason `:containment-lost` and stops
+before applying later entries.
+
+The check catches a missing or different parent at the re-open. A path restored
+before that check is not detected, and a rename can still happen during a write
+or after the check. Callers must ensure that no other actor can rename or
+replace path components while the plan is applied. The library rejects absolute
+paths, `..`, NUL, and symlink components; those checks
+do not remove the concurrent-rename trust boundary. A concurrent rename can
+move an already-written file.
+
+The lexical duplicate check does not account for filesystem Unicode
+normalization, so a filesystem may treat distinct Unicode spellings of a name
+as aliases.

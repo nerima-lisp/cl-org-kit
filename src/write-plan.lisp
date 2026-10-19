@@ -459,10 +459,12 @@ missing parent directories."
               (write-plan-error :missing-parent-directory path))
           (error condition)))))
 
-(defun write-plan-open-parent-directory (root-fd record)
+(defun write-plan-open-parent-directory
+    (root-fd record &optional
+               (create-p
+                 (%write-plan-entry-create-directories-p (first record))))
   (let ((directory-fds nil)
-        (path (second record))
-        (create-p (%write-plan-entry-create-directories-p (first record))))
+        (path (second record)))
     (unwind-protect
          (progn
            (sb-sys:without-interrupts
@@ -481,6 +483,38 @@ missing parent directories."
       (sb-sys:without-interrupts
         (dolist (fd directory-fds)
           (ignore-errors (sb-posix:close fd)))))))
+
+(defun write-plan-verify-parent-directory (root-fd record parent-fd)
+  (let ((path (second record))
+        (current-fd nil))
+    (unwind-protect
+         (progn
+           (setf current-fd
+                 (handler-case
+                     (write-plan-open-parent-directory root-fd record nil)
+                   (error (condition)
+                     (write-plan-error :containment-lost path condition))))
+           (let* ((opened-stat
+                    (handler-case
+                        (sb-posix:fstat parent-fd)
+                      (error (condition)
+                        (write-plan-error :containment-lost path condition))))
+                  (current-stat
+                    (handler-case
+                        (sb-posix:fstat current-fd)
+                      (error (condition)
+                        (write-plan-error :containment-lost path condition))))
+                  (same-directory-p
+                    (and (= (sb-posix:stat-dev opened-stat)
+                            (sb-posix:stat-dev current-stat))
+                         (= (sb-posix:stat-ino opened-stat)
+                            (sb-posix:stat-ino current-stat)))))
+             (unless same-directory-p
+               (write-plan-error :containment-lost path))
+             t))
+      (when current-fd
+        (sb-sys:without-interrupts
+          (ignore-errors (sb-posix:close current-fd)))))))
 
 (defun write-plan-random-temporary-name (random-state)
   (concatenate 'string ".org-kit-"
@@ -570,6 +604,7 @@ missing parent directories."
                         (%write-plan-unlinkat
                          parent-fd temporary-name 0)
                         "unlinkat")))))
+               (write-plan-verify-parent-directory root-fd record parent-fd)
                (sb-sys:without-interrupts
                  (sb-posix:close parent-fd)
                  (setf parent-fd nil))
@@ -584,10 +619,18 @@ missing parent directories."
           (setf parent-fd nil))))))
 
 (defun apply-write-plan (plan root &key (limits (make-limits)))
-  "Validate PLAN in full, then atomically replace each file below ROOT.
-All paths are relative POSIX paths. Every entry and limit is checked before
-directory or file creation. Each file uses a same-directory temporary file and
-rename; a multi-file plan is not transactional."
+  "Validate PLAN in full, then replace each target below ROOT through a
+same-directory temporary file and rename. ROOT must name an existing
+directory; a symlink used as ROOT resolves to its target. All paths are relative
+POSIX paths. Every entry and limit is checked before directory or file creation.
+Returns normalized relative paths in plan order; a multi-file plan is not
+transactional. The caller must prevent other actors from renaming or replacing
+path components during application. The library rejects absolute paths, `..`,
+NUL, and symlink components below the resolved root. After each write, it
+compares the opened parent's device and inode with a root-relative re-open. That
+check reports a missing or different parent. A path restored before the check
+is not detected. The check cannot prevent a rename during a write or after the
+check."
   (multiple-value-bind (canonical-root records)
       (write-plan-prepare plan root limits)
     (handler-case
