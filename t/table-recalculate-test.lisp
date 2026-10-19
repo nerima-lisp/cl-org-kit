@@ -137,7 +137,7 @@
              "policy/expected/recalculate/source-order-columns.org")))
       (expect (length (edit-result-spans result)) :to-be 2)))
 
-  (it "evaluates field formulas against the original table snapshot"
+  (it "evaluates field formulas in source order"
     (let ((result
             (table-recalculate-test-run-fixture
              "policy/recalculate/original-field-snapshot.org"
@@ -148,7 +148,7 @@
     (let* ((source
              (format nil "| a | b | c |~%|---+---+---|~%| 1 | 2 | 0 |~%#+TBLFM: @2$1=10::@2$3=vsum(@2$1..@2$2)+vsum(@2$1..@2$2)~%"))
            (expected
-             (format nil "| a | b | c |~%|---+---+---|~%| 10 | 2 | 6 |~%#+TBLFM: @2$1=10::@2$3=vsum(@2$1..@2$2)+vsum(@2$1..@2$2)~%"))
+             (format nil "| a | b | c |~%|---+---+---|~%| 10 | 2 | 24 |~%#+TBLFM: @2$1=10::@2$3=vsum(@2$1..@2$2)+vsum(@2$1..@2$2)~%"))
            (document (parse-org source))
            (table (table-recalculate-test-find-node (document-root document) :table))
            (result (table-recalculate document table)))
@@ -156,11 +156,11 @@
         (expect (document-text (edit-result-updated-document result)) :to-equal expected)
         (expect (document-text document) :to-equal source))))
 
-  (it "orders multiple field targets referenced by a vertical range"
+  (it "orders field targets before reading them through a vertical range"
     (let* ((source
              (format nil "| a | b | c | d |~%|---+---+---+---|~%| x | 1 | 0 | 0 |~%| x | 2 | 0 | 0 |~%| x | 3 | 0 | 0 |~%| x | 4 | 0 | 0 |~%#+TBLFM: @2$2=10::@4$2=20::@2$4=30::@5$3=vsum(@2$2..@4$2)~%"))
            (expected
-             (format nil "| a | b | c | d |~%|---+---+---+---|~%| x | 10 | 0 | 30 |~%| x | 2 | 0 | 0 |~%| x | 20 | 0 | 0 |~%| x | 4 | 6 | 0 |~%#+TBLFM: @2$2=10::@4$2=20::@2$4=30::@5$3=vsum(@2$2..@4$2)~%"))
+             (format nil "| a | b | c | d |~%|---+---+---+---|~%| x | 10 | 0 | 30 |~%| x | 2 | 0 | 0 |~%| x | 20 | 0 | 0 |~%| x | 4 | 32 | 0 |~%#+TBLFM: @2$2=10::@4$2=20::@2$4=30::@5$3=vsum(@2$2..@4$2)~%"))
            (document (parse-org source))
            (table (table-recalculate-test-find-node (document-root document) :table))
            (result (table-recalculate document table)))
@@ -172,7 +172,7 @@
     (let* ((source
              (format nil "| a | b | c |~%|---+---+---|~%| 1 | 2 | 0 |~%#+TBLFM: @2$1=10::@2$3=@2$1+@2$1~%"))
            (expected
-             (format nil "| a | b | c |~%|---+---+---|~%| 10 | 2 | 2 |~%#+TBLFM: @2$1=10::@2$3=@2$1+@2$1~%"))
+             (format nil "| a | b | c |~%|---+---+---|~%| 10 | 2 | 20 |~%#+TBLFM: @2$1=10::@2$3=@2$1+@2$1~%"))
            (document (parse-org source))
            (table (table-recalculate-test-find-node (document-root document) :table))
            (result (table-recalculate document table)))
@@ -195,10 +195,10 @@
   (it "resolves absolute, relative, ordinal, offset, and range hline references"
     (let* ((source
              (format nil
-                     "| key | value |~%|-----+-------|~%| a | 10 |~%| b | 20 |~%|-----+-------|~%| c | 30 |~%| d | 40 |~%|-----+-------|~%| e | 50 |~%| f | 60 |~%|-----+-------|~%| g | 70 |~%| h | 80 |~%| i | 90 |~%#+TBLFM: @3$2=@I$2+@-I$2+@+I$2+@II$2+@III+2$2::@10$2=vsum(@I$2..@II$2)~%"))
+                     "| key | value |~%|-----+-------|~%| a | 10 |~%| b | 20 |~%|-----+-------|~%| c | 30 |~%| d | 40 |~%|-----+-------|~%| e | 50 |~%| f | 60 |~%|-----+-------|~%| g | 70 |~%| h | 80 |~%| i | 90 |~%#+TBLFM: @3$2=@I$2+@-I$2+@+I$2+@II$2+@III+2$2::@>$2=vsum(@I$2..@II$2)~%"))
            (expected
              (format nil
-                     "| key | value |~%|-----+-------|~%| a | 10 |~%| b | 140 |~%|-----+-------|~%| c | 30 |~%| d | 40 |~%|-----+-------|~%| e | 50 |~%| f | 60 |~%|-----+-------|~%| g | 70 |~%| h | 80 |~%| i | 60 |~%#+TBLFM: @3$2=@I$2+@-I$2+@+I$2+@II$2+@III+2$2::@10$2=vsum(@I$2..@II$2)~%"))
+                     "| key | value |~%|-----+-------|~%| a | 10 |~%| b | 140 |~%|-----+-------|~%| c | 30 |~%| d | 40 |~%|-----+-------|~%| e | 50 |~%| f | 60 |~%|-----+-------|~%| g | 70 |~%| h | 80 |~%| i | 150 |~%#+TBLFM: @3$2=@I$2+@-I$2+@+I$2+@II$2+@III+2$2::@>$2=vsum(@I$2..@II$2)~%"))
            (document (parse-org source))
            (table (table-recalculate-test-find-node (document-root document) :table))
            (result (table-recalculate document table)))
@@ -351,11 +351,11 @@
         (table-recalculate-test-expect-table-error condition (second case))
         (expect (document-text document) :to-equal source))))
 
-  (it "resolves a named remote table in the same document"
+  (it "reads saved values from case-insensitive named remote tables"
     (let* ((source
-             (format nil "#+NAME: inputs~%| value |~%|-------|~%| 40 |~%#+NAME: result~%| value |~%|-------|~%| 0 |~%#+TBLFM: @2$1=remote(inputs,@2$1)+2~%"))
+             (format nil "#+NAME: Inputs~%| value |~%|-------|~%| 40 |~%#+TBLFM: @2$1=99~%#+NAME: result~%| value |~%|-------|~%| 0 |~%#+TBLFM: @2$1=remote(inputs,@2$1)+2~%"))
            (expected
-             (format nil "#+NAME: inputs~%| value |~%|-------|~%| 40 |~%#+NAME: result~%| value |~%|-------|~%| 42 |~%#+TBLFM: @2$1=remote(inputs,@2$1)+2~%"))
+             (format nil "#+NAME: Inputs~%| value |~%|-------|~%| 40 |~%#+TBLFM: @2$1=99~%#+NAME: result~%| value |~%|-------|~%| 42 |~%#+TBLFM: @2$1=remote(inputs,@2$1)+2~%"))
            (document (parse-org source))
            (tables (table-recalculate-test-find-nodes (document-root document) :table))
            (result (table-recalculate document (second tables))))
@@ -394,23 +394,51 @@
     (let* ((document (parse-org (format nil "| a |~%|---|~%| 1 |~%")))
            (table (table-recalculate-test-find-node (document-root document) :table))
            (tables (make-hash-table :test #'equal))
-           (cache (make-hash-table :test #'eq))
+           (remote-cache (make-hash-table :test #'eq))
            (state
              (org-kit::make-table-recalculate-state
-              :standard-rows #(#(t)) :hline-rows #() :header-row nil :values nil))
+              :standard-rows #(#(t)) :data-rows nil :header-row nil
+              :hline-rows #() :values (make-hash-table :test #'equal)
+              :column-count 1 :header-columns (make-hash-table :test #'equal)))
            (context
-             (org-kit::make-table-recalculate-context :tables tables :cache cache))
+             (org-kit::make-table-recalculate-context
+              :tables tables :remote-cache remote-cache))
            (expression
              (org-kit::table-calc-assignment-expression
               (table-recalculate-test-assignment "$1=1")))
            (remote-function nil))
       (setf (gethash "remote" tables) table
-            (gethash table cache) state
+            (gethash table remote-cache) state
             remote-function
             (org-kit::table-recalculate-remote-reference-function context table))
       (expect (table-recalculate-test-condition
                (lambda () (funcall remote-function "remote" expression 1 1)))
               :to-equal '(:table :invalid-reference))))
+  (it "caches remote table metadata and charges it to the formula work budget"
+    (let* ((document
+             (parse-org (format nil
+                                "#+NAME: source~%| one | two |~%|---+---|~%| 1 | 2 |~%")))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (budget (org-kit::make-table-calc-work-budget))
+           (limits (make-limits :max-formula-work 100))
+           (context
+             (org-kit::make-table-recalculate-context
+              :limits limits :work-budget budget))
+           (state (org-kit::table-recalculate-remote-state context table))
+           (used (org-kit::table-calc-work-budget-used budget))
+           (cached-state (org-kit::table-recalculate-remote-state context table))
+           (limited-context
+             (org-kit::make-table-recalculate-context
+              :limits (make-limits :max-formula-work (1- used))
+              :work-budget (org-kit::make-table-calc-work-budget))))
+      (with-soft-assertions
+        (expect (plusp used) :to-be t)
+        (expect (eq cached-state state) :to-be t)
+        (expect (org-kit::table-calc-work-budget-used budget) :to-equal used)
+        (expect (table-recalculate-test-condition
+                 (lambda ()
+                   (org-kit::table-recalculate-remote-state limited-context table)))
+                :to-equal (list :limit :max-formula-work (1- used) used)))))
 
   (it "returns a cached state for a previously computed table"
     (let* ((table :cached-table)
@@ -444,18 +472,19 @@
       (table-recalculate-test-expect-table-error condition :unknown-remote-table)
       (expect (document-text document) :to-equal source)))
 
-  (it "rejects a cycle between named remote tables without changing the document"
+  (it "reads saved values without recursively recalculating remote table formulas"
     (let* ((source
-             (format nil "#+NAME: left~%| value |~%|-------|~%| 0 |~%#+TBLFM: @2$1=remote(right,@2$1)~%#+NAME: right~%| value |~%|-------|~%| 0 |~%#+TBLFM: @2$1=remote(left,@2$1)~%"))
+             (format nil "#+NAME: left~%| value |~%|-------|~%| 1 |~%#+TBLFM: @2$1=remote(right,@2$1)~%#+NAME: right~%| value |~%|-------|~%| 2 |~%#+TBLFM: @2$1=remote(left,@2$1)~%"))
+           (expected
+             (format nil "#+NAME: left~%| value |~%|-------|~%| 2 |~%#+TBLFM: @2$1=remote(right,@2$1)~%#+NAME: right~%| value |~%|-------|~%| 2 |~%#+TBLFM: @2$1=remote(left,@2$1)~%"))
            (document (parse-org source))
            (table (table-recalculate-test-find-node (document-root document) :table))
-           (condition
-             (table-recalculate-test-caught-condition
-              (lambda () (table-recalculate document table)))))
-      (table-recalculate-test-expect-table-error condition :cyclic-remote-reference)
-      (expect (document-text document) :to-equal source)))
+           (result (table-recalculate document table)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result)) :to-equal expected)
+        (expect (document-text document) :to-equal source))))
 
-  (it "calls a registered formula function with evaluated numeric arguments"
+  (it "calls registered formula functions after built-in resolution"
     (let* ((source
              (format nil "| value |~%|-------|~%| 0 |~%#+TBLFM: @2$1=double(21)~%"))
            (expected
@@ -473,7 +502,20 @@
       (with-soft-assertions
         (expect arguments :to-equal '(21))
         (expect (document-text (edit-result-updated-document result)) :to-equal expected)
-        (expect (document-text document) :to-equal source))))
+        (expect (document-text document) :to-equal source)))
+    (let* ((source
+             (format nil "| value |~%|-------|~%| 0 |~%#+TBLFM: @2$1=exp(1)~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (result
+             (table-recalculate
+              document table
+              :functions (list (cons "exp" (lambda (value)
+                                              (declare (ignore value))
+                                              99))))))
+      (expect (document-text (edit-result-updated-document result))
+              :to-equal
+              (format nil "| value |~%|-------|~%| 2.7182818 |~%#+TBLFM: @2$1=exp(1)~%"))))
 
   (it "passes evaluated strings to registered formula functions"
     (let* ((source

@@ -353,13 +353,8 @@
   (unless (and (realp value)
                (< (abs value) most-positive-double-float))
     (table-calc-evaluation-error :non-finite-result :formula))
-  (let* ((text (format nil "~,16F" (float value 1d0)))
-         (trimmed (string-right-trim "0" text))
-         (canonical (if (and (plusp (length trimmed))
-                             (char= (char trimmed (1- (length trimmed))) #\.))
-                        (subseq trimmed 0 (1- (length trimmed)))
-                        trimmed))
-         (decimal (parse-safe-decimal canonical :limits limits)))
+  (let* ((text (substitute #\e #\d (format nil "~,17E" (float value 1d0))))
+         (decimal (parse-safe-decimal text :limits limits)))
     (setf (safe-decimal-float-p decimal) t)
     decimal))
 
@@ -447,12 +442,19 @@
     (multiple-value-bind (first-row first-column)
         (table-calc-reference-position
          first-reference reference-position-function target)
-      (multiple-value-bind (last-row last-column)
+      (multiple-value-bind (resolved-last-row last-column)
           (table-calc-reference-position
            last-reference reference-position-function target)
-        (%make-table-calc-range-value
-         (min first-row last-row) (max first-row last-row)
-         (min first-column last-column) (max first-column last-column))))))
+        (let ((last-row
+                (if (eq (table-calc-reference-row-kind last-reference)
+                        :hline-anchor)
+                    (1- resolved-last-row)
+                    resolved-last-row)))
+          (when (< last-row 1)
+            (table-calc-evaluation-error :invalid-reference target))
+          (%make-table-calc-range-value
+           (min first-row last-row) (max first-row last-row)
+           (min first-column last-column) (max first-column last-column)))))))
 
 (defun table-calc-number-add (left right limits &optional calculation-precision)
   (if (and (safe-decimal-p left) (safe-decimal-p right))
@@ -610,7 +612,7 @@
 (defun table-calc-type-code (value)
   (cond
     ((eq value +table-calc-nan+) 12)
-    ((stringp value) 4)
+    ((stringp value) 101)
     ((safe-decimal-p value)
      (cond ((safe-decimal-float-p value) 3)
            ((minusp (safe-decimal-exponent value)) 2)
@@ -678,20 +680,23 @@
         name argument mode cell-value-function limits budget target fraction-p
         duration-p unit-mode-p calculation-precision))
       ((member name '("exp" "sin" "tan") :test #'string=)
-       (unless (or (safe-decimal-p argument) (numberp argument))
+       (unless (or (safe-decimal-p argument) (realp argument))
          (table-calc-evaluation-error
           (if (and (member :symbolic flags) (stringp argument))
               :unsupported-mode
               :invalid-number)
           target))
-       (let* ((number (float (table-calc-number-rational argument) 1d0))
-              (angle (if angle-degrees-p (* number (/ pi 180d0)) number))
-              (result (cond ((string= name "exp") (exp number))
-                            ((string= name "sin") (sin angle))
-                            (t (tan angle)))))
-         (table-calc-decimal-at-precision
-          (table-calc-float-to-decimal result limits)
-          calculation-precision limits)))
+       (handler-case
+           (let* ((number (float (table-calc-number-rational argument) 1d0))
+                  (angle (if angle-degrees-p (* number (/ pi 180d0)) number))
+                  (result (cond ((string= name "exp") (exp number))
+                                ((string= name "sin") (sin angle))
+                                (t (tan angle)))))
+             (table-calc-decimal-at-precision
+              (table-calc-float-to-decimal result limits)
+              calculation-precision limits))
+         (arithmetic-error ()
+           (table-calc-evaluation-error :non-finite-result target))))
       ((string= name "string")
        (table-calc-value-string argument limits))
       ((string= name "typeof")
@@ -722,10 +727,14 @@
                     (first (table-calc-expression-children variable-assignment))))
          (point-expression (second (table-calc-expression-children variable-assignment)))
          (function-children (table-calc-expression-children function-expression)))
-    (unless (and (string= (table-calc-expression-value function-expression) "exp")
+    (unless (and (eq (table-calc-expression-kind function-expression) :function)
+                 (stringp (table-calc-expression-value function-expression))
+                 (string= (table-calc-expression-value function-expression) "exp")
                  (= (length function-children) 1)
                  (eq (table-calc-expression-kind (first function-children)) :symbol)
-                 (string= (table-calc-expression-value (first function-children)) variable))
+                 (stringp variable)
+                 (string= (table-calc-expression-value (first function-children))
+                          variable))
       (table-calc-evaluation-error :unsupported-mode target))
     (let* ((point (table-calc-evaluate-expression
                    point-expression reference-position-function cell-value-function
@@ -738,30 +747,37 @@
                     mode limits budget target :flags flags :functions functions
                     :reference-value-function reference-value-function
                     :remote-function remote-function :current-row current-row
-                    :current-column current-column))
-           (order (if (safe-decimal-p point)
-                      (float (safe-decimal-rational point) 1d0)
-                      (float point 1d0))))
-      (unless (and (integerp (table-calc-number-rational degree))
+                    :current-column current-column)))
+      (unless (or (safe-decimal-p point) (realp point))
+        (table-calc-evaluation-error :unsupported-mode target))
+      (unless (and (or (safe-decimal-p degree) (realp degree))
+                   (integerp (table-calc-number-rational degree))
                    (= (table-calc-number-rational degree) 2))
         (table-calc-evaluation-error :unsupported-mode target))
-      (let* ((calculation-precision
-               (table-calc-effective-precision flags limits))
-             (coefficient-decimal
-               (table-calc-decimal-at-precision
-                (table-calc-float-to-decimal (exp order) limits)
-                calculation-precision limits))
-             (coefficient (float (safe-decimal-rational coefficient-decimal) 1d0))
-             (quadratic (/ coefficient 2d0))
-             (constant (* coefficient (- 1 order)))
-             (point-text (table-calc-value-string point limits))
-             (coefficient-text (table-calc-taylor-float-string coefficient))
-             (quadratic-text (table-calc-taylor-float-string quadratic))
-             (constant-text (table-calc-taylor-float-string (abs constant)))
-             (sign (if (minusp constant) "-" "+")))
-        (format nil "~A ~A + ~A (~A - ~A)^2 ~A ~A"
-                coefficient-text variable quadratic-text variable point-text
-                sign constant-text)))))
+      (when (zerop (table-calc-number-rational point))
+        (return-from table-calc-taylor-number
+          (format nil "~A + ~A^2 / 2 + 1" variable variable)))
+      (handler-case
+          (let* ((order (float (table-calc-number-rational point) 1d0))
+                 (calculation-precision
+                   (table-calc-effective-precision flags limits))
+                 (coefficient-decimal
+                   (table-calc-decimal-at-precision
+                    (table-calc-float-to-decimal (exp order) limits)
+                    calculation-precision limits))
+                 (coefficient (float (safe-decimal-rational coefficient-decimal) 1d0))
+                 (quadratic (/ coefficient 2d0))
+                 (constant (* coefficient (- 1 order)))
+                 (point-text (table-calc-value-string point limits))
+                 (coefficient-text (table-calc-taylor-float-string coefficient))
+                 (quadratic-text (table-calc-taylor-float-string quadratic))
+                 (constant-text (table-calc-taylor-float-string (abs constant)))
+                 (sign (if (minusp constant) "-" "+")))
+            (format nil "~A ~A + ~A (~A - ~A)^2 ~A ~A"
+                    coefficient-text variable quadratic-text variable point-text
+                    sign constant-text))
+        (arithmetic-error ()
+          (table-calc-evaluation-error :non-finite-result target))))))
 
 (defun table-calc-taylor-float-string (number)
   (let* ((order (if (zerop number) 0
@@ -935,8 +951,14 @@
                                      :remote-function remote-function
                                      :current-row current-row
                                      :current-column current-column)))
-                             (unless (member condition '(t nil))
+                             (unless (or (member condition '(t nil))
+                                         (safe-decimal-p condition)
+                                         (realp condition))
                                (table-calc-evaluation-error :invalid-value target))
+                             (when (or (safe-decimal-p condition) (realp condition))
+                               (setf condition
+                                     (not (zerop
+                                           (table-calc-number-rational condition)))))
                              (push
                               (table-calc-evaluate-expression
                                (if condition (second children) (third children))
@@ -1148,7 +1170,10 @@
       (return-from table-calc-format-result
         (table-calc-rational-string (table-calc-number-rational value))))
     (if float-result-p
-        (table-calc-significant-decimal-string value precision limits)
+        (let ((order (table-calc-number-base10-order value limits)))
+          (if (or (< order -2) (>= order 12))
+              (table-calc-scientific-string value precision nil limits)
+              (table-calc-significant-decimal-string value precision limits)))
         (table-calc-decimal-string decimal))))
 
 (defun table-calc-evaluate-assignment

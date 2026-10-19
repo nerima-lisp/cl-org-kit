@@ -164,15 +164,24 @@
 
   (it "evaluates each Calc function listed in the Org table manual"
     (dolist (case '(("@1$1=exp(1)" . "2.7182818")
+                    ("@1$1=exp(-50)" . "1.9287498e-22")
+                    ("@1$1=exp(80);p20" . "5.5406224e34")
                     ("@1$1=sin(30)" . "0.5")
+                    ("@1$1=sin(0.0000000001)" . "1.7453293e-12")
                     ("@1$1=sin(30);D" . "0.5")
                     ("@1$1=tan(45);D" . "1.")
                     ("@1$1=taylor(exp(x),x=7,2)"
                      . "1096.63315843 x + 548.316579215 (x - 7)^2 - 6579.79895058")
+                    ("@1$1=taylor(exp(x),x=0,2)" . "x + x^2 / 2 + 1")
                     ("@1$1=if(1<20,teen,string(\"\"))" . "teen")
                     ("@1$1=string(42)" . "42")
-                    ("@1$1=typeof(3)" . "1")))
-      (expect (table-calc-eval-test-evaluate (car case)) :to-equal (cdr case)))
+                    ("@1$1=vmean(@1$2..@1$2);Ef-1" . "")
+                    ("@1$1=typeof(string(\"\"))" . "101")))
+      (expect
+        (table-calc-eval-test-evaluate
+         (car case)
+         :cells (table-calc-eval-test-cell-map '(1 2 "")))
+        :to-equal (cdr case)))
     (expect (table-calc-eval-test-evaluate "@1$1=vmean(@1$2..@1$3)"
                                            :cells (table-calc-eval-test-cell-map
                                                    '(1 2 "2") '(1 3 "4")))
@@ -373,7 +382,7 @@
     (expect (table-calc-eval-test-evaluate "@1$1=-0;%.2f")
             :to-equal "-0.00")
     (expect (table-calc-eval-test-evaluate "@1$1=1e-3")
-            :to-equal "0.001")))
+            :to-equal "1e-3")))
 
   (it "evaluates current-column targets and assignment defaults through parsed input"
     (let* ((assignment (table-calc-eval-test-assignment "$2=7"))
@@ -435,8 +444,8 @@
              :hline-anchors '((1 . 3) (2 . 5))
              :cells (table-calc-eval-test-cell-map
                      '(3 2 "10") '(4 2 "") '(5 2 "20")))))
-      (expect before-insertion :to-equal "30")
-      (expect after-insertion :to-equal "30"))
+      (expect before-insertion :to-equal "10")
+      (expect after-insertion :to-equal "10"))
     (let ((condition
             (table-calc-eval-test-condition
              "@1$3=vsum(@I$2..@II$2)"
@@ -788,7 +797,7 @@
               :to-equal :default)
       (expect (org-kit::table-calc-type-code org-kit::+table-calc-nan+)
               :to-equal 12)
-      (expect (org-kit::table-calc-type-code "text") :to-equal 4)
+      (expect (org-kit::table-calc-type-code "text") :to-equal 101)
       (expect (org-kit::table-calc-type-code float-decimal) :to-equal 3)
       (expect (org-kit::table-calc-type-code fraction-decimal) :to-equal 2)
       (expect (org-kit::table-calc-type-code integer-decimal) :to-equal 1)
@@ -947,9 +956,10 @@
        (table-calc-eval-test-condition (first case)) (second case)))
     (expect (table-calc-eval-test-evaluate "@1$1=if(1<0,2,3)")
             :to-equal "3")
-    (table-calc-eval-test-expect-table-error
-     (table-calc-eval-test-condition "@1$1=if(3,2,1)")
-     :invalid-value)
+    (expect (table-calc-eval-test-evaluate "@1$1=if(3,2,1)")
+            :to-equal "2")
+    (expect (table-calc-eval-test-evaluate "@1$1=if(0,2,1)")
+            :to-equal "1")
     (dolist (name '("exp" "sin" "tan"))
       (table-calc-eval-test-expect-table-error
        (table-calc-eval-test-condition
@@ -982,11 +992,18 @@
             :to-be t)
     (expect (org-kit::table-calc-taylor-float-string 1d0)
             :to-equal "1")
+    (dolist (case '(("@1$1=taylor(sin(x),x=0,2)" :unsupported-mode)
+                    ("@1$1=taylor(exp(x),x=0,3)" :unsupported-mode)
+                    ("@1$1=taylor(1,x=0,2)" :unsupported-mode)
+                    ("@1$1=taylor(exp(x),x=y,2)" :unsupported-mode)
+                    ("@1$1=taylor(exp(x),x=710,2)" :non-finite-result)
+                    ("@1$1=exp(710)" :non-finite-result)))
+      (table-calc-eval-test-expect-table-error
+       (table-calc-eval-test-condition (first case)) (second case)))
     (table-calc-eval-test-expect-table-error
-     (table-calc-eval-test-condition "@1$1=taylor(sin(x),x=0,2)")
-     :unsupported-mode)
-    (table-calc-eval-test-expect-table-error
-     (table-calc-eval-test-condition "@1$1=taylor(exp(x),x=0,3)")
+     (table-calc-eval-test-condition
+      "@1$1=taylor(@1$2,x=7,2)"
+      :cells (table-calc-eval-test-cell-map '(1 2 "3")))
      :unsupported-mode)
     (dolist (text '("abc" "1:2"))
       (expect (org-kit::table-calc-duration-cell-seconds text)

@@ -765,13 +765,14 @@
                  (first (org-kit::table-calc-expression-children valid-remote)))
                 :to-be :function))
       (dolist (formula '("$1=remote(1,@2$1)"
-                        "$1=if(1,2)"
-                        "$1=taylor(1,2,3)"
-                        "$1=exp()"
-                        "$1=sin()"
-                        "$1=tan()"
-                        "$1=string()"
-                        "$1=typeof()"))
+                         "$1=remote(source,@+1$-1)"
+                         "$1=if(1,2)"
+                         "$1=taylor(1,2,3)"
+                         "$1=exp()"
+                         "$1=sin()"
+                         "$1=tan()"
+                         "$1=string()"
+                         "$1=typeof()"))
         (let ((condition (table-calc-test-condition formula)))
           (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
           (when (typep condition 'org-table-unsupported-syntax)

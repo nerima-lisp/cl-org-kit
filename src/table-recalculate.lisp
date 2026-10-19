@@ -2,10 +2,11 @@
 (in-package #:org-kit)
 
 (defstruct table-recalculate-entry assignment row column owner)
-(defstruct table-recalculate-state standard-rows data-rows header-row hline-rows values)
+(defstruct table-recalculate-state
+  standard-rows data-rows header-row hline-rows values column-count header-columns)
 (defstruct table-recalculate-context
   document tables cache active functions constants constants-declared-p
-  limits work-budget)
+  limits work-budget (remote-cache (make-hash-table :test #'eq)))
 
 (defun table-recalculate-signal-error (target reason message)
   (error 'org-table-error
@@ -66,13 +67,15 @@
   (let ((cell (table-recalculate-cell standard-rows row column)))
     (if cell (node-property cell :value) "")))
 
-(defun table-recalculate-header-columns (header-row)
+(defun table-recalculate-header-columns (header-row &optional limits work-budget)
   (let ((columns (make-hash-table :test #'equal)))
     (when header-row
       (loop for cell in (node-children header-row)
             for column from 1
             for name = (node-property cell :value)
-            do (setf (gethash name columns)
+            do (when limits
+                 (table-calc-charge-work limits work-budget 1))
+               (setf (gethash name columns)
                      (if (gethash name columns) :ambiguous column))))
     columns))
 
@@ -539,12 +542,15 @@
      :reference-value-function reference-value-function)))
 
 (defun table-recalculate-work-map-cell-value
-    (work-map standard-rows row column)
+    (work-map standard-rows row column &optional fallback-work-map)
   (multiple-value-bind (value present)
       (gethash (table-recalculate-target-key row column) work-map)
     (if present
         value
-        (table-recalculate-cell-value standard-rows row column))))
+        (if fallback-work-map
+            (table-recalculate-work-map-cell-value
+             fallback-work-map standard-rows row column)
+            (table-recalculate-cell-value standard-rows row column)))))
 
 (defun table-recalculate-evaluate-entries
     (entries row-count column-count header-columns limits work-budget
@@ -579,7 +585,7 @@
     values))
 
 (defun table-recalculate-table-name-map (document)
-  (let ((tables (make-hash-table :test #'equal)))
+  (let ((tables (make-hash-table :test #'equalp)))
     (map-nodes
      (lambda (node)
        (when (and (eq (node-type node) :table)
@@ -714,6 +720,32 @@
       (table-recalculate-signal-error
        target :unknown-remote-table "Formula references an unknown named table"))
     table))
+(defun table-recalculate-remote-state (context table)
+  (let ((cache (table-recalculate-context-remote-cache context)))
+    (multiple-value-bind (cached present-p) (gethash table cache)
+      (when present-p
+        (return-from table-recalculate-remote-state cached)))
+    (let ((limits (table-recalculate-context-limits context))
+          (work-budget (table-recalculate-context-work-budget context)))
+      (unless (eq (node-property table :type) :org)
+        (table-recalculate-signal-error
+         table :unsupported-table-type "Only Org pipe tables can be recalculated"))
+      (multiple-value-bind (standard-rows data-rows header-row hline-rows)
+          (table-recalculate-standard-rows table limits work-budget)
+        (table-calc-charge-work limits work-budget (length standard-rows))
+        (let* ((column-count
+                 (reduce #'max standard-rows :key #'length :initial-value 0))
+               (header-columns
+                 (table-recalculate-header-columns
+                  header-row limits work-budget))
+               (state
+                 (make-table-recalculate-state
+                  :standard-rows standard-rows :data-rows data-rows
+                  :header-row header-row :hline-rows hline-rows
+                  :values (make-hash-table :test #'equal)
+                  :column-count column-count :header-columns header-columns)))
+          (setf (gethash table cache) state)
+          state)))))
 
 (defun table-recalculate-remote-reference-function (context target)
   (lambda (table-name reference-expression current-row current-column)
@@ -721,15 +753,14 @@
       (table-recalculate-signal-error
        target :unknown-remote-table "Remote table name must be a string"))
     (let* ((table (table-recalculate-remote-table context table-name target))
-           (state (table-recalculate-compute-state context table))
+           (state (table-recalculate-remote-state context table))
            (standard-rows (table-recalculate-state-standard-rows state))
            (row-count (length standard-rows))
-           (column-count (reduce #'max standard-rows
-                                 :key #'length :initial-value 0))
-           (header-columns
-             (table-recalculate-header-columns
-              (table-recalculate-state-header-row state)))
-           (hline-rows (table-recalculate-state-hline-rows state)))
+           (column-count (table-recalculate-state-column-count state))
+           (header-columns (table-recalculate-state-header-columns state))
+           (hline-rows (table-recalculate-state-hline-rows state))
+           (limits (table-recalculate-context-limits context))
+           (work-budget (table-recalculate-context-work-budget context)))
       (case (table-calc-expression-kind reference-expression)
         (:reference
          (multiple-value-bind (row column)
@@ -739,26 +770,21 @@
               hline-rows target)
            (table-recalculate-state-cell-value state row column)))
         (:range
-         (let* ((children
-                  (table-calc-expression-children reference-expression))
-                (first-reference
-                  (table-calc-expression-value (first children)))
-                (last-reference
-                  (table-calc-expression-value (second children))))
-           (multiple-value-bind (first-row first-column)
-               (table-recalculate-reference-position
-                first-reference current-row current-column row-count column-count
-                header-columns hline-rows target)
-             (multiple-value-bind (last-row last-column)
-                 (table-recalculate-reference-position
-                  last-reference current-row current-column row-count column-count
-                  header-columns hline-rows target)
-               (loop for row from (min first-row last-row)
-                       to (max first-row last-row)
-                     append (loop for column from (min first-column last-column)
-                                    to (max first-column last-column)
-                                  collect (table-recalculate-state-cell-value
-                                           state row column)))))))
+         (let ((range
+                 (table-calc-resolve-range
+                  reference-expression
+                  (lambda (reference)
+                    (table-recalculate-reference-position
+                     reference current-row current-column row-count column-count
+                     header-columns hline-rows target))
+                  limits work-budget target)))
+           (loop for row from (table-calc-range-value-first-row range)
+                   to (table-calc-range-value-last-row range)
+                 append (loop for column from
+                              (table-calc-range-value-first-column range)
+                                to (table-calc-range-value-last-column range)
+                              collect (table-recalculate-state-cell-value
+                                       state row column)))))
         (otherwise
          (table-recalculate-signal-error
           target :invalid-reference "Remote reference must select a field or range"))))))
@@ -862,9 +888,8 @@
              field-entries row-count column-count header-columns
              limits work-budget field-values
              (lambda (work-map row column)
-               (declare (ignore work-map))
                (table-recalculate-work-map-cell-value
-                column-values standard-rows row column))
+                work-map standard-rows row column column-values))
              table :hline-rows hline-rows :functions functions
              :reference-value-function reference-value-function
              :remote-function
@@ -873,7 +898,8 @@
              :standard-rows standard-rows :data-rows data-rows
              :header-row header-row :hline-rows hline-rows
              :values (table-recalculate-final-values
-                      column-values field-values))))))))
+                      column-values field-values)
+             :column-count column-count :header-columns header-columns)))))))
 
 (defun table-recalculate-expected-canonical (document values standard-rows)
   (let ((expected (edit-canonical-copy (edit-canonical-document document))))

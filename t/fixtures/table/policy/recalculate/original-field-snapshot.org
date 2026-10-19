@@ -1,4 +1,4 @@
-# T5a policy fixture: field formulas read the original table snapshot
+# T5a policy fixture: field formulas read earlier source-order results
 | first | second | third |
 |-------+--------+-------|
 | 2     | 3      | 4     |

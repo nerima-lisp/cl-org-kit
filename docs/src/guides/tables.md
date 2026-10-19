@@ -3,6 +3,8 @@
 Formatting and structural edits apply to Org pipe tables. Table.el tables are
 not supported by these editing functions. Each successful operation returns an
 `edit-result`; read its updated document with `edit-result-updated-document`.
+The examples require the runtime dependencies listed in
+[Getting Started](../getting-started.md#asdf) to be available through ASDF.
 
 ## Format, insert, and sort
 
@@ -39,19 +41,26 @@ not supported by these editing functions. Each successful operation returns an
     (org-kit:write-org sorted)))
 ~~~
 
+In this call, `1` selects the first table column as the sort key.
+
 The structural edit functions are:
 
-- `table-insert-row` and `table-delete-row`
-- `table-move-row`, which moves a row within its hline-delimited section
-- `table-insert-column` and `table-delete-column`
-- `table-move-column`
+- `(table-insert-row document target index &key values)` and
+  `(table-delete-row document target index)`
+- `(table-move-row document target from to)`, which moves a row within its
+  hline-delimited section
+- `(table-insert-column document target index &key values)` and
+  `(table-delete-column document target index)`
+- `(table-move-column document target from to)`
 
 Structural edit row and column positions are one-based. Row positions count
 standard rows and ignore hlines. `table-move-row` takes source and destination
 positions; a row cannot move across an hline. Without hlines, all rows are in
 the same section.
 
-Insert functions accept optional cell values as single-line strings.
+`table-insert-row :values` supplies cells in column order, and
+`table-insert-column :values` supplies them in standard-row order. Missing
+entries create blank cells. All values are single-line strings.
 `table-sort-rows` accepts `:order` as `:ascending` or `:descending`, `:type`
 as `:lexical` or `:numeric`, and optional one-based `:start` and `:end` row
 positions. The bounds are inclusive and count standard rows; hline rows do not
@@ -78,8 +87,9 @@ recalculation, which follows Org's first-directive rule below.
 ## Recalculate formulas
 
 `table-recalculate` has the signature
-`(table-recalculate document target &key functions)`. It evaluates formulas
-for an Org pipe table and returns an `edit-result`; use
+`(table-recalculate document target &key functions)`. `target` must resolve to
+an Org pipe-table node in `document`. It evaluates formulas for that table and
+returns an `edit-result`; use
 `edit-result-updated-document` to read the result. The input document remains
 unchanged. With no `TBLFM`, the result contains the input document and no edit
 spans. If several `#+TBLFM` directives follow a table, recalculation applies
@@ -91,13 +101,13 @@ including the header, and ignore hline rows. `@I`, `@II`, and later Roman
 numerals select the first standard row after the matching hline. `@-I` and
 `@+I` select the row after the nearest hline above or below the current row.
 For example, `@-I$2` selects column 2 in the row below the hline above.
-`@I..II` spans from the row after the first hline through the row after the
+`@I..II` spans from the row after the first hline through the row before the
 second; omitting the second `@` is Org shorthand for `@I..@II`. `@III+1`
 selects the first standard row after the third hline, and `@III+2` selects the
-second. Other supported references include absolute rows such as `@3$2`, the
-current row such as `@0$2`, a relative row such as `@+1$2`, the first and last
-rows (`@<`, `@>`), and named columns such as `@>$Price`. Named columns use the
-table's header row.
+second standard row after the third hline. Other supported references include
+absolute rows such as `@3$2`, the current row such as `@0$2`, a relative row
+such as `@+1$2`, the first and last rows (`@<`, `@>`), and named columns such
+as `@>$Price`. Named columns use the table's header row.
 
 Assignments can target a field, a row or rectangular range, or a whole column.
 A row formula such as `@3=...` assigns across the selected standard row. A
@@ -110,11 +120,12 @@ over a column formula for any field both formulas target.
 An expression can read a field or range from another named table in the same
 document with `remote(name, ref)`. Give the source table a `#+NAME:` immediately
 before it; `name` can be bare or quoted, and `ref` is an absolute field or
-range reference in that table. A remote range returns its cells in row-major
-order and can be passed to a vector function, for example
+range reference in that table. Names are matched without regard to case. A
+remote read uses the source table's saved cell contents and does not recalculate
+its `TBLFM`. A remote range returns its cells in row-major order and can be
+passed to a vector function, for example
 `vsum(remote(inputs,@2$1..@3$1))`. Remote references to another document are
-not supported. A remote dependency cycle signals `org-table-error` with reason
-`:cyclic-remote-reference`.
+not supported.
 
 `#+CONSTANTS:` defines document-level formula constants, for example
 `#+CONSTANTS: pi=3.14`; reference that constant as `$pi` in a formula. A
@@ -134,19 +145,23 @@ the current row contains `2`, `4`, and `6` in columns 1 through 3.
 | `vmean` | `vmean($1..$3)` | `4` |
 | `vsum` | `vsum($1..$3)` | `12` |
 | `taylor` | `taylor(exp(x),x=7,2)` | `1096.63315843 x + 548.316579215 (x - 7)^2 - 6579.79895058` |
-| `if` | `if(1<20,teen,string(""))` | `teen` |
+| `if` | `if(3,2,1)` | `2` |
 | `string` | `string(42)` | The text `42` |
-| `typeof` | `typeof(3)` | Type code `1` |
+| `typeof` | `typeof("a")` | Type code `101` |
 
 The current `taylor` implementation accepts `taylor(exp(x),x=point,2)`, where
 `point` is a numeric expression, and returns a second-order expansion around
 that value.
 
-The existing vector helpers `vmin`, `vmax`, and `vcount` remain available; for
-example, `vmin($1..$3)` returns `2` for the values above.
+The existing vector helpers `vmin`, `vmax`, and `vcount` are also available.
 
-Other function names can be supplied for one recalculation call. `:functions`
-is an alist from function-name strings to Common Lisp function designators.
+`if` accepts boolean expressions and numeric conditions; zero is false and any
+nonzero number is true. For example, `if(0,2,1)` returns `1`. Calc type code `1`
+denotes an integer, while `101` denotes a string.
+
+Other function names can be supplied for one recalculation call. Built-in names
+take precedence and cannot be overridden. `:functions` is an alist from
+function-name strings to Common Lisp function designators.
 Callbacks receive evaluated positional arguments as numbers or strings and
 must return a real number or string. An unregistered function signals
 `org-table-unsupported-syntax` with feature `:unknown-function`.
@@ -188,20 +203,22 @@ Add flags after a semicolon in a formula. Supported flags are `pN`,
 precision, so `exp(1);p20` still displays `2.7182818`. `nN`, `sN`, and `eN`
 format numeric results as normal, scientific, or engineering output with the
 selected significant digits. `fN` formats a fixed number of decimal places;
-for example, `1/3;n3` gives `0.333`, `12345.0;s3` gives `1.23e4`,
-`12345.0;e2` gives `12e3`, and `1/3;f4` gives `0.3333`. `D` selects degrees
-and is the default angle mode; `R` selects radians for `sin` and `tan`.
+the special `f-1` format emits blank output for `nan` and uses one decimal place
+for other numbers. For example, `1/3;n3` gives `0.333`, `12345.0;s3` gives
+`1.23e4`, `12345.0;e2` gives `12e3`, and `1/3;f4` gives `0.3333`. `D` selects
+degrees and is the default angle mode; `R` selects radians for `sin` and `tan`.
 Upper-case `E` and `N` control empty and non-numeric fields; lower-case `eN`
 and `nN` select number formats. `E` interprets empty fields as `nan`. `N` treats
 empty and non-numeric fields as zero, including when `E` is also present. For
 example, `vmean($1..$7);EN` combines the two field modes. `F` formats numeric
-results as Calc fractions, so `1/3;F` produces `1:3`. `S` emits ordinary numeric output
-for exact values supported by decimal arithmetic; symbolic algebra is not
-implemented. `u` leaves unit-free numeric results unchanged; unit literals and
-conversion are not implemented. Unsupported symbolic or unit-bearing
-operations signal `org-table-error` with reason `:unsupported-mode`. `T`, `t`,
-and `U` enable duration handling as described below. `L` is the Lisp formula
-mode and remains outside FR-060–064.
+results as Calc fractions, so `1/3;F` produces `1:3`. `S` emits ordinary
+numeric output for exact values supported by decimal arithmetic; symbolic
+algebra is not implemented. `u` leaves unit-free numeric results unchanged;
+unit literals and conversion are not implemented. Unsupported symbolic or
+unit-bearing operations signal `org-table-error` with reason
+`:unsupported-mode`. `T`, `t`, and `U` enable duration handling as described
+below. `L` selects Lisp formula mode, which this implementation does not
+support.
 
 Formula literals accept `HH:MM` or `HH:MM:SS` and represent seconds. Referenced
 table cells are read as durations when the assignment has `T`, `t`, or `U`;
@@ -225,10 +242,9 @@ Recalculation supports Org pipe tables only. A Table.el table signals
 `org-table-error`. Formula syntax the parser cannot read signals
 `org-table-unsupported-syntax`. Semantic errors, including invalid or
 out-of-range targets or references, unresolved or ambiguous named columns, and
-formula dependency cycles, signal `org-table-error`; a remote dependency cycle
-uses reason `:cyclic-remote-reference`. An invalid, foreign, or wrong-type API
-target can signal `org-edit-error`. Applicable document or formula ceilings
-signal `org-resource-limit-error`.
+formula dependency cycles, signal `org-table-error`. An invalid, foreign, or
+wrong-type API target can signal `org-edit-error`. Applicable document or
+formula ceilings signal `org-resource-limit-error`.
 
 ## Errors and limits
 
