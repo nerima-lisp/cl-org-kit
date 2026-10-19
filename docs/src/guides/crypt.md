@@ -11,7 +11,7 @@ For instructions on adding a checkout and its dependencies to the ASDF source re
 
 ## Register callbacks
 
-Create a callback registry and register one function for encryption and one for decryption. Each function receives one string and returns a string. The encryption callback returns one complete PGP MESSAGE armor block; the decryption callback returns plaintext.
+Create a callback registry and register one function for encryption and one for decryption. Each function receives one string and returns a string. The encryption callback returns one complete PGP MESSAGE armor block; the decryption callback returns plaintext. Replace `my-encrypt-function` and `my-decrypt-function` in the examples with your application functions; the library does not provide cryptography.
 
 ```lisp
 (let ((registry (org-kit:make-callback-registry)))
@@ -55,7 +55,7 @@ The callback name is always `"org-crypt"`. Callers own the registry and the cryp
        (org-kit:edit-result-updated-document result)))))
 ```
 
-The operations leave the input document unchanged. `edit-result-spans` lists the ranges replaced in the original source. If encryption finds an existing armor block, the entry has no body, or decryption finds no recognized armor block, the list is empty and the operation is a no-op.
+The operations leave the input document unchanged. `edit-result-spans` lists half-open character-offset ranges in the original document text that the operation replaced. If encryption finds an existing armor block, the entry has no body, or decryption finds no recognized armor block, the list is empty and the operation is a no-op.
 
 For encryption, the payload starts after the metadata skipped by Org 9.8.10's `org-end-of-meta-data 'standard` boundary. That boundary skips at most one planning line immediately after the heading, then an immediately following property drawer, then repeatedly skips leading blank lines, CLOCK lines, and LOGBOOK drawers. A second planning line is body text. Arbitrary drawers after the boundary are body text. The payload continues through descendants of the entry and stops before trailing blank lines or the next heading at the same or a higher level.
 
@@ -63,7 +63,7 @@ The first payload line identifies encrypted content only when it is exactly `---
 
 ## Edit tagged entries
 
-`crypt-encrypt-entries` and `crypt-decrypt-entries` apply the operation to tagged headings and return one `edit-result` for the document. A matching heading is processed once with its subtree, so a matching descendant is not a separate target. Headings with a local or inherited `ARCHIVE` tag, and COMMENT headings with their descendants, are skipped.
+`crypt-encrypt-entries` and `crypt-decrypt-entries` apply the operation to tagged headings and return one `edit-result` for the document. A matching heading is processed once with its subtree, so a matching descendant is not a separate target. The tag scan omits headings with a local or inherited `ARCHIVE` tag and COMMENT subtrees; a selected ancestor is still processed as one subtree.
 
 With a parsed `document` and configured `registry`, call either function:
 
@@ -72,6 +72,6 @@ With a parsed `document` and configured `registry`, call either function:
 (org-kit:crypt-decrypt-entries document registry :tag "private")
 ```
 
-The default tag is `"crypt"`. `:tag` accepts a string or symbol. Tag matching includes inherited tags by default; pass `:inherit nil` to match only tags written on each heading. If a callback fails or a configured resource limit is exceeded, the operation signals a condition without producing an edit result and leaves its input document unchanged. Side effects performed by a callback remain the caller's responsibility.
+The default tag is `"crypt"`. `:tag` accepts a string or symbol. Tag matching includes inherited tags by default; pass `:inherit nil` to match only tags written on each heading. If a callback fails or a configured resource limit is exceeded, the operation signals `org-crypt-error` or `org-resource-limit-error` without producing an edit result and leaves its input document unchanged. Side effects performed by a callback remain the caller's responsibility.
 
 Edits are checked against `:max-output-length`, `:max-output-octets`, and `:max-input-length` (the last bounds output characters for unencoded documents and output octets for encoded documents). See [Resource limits](../reference/node-model.md#resource-limits) for units and defaults. The library does not manage cryptographic keys or temporary files.
