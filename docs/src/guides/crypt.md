@@ -2,7 +2,7 @@
 
 `cl-org-kit` edits Org crypt payloads through callbacks supplied by the caller. It does not start GPG or another process. The callback decides how plaintext is encrypted and how ciphertext is decrypted.
 
-Once `cl-org-kit` is available through your ASDF source registry, load it before evaluating the examples:
+For instructions on adding a checkout and its dependencies to the ASDF source registry, see [Getting Started](../getting-started.md). Once `cl-org-kit` is available through your ASDF source registry, load it before evaluating the examples:
 
 ```lisp
 (require :asdf)
@@ -59,7 +59,7 @@ In the example, `my-encrypt-function` and `my-decrypt-function` stand for functi
 
 The operations leave the input document unchanged. If encryption finds an existing armor block, or the entry has no body, it returns an edit result with no spans. Decryption without a recognized armor block is also a no-op.
 
-For encryption, the payload starts after the metadata skipped by Org 9.8.10's `org-end-of-meta-data 'standard` boundary. That boundary skips at most one planning line immediately after the heading, then an immediately following property drawer, then leading blank lines, clock lines, and a LOGBOOK drawer. A second planning line is body text. Arbitrary drawers after the boundary are body text. The payload continues through descendants of the entry and stops before trailing blank lines or the next heading at the same or a higher level.
+For encryption, the payload starts after the metadata skipped by Org 9.8.10's `org-end-of-meta-data 'standard` boundary. That boundary skips at most one planning line immediately after the heading, then an immediately following property drawer, then repeatedly skips leading blank lines, CLOCK lines, and LOGBOOK drawers. A second planning line is body text. Arbitrary drawers after the boundary are body text. The payload continues through descendants of the entry and stops before trailing blank lines or the next heading at the same or a higher level.
 
 The first payload line identifies encrypted content only when it is exactly `-----BEGIN PGP MESSAGE-----`, with optional leading spaces or tabs. The operation then looks for an exact `-----END PGP MESSAGE-----` line, also allowing leading spaces or tabs, before the next heading. An encryption callback must return only one such block: the BEGIN line is first and the END line is last, with no text outside the markers. A final line ending is allowed. This checks the armor shape, not the PGP contents. During decryption, indentation is removed from every armor line. Only the range from the BEGIN line through the END line is replaced, so text after the footer stays in place. Plaintext headings at the same or a shallower level than the encrypted entry are shifted deeper beneath that entry.
 
