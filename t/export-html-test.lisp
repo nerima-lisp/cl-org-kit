@@ -1320,6 +1320,43 @@ paragraph" table-list) :not :to-be nil))))
           (expect (> (org-resource-limit-error-actual below) (1- length))
                   :to-be t))
         (expect at :to-equal expected))))
+  (it "uses the filtered body length as the trailer output offset"
+    (let* ((source
+             (concatenate 'string "Body "
+                          (make-string 16384 :initial-element (code-char 120))))
+           (backend :fr106-html-filtered-body-offset)
+           (registered-p nil)
+           (body-filter-input-length 0)
+           (expected nil)
+           (at-limit nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :html
+              :filters
+              (list
+               (cons :body
+                     (list (lambda (value context)
+                             (declare (ignore context))
+                             (setf body-filter-input-length (length value))
+                             "")))))
+             (setf registered-p t
+                   expected (export-org (parse-org source) backend))
+             (setf at-limit
+                   (export-org
+                    (parse-org
+                     source :limits
+                     (make-limits
+                      :max-output-length (length expected)))
+                    backend))
+             (with-soft-assertions
+               (expect (> body-filter-input-length 4096) :to-be t)
+               (expect (plusp (length expected)) :to-be t)
+               (expect (search "Body " expected) :to-be nil)
+               (expect at-limit :to-equal expected)
+               (expect (length at-limit) :to-equal (length expected))))
+        (when registered-p
+          (unregister-export-backend backend)))))
 
   (it "exports a programmatic inline code node without source offsets"
     (let* ((document (make-document ""))
@@ -1404,4 +1441,211 @@ paragraph" table-list) :not :to-be nil))))
                   :to-be :max-output-length)
           (expect (> (org-resource-limit-error-actual condition) 32)
                   :to-be t))
-        (expect (< allocated (floor input-length 2)) :to-be t)))))
+        (expect (< allocated (floor input-length 2)) :to-be t))))
+  (it "dispatches heading titles and descriptive terms through registered transcoders"
+      (let ((document
+             (parse-org
+              (format nil "* Title *bold*~%~%- /Term/ :: description~%")))
+            (backend :fr106-html-title-term)
+            (registered-p nil)
+            (bold-calls 0)
+            (italic-calls 0)
+            (output nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :html
+               :transcoders
+               (list
+                (cons :bold
+                      (lambda (node view frame context)
+                        (declare (ignore node view frame context))
+                        (incf bold-calls)
+                        "TITLE-OVERRIDE"))
+                (cons :italic
+                      (lambda (node view frame context)
+                        (declare (ignore node view frame context))
+                        (incf italic-calls)
+                        "TERM-OVERRIDE"))))
+              (setf registered-p t
+                    output (export-org document backend))
+              (with-soft-assertions
+               (expect (search "TITLE-OVERRIDE" output) :not :to-be nil)
+               (expect (search "<dt>TERM-OVERRIDE</dt>" output)
+                       :not :to-be nil)
+               (expect bold-calls :to-be 1)
+               (expect italic-calls :to-be 1)))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "dispatches view-less children through registered transcoders"
+      (let* ((document (parse-org "*child*"))
+             (bold (export-html-test-node-of-type document :bold))
+             (child (first (node-children bold)))
+             (backend :fr106-html-viewless-child)
+             (registered-p nil)
+             (output nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :html
+               :renderer
+               (lambda (context)
+                 (export-render-node
+                  context
+                  (export-html-test-node-of-type
+                   (export-render-context-document context) :bold)))
+               :transcoders
+               (list
+                (cons (node-type child)
+                      (lambda (node view frame context)
+                        (declare (ignore node view frame context))
+                        "VIEWLESS-CHILD"))))
+              (setf registered-p t
+                    output (export-org document backend))
+              (expect output :to-equal "<b>VIEWLESS-CHILD</b>"))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "dispatches anonymous inline footnote children through the registry"
+      (let* ((document (parse-org "Before [fn::*inline*] after."))
+             (backend :fr106-html-inline-footnote)
+             (registered-p nil)
+             (output nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :html
+               :renderer
+               (lambda (context)
+                 (export-render-node
+                  context
+                  (export-html-test-node-of-type
+                   (export-render-context-document context) :footnote-reference)
+                  :mode :inline))
+               :transcoders
+               (list
+                (cons :bold
+                      (lambda (node view frame context)
+                        (declare (ignore node view frame context))
+                        "INLINE-FOOTNOTE-CHILD"))))
+              (setf registered-p t
+                    output (export-org document backend))
+              (expect output :to-equal "INLINE-FOOTNOTE-CHILD"))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "validates ATTR_HTML before invoking the node wrapper"
+      (let* ((invalid-document (parse-org (format nil "* Invalid~%")))
+             (invalid-heading
+              (export-html-test-node-of-type invalid-document :headline))
+             (valid-document (parse-org (format nil "* Valid~%")))
+             (backend :fr106-html-wrapper-order)
+             (registered-p nil)
+             (headline-wrapper-calls 0)
+             (invalid-condition nil)
+             (valid-output nil))
+        (setf (node-property invalid-heading :ATTR_HTML) ":id \"invalid\"")
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :html
+               :node-wrapper
+               (lambda (node view frame context render-next)
+                 (declare (ignore view frame context))
+                 (if (eq (node-type node) :headline)
+                     (progn
+                       (incf headline-wrapper-calls)
+                       (funcall render-next
+                                "<heading-wrapper>" "</heading-wrapper>"))
+                   (funcall render-next "" ""))))
+              (setf registered-p t
+                    invalid-condition
+                    (export-html-test-catch-error
+                     (lambda () (export-org invalid-document backend))))
+              (with-soft-assertions
+               (expect (typep invalid-condition 'org-export-unsupported-syntax)
+                       :to-be t)
+               (when (typep invalid-condition 'org-export-unsupported-syntax)
+                 (expect (org-export-unsupported-syntax-feature invalid-condition)
+                         :to-be :html-attribute))
+               (expect headline-wrapper-calls :to-be 0))
+              (setf valid-output (export-org valid-document backend))
+              (with-soft-assertions
+               (expect (search "<heading-wrapper>" valid-output) :not :to-be nil)
+               (expect (search "</heading-wrapper>" valid-output) :not :to-be nil)
+               (expect headline-wrapper-calls :to-be 1)))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "dispatches wrapped list paragraphs through the registry"
+      (let* ((document
+               (parse-org (format nil "- | cell |~%  paragraph~%")))
+             (backend :fr106-html-list-paragraph-wrapper)
+             (registered-p nil)
+             (paragraph-wrapper-calls 0)
+             (output nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :html
+               :node-wrapper
+               (lambda (node view frame context render-next)
+                 (declare (ignore view frame context))
+                 (if (eq (node-type node) :paragraph)
+                     (progn
+                       (incf paragraph-wrapper-calls)
+                       (funcall render-next
+                                "<list-paragraph-wrapper>"
+                                "</list-paragraph-wrapper>"))
+                   (funcall render-next "" ""))))
+              (setf registered-p t
+                    output (export-org document backend))
+              (with-soft-assertions
+               (expect
+                (search
+                 (format nil
+                         "</table>~%<list-paragraph-wrapper><p>~%paragraph")
+                 output)
+                :not :to-be nil)
+               (expect
+                (search
+                 (format nil "</p>~%</list-paragraph-wrapper></li>")
+                 output)
+                :not :to-be nil)
+               (expect paragraph-wrapper-calls :to-be 1)))
+          (when registered-p
+            (unregister-export-backend backend)))))
+  (it "dispatches standalone image paragraphs through the registry"
+      (let* ((document
+               (parse-org
+                (format nil "#+ATTR_HTML: :title \"<tag>&\"~%[[file:image.png]]")))
+             (backend :fr106-html-image-wrapper)
+             (registered-p nil)
+             (link-wrapper-calls 0)
+             (output nil))
+        (unwind-protect
+            (progn
+              (register-derived-export-backend
+               backend :html
+               :node-wrapper
+               (lambda (node view frame context render-next)
+                 (declare (ignore view frame context))
+                 (if (eq (node-type node) :link)
+                     (progn
+                       (incf link-wrapper-calls)
+                       (funcall render-next
+                                "<image-wrapper>" "</image-wrapper>"))
+                   (funcall render-next "" ""))))
+              (setf registered-p t
+                    output (export-org document backend))
+              (with-soft-assertions
+               (expect (search
+                        (format nil "class=\"figure\">~%<p><image-wrapper>")
+                        output)
+                       :not :to-be nil)
+               (expect (search "title=\"&lt;tag&gt;&amp;\"" output)
+                       :not :to-be nil)
+               (expect (search
+                        (format nil "</image-wrapper>~%</p>~%</div>")
+                        output)
+                       :not :to-be nil)
+               (expect link-wrapper-calls :to-be 1)))
+          (when registered-p
+            (unregister-export-backend backend))))))

@@ -5,6 +5,12 @@
   preparation
   limits
   resolution-index
+  render-context
+  render-frame
+  (output-offset 0)
+  trim-list-indent-p
+  standalone-image-node
+  standalone-image-attributes
   (output (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
   verse-output-p
   (explicit-references (make-hash-table :test #'eq))
@@ -209,7 +215,8 @@
 
 (defun export-html-check-output-length (state additional-length)
   (let* ((output (export-html-state-output state))
-         (next-length (+ (fill-pointer output) additional-length)))
+         (next-length (+ (export-html-state-output-offset state)
+                         (fill-pointer output) additional-length)))
     (check-limit (export-html-state-limits state) :max-output-length
                  next-length)))
 
@@ -404,7 +411,7 @@
                 (let ((macro-entry (assoc segment title-macros :test #'eq)))
                   (if macro-entry
                       (export-html-write-inline-views state (cdr macro-entry))
-                      (export-html-render-node state segment nil nil)))
+                      (export-html-dispatch-node state segment nil nil :mode :inline)))
                 (when (plusp (node-post-blank segment))
                   (export-html-write-spaces state
                                             (node-post-blank segment))))
@@ -599,7 +606,7 @@
                 (export-html-write-text-range state text start (length text))
                 (when (< start (length text))
                   (setf trim-list-indent-p nil))))
-             (t (export-html-render-view state view)))
+             (t (export-html-render-view state view :inline)))
            (when (and (not (member type '(:section :paragraph) :test #'eq))
                       (plusp (node-post-blank node)))
              (export-html-write-spaces state (node-post-blank node)))))
@@ -680,7 +687,7 @@
                   (export-html-group-section-children child-views)
                   child-views))
              (dolist (child (node-children node))
-               (export-html-render-node state child nil nil)))
+               (export-html-dispatch-node state child nil nil)))
       (when verse-p
         (setf (export-html-state-verse-output-p state) previous)))))
 
@@ -783,6 +790,10 @@
           for view = (pop stack)
           for node = (export-view-node view)
           do (when (node-property node :ATTR_HTML)
+               (unless (member (node-type node)
+                               '(:link :paragraph :table) :test #'eq)
+                 (export-html-attribute-error
+                  node "ATTR_HTML is supported only on HTML links and images"))
                (dolist (attribute (export-html-parse-attributes node state))
                  (when (string= (car attribute) "id")
                    (setf (gethash (cdr attribute)
@@ -998,7 +1009,7 @@
        (if view
            (export-html-write-inline-views state child-views)
            (dolist (child (node-children node))
-             (export-html-render-node state child nil nil))))
+             (export-html-dispatch-node state child nil nil :mode :inline))))
       (number
        (let ((reference-id
                (gethash node
@@ -1174,6 +1185,22 @@
                 (every #'export-whitespace-character-p (node-text node))))
           (t (return-from export-html-standalone-image-view nil)))))
     image-view))
+(defun export-html-validate-attribute-nodes (state)
+  (let ((stack (reverse
+                (export-preparation-root-views
+                 (export-html-state-preparation state)))))
+    (loop while stack
+          for view = (pop stack)
+          for node = (export-view-node view)
+          do (when (and (node-property node :ATTR_HTML)
+                        (eq (node-type node) :paragraph)
+                        (null (export-html-standalone-image-view
+                               (export-view-children view))))
+               (export-html-attribute-error
+                node "ATTR_HTML requires one unambiguous image link"))
+             (dolist (child (reverse (export-view-children view)))
+               (push child stack))))
+  state)
 
 (defun export-html-render-standalone-image (state node child-views image-view
                                            attributes)
@@ -1184,8 +1211,9 @@
   (dolist (child child-views)
     (when (eq child image-view)
       (let ((link (export-view-node child)))
-        (export-html-render-link
-         state link (export-view-children child) child attributes))))
+        (export-html-dispatch-node
+         state link (export-view-children child) child
+         :mode :inline :image-attributes attributes))))
   (export-html-write state (format nil "~%</p>~%</div>~%")))
 
 (defun export-html-render-paragraph (state node child-views
@@ -1361,7 +1389,7 @@
           (let ((term (node-property node :tag)))
             (dolist (segment term)
               (if (node-p segment)
-                  (export-html-render-node state segment nil nil)
+                  (export-html-dispatch-node state segment nil nil :mode :inline)
                   (export-html-escape-to-output state :text segment))))
           (export-html-write state "</dt>
 <dd"))
@@ -1382,10 +1410,11 @@
               (when paragraph-seen-p
                 (export-html-write state (string #\Newline)))
               (if wrap-paragraphs-p
-                  (export-html-render-paragraph
-                   state child-node (export-view-children child) t)
-                  (export-html-write-inline-views
-                   state (export-view-children child) t))
+    (export-html-dispatch-node
+     state child-node (export-view-children child) child
+     :mode :block :trim-list-indent-p t)
+    (export-html-write-inline-views
+     state (export-view-children child) t))
               (setf paragraph-seen-p t))
             (progn
               (when (and (or paragraph-seen-p
@@ -1493,7 +1522,7 @@
     (export-html-write state "</table>
 ")))
 
-(defun export-html-render-node (state node child-views view)
+(defun export-html-render-node-legacy (state node child-views view)
   (let ((type (node-type node)))
     (when (and (node-property node :ATTR_HTML)
                (not (member type '(:link :paragraph :table) :test #'eq)))
@@ -1519,7 +1548,9 @@
       ((:headline :inlinetask)
        (export-html-render-heading state node child-views view))
       (:paragraph
-       (export-html-render-paragraph state node child-views))
+       (export-html-render-paragraph
+ state node child-views
+ (export-html-state-trim-list-indent-p state)))
       (:center-block
        (export-html-write state "<div class=\"org-center\">
 ")
@@ -1583,7 +1614,10 @@
                (export-html-write state tag)
                (export-html-write state ">")))))
       (:link
-       (export-html-render-link state node child-views view))
+       (export-html-render-link
+ state node child-views view
+ (when (eq node (export-html-state-standalone-image-node state))
+   (export-html-state-standalone-image-attributes state))))
       (:footnote-reference
        (export-html-footnote-reference state node child-views view))
       (:footnote-definition nil)
@@ -1627,9 +1661,89 @@
         :planning :clock)
        nil))))
 
-(defun export-html-render-view (state view)
-  (export-html-render-node state (export-view-node view)
-                           (export-view-children view) view))
+(defun export-html-dispatch-node (state node child-views view
+                                      &key (mode nil mode-p)
+                                           (trim-list-indent-p nil)
+                                           (image-attributes nil image-attributes-p))
+  (let* ((context (export-html-state-render-context state))
+         (frame (export-html-state-render-frame state))
+         (mode (if mode-p mode
+                   (if frame (export-render-frame-mode frame) :block)))
+         (table-cell-p
+           (and frame (export-render-frame-table-cell-p frame)))
+         (preserve-source-breaks-p
+           (and frame
+                (export-render-frame-preserve-source-breaks-p frame)))
+         (previous-trim (export-html-state-trim-list-indent-p state))
+         (previous-image-node (export-html-state-standalone-image-node state))
+         (previous-image-attributes
+           (export-html-state-standalone-image-attributes state)))
+    (unwind-protect
+         (progn
+           (setf (export-html-state-trim-list-indent-p state)
+                 trim-list-indent-p
+                 (export-html-state-standalone-image-node state)
+                 (and image-attributes-p node)
+                 (export-html-state-standalone-image-attributes state)
+                 (and image-attributes-p image-attributes))
+           (if (null context)
+               (export-html-render-node-legacy state node child-views view)
+               (let* ((output (export-html-state-output state))
+                      (base-offset (export-html-state-output-offset state))
+                      (dispatch-offset (+ base-offset (fill-pointer output)))
+                      (result nil))
+                 (unwind-protect
+                      (let ((*export-current-output-offset* dispatch-offset))
+                        (setf result
+                              (if view
+                                  (export-render-view
+                                   context view :mode mode
+                                   :table-cell-p table-cell-p
+                                   :preserve-source-breaks-p
+                                   preserve-source-breaks-p)
+                                  (export-render-node
+                                   context node :mode mode
+                                   :table-cell-p table-cell-p
+                                   :preserve-source-breaks-p
+                                   preserve-source-breaks-p)))
+                        (export-html-write state result))
+                   (setf (export-html-state-output-offset state) base-offset)))))
+      (setf (export-html-state-trim-list-indent-p state) previous-trim
+            (export-html-state-standalone-image-node state) previous-image-node
+            (export-html-state-standalone-image-attributes state)
+            previous-image-attributes))))
+(defun export-html-render-view (state view &optional (mode nil mode-p))
+  (if mode-p
+      (export-html-dispatch-node
+       state (export-view-node view) (export-view-children view) view
+       :mode mode)
+      (export-html-dispatch-node
+       state (export-view-node view) (export-view-children view) view)))
+(defun export-html-transcode-node (node view frame context)
+  (let* ((state (export-render-context-state context))
+         (parent-output (export-html-state-output state))
+         (parent-offset (export-html-state-output-offset state))
+         (parent-frame (export-html-state-render-frame state))
+         (parent-context (export-html-state-render-context state))
+         (offset (max parent-offset (export-render-frame-output-offset frame)))
+         (output (make-array 0 :element-type 'character
+                             :adjustable t :fill-pointer 0)))
+    (setf (export-html-state-preparation state)
+          (org-kit::%export-render-context-preparation context)
+          (export-html-state-limits state) (export-render-context-limits context)
+          (export-html-state-render-context state) context
+          (export-html-state-render-frame state) frame
+          (export-html-state-output-offset state) offset
+          (export-html-state-output state) output)
+    (unwind-protect
+         (progn
+           (export-html-render-node-legacy
+ state node (and view (export-view-children view)) view)
+           (coerce (export-html-state-output state) 'string))
+      (setf (export-html-state-output state) parent-output
+            (export-html-state-output-offset state) parent-offset
+            (export-html-state-render-frame state) parent-frame
+            (export-html-state-render-context state) parent-context))))
 
 (defun export-html-option-enabled-p (state key &optional (default t))
   (let ((entry (assoc key
@@ -1729,3 +1843,87 @@
     (export-html-index-preparation state)
     (export-html-index-footnote-ids state)
     (export-html-render-document state)))
+(defun export-html-make-state (context)
+  (let* ((preparation (%export-render-context-preparation context))
+         (state (%make-export-html-state
+                 :preparation preparation
+                 :limits (export-render-context-limits context))))
+    (export-html-index-attribute-ids state)
+    (export-html-validate-attribute-nodes state)
+    (export-html-index-preparation state)
+    (export-html-index-footnote-ids state)
+    state))
+
+(defun export-html-node-transcoders ()
+  (mapcar (lambda (type)
+            (cons type #'export-html-transcode-node))
+          (node-types)))
+(defun export-html-start-render-component (state)
+  (setf (export-html-state-output-offset state)
+        *export-current-output-offset*
+        (export-html-state-output state)
+        (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))
+  state)
+(defun export-html-render-preamble (context)
+  (let* ((state (export-render-context-state context))
+         (preparation (org-kit::%export-render-context-preparation context)))
+    (setf (export-html-state-preparation state) preparation
+          (export-html-state-limits state) (export-render-context-limits context)
+          (export-html-state-render-context state) context
+          (export-html-state-render-frame state) nil
+          (export-html-state-output-offset state) 0
+          (export-html-state-output state)
+          (make-array 0 :element-type 'character :adjustable t :fill-pointer 0)
+          (export-html-state-trim-list-indent-p state) nil
+          (export-html-state-standalone-image-node state) nil
+          (export-html-state-standalone-image-attributes state) nil)
+    (export-html-write-head-metadata state)
+    (coerce (export-html-state-output state) 'string)))
+(defun export-html-render-body (context)
+  (let* ((state (export-render-context-state context))
+         (preparation (org-kit::%export-render-context-preparation context))
+         (title (getf (export-preparation-metadata preparation) :title)))
+    (setf (export-html-state-preparation state) preparation
+          (export-html-state-limits state) (export-render-context-limits context)
+          (export-html-state-render-context state) context)
+    (export-html-start-render-component state)
+    (export-html-write state "<div id=\"content\" class=\"content\">
+")
+    (when (and title (export-html-option-enabled-p state :title))
+      (export-html-write state "<h1 class=\"title\">")
+      (export-html-escape-to-output state :text title)
+      (export-html-write state "</h1>
+"))
+    (export-html-render-toc state)
+    (export-html-write-views state (export-preparation-root-views preparation))
+    (export-html-render-footnotes state)
+    (coerce (export-html-state-output state) 'string)))
+(defun export-html-render-trailer (context)
+  (let* ((state (export-render-context-state context))
+         (preparation (org-kit::%export-render-context-preparation context)))
+    (setf (export-html-state-preparation state) preparation
+          (export-html-state-limits state) (export-render-context-limits context)
+          (export-html-state-render-context state) context)
+    (export-html-start-render-component state)
+    (export-html-write state "</div>
+")
+    (export-html-write-postamble state)
+    (coerce (export-html-state-output state) 'string)))
+
+(defun export-html-node-policies ()
+  '((:diary-sexp :unsupported
+                 :feature :diary-sexp
+                 :message "Diary sexp export is unsupported")))
+
+(eval-when (:load-toplevel :execute)
+  (%register-builtin-export-backend
+   :html
+   :renderer #'export-html-render-body
+   :preamble-renderer #'export-html-render-preamble
+   :trailer-renderer #'export-html-render-trailer
+   :make-state #'export-html-make-state
+   :transcoders (export-html-node-transcoders)
+   :node-policies (export-html-node-policies)
+   :raw-output-options '((:html . :allow-raw-html))
+   :export-block-names '("html")
+   :export-snippet-names '("html")))
