@@ -17,22 +17,22 @@
     (program-error () t)))
 (progn
   (defun export-registry-test-capture-output-check (function)
-    (let ((condition nil)
-          (events nil))
-      (handler-bind
-          ((org-resource-limit-error
-             (lambda (limit-error)
-               (push (list :phase org-kit::*export-current-export-phase*
-                           :kind org-kit::*export-current-output-check-kind*
-                           :index org-kit::*export-current-output-check-index*
-                           :actual
-                           (org-resource-limit-error-actual limit-error))
-                     events))))
-        (setf condition
-              (handler-case
-                  (progn (funcall function) nil)
-                (org-resource-limit-error (limit-error) limit-error))))
-      (values condition (nreverse events))))
+  (let ((condition nil)
+        (events nil))
+    (setf condition
+          (handler-case
+              (handler-bind
+                  ((org-resource-limit-error
+                     (lambda (limit-error)
+                       (push (list :phase org-kit::*export-current-export-phase*
+                                   :kind org-kit::*export-current-output-check-kind*
+                                   :index org-kit::*export-current-output-check-index*
+                                   :actual
+                                   (org-resource-limit-error-actual limit-error))
+                             events))))
+                (progn (funcall function) nil))
+            (org-resource-limit-error (limit-error) limit-error)))
+    (values condition (nreverse events))))
   (defclass export-registry-test-failing-output-stream
       (sb-gray:fundamental-character-output-stream)
     ())
@@ -104,8 +104,9 @@
                (expect
                 (org-export-error-reason
                  (export-registry-test-registration-error
-                  (lambda () (register-export-backend :api-registry-no-renderer))))
-                :to-be :invalid-renderer))
+                  (lambda ()
+                    (register-export-backend :api-registry-no-renderer))))
+                :to-be :invalid-renderer)
                (expect
                 (export-registry-test-signals-type-error-p
                  (lambda ()
@@ -125,7 +126,8 @@
                   (lambda ()
                     (register-export-backend
                      :api-registry-invalid-renderer-priority
-                     :transcoders (list (cons :unknown-node #'identity)))))
+                     :transcoders
+                     (list (cons :unknown-node #'identity))))))
                 :to-be :invalid-renderer)
                (expect
                 (org-export-error-reason
@@ -134,7 +136,8 @@
                     (register-export-backend
                      :api-registry-invalid-transcoder
                      :renderer #'identity
-                     :transcoders (list (cons :unknown-node #'identity)))))
+                     :transcoders
+                     (list (cons :unknown-node #'identity))))))
                 :to-be :invalid-transcoder)
                (expect
                 (org-export-error-reason
@@ -143,7 +146,8 @@
                     (register-export-backend
                      :api-registry-invalid-policy
                      :renderer #'identity
-                     :node-policies (list (cons :paragraph :unknown-policy)))))
+                     :node-policies
+                     (list (cons :paragraph :unknown-policy))))))
                 :to-be :invalid-node-policy)
                (expect
                 (org-export-error-reason
@@ -152,32 +156,38 @@
                     (register-export-backend
                      :api-registry-invalid-filter-stage
                      :renderer #'identity
-                     :filters (list (cons :unknown-stage (list #'identity))))))
+                     :filters
+                     (list
+                      (cons :unknown-stage (list #'identity)))))))
                 :to-be :invalid-filter-stage)
                (expect
                 (org-export-error-reason
                  (export-registry-test-registration-error
                   (lambda ()
                     (register-derived-export-backend
-                     :api-registry-unknown-parent :api-registry-missing-parent))))
+                     :api-registry-unknown-parent
+                     :api-registry-missing-parent))))
                 :to-be :unknown-parent)
                (register-export-backend backend :renderer #'identity)
                (setf registered-p t)
                (let ((duplicate
                        (export-registry-test-registration-error
                         (lambda ()
-                          (register-export-backend backend :renderer #'identity)))))
-                 (expect (typep duplicate 'org-export-registration-error) :to-be t)
+                          (register-export-backend
+                           backend :renderer #'identity)))))
+                 (expect (typep duplicate 'org-export-registration-error)
+                         :to-be t)
                  (when duplicate
-                   (expect (org-export-error-backend duplicate) :to-be backend)
+                   (expect (org-export-error-backend duplicate)
+                           :to-be backend)
                    (expect (org-export-error-reason duplicate)
                            :to-be :duplicate-backend)))
                (expect
                 (org-export-error-reason
                  (export-registry-test-registration-error
                   (lambda ()
-                    (register-export-link-type :api-registry-missing-backend
-                                               "sample" #'identity))))
+                    (register-export-link-type
+                     :api-registry-missing-backend "sample" #'identity))))
                 :to-be :unknown-backend)
                (expect
                 (org-export-error-reason
@@ -187,10 +197,11 @@
                 :to-be :invalid-link-type-handler)
                (expect
                 (export-registry-test-signals-type-error-p
-                 (lambda () (register-export-link-type backend "sample" 42)))
+                 (lambda ()
+                   (register-export-link-type backend "sample" 42)))
                 :to-be t)))
         (when registered-p
-          (unregister-export-backend backend))))))))
+          (unregister-export-backend backend)))))
 
   (it "inherits renderers and node maps while checking strict ancestry"
     (let* ((root :api-registry-inheritance-root)
@@ -380,12 +391,14 @@
                        (progn
                          (export-org (parse-org "#+UNKNOWN: value") backend)
                          nil)
-                     (org-export-error (error) error)))
+                     (org-export-unsupported-syntax (error) error)))
              (with-soft-assertions
-               (expect (typep condition 'org-export-error) :to-be t)
-               (when (typep condition 'org-export-error)
-                 (expect (org-export-error-backend condition) :to-be backend)
-                 (expect (org-export-error-reason condition)
+               (expect (typep condition 'org-export-unsupported-syntax)
+                       :to-be t)
+               (when (typep condition 'org-export-unsupported-syntax)
+                 (expect (org-export-unsupported-syntax-backend condition)
+                         :to-be backend)
+                 (expect (org-export-unsupported-syntax-feature condition)
                          :to-be :unknown-keyword))))
         (when registered-p
           (unregister-export-backend backend)))))
@@ -526,7 +539,7 @@
                               "Stable-option"))
                  "isolated"))
              :option-specifications
-             (list (list :key :test-option :token "Q" :parser #'identity)))
+             (list (list :key :test-option :token "Q" :parser (lambda (value source backend) (declare (ignore source backend)) value))))
        (lambda ()
          (with-soft-assertions
            (expect (export-org
@@ -600,7 +613,7 @@
        (lambda ()
          (with-soft-assertions
            (expect (export-org
-                    (parse-org "#+OPTIONS: custom:value\n\nOption parser.") child)
+                    (parse-org (format nil "#+OPTIONS: custom:value~%~%Option parser.")) child)
                    :to-equal "child:value")
            (expect (node-type parsed-source) :to-be :keyword)
            (expect parsed-backend :to-be child))))))
@@ -1110,24 +1123,23 @@
              (declare (ignore context))
              "output"))
      (lambda ()
-       (handler-bind
-           ((error
-              (lambda (condition)
-                (declare (ignore condition))
-                (setf observed-phase
-                      org-kit::*export-current-export-phase*))))
-         (setf failure
-               (handler-case
-                   (progn
-                     (export-org
-                      (parse-org "Stream write phase.")
-                      :api-registry-stream-write-phase
-                      :output-type :stream
-                      :stream
-                      (make-instance
-                       'export-registry-test-failing-output-stream))
-                     nil)
-                 (error (condition) condition))))))
+       (setf failure
+      (handler-case
+          (handler-bind
+              ((error
+                 (lambda (condition)
+                   (declare (ignore condition))
+                   (setf observed-phase
+                         org-kit::*export-current-export-phase*))))
+            (progn
+              (export-org
+               (parse-org "Stream write phase.")
+               :api-registry-stream-write-phase
+               :output-type :stream
+               :stream
+               (make-instance 'export-registry-test-failing-output-stream))
+              nil))
+        (error (condition) condition)))))
     (with-soft-assertions
       (expect (not (null failure)) :to-be t)
       (expect observed-phase :to-be :stream-write)))))
