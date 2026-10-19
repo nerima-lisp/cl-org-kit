@@ -665,9 +665,21 @@
       (setf radio-output
             (org-kit::export-latex-render-object state radio-target 0))
       (with-soft-assertions
-        (expect (org-kit::export-latex-rendered-views
-                 state (list first second) 0 t)
-                :to-equal "\\texttt{left}  \\texttt{right}")
+        (progn
+          (expect (org-kit::export-latex-rendered-views
+                   state (list first second) 0 t)
+                  :to-equal "\\texttt{left}  \\texttt{right}")
+          (expect (org-kit::export-latex-render-inline-views
+                   state
+                   (list (export-latex-test-view
+                          document :latex-fragment
+                          :properties '(:value "\\ignored{}")
+                          :post-blank 1)
+                         (export-latex-test-view
+                          document :inline-src-block
+                          :properties '(:value "visible")))
+                   0)
+                  :to-equal " \\texttt{visible}"))
         (expect (org-kit::export-latex-render-view state table-row)
                 :to-equal "\\texttt{A} & \\texttt{B}")
         (expect (org-kit::export-latex-render-view state table-cell-a)
@@ -684,11 +696,31 @@
         (progn
           (expect (org-kit::export-latex-render-view state item)
                   :to-equal "\\item{} [-] \\texttt{definition}")
-          (expect (org-kit::export-latex-render-view
-                   state (export-latex-test-view
-                          document :special-block :properties '(:type "proof*")))
-                  :to-equal
-                  (format nil "\\begin{proof*}~%~%\\end{proof*}")))
+          (progn
+            (expect (org-kit::export-latex-render-view
+                     state (export-latex-test-view
+                            document :special-block
+                            :properties '(:type "proof*")))
+                    :to-equal
+                    (format nil "\\begin{proof*}~%~%\\end{proof*}"))
+            (expect (org-kit::export-latex-render-view
+                     state (export-latex-test-view
+                            document :special-block
+                            :properties (list :type 42)))
+                    :to-equal
+                    (format nil "\\begin{quote}~%~%\\end{quote}"))
+            (expect (org-kit::export-latex-render-view
+                     state (export-latex-test-view
+                            document :special-block
+                            :properties (list :type "")))
+                    :to-equal
+                    (format nil "\\begin{quote}~%~%\\end{quote}"))
+            (expect (org-kit::export-latex-render-view
+                     state (export-latex-test-view
+                            document :special-block
+                            :properties (list :type "pπ")))
+                    :to-equal
+                    (format nil "\\begin{quote}~%~%\\end{quote}"))))
         (expect radio-output :to-equal "\\label{org:target}target")
         (progn
   (expect (typep unresolved-footnote 'org-export-error) :to-be t)
@@ -809,8 +841,22 @@
                                                              macro-view)
                                                             macro-view 0))
                 :to-be-truthy)
-        (expect (org-kit::export-latex-render-view state source-result)
-                :to-equal "\\texttt{result}")
+        (progn
+          (expect (org-kit::export-latex-render-view state source-result)
+                  :to-equal "\\texttt{result}")
+          (expect
+           (org-kit::export-latex-render-view
+            state
+            (export-latex-test-view
+             document :src-block
+             :properties (list :value "visible code")
+             :payload (list :requested-exports :code)
+             :children
+             (list (export-latex-test-view
+                    document :inline-src-block
+                    :properties (list :value "hidden result")))))
+           :to-equal
+           (format nil "\\begin{verbatim}~%visible code~%\\end{verbatim}")))
         (expect (org-kit::export-latex-render-view state raw-keyword)
                 :to-equal "\\raw{}")
         (expect (org-kit::export-latex-render-view state attribute-keyword)
