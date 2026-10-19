@@ -136,6 +136,33 @@
             ((string= marker *crypt-end-marker*) :end)
             (t nil)))))
 
+(defun crypt-complete-armor-p (armor)
+  (let ((limit (length armor))
+        (cursor 0)
+        (line-count 0)
+        (begin-count 0)
+        (end-count 0)
+        (first-kind nil)
+        (last-kind nil))
+    (loop while (< cursor limit)
+          do (multiple-value-bind (line-end next)
+                 (crypt-line-bounds armor cursor limit)
+               (declare (ignore line-end))
+               (let ((kind (crypt-armor-line-kind armor cursor limit)))
+                 (when (zerop line-count)
+                   (setf first-kind kind))
+                 (when (eq kind :begin)
+                   (incf begin-count))
+                 (when (eq kind :end)
+                   (incf end-count))
+                 (setf last-kind kind
+                       cursor next)
+                 (incf line-count)))
+          finally (return (and (eq first-kind :begin)
+                               (eq last-kind :end)
+                               (= begin-count 1)
+                               (= end-count 1))))))
+
 (defun crypt-headline-at-line-p (document position)
   (not (null (crypt-find-headline-at document position))))
 
@@ -290,6 +317,10 @@
                                    registry :crypt-encrypt
                                    (subseq source body-start body-end))))
                  (crypt-check-output-length document body-start body-end replacement)
+                 (unless (crypt-complete-armor-p replacement)
+                   (error 'org-crypt-error
+                          :message "Org crypt callback did not return one PGP message armor block"
+                          :reason :invalid-callback-result))
                  (crypt-apply-patches-result
                   document
                   (list (edit-make-patch body-start body-end replacement heading))))))

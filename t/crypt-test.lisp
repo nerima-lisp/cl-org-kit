@@ -70,6 +70,47 @@
           (expect decrypt-calls :to-be 1)
           (expect (document-text document) :to-equal source)))))
 
+  (it "requires encryption callbacks to return one exact PGP armor block"
+    (let* ((sentinel "plaintext-leak-probe")
+           (source (format nil "* Entry~%~A" sentinel))
+           (document (parse-org source))
+           (heading (crypt-test-headline document "Entry"))
+           (registry (make-callback-registry))
+           (responses '(:identity :suffix :indented)))
+      (register-callback
+       registry :crypt-encrypt "org-crypt"
+       (lambda (text)
+         (case (pop responses)
+           (:identity text)
+           (:suffix (format nil "~A~%outside-suffix-probe"
+                            (crypt-test-armor text)))
+           (:indented
+            (format nil "  -----BEGIN PGP MESSAGE-----~%encrypted~%  -----END PGP MESSAGE-----~%")))))
+      (loop repeat 2
+            do
+        (let ((caught
+                (handler-case
+                    (progn (crypt-encrypt-entry document heading registry) nil)
+                  (org-crypt-error (condition) condition))))
+          (let ((report (princ-to-string caught)))
+            (with-soft-assertions
+              (expect (typep caught 'org-crypt-error) :to-be t)
+              (when caught
+                (expect (org-crypt-error-reason caught)
+                        :to-be :invalid-callback-result))
+              (expect (search sentinel report) :to-equal nil)
+              (expect (search "outside-suffix-probe" report) :to-equal nil)
+              (expect (document-text document) :to-equal source)))))
+      (let* ((result (crypt-encrypt-entry document heading registry))
+             (output (document-text (edit-result-updated-document result))))
+        (with-soft-assertions
+          (expect (edit-result-p result) :to-be t)
+          (expect output
+                  :to-equal
+                  (format nil
+                          "* Entry~%  -----BEGIN PGP MESSAGE-----~%encrypted~%  -----END PGP MESSAGE-----~%"))
+          (expect (document-text document) :to-equal source)))))
+
   (it "skips Org leading metadata and includes body drawers through the subtree end"
     (let* ((source
              (format nil

@@ -11,7 +11,7 @@ Once `cl-org-kit` is available through your ASDF source registry, load it before
 
 ## Register callbacks
 
-Create a callback registry and register one function for encryption and one for decryption. Each function receives one string and returns a string. The encryption callback returns a PGP MESSAGE armor block; the decryption callback returns plaintext.
+Create a callback registry and register one function for encryption and one for decryption. Each function receives one string and returns a string. The encryption callback returns one complete PGP MESSAGE armor block; the decryption callback returns plaintext.
 
 ```lisp
 (let ((registry (org-kit:make-callback-registry)))
@@ -25,7 +25,7 @@ Create a callback registry and register one function for encryption and one for 
      (my-decrypt-function armor))))
 ```
 
-The callback name is always `"org-crypt"`. Callers own the registry and the cryptographic implementation. A missing callback signals `org-crypt-error` with reason `:missing-callback`. A callback condition signals the same condition with reason `:callback-failed`. Callback conditions are not retained: `org-crypt-error-cause` returns `nil` so it cannot expose callback data such as plaintext.
+The callback name is always `"org-crypt"`. Callers own the registry and the cryptographic implementation. A missing callback signals `org-crypt-error` with reason `:missing-callback`. A callback condition signals the same condition with reason `:callback-failed`. A non-string result or malformed encryption armor uses reason `:invalid-callback-result`. Callback conditions are not retained: `org-crypt-error-cause` returns `nil` so it cannot expose callback data such as plaintext.
 
 In the example, `my-encrypt-function` and `my-decrypt-function` stand for functions supplied by the application, usually backed by its chosen cryptography library.
 
@@ -61,7 +61,7 @@ The operations leave the input document unchanged. If encryption finds an existi
 
 For encryption, the payload starts after the metadata skipped by Org 9.8.10's `org-end-of-meta-data 'standard` boundary. That boundary skips at most one planning line immediately after the heading, then an immediately following property drawer, then leading blank lines, clock lines, and a LOGBOOK drawer. A second planning line is body text. Arbitrary drawers after the boundary are body text. The payload continues through descendants of the entry and stops before trailing blank lines or the next heading at the same or a higher level.
 
-The first payload line identifies encrypted content only when it is exactly `-----BEGIN PGP MESSAGE-----`, with optional leading spaces or tabs. The operation then looks for an exact `-----END PGP MESSAGE-----` line, also allowing leading spaces or tabs, before the next heading. It does not validate the PGP contents. During decryption, indentation is removed from every armor line. Only the range from the BEGIN line through the END line is replaced, so text after the footer stays in place. Plaintext headings at the same or a shallower level than the encrypted entry are shifted deeper beneath that entry.
+The first payload line identifies encrypted content only when it is exactly `-----BEGIN PGP MESSAGE-----`, with optional leading spaces or tabs. The operation then looks for an exact `-----END PGP MESSAGE-----` line, also allowing leading spaces or tabs, before the next heading. An encryption callback must return only one such block: the BEGIN line is first and the END line is last, with no text outside the markers. A final line ending is allowed. This checks the armor shape, not the PGP contents. During decryption, indentation is removed from every armor line. Only the range from the BEGIN line through the END line is replaced, so text after the footer stays in place. Plaintext headings at the same or a shallower level than the encrypted entry are shifted deeper beneath that entry.
 
 ## Edit tagged entries
 
