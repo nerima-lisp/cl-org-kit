@@ -119,8 +119,8 @@ amount that exceeded it."))
                      (org-callback-error-kind condition)
                      (org-callback-error-name condition)
                      (org-callback-error-reason condition))))
-  (:documentation "Signalled when a requested callback is not registered.
-KIND and NAME identify it, and REASON classifies the lookup failure."))
+  (:documentation "Signalled when a callback lookup or execution fails.
+KIND and NAME identify the callback, and REASON classifies the failure."))
 
 (define-condition org-elisp-evaluator-error (org-callback-error)
   ()
