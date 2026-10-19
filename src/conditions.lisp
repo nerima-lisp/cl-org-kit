@@ -127,6 +127,12 @@ KIND and NAME identify it, and REASON classifies the lookup failure."))
   (:documentation "Signalled when Emacs Lisp evaluation is requested without a
 registered Emacs Lisp evaluator."))
 
+(define-condition org-callback-timeout-error (org-callback-error)
+  ()
+  (:default-initargs :reason :timeout)
+  (:documentation "Signalled by a caller-owned callback when its work exceeds its time budget.
+KIND and NAME identify the callback, and REASON defaults to :TIMEOUT."))
+
 (define-condition org-write-plan-error (org-kit-error)
   ((path :initarg :path :initform nil)
    (reason :initarg :reason :initform nil)

@@ -1,7 +1,4 @@
 ;;;; src/package.lisp
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (require :sb-posix))
-
 (defpackage #:org-kit
   (:use #:cl)
   (:export
@@ -21,7 +18,7 @@
    #:org-resource-limit-error #:org-resource-limit-error-limit-name
    #:org-resource-limit-error-limit #:org-resource-limit-error-actual
    #:org-callback-error #:org-callback-error-kind #:org-callback-error-name
-   #:org-callback-error-reason #:org-elisp-evaluator-error
+   #:org-callback-error-reason #:org-elisp-evaluator-error #:org-callback-timeout-error
    #:org-write-plan-error #:org-write-plan-error-path #:org-write-plan-error-reason
    #:org-write-plan-error-cause
    ;; Clock aggregation

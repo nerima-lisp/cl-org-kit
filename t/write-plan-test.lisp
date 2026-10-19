@@ -189,26 +189,37 @@
   (it "rejects absolute and parent-component paths before writing"
     (write-plan-test-call-with-directory
      (lambda (root)
-       (dolist (case '(("/outside.txt" :absolute-path)
-                       ("../outside.txt" :parent-component)
-                       ("nested/../../outside.txt" :parent-component)))
-         (let* ((path (first case))
-                (condition
-                  (write-plan-test-capture-error
-                   (make-write-plan
-                    (list (make-write-plan-entry "nested/first.txt" "first"
-                                                 :create-directories-p t)
-                          (make-write-plan-entry path "rejected")))
-                   root)))
-           (with-soft-assertions
-             (expect (typep condition 'org-write-plan-error) :to-be t)
-             (when condition
-               (expect (org-write-plan-error-reason condition) :to-be (second case)))
-             (expect (probe-file (write-plan-test-path root "nested/first.txt"))
-                     :to-be nil)
-             (expect (write-plan-test-directory-exists-p
-                      (write-plan-test-path root "nested"))
-                     :to-be nil)))))))
+       (let* ((root-name (car (last (pathname-directory root))))
+              (outside-name (format nil "~A-outside.txt" root-name))
+              (outside-path (write-plan-test-path root (format nil "../~A" outside-name)))
+              (absolute-path (namestring outside-path)))
+         (unwind-protect
+              (dolist (case (list (list absolute-path :absolute-path)
+                                  (list (format nil "../~A" outside-name) :parent-component)
+                                  (list (format nil "nested/../../~A" outside-name)
+                                        :parent-component)))
+                (let* ((path (first case))
+                       (condition
+                         (write-plan-test-capture-error
+                          (make-write-plan
+                           (list (make-write-plan-entry "nested/first.txt" "first"
+                                                        :create-directories-p t)
+                                 (make-write-plan-entry path "rejected")))
+                          root)))
+                  (with-soft-assertions
+                    (expect (typep condition 'org-write-plan-error) :to-be t)
+                    (when condition
+                      (expect (org-write-plan-error-reason condition)
+                              :to-be (second case)))
+                    (expect (probe-file outside-path) :to-be nil)
+                    (expect (probe-file
+                             (write-plan-test-path root "nested/first.txt"))
+                            :to-be nil)
+                    (expect (write-plan-test-directory-exists-p
+                             (write-plan-test-path root "nested"))
+                            :to-be nil))))
+           (when (probe-file outside-path)
+             (delete-file outside-path)))))))
 
   (it "rejects normalized duplicates and file-parent conflicts before writes"
     (write-plan-test-call-with-directory

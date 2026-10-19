@@ -15,15 +15,16 @@ Create a registry and pass it to the operation that needs a callback. A registry
   (org-kit:evaluate-elisp registry "(+ 1 2)"))
 ```
 
-`evaluate-elisp` passes its expression or form unchanged to the registered function. The library does not parse or evaluate it. If the registry has no `:evaluator` callback named `:emacs-lisp`, the call signals `org-elisp-evaluator-error`. Conditions signalled by a registered function propagate unchanged.
+`evaluate-elisp` passes EXPRESSION unchanged to the registered function; the library does not parse or evaluate it. If the registry has no `:evaluator` callback named `:emacs-lisp`, the call signals `org-elisp-evaluator-error`. Conditions signalled by a registered function propagate unchanged.
+
+A callback registered as an executor reports a timeout by signalling `org-callback-timeout-error`. The condition provides `org-callback-error-kind`, `org-callback-error-name`, and `org-callback-error-reason`; the reason defaults to `:timeout`. `invoke-callback` propagates the condition unchanged. The executor enforces its own deadline. cl-org-kit does not start a process or thread or interrupt the callback to enforce it.
 
 The same registry can supply named functions to other features. For example, a caller can register a
 Babel executor under kind `:babel-executor` and name `"python"`, then call it with
-`(org-kit:invoke-callback registry :babel-executor "python" source)`. A crypt callback could use kind
-`:crypt-encrypt` and name `:org-crypt`. `register-callback` folds kinds to uppercase and names to
-lowercase. Registering the same kind and name again replaces the earlier function. Registry
-operations are not thread-safe. Callers must synchronize access when multiple threads register or
-invoke callbacks through the same registry.
+`(org-kit:invoke-callback registry :babel-executor "python" source)`. `register-callback` folds kinds
+to uppercase and names to lowercase. Registering the same kind and name again replaces the earlier
+function. Registry operations are not thread-safe. Callers must synchronize access when multiple
+threads register or invoke callbacks through the same registry.
 
 ## Build and inspect a write plan
 

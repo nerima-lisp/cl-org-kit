@@ -98,3 +98,26 @@
         (register-callback registry "KiNd" "NaMe" #'identity)
         (expect (invoke-callback registry :kind :name "value")
                 :to-equal "value")))))
+
+(describe "callback timeout reporting"
+  (it "propagates a caller-reported timeout with callback identity"
+    (let* ((registry (make-callback-registry))
+           (timeout (make-condition 'org-callback-timeout-error
+                                    :kind "BABEL-EXECUTOR"
+                                    :name "PYTHON"))
+           (caught nil))
+      (register-callback registry :babel-executor "python"
+                         (lambda (source)
+                           (declare (ignore source))
+                           (error timeout)))
+      (setf caught
+            (handler-case
+                (progn (invoke-callback registry :babel-executor "python" "work") nil)
+              (org-callback-timeout-error (condition) condition)))
+      (with-soft-assertions
+        (expect (typep caught 'org-callback-timeout-error) :to-be t)
+        (when caught
+          (expect (eq caught timeout) :to-be t)
+          (expect (org-callback-error-kind caught) :to-equal "BABEL-EXECUTOR")
+          (expect (org-callback-error-name caught) :to-equal "PYTHON")
+          (expect (org-callback-error-reason caught) :to-be :timeout))))))
