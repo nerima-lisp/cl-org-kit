@@ -334,22 +334,22 @@ REASON classifies the failure, and CONTEXT is a bounded, escaped excerpt."))
   (slot-value condition 'context))
 
 (define-condition org-crypt-error (org-kit-error)
-  ((reason :initarg :reason :initform nil)
-   (cause :initarg :cause :initform nil))
+  ((reason :initarg :reason :initform nil))
   (:report (lambda (condition stream)
              (format stream "~A~@[ (~(~A~))~]"
                      (org-kit-error-message condition)
                      (org-crypt-error-reason condition))))
   (:documentation "Signalled when an Org crypt operation or callback fails.
-REASON classifies the failure; CAUSE is the underlying callback condition, if any."))
+REASON classifies the failure. Callback conditions are not retained."))
 
 (defun org-crypt-error-reason (condition)
   "Return the keyword classifying the Org crypt failure CONDITION reports."
   (slot-value condition 'reason))
 
 (defun org-crypt-error-cause (condition)
-  "Return the callback condition that caused CONDITION, or NIL."
-  (slot-value condition 'cause))
+  "Return NIL; callback conditions are not retained by Org crypt errors."
+  (declare (ignore condition))
+  nil)
 
 (define-condition org-export-error (org-kit-error)
   ((backend :initarg :backend :initform nil)

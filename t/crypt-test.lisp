@@ -204,7 +204,8 @@
                   :to-be 3)))))
 
   (it "wraps missing callbacks and callback failures without changing the input"
-    (let* ((source (format nil "* Entry~%secret~%"))
+    (let* ((sentinel "org-crypt-plaintext-leak-sentinel")
+           (source (format nil "* Entry~%~A~%" sentinel))
            (document (parse-org source))
            (heading (crypt-test-headline document "Entry"))
            (missing
@@ -214,26 +215,36 @@
                         nil)
                (org-crypt-error (condition) condition)))
            (registry (make-callback-registry))
-           (failure (make-condition 'simple-error
-                                    :format-control "stub failed"))
+           (failure nil)
            (caught nil))
       (register-callback registry :crypt-encrypt "org-crypt"
-                         (lambda (text) (declare (ignore text)) (error failure)))
+                         (lambda (text)
+                           (setf failure
+                                 (make-condition
+                                  'org-crypt-error
+                                  :message (format nil "callback input: ~A" text)
+                                  :reason (format nil "callback reason: ~A" text)))
+                           (error failure)))
       (setf caught
             (handler-case
                 (progn (crypt-encrypt-entry document heading registry) nil)
               (org-crypt-error (condition) condition)))
-      (with-soft-assertions
-        (expect (typep missing 'org-crypt-error) :to-be t)
-        (when missing
-          (expect (org-crypt-error-reason missing) :to-be :missing-callback)
-          (expect (typep (org-crypt-error-cause missing) 'org-callback-error)
-                  :to-be t))
-        (expect (typep caught 'org-crypt-error) :to-be t)
-        (when caught
-          (expect (org-crypt-error-reason caught) :to-be :callback-failed)
-          (expect (eq (org-crypt-error-cause caught) failure) :to-be t))
-        (expect (document-text document) :to-equal source))))
+      (let ((failure-report (princ-to-string failure))
+            (outer-report (princ-to-string caught))
+            (cause-report (princ-to-string (org-crypt-error-cause caught))))
+        (with-soft-assertions
+          (expect (typep missing 'org-crypt-error) :to-be t)
+          (when missing
+            (expect (org-crypt-error-reason missing) :to-be :missing-callback)
+            (expect (org-crypt-error-cause missing) :to-equal nil))
+          (expect (typep caught 'org-crypt-error) :to-be t)
+          (when caught
+            (expect (org-crypt-error-reason caught) :to-be :callback-failed)
+            (expect (org-crypt-error-cause caught) :to-equal nil))
+          (expect (search sentinel failure-report) :to-be-truthy)
+          (expect (search sentinel outer-report) :to-equal nil)
+          (expect (search sentinel cause-report) :to-equal nil)
+          (expect (document-text document) :to-equal source)))))
 
   (it "uses the default crypt tag for bulk encryption"
     (let* ((source (format nil "* Entry :crypt:~%secret~%"))

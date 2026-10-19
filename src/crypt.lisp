@@ -226,31 +226,28 @@
                      (setf cursor next)))))))
     plaintext))
 
-(defun crypt-signal-callback-failure (condition)
+(defun crypt-signal-callback-failure (reason)
   (error 'org-crypt-error
-         :message "Org crypt callback failed"
-         :reason :callback-failed
-         :cause condition))
+         :message (if (eq reason :missing-callback)
+                      "Org crypt callback is not registered"
+                      "Org crypt callback failed")
+         :reason reason))
 
 (defun crypt-invoke (registry kind text)
-  (handler-case
-      (let ((result (invoke-callback registry kind "org-crypt" (copy-seq text))))
-        (unless (stringp result)
-          (error 'org-crypt-error
-                 :message "Org crypt callback returned a non-string value"
-                 :reason :invalid-callback-result))
-        result)
-    (org-callback-error (condition)
+  (let ((result
+          (handler-case
+              (invoke-callback registry kind "org-crypt" (copy-seq text))
+            (org-callback-error (condition)
+              (crypt-signal-callback-failure
+               (if (eq (org-callback-error-reason condition) :unregistered)
+                   :missing-callback
+                   :callback-failed)))
+            (error () (crypt-signal-callback-failure :callback-failed)))))
+    (unless (stringp result)
       (error 'org-crypt-error
-             :message (if (eq (org-callback-error-reason condition) :unregistered)
-                          "Org crypt callback is not registered"
-                          "Org crypt callback failed")
-             :reason (if (eq (org-callback-error-reason condition) :unregistered)
-                         :missing-callback
-                         :callback-failed)
-             :cause condition))
-    (org-crypt-error (condition) (error condition))
-    (error (condition) (crypt-signal-callback-failure condition))))
+             :message "Org crypt callback returned a non-string value"
+             :reason :invalid-callback-result))
+    result))
 
 (defun crypt-check-document-and-registry (document registry)
   (unless (document-p document)

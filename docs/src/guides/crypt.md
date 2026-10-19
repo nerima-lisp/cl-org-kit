@@ -25,7 +25,7 @@ Create a callback registry and register one function for encryption and one for 
      (my-decrypt-function armor))))
 ```
 
-The callback name is always `"org-crypt"`. Callers own the registry and the cryptographic implementation. A missing callback signals `org-crypt-error` with reason `:missing-callback`. A callback condition or a non-string result signals the same condition with reason `:callback-failed` or `:invalid-callback-result`; `org-crypt-error-cause` returns the underlying callback condition when there is one.
+The callback name is always `"org-crypt"`. Callers own the registry and the cryptographic implementation. A missing callback signals `org-crypt-error` with reason `:missing-callback`. A callback condition signals the same condition with reason `:callback-failed`. Callback conditions are not retained: `org-crypt-error-cause` returns `nil` so it cannot expose callback data such as plaintext.
 
 In the example, `my-encrypt-function` and `my-decrypt-function` stand for functions supplied by the application, usually backed by its chosen cryptography library.
 
