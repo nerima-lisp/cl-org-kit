@@ -329,15 +329,22 @@
                (crypt-no-op-result document)
                (let* ((armor (crypt-remove-armor-indentation
                               source armor-start armor-end))
-                      (plaintext (crypt-invoke registry :crypt-decrypt armor))
-                      (replacement
-                        (crypt-shift-plaintext-headings
-                         document armor-start armor-end plaintext
-                         (node-property heading :level))))
-                 (crypt-check-output-length document armor-start armor-end replacement)
-                 (crypt-apply-patches-result
+                      (plaintext (crypt-invoke registry :crypt-decrypt armor)))
+                 (edit-prepare-patches
                   document
-                  (list (edit-make-patch armor-start armor-end replacement heading)))))))))))
+                  (list (edit-make-patch
+                         armor-start armor-end plaintext heading))
+                  :target heading)
+                 (let ((replacement
+                         (crypt-shift-plaintext-headings
+                          document armor-start armor-end plaintext
+                          (node-property heading :level))))
+                   (crypt-check-output-length
+                    document armor-start armor-end replacement)
+                   (crypt-apply-patches-result
+                    document
+                    (list (edit-make-patch
+                           armor-start armor-end replacement heading))))))))))))
 
 (defun crypt-encrypt-entry (document target registry)
   "Encrypt TARGET's body with the caller-owned registry and return an edit result.

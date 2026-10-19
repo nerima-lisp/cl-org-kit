@@ -426,4 +426,39 @@
         (when caught
           (expect (org-resource-limit-error-limit-name caught)
                   :to-be :max-output-length))
+        (expect (document-text document) :to-equal source))))
+
+  (it "checks decrypted plaintext limits before scanning headings"
+    (let* ((source (format nil "* Entry~%~A~%" (crypt-test-armor "ciphertext")))
+           (limits (make-limits :max-output-length (length source)))
+           (document (parse-org source :limits limits))
+           (registry (make-callback-registry))
+           (original-scanner (symbol-function 'org-kit::crypt-plaintext-heading-shift))
+           (scanner-calls 0)
+           (caught nil))
+      (register-callback registry :crypt-decrypt "org-crypt"
+                         (lambda (armor)
+                           (declare (ignore armor))
+                           (make-string (1+ (length source)) :initial-element #\a)))
+      (unwind-protect
+           (progn
+             (setf (symbol-function 'org-kit::crypt-plaintext-heading-shift)
+                   (lambda (&rest arguments)
+                     (declare (ignore arguments))
+                     (incf scanner-calls)
+                     (error "Plaintext heading scanner ran before the limit check")))
+             (setf caught
+                   (handler-case
+                       (progn (crypt-decrypt-entry
+                               document (crypt-test-headline document "Entry") registry)
+                              nil)
+                     (org-resource-limit-error (condition) condition))))
+        (setf (symbol-function 'org-kit::crypt-plaintext-heading-shift)
+              original-scanner))
+      (with-soft-assertions
+        (expect (typep caught 'org-resource-limit-error) :to-be t)
+        (when caught
+          (expect (org-resource-limit-error-limit-name caught)
+                  :to-be :max-output-length))
+        (expect scanner-calls :to-be 0)
         (expect (document-text document) :to-equal source)))))
