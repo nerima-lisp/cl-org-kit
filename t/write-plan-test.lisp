@@ -89,6 +89,19 @@
                    (apply original arguments)))
            (funcall function (lambda () calls)))
       (setf (symbol-function symbol) original))))
+(defun write-plan-test-call-after-preflight (mutation thunk)
+  (let* ((symbol 'org-kit::write-plan-prepare)
+         (original (symbol-function symbol)))
+    (unwind-protect
+         (progn
+           (setf (symbol-function symbol)
+                 (lambda (plan root limits)
+                   (multiple-value-bind (canonical-root records)
+                       (funcall original plan root limits)
+                     (funcall mutation canonical-root)
+                     (values canonical-root records))))
+           (funcall thunk))
+      (setf (symbol-function symbol) original))))
 
 (describe "write plans"
   (it "writes exact UTF-8 content with the requested mode and creates parents"
@@ -438,28 +451,79 @@
            (expect (probe-file (write-plan-test-path root "second.txt")) :to-be nil)
            (expect (probe-file (write-plan-test-path root "large.txt")) :to-be nil))))))
 
-  (it "rejects a symlink parent without creating a target outside the root"
-    (write-plan-test-call-with-directory
-     (lambda (base)
-       (let* ((root (write-plan-test-child-directory base "root"))
-              (outside (write-plan-test-child-directory base "outside"))
-              (sentinel (write-plan-test-path outside "sentinel.txt"))
-              (link (write-plan-test-path root "parent")))
-         (write-plan-test-write-text sentinel "unchanged")
-         (sb-posix:symlink (namestring outside) (namestring link))
-         (let ((condition
-                 (write-plan-test-capture-error
-                  (make-write-plan
-                   (list (make-write-plan-entry "parent/new.txt" "changed")))
-                  root)))
+  (it "rejects symlink swaps during application"
+      (write-plan-test-call-with-directory
+       (lambda (base)
+         (let* ((root (write-plan-test-child-directory base "root"))
+                (outside (write-plan-test-child-directory base "outside"))
+                (parent (write-plan-test-child-directory root "existing"))
+                (existing-condition
+                 (write-plan-test-call-after-preflight
+                  (lambda (canonical-root)
+                    (declare (ignore canonical-root))
+                    (uiop:delete-directory-tree parent :validate t)
+                    (sb-posix:symlink (namestring outside) (namestring (write-plan-test-path root "existing"))))
+                  (lambda ()
+                    (write-plan-test-capture-error
+                     (make-write-plan
+                      (list (make-write-plan-entry "existing/new.txt" "value"
+                                                   :create-directories-p t)))
+                     root))))
+                (planned-parent (write-plan-test-path root "planned"))
+                (planned-condition
+                 (write-plan-test-call-after-preflight
+                  (lambda (canonical-root)
+                    (declare (ignore canonical-root))
+                    (sb-posix:symlink (namestring outside)
+                                      (namestring planned-parent)))
+                  (lambda ()
+                    (write-plan-test-capture-error
+                     (make-write-plan
+                      (list (make-write-plan-entry "planned/new.txt" "value"
+                                                   :create-directories-p t)))
+                     root)))))
            (with-soft-assertions
-             (expect (typep condition 'org-write-plan-error) :to-be t)
-             (when condition
-               (expect (org-write-plan-error-reason condition)
-                       :to-be :symlink-component))
-             (expect (write-plan-test-read-text sentinel) :to-equal "unchanged")
-             (expect (probe-file (write-plan-test-path outside "new.txt"))
-                     :to-be nil)))))))
+            (dolist (condition (list existing-condition planned-condition))
+              (expect (typep condition 'org-write-plan-error) :to-be t)
+              (when condition
+                (expect (org-write-plan-error-reason condition) :to-be :io-failed)
+                (expect (typep (org-write-plan-error-cause condition)
+                               'sb-posix:syscall-error)
+                        :to-be t)
+                (when (typep (org-write-plan-error-cause condition)
+                             'sb-posix:syscall-error)
+                  (expect (member
+                           (sb-posix:syscall-errno
+                            (org-write-plan-error-cause condition))
+                           (list sb-posix:enotdir sb-posix:eloop))
+                          :to-be-truthy)))
+              (expect (uiop:directory-files outside) :to-equal nil))))))
+      (write-plan-test-call-with-directory
+       (lambda (base)
+         (let* ((root (write-plan-test-child-directory base "root"))
+                (outside (write-plan-test-child-directory base "outside"))
+                (target (write-plan-test-path root "target.txt"))
+                (sentinel (write-plan-test-path outside "sentinel.txt"))
+                (plan (make-write-plan
+                       (list (make-write-plan-entry "target.txt" "replacement"))))
+                (applied nil))
+           (write-plan-test-write-text target "old")
+           (write-plan-test-write-text sentinel "unchanged")
+           (setf applied
+                 (write-plan-test-call-after-preflight
+                  (lambda (canonical-root)
+                    (declare (ignore canonical-root))
+                    (delete-file target)
+                    (sb-posix:symlink (namestring sentinel) (namestring target)))
+                  (lambda () (apply-write-plan plan root))))
+           (with-soft-assertions
+            (expect applied :to-equal '("target.txt"))
+            (expect (write-plan-test-read-text target) :to-equal "replacement")
+            (expect (write-plan-test-read-text sentinel) :to-equal "unchanged")
+            (expect (logand (sb-posix:stat-mode (sb-posix:lstat (namestring target)))
+                            #o170000)
+                    :to-be #o100000)))))
+      )
 
   (it "copies and validates write-plan data"
     (let* ((source-path (copy-seq "entry.txt"))
