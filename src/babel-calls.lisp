@@ -42,21 +42,20 @@
                      (babel-merge-variable-assignments
                       parameters (list assignment)))
              (let ((parameter
-                     (find-if
-                      (lambda (entry)
-                        (let ((name (and (string= (car entry) "VAR")
-                                         (babel-var-assignment-name
-                                          (cdr entry)))))
-                          (and name (string= name (car assignment)))))
-                      parameters)))
-               (unless parameter
-                 (babel-signal-error
-                  :invalid-variable-assignment
-                  "Babel positional argument has no matching variable"
-                  argument))
-               (setf (cdr parameter)
-                     (format nil "~A=~A"
-                             (car assignment) (cdr assignment))))))
+       (find-if
+        (lambda (entry)
+          (let ((name (and (string= (car entry) "VAR")
+                           (babel-var-assignment-name (cdr entry)))))
+            (and name (string= name (car assignment)))))
+        parameters)))
+  (unless parameter
+    (babel-signal-error
+     :invalid-variable-assignment
+     "Babel positional argument has no matching variable"
+     argument))
+  (setf (cdr parameter)
+        (format nil "~A=~A"
+                (car assignment) (cdr assignment))))))
   parameters)
 
 (defun babel-call-effective-parameters (call-document call target-document
@@ -96,7 +95,7 @@ parameters and arguments are merged over the target block's parameters."
                   :test #'eq)
     (babel-signal-error :invalid-target
                         "Babel call execution requires a call node"
-                        (node-type call-node)))
+                        (princ-to-string (node-type call-node))))
   (unless (eq (node-document call-node) document)
     (babel-signal-error :document-mismatch
                         "Babel call belongs to another document"

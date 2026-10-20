@@ -115,7 +115,7 @@
                (org-kit:babel-execution-result-edit-result result)))
              :to-equal
              (format nil "~A#+RESULTS:~%done~%" original-source))
-            (expect (org-kit:document-text document) :to-equal original-source)))))
+            (expect (org-kit:document-text document) :to-equal original-source))))))
 
   (it "resolves supplied library documents after the local document"
     (let* ((document (parse-org "#+CALL: library-task(9)"))
@@ -314,5 +314,128 @@
         (expect (org-kit:org-callback-error-name caught)
                 :to-equal "EMACS-LISP")
         (expect (org-kit:org-callback-error-reason caught)
-                :to-be :timeout))))))
+                :to-be :timeout)))))
+  (it "validates malformed call nodes, targets, and library documents"
+    (let* ((document (babel-call-test-source-document nil "#+CALL: target()"))
+           (call (first (babel-call-test-nodes document :babel-call)))
+           (source-block (first (babel-call-test-nodes document :src-block)))
+           (registry (org-kit:make-callback-registry))
+           (foreign-document
+             (babel-call-test-source-document nil "#+CALL: target()"))
+           (foreign-call
+             (first (babel-call-test-nodes foreign-document :babel-call)))
+           (missing-document (parse-org "#+CALL: absent()"))
+           (missing-call
+             (first (babel-call-test-nodes missing-document :babel-call)))
+           (table-document
+             (parse-org (format nil "#+NAME: named-table~%| 1 |~%~%#+CALL: named-table()~%")))
+           (table-call
+             (first (babel-call-test-nodes table-document :babel-call)))
+           (positional-document
+             (babel-call-test-source-document nil "#+CALL: target(9)"))
+           (positional-call
+             (first (babel-call-test-nodes positional-document :babel-call)))
+           (document-error
+             (babel-call-test-condition
+              (lambda () (org-kit:execute-babel-call nil call registry))))
+           (node-error
+             (babel-call-test-condition
+              (lambda () (org-kit:execute-babel-call document nil registry))))
+           (non-call-error
+             (babel-call-test-condition
+              (lambda ()
+                (org-kit:execute-babel-call document source-block registry))))
+           (foreign-error
+             (babel-call-test-condition
+              (lambda ()
+                (org-kit:execute-babel-call document foreign-call registry))))
+           (bad-library-error
+             (babel-call-test-condition
+              (lambda ()
+                (org-kit:execute-babel-call
+                 missing-document missing-call registry
+                 :library-documents (list :not-a-document)))))
+           (improper-library-list-error
+             (babel-call-test-condition
+              (lambda ()
+                (org-kit:execute-babel-call
+                 document call registry
+                 :library-documents (cons document :not-a-list)))))
+           (table-target-error
+             (babel-call-test-condition
+              (lambda ()
+                (org-kit:execute-babel-call table-document table-call registry))))
+           (argument-error
+             (babel-call-test-condition
+              (lambda ()
+                (org-kit:execute-babel-call
+                 positional-document positional-call registry))))
+           (missing-name-error
+             (progn
+               (setf (node-property call :call) nil)
+               (babel-call-test-condition
+                (lambda ()
+                  (org-kit:execute-babel-call document call registry))))))
+      (flet ((expect-reason (condition reason)
+               (expect (typep condition 'org-kit:org-babel-error) :to-be t)
+               (when (typep condition 'org-kit:org-babel-error)
+                 (expect (org-kit:org-babel-error-reason condition)
+                         :to-be reason))))
+        (with-soft-assertions
+          (expect (typep document-error 'type-error) :to-be t)
+          (expect (typep node-error 'type-error) :to-be t)
+          (expect-reason non-call-error :invalid-target)
+          (expect-reason foreign-error :document-mismatch)
+          (expect (typep bad-library-error 'type-error) :to-be t)
+          (expect (typep improper-library-list-error 'type-error) :to-be t)
+          (expect-reason table-target-error :unresolved-call-target)
+          (expect-reason argument-error :invalid-variable-assignment)
+          (expect-reason missing-name-error :unresolved-call-target)))))
+
 )
+(describe "Babel call parameter boundaries"
+  (it "keeps an explicit lexical header"
+    (let* ((document
+             (babel-call-test-source-document
+              ":lexical yes" "#+CALL: target()"))
+           (call (first (babel-call-test-nodes document :babel-call)))
+           (registry (org-kit:make-callback-registry))
+           (parameters nil))
+      (org-kit:register-babel-executor
+       registry "emacs-lisp"
+       (lambda (body effective-parameters variables)
+         (declare (ignore body variables))
+         (setf parameters effective-parameters)
+         "done"))
+      (let ((result
+              (org-kit:execute-babel-call document call registry)))
+        (with-soft-assertions
+          (expect (org-kit:babel-execution-result-status result)
+                  :to-be
+                  :executed)
+          (expect (babel-call-test-parameter-values parameters "LEXICAL")
+                  :to-equal
+                  '("yes"))))))
+  (it "rejects a non-list library-document value"
+    (let* ((document (babel-call-test-source-document
+                      nil "#+CALL: target()"))
+           (call (first (babel-call-test-nodes document :babel-call)))
+           (condition
+             (babel-call-test-condition
+              (lambda ()
+                (org-kit:execute-babel-call
+                 document call (org-kit:make-callback-registry)
+                 :library-documents 42)))))
+      (expect (typep condition 'type-error) :to-be t)))
+  (it "rejects unmatched positional parameter cells"
+    (let ((condition
+            (babel-call-test-condition
+             (lambda ()
+               (org-kit::babel-merge-call-arguments
+                '(("VAR" . "first=1, second=2"))
+                "next-first,next-second")))))
+      (with-soft-assertions
+        (expect (typep condition 'org-kit:org-babel-error) :to-be t)
+        (when (typep condition 'org-kit:org-babel-error)
+          (expect (org-kit:org-babel-error-reason condition)
+                  :to-be :invalid-variable-assignment))))))

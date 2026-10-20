@@ -522,20 +522,20 @@
          (arguments nil)
          (end-header nil))
     (labels ((skip-space ()
-               (loop while (and (< position length)
-                                (member (char text position)
-                                        (list #\Space #\Tab)))
-                     do (incf position)))
+                         (loop while (and (< position length)
+                                          (member (char text position)
+                                                  (list #\Space #\Tab)))
+                               do (incf position)))
              (read-field (open close)
-               (other-object-paired-span text position length open close))
+                         (other-object-paired-span text position length open close))
              (unclosed-header ()
-               (return-from reader-blocks-call-fields
-                 (values name nil nil (subseq text (length name))))))
+                              (return-from reader-blocks-call-fields
+                                           (values name nil nil (subseq text (length name))))))
       (when (zerop (length name))
         (return-from reader-blocks-call-fields (values text nil nil nil)))
       (when name-end
         (skip-space)
-        (when (and (< position length) (char= (char text position) #\[))
+        (when (char= (char text position) #\[)
           (multiple-value-bind (start end after)
               (read-field #\[ #\])
             (unless after
@@ -567,9 +567,8 @@
                   (reader-blocks-trim
                    (if end-header
                        (format nil "~A ~A" end-header trailing)
-                       trailing))
-                  position length)))
-      (values name inside-header arguments end-header)))))
+                     trailing))
+                  position length)))) (values name inside-header arguments end-header))))
 
 (defun reader-blocks-keyword-node (context start
                                            limit

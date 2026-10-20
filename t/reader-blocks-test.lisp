@@ -570,3 +570,56 @@
         (expect (emit-org (document-root document))
                 :to-equal
                 source)))))
+(describe "Babel CALL field boundaries"
+  (it "keeps empty names and appends trailing text to the end header"
+    (with-soft-assertions
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "[]"))
+       :to-equal
+       (list "[]" nil nil nil))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields
+         "combine[:var value=1](2)[:results output] trailing-token"))
+       :to-equal
+       (list "combine" ":var value=1" "2"
+             ":results output trailing-token")))))
+(describe "Babel CALL field empty cases"
+  (it "distinguishes empty input, bare names, and empty bracketed fields"
+    (with-soft-assertions
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields ""))
+       :to-equal
+       (list "" nil nil nil))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "combine"))
+       :to-equal
+       (list "combine" nil nil nil))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "combine[]"))
+       :to-equal
+       (list "combine" nil nil nil))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "combine[:var value"))
+       :to-equal
+       (list "combine" nil nil "[:var value"))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "combine[:var value=1]"))
+       :to-equal
+       (list "combine" ":var value=1" nil nil))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "combine( )"))
+       :to-equal
+       (list "combine" nil nil nil))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "combine[:results output]"))
+       :to-equal
+       (list "combine" ":results output" nil nil)))))
