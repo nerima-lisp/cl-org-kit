@@ -325,6 +325,8 @@
             :to-equal (list "toc" nil))
     (expect (org-kit::%lint-placeholder-numbers "$3 $1 $3 $0 $$2")
             :to-equal (list 1 2 3))
+    (expect (org-kit::%lint-placeholder-numbers "$1$")
+            :to-equal (list 1))
     (expect (org-kit::%lint-template-arity "$1 and $3") :to-equal (cons 3 3))
     (expect (org-kit::%lint-template-arity "no placeholders") :to-equal (cons 0 0)))
   (it "parses macro definitions and all arity message forms"
@@ -400,7 +402,13 @@
             (org-kit::node-property link :path) "missing")
       (expect (length (org-kit::%lint-invalid-id-link
                        document '(:known-ids nil)))
-              :to-be 1))
+              :to-be 1)
+      (setf (org-kit::node-property link :type) "fuzzy"
+            (org-kit::node-property link :path) "id:missing-id")
+      (expect (mapcar (function org-kit::org-lint-diagnostic-message)
+                      (org-kit::%lint-invalid-id-link
+                       document '(:known-ids nil)))
+              :to-equal (list "Unknown ID \"missing-id\"")))
     (let* ((document (parse-org
                       (lint-context-test-lines
                        "#+MACRO:" "#+MACRO: local" "#+MACRO: sparse $2")))

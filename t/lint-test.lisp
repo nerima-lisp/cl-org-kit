@@ -20,7 +20,7 @@
       (expect (set-difference registered on-disk :test #'string=) :to-equal '())
       (expect (set-difference on-disk registered :test #'string=) :to-equal '())))
 
-  (it "registers all 61 Org checker names: 58 dispatchable and three deferred"
+  (it "registers 61 Org checker names: 58 dispatchable and three marked :dependency-wait"
     (let* ((table org-kit::*org-lint-checkers*)
            (active (remove-if (lambda (checker)
                                 (eq (third checker) :dependency-wait))
@@ -48,29 +48,39 @@ body
                       :checkers '())
             :to-equal '()))
 
-  (it "does not run a context-dependent checker without its required material"
+  (it "does not run context-dependent checks without required material"
     (expect (org-lint (parse-org "#+BEGIN_SRC not-a-language
 body
 #+END_SRC
 ")
                       :checkers '("suspicious-language-in-src-block"))
             :to-equal '()))
+  (it "does not dispatch checkers marked :dependency-wait"
+    (let* ((document (parse-org "[[id:missing-id]]"))
+           (org-kit::*org-lint-checkers*
+             (list (list "invalid-id-link"
+                         (find-symbol "%LINT-INVALID-ID-LINK" :org-kit)
+                         :dependency-wait nil))))
+      (expect (org-lint document :context '(:known-ids nil))
+              :to-equal nil)))
 
   (it "rejects an unknown checker name"
     (signals org-kit-error
       (org-lint (parse-org "Text.") :checkers '("not-a-checker"))))
 
   (it "requires an already parsed document"
-    (signals org-kit-error (org-lint (make-document "Text."))))
-
-  (it "validates context as a proper keyword plist"
-    (signals org-kit-error (org-lint (parse-org "Text.") :context '(:not-a-pair)))))
+    (signals org-kit-error (org-lint (make-document "Text.")))))
 (describe "Org lint validation edge cases"
+  (it "uses diagnostic defaults"
+    (let ((diagnostic (org-kit::%make-org-lint-diagnostic)))
+      (expect (org-kit::org-lint-diagnostic-checker diagnostic) :to-equal "")
+      (expect (org-kit::org-lint-diagnostic-position diagnostic) :to-be 1)
+      (expect (org-kit::org-lint-diagnostic-message diagnostic) :to-equal "")))
   (it "rejects invalid documents and diagnostic positions"
-  (signals type-error (org-lint nil))
-  (let ((position (read-from-string "0")))
-    (signals type-error
-      (org-kit::%make-org-lint-diagnostic :position position))))
+    (signals type-error (org-lint nil))
+    (let ((position (read-from-string "0")))
+      (signals type-error
+        (org-kit::%make-org-lint-diagnostic :position position))))
   (it "rejects malformed context plist shapes"
     (let ((document (parse-org "Text.")))
       (signals org-kit-error (org-lint document :context :invalid))
@@ -83,6 +93,9 @@ body
       (let ((cycle (list :known-ids nil)))
         (setf (cdr (last cycle)) cycle)
         (signals org-kit-error (org-lint document :context cycle)))))
+  (it "rejects an unmatched keyword in the context plist"
+    (signals org-kit-error
+      (org-lint (parse-org "Text.") :context '(:not-a-pair))))
   (it "rejects malformed checker selections"
     (let ((document (parse-org "Text.")))
       (signals type-error
@@ -92,7 +105,7 @@ body
       (let ((cycle (list "known")))
         (setf (cdr (last cycle)) cycle)
         (expect (org-kit::%lint-string-list-p cycle) :to-be nil))))
-  (it "rejects diagnostic offsets outside the document"
+  (it "rejects diagnostic offsets outside the document or with invalid types"
     (let ((document (parse-org "Text.")))
       (expect (org-kit::%lint-report document "test" -1 "message") :to-be nil)
       (expect (org-kit::%lint-report document "test" 6 "message") :to-be nil)
