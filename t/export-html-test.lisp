@@ -1233,6 +1233,12 @@ paragraph" table-list) :not :to-be nil))))
                 (lambda ()
                   (org-kit::export-html-link-destination state link)))
                (sb-ext:gc :full t)
+               (export-html-test-catch-error
+                (lambda () (export-org document :html)))
+               (export-html-test-catch-error
+                (lambda ()
+                  (org-kit::export-html-link-destination state link)))
+               (sb-ext:gc :full t)
                (sb-ext:get-bytes-consed)))
            (condition
              (export-html-test-catch-error
