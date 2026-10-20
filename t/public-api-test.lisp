@@ -438,7 +438,7 @@ are :LATE."))
     (expect (fboundp 'clocktable-result-total-minutes) :to-be-truthy)
     (expect (fboundp 'clocktable-result-range) :to-be-truthy))
 
-  (it "pins the P8b callback and write-plan API documentation"
+  (it "pins the callback and write-plan API documentation"
     (with-soft-assertions
       (expect (documentation 'make-callback-registry 'function)
               :to-equal "Return an empty callback registry with no callbacks pre-registered.")
@@ -473,7 +473,8 @@ missing parent directories.")
               "Return the permission bits for ENTRY, or NIL for a delete entry.")
       (expect (documentation (quote make-write-plan-delete-entry) (quote function))
               :to-equal
-              "Return a write-plan entry that removes one relative path when applied.")
+              "Return an entry that removes an existing regular file below ROOT when applied.
+Symlink components below ROOT are rejected.")
       (expect (documentation (quote write-plan-entry-operation) (quote function))
               :to-equal
               "Return ENTRY operation, either :WRITE or :DELETE.")

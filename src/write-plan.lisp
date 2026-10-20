@@ -103,7 +103,8 @@ missing parent directories."
   (%write-plan-entry-create-directories-p entry))
 
 (defun make-write-plan-delete-entry (path)
-  "Return a write-plan entry that removes one relative path when applied."
+  "Return an entry that removes an existing regular file below ROOT when applied.
+Symlink components below ROOT are rejected."
   (unless (or (stringp path) (pathnamep path))
     (error 'type-error :datum path :expected-type '(or string pathname)))
   (%make-write-plan-entry
