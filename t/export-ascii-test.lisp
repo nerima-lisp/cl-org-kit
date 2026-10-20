@@ -1344,22 +1344,28 @@
              (parse-org source
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :ascii))
+           (check-counts (make-hash-table))
            (input-length (length source))
            (before
              (progn
+               (let ((org-kit::*export-output-check-counts* check-counts)
+                     (org-kit::*export-current-export-phase* :body))
+                 (handler-case
+                     (progn
+                       (org-kit::export-ascii-render-preparation preparation)
+                       nil)
+                   (org-resource-limit-error (condition) condition)))
+               (sb-ext:gc :full t)
+               (setf check-counts (make-hash-table))
+               (sb-ext:get-bytes-consed)))
+           (condition
+             (let ((org-kit::*export-output-check-counts* check-counts)
+                   (org-kit::*export-current-export-phase* :body))
                (handler-case
                    (progn
                      (org-kit::export-ascii-render-preparation preparation)
                      nil)
-                 (org-resource-limit-error (condition) condition))
-               (sb-ext:gc :full t)
-               (sb-ext:get-bytes-consed)))
-           (condition
-             (handler-case
-                 (progn
-                   (org-kit::export-ascii-render-preparation preparation)
-                   nil)
-               (org-resource-limit-error (condition) condition)))
+                 (org-resource-limit-error (condition) condition))))
            (allocated (- (sb-ext:get-bytes-consed) before)))
       (with-soft-assertions
         (expect (> input-length (* 256 1024)) :to-be t)
