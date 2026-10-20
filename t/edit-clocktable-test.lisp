@@ -892,6 +892,13 @@
         (expect (document-text document) :to-equal source)))))
 
 (describe "clocktable calendar ranges and rendering"
+  (it "returns no stepped periods for an empty time range"
+    (let ((range (make-time-range
+                  (make-org-time-value "2026-10-13")
+                  (make-org-time-value "2026-10-13"))))
+      (expect (org-kit::clocktable-step-ranges range "day")
+              :to-equal nil)))
+
   (it "selects exact year, month, week, quarter, and day block ranges"
     (let ((prefix
             (format nil
@@ -942,25 +949,27 @@
                     :to-be-truthy))))))
 
   (it "splits weekly, semimonthly, monthly, quarterly, and yearly ranges"
-    (dolist (case '( ("week" "2026-10-13" "2026-10-29"
-                      "Weekly report starting on: [2026-10-13 Tue]"
-                      "Weekly report starting on: [2026-10-19 Mon]"
-                      "Weekly report starting on: [2026-10-26 Mon]")
-                    ("semimonth" "2026-10-01" "2026-12-01"
-                     "Semimonthly report starting on: [2026-10-01 Thu]"
-                     "Semimonthly report starting on: [2026-10-16 Fri]"
-                     "Semimonthly report starting on: [2026-11-01 Sun]"
-                     "Semimonthly report starting on: [2026-11-16 Mon]")
-                    ("month" "2026-10-15" "2026-12-01"
-                     "Monthly report starting on: [2026-10-15 Thu]"
-                     "Monthly report starting on: [2026-11-01 Sun]")
-                    ("quarter" "2026-10-15" "2027-02-01"
-                     "Quarterly report starting on: [2026-10-15 Thu]"
-                     "Quarterly report starting on: [2027-01-01 Fri]")
-                    ("year" "2025-10-15" "2027-03-01"
-                     "Annual report starting on: [2025-10-15 Wed]"
-                     "Annual report starting on: [2026-01-01 Thu]"
-                     "Annual report starting on: [2027-01-01 Fri]")))
+    (dolist (case '(("week" "2026-10-13" "2026-10-29"
+                    "Weekly report starting on: [2026-10-13 Tue]"
+                    "Weekly report starting on: [2026-10-19 Mon]"
+                    "Weekly report starting on: [2026-10-26 Mon]")
+                   ("semimonth" "2026-10-01" "2026-12-01"
+                    "Semimonthly report starting on: [2026-10-01 Thu]"
+                    "Semimonthly report starting on: [2026-10-16 Fri]"
+                    "Semimonthly report starting on: [2026-11-01 Sun]"
+                    "Semimonthly report starting on: [2026-11-16 Mon]")
+                   ("semimonth" "2026-10-16" "2026-11-01"
+                    "Semimonthly report starting on: [2026-10-16 Fri]")
+                   ("month" "2026-10-15" "2026-12-01"
+                    "Monthly report starting on: [2026-10-15 Thu]"
+                    "Monthly report starting on: [2026-11-01 Sun]")
+                   ("quarter" "2026-10-15" "2027-02-01"
+                    "Quarterly report starting on: [2026-10-15 Thu]"
+                    "Quarterly report starting on: [2027-01-01 Fri]")
+                   ("year" "2025-10-15" "2027-03-01"
+                    "Annual report starting on: [2025-10-15 Wed]"
+                    "Annual report starting on: [2026-01-01 Thu]"
+                    "Annual report starting on: [2027-01-01 Fri]")))
       (destructuring-bind (step start end &rest labels) case
         (multiple-value-bind (updated edit document)
             (edit-clocktable-test-update-arguments
