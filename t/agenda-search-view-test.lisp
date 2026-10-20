@@ -31,7 +31,7 @@
                        "* Phrase~%amber~%cobalt~%* Noncontiguous~%amber gap cobalt~%"
                        "* Reversed~%cobalt then amber~%* Amber only~%amber~%"
                        "* Cobalt only~%cobalt~%* Beta~%COBALT SIGNAL~%"
-                       "* Gamma~%violet signal~%"))))
+                       "* Gamma~%violet signal~%* Joined~%amberX cobalt~%"))))
            (phrase-entries
              (agenda-search-view (list document) "amber cobalt"))
            (and-entries
@@ -42,16 +42,20 @@
         (expect (agenda-search-view-test-titles phrase-entries)
                 :to-equal (list "Phrase"))
         (expect (agenda-search-view-test-titles and-entries)
-                :to-equal (list "Phrase" "Noncontiguous" "Reversed"))
+                :to-equal (list "Phrase" "Noncontiguous" "Reversed" "Joined"))
         (expect (agenda-search-view-test-titles regex-entries)
                 :to-equal (list "Beta")))))
-  (it "matches nested delimiter and escaped interval regexes"
+  (it "matches escaped search words and nested regex delimiters"
     (let* ((document
              (parse-org
-              (format nil "* Curly~%literal a{b}~%* Repeated~%aa~%* Other~%literal ab~%")))
+              (format nil "* Curly~%literal a{b}~%* Repeated~%aa~%* Other~%literal ab~%* Escaped word~%amber cobalt~%")))
            (nested-entries
              (agenda-search-view (list document) "+{a{b}}"))
            (backslash (string (code-char 92)))
+           (escaped-word-query
+             (concatenate 'string "+amber" backslash " cobalt"))
+           (escaped-word-entries
+             (agenda-search-view (list document) escaped-word-query))
            (interval-query
              (concatenate 'string "+{a" backslash "{2" backslash "}}"))
            (interval-entries
@@ -59,6 +63,8 @@
       (with-soft-assertions
         (expect (agenda-search-view-test-titles nested-entries)
                 :to-equal (list "Curly"))
+        (expect (agenda-search-view-test-titles escaped-word-entries)
+                :to-equal (list "Escaped word"))
         (expect (agenda-search-view-test-titles interval-entries)
                 :to-equal (list "Repeated")))))
   (it "treats quotes as literal text outside Boolean mode"
