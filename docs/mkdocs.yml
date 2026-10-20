@@ -21,6 +21,7 @@ nav:
       - Tables: guides/tables.md
       - Links: guides/links.md
       - Org IDs: guides/org-id.md
+      - BibTeX: guides/bibtex.md
       - Export: guides/export.md
       - Org crypt: guides/crypt.md
       - Callbacks and Write Plans: guides/callbacks-and-write-plans.md
