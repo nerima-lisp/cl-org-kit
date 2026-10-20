@@ -137,6 +137,7 @@
    #:toggle-heading
    #:toggle-item
    #:toggle-fixed-width
+   #:insert-structure-template
    #:clone-subtree-with-time-shift #:demote-subtree
    ;; Unit E subtree relocation and sort
    #:relocation-result #:make-relocation-result #:relocation-result-p
