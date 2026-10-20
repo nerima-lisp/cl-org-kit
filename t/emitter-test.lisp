@@ -1347,6 +1347,10 @@
               (make-node :babel-call :properties (list :call "run"
                                                        :inside-header "bad]header"))
               (make-node :babel-call :properties (list :call "run"
+                                                       :inside-header "bad[header"))
+              (make-node :babel-call :properties (list :call "run"
+                                                       :inside-header " padded "))
+              (make-node :babel-call :properties (list :call "run"
                                                        :inside-header
                                                        (format nil "bad~%header")))
               (make-node :babel-call :properties (list :call "run"
