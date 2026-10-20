@@ -331,9 +331,7 @@
 
 (defun bibtex-align-generated-properties (document headline)
   (let* ((section (find :section (node-children headline) :key #'node-type))
-         (drawer (and section
-                      (find :property-drawer (node-children section)
-                            :key #'node-type)))
+         (drawer (edit-properties-section-drawer section))
          (properties (and drawer (node-children drawer))))
     (if (null properties)
         document
