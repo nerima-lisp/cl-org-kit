@@ -1665,7 +1665,462 @@
                  :to-equal "isolated")
          (expect snapshot-preserved-p :to-be t)
          (expect snapshot-isolated-p :to-be t)))))
-))
+)
+  (it "builds link descriptions from view content and fallback properties"
+    (labels ((description (node &optional children source-document)
+               (org-kit::export-view-plain-text-description
+                (make-export-view node :children children
+                                  :source-document source-document)))
+             (source-description (type)
+               (let* ((document (parse-org "raw"))
+                      (node (make-node type :begin 0 :end 3)))
+                 (setf (document-root document) node)
+                 (description node nil document))))
+      (let* ((child
+               (make-export-view
+                (make-node :plain-text :properties '(:value "child label"))))
+             (link-with-child
+               (make-node :link :properties '(:raw-link "raw" :path "path")))
+             (link-with-raw
+               (make-node :link :properties '(:raw-link "raw label" :path "path")))
+             (link-with-path
+               (make-node :link :properties '(:path "path label")))
+             (literal-with-value
+               (make-node :code :properties '(:value "literal value")))
+             (macro-with-child (make-node :macro))
+             (paragraph (make-node :paragraph)))
+        (with-soft-assertions
+          (expect (description (make-node :plain-text
+                                          :properties '(:value "plain value")))
+                  :to-equal "plain value")
+          (expect (source-description :plain-text) :to-equal "raw")
+          (expect (description (make-node :entity
+                                          :properties '(:utf-8 "UTF-8")))
+                  :to-equal "UTF-8")
+          (expect (description (make-node :entity
+                                          :properties '(:unicode "Unicode")))
+                  :to-equal "Unicode")
+          (expect (source-description :entity) :to-equal "raw")
+          (expect (description (make-node :entity)) :to-equal "")
+          (expect (description (make-node :line-break))
+                  :to-equal (string (code-char 10)))
+          (expect (description link-with-child (list child))
+                  :to-equal "child label")
+          (expect (description link-with-raw) :to-equal "raw label")
+          (expect (description link-with-path) :to-equal "path label")
+          (expect (description (make-node :link)) :to-equal "")
+          (expect (description literal-with-value) :to-equal "literal value")
+          (expect (source-description :code) :to-equal "raw")
+          (expect (description (make-node :macro) (list child))
+                  :to-equal "child label")
+          (expect (description macro-with-child) :to-equal "")
+          (expect (description paragraph (list child)) :to-equal "child label")
+          (expect (description paragraph) :to-equal "")
+          (expect (source-description :paragraph) :to-equal "raw")))))
+  (it "validates direct link handler dispatch inputs and results"
+      (let ((invalid-type-p nil)
+            (invalid-path-p nil)
+            (invalid-description-p nil)
+            (invalid-frame-p nil)
+            (invalid-result-p nil)
+            (missing-handler-p nil)
+            (valid-result nil))
+        (export-registry-test-with-root-backend
+         :api-registry-link-call-validation
+         (list
+          :renderer
+          (lambda (context)
+            (let ((frame (org-kit::%make-export-render-frame :mode :inline)))
+              (setf invalid-type-p
+                    (export-registry-test-signals-type-error-p
+                     (lambda ()
+                       (org-kit::export-call-link-type-handler
+                        context 42 "path" "label" frame))))
+              (setf invalid-path-p
+                    (export-registry-test-signals-type-error-p
+                     (lambda ()
+                       (org-kit::export-call-link-type-handler
+                        context "valid" 42 "label" frame))))
+              (setf invalid-description-p
+                    (export-registry-test-signals-type-error-p
+                     (lambda ()
+                       (org-kit::export-call-link-type-handler
+                        context "valid" "path" 42 frame))))
+              (setf invalid-frame-p
+                    (export-registry-test-signals-type-error-p
+                     (lambda ()
+                       (org-kit::export-call-link-type-handler
+                        context "valid" "path" "label" nil))))
+              (setf invalid-result-p
+                    (export-registry-test-signals-type-error-p
+                     (lambda ()
+                       (org-kit::export-call-link-type-handler
+                        context "invalid-result" "path" "label" frame))))
+              (setf missing-handler-p
+                    (null (org-kit::export-call-link-type-handler
+                           context "missing" "path" "label" frame)))
+              (setf valid-result
+                    (org-kit::export-call-link-type-handler
+                     context "valid" "path" "label" frame))
+              "validated"))
+          :link-type-handlers
+          (list (cons "invalid-result"
+                      (lambda (path description frame context)
+                        (declare (ignore path description frame context))
+                        nil))
+                (cons "valid"
+                      (lambda (path description frame context)
+                        (declare (ignore path frame context))
+                        (make-export-link-result
+                         :kind :link :destination "/target"
+                         :description description)))))
+         (lambda ()
+           (with-soft-assertions
+            (expect (export-org (parse-org "Body")
+                                :api-registry-link-call-validation)
+                    :to-equal "validated")
+            (expect invalid-type-p :to-be t)
+            (expect invalid-path-p :to-be t)
+            (expect invalid-description-p :to-be t)
+            (expect invalid-frame-p :to-be t)
+            (expect invalid-result-p :to-be t)
+            (expect missing-handler-p :to-be t)
+            (expect (list (export-link-result-kind valid-result)
+                          (export-link-result-destination valid-result)
+                          (export-link-result-description valid-result))
+                    :to-equal '(:link "/target" "label")))))))
+  (it "validates parser defaults and link result snapshots"
+    (let* ((specifications
+             (list (list :token "boolean" :key :boolean :parser :boolean :default t)
+                   (list :token "integer" :key :integer :parser :integer :default 3)
+                   (list :token "boolean-integer" :key :boolean-integer
+                         :parser :boolean-integer :default 2)
+                   (list :token "toc" :key :toc :parser :toc :default 2)
+                   (list :token "creator" :key :creator :parser :creator-mode
+                         :default :comment)
+                   (list :token "superscript" :key :superscript
+                         :parser :sub-superscript :default "{}")
+                   (list :token "disabled" :key :disabled :parser :disabled-only
+                         :default nil)
+                   (list :token "archive" :key :archive :parser :archive-mode
+                         :default :headline)
+                   (list :token "latex" :key :latex :parser :latex-mode
+                         :default :verbatim)
+                   (list :token "tags" :key :tags :parser :tag-mode
+                         :default :not-in-toc)
+                   (list :token "timestamps" :key :timestamps
+                         :parser :timestamp-range
+                         :default :active-exclude-diary)
+                   (list :token "selection" :key :selection
+                         :parser :selection-list :default '(:include "PROPERTIES"))
+                   (list :token "drawers" :key :drawers
+                         :parser :drawer-list :default '(:exclude "LOGBOOK"))
+                   (list :token "tasks" :key :tasks :parser :tasks-mode
+                         :default :todo)
+                   (list :token "custom" :key :custom :parser #'identity
+                         :default #\Z)))
+           (checked-specifications
+             (org-kit::export-registration-check-option-specifications
+              specifications))
+           (destination (copy-seq "/target"))
+           (description (copy-seq "label"))
+           (result (make-export-link-result :kind :link
+                                            :destination destination
+                                            :description description)))
+      (with-soft-assertions
+        (expect checked-specifications :to-equal specifications)
+        (expect (org-kit::export-common-node-policies)
+                :to-equal '((:property-drawer . :prune-children)
+                            (:node-property . :prune-children)
+                            (:planning . :prune-children)
+                            (:clock . :prune-children)
+                            (:comment . :prune-children)
+                            (:comment-block . :prune-children)))
+        (expect (org-kit::export-merge-string-sets
+                 '("HTML" "xml") '("html" "text"))
+                :to-equal '("HTML" "xml" "text"))
+        (expect (org-kit::export-registration-check-string-set
+                 '("html" "gfm") :invalid-keyword-policy)
+                :to-equal '("html" "gfm"))
+        (expect (org-kit::export-registration-check-raw-options
+                 '((:html . :allow) (:latex . :allow)))
+                :to-equal '((:html . :allow) (:latex . :allow)))
+        (expect (org-kit::export-registration-check-link-handlers
+                 (list (cons "custom" #'identity)))
+                :to-equal (list (cons "custom" #'identity)))
+        (expect (export-link-result-kind result) :to-be :link)
+        (expect (export-link-result-destination result) :to-equal "/target")
+        (expect (export-link-result-description result) :to-equal "label")
+        (setf (char destination 0) #\X
+              (char description 0) #\X)
+        (expect (export-link-result-destination result) :to-equal "/target")
+        (expect (export-link-result-description result) :to-equal "label")
+        (let ((copy (export-link-result-destination result)))
+          (setf (char copy 0) #\X)
+          (expect (export-link-result-destination result) :to-equal "/target"))
+        (let ((copy (export-link-result-description result)))
+          (setf (char copy 0) #\X)
+          (expect (export-link-result-description result) :to-equal "label"))
+        (dolist (entry '((:integer "3")
+                         (:boolean-integer :yes)
+                         (:toc :yes)
+                         (:creator-mode :unknown)
+                         (:sub-superscript "yes")
+                         (:disabled-only t)
+                         (:archive-mode :unknown)
+                         (:latex-mode :unknown)
+                         (:tag-mode :unknown)
+                         (:timestamp-range :unknown)
+                         (:selection-list (:include 42))
+                         (:drawer-list (:unknown "LOGBOOK"))
+                         (:tasks-mode (:include 42))))
+          (expect
+           (org-export-error-reason
+            (export-registry-test-registration-error
+             (lambda ()
+               (org-kit::export-registration-check-option-specifications
+                (list (list :token "invalid" :key :invalid
+                            :parser (first entry) :default (second entry))))))
+           :to-be :invalid-option-specification))
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (org-kit::export-registration-check-option-specifications :not-a-list)))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (org-kit::export-registration-check-string-set :not-a-list
+                                                            :invalid-keyword-policy)))
+         :to-be t)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (org-kit::export-registration-check-string-set
+              '("duplicate" "DUPLICATE") :invalid-keyword-policy))))
+         :to-be :invalid-keyword-policy)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (org-kit::export-registration-check-string-set
+             '("valid" 42) :invalid-keyword-policy)))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda () (org-kit::export-registration-check-raw-options :not-a-list)))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda () (org-kit::export-registration-check-raw-options '(:html))))
+         :to-be t)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (org-kit::export-registration-check-raw-options
+              '((:text . :allow))))))
+         :to-be :invalid-raw-output-policy)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (org-kit::export-registration-check-raw-options
+             '((:html . "allow")))))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda () (org-kit::export-registration-check-link-handlers :not-a-list)))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda () (org-kit::export-registration-check-link-handlers '("bad"))))
+         :to-be t)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (org-kit::export-registration-check-link-handlers
+              (list (cons "custom" #'identity)
+                    (cons "CUSTOM" #'identity))))))
+         :to-be :invalid-link-type-handler)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (org-kit::export-merge-option-specifications
+              '((:token "one" :key :one :parser :boolean))
+              '((:token "ONE" :key :two :parser :boolean))))))
+         :to-be :invalid-option-specification)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda () (export-link-result-kind :not-a-result)))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda () (export-link-result-destination :not-a-result)))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda () (export-link-result-description :not-a-result)))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (make-export-link-result :kind :other :destination "x" :description "x")))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (make-export-link-result :kind :link :destination nil :description "x")))
+         :to-be t)
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (make-export-link-result :kind :image :destination "x" :description nil)))
+         :to-be t))))
+)
+  (it "exposes render context snapshots and parent components"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+TITLE: Caller title~%#+OPTIONS: num:2~%~%* Heading~%Body[fn:1]~%~%[fn:1] Note")))
+           (caller-context
+             (make-export-context :extensions '((:marker . :extension-value))))
+           (context-observation nil)
+           (parent-observation nil)
+           (view-list-isolated-p nil)
+           (toc-isolated-p nil)
+           (footnotes-isolated-p nil)
+           (invalid-raw-kind-p nil)
+           (invalid-extension-key-p nil)
+           (invalid-explicit-option-key-p nil)
+           (invalid-option-value-key-p nil)
+           (invalid-context-p nil)
+           (invalid-frame-p nil))
+      (export-registry-test-with-backend-pair
+       :api-registry-context-parent
+       :api-registry-context-child
+       (list :renderer (lambda (context)
+                         (declare (ignore context))
+                         "parent")
+             :preamble-renderer (lambda (context)
+                                  (declare (ignore context))
+                                  "P")
+             :trailer-renderer (lambda (context)
+                                 (declare (ignore context))
+                                 "T")
+             :template (lambda (context preamble body trailer)
+                         (declare (ignore context))
+                         (format nil "<~A|~A|~A>" preamble body trailer))
+             :raw-output-options '((:html . :allow-raw-html)))
+       (list :renderer
+             (lambda (context)
+               (let* ((metadata (export-render-context-metadata context))
+                      (views (export-render-context-root-views context))
+                      (toc (export-render-context-toc context))
+                      (footnotes (export-render-context-footnotes context)))
+                 (let ((view-count (length views)))
+                   (pop views)
+                   (setf view-list-isolated-p
+                         (= view-count
+                            (length (export-render-context-root-views context)))))
+                 (when toc
+                   (setf (getf (first toc) :title) "changed"))
+                 (setf toc-isolated-p
+                       (string= (getf (first (export-render-context-toc context))
+                                      :title)
+                                "Heading"))
+                 (when footnotes
+                   (setf (getf (first footnotes) :label) "changed"))
+                 (setf footnotes-isolated-p
+                       (not (string= (getf (first (export-render-context-footnotes context))
+                                          :label)
+                                     "changed")))
+                 (setf invalid-raw-kind-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-context-raw-output-p context :text))))
+                 (setf invalid-extension-key-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-context-extension context "marker"))))
+                 (setf invalid-explicit-option-key-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda () (export-option-explicit-p context "num"))))
+                 (setf invalid-option-value-key-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda () (export-option-value context "num"))))
+                 (setf context-observation
+                       (list (export-render-context-backend context)
+                             (eq (export-render-context-document context) document)
+                             (getf metadata :title)
+                             (not (null (export-render-context-limits context)))
+                             (length (export-render-context-root-views context))
+                             (mapcar (lambda (entry)
+                                       (list (getf entry :level)
+                                             (getf entry :title)))
+                                     (export-render-context-toc context))
+                             (mapcar (lambda (entry)
+                                       (list (getf entry :label)
+                                             (getf entry :number)))
+                                     (export-render-context-footnotes context))
+                             (export-render-context-raw-output-p context :html)
+                             (export-render-context-raw-output-p context :latex)
+                             (export-render-context-extension context :marker)
+                             (export-render-context-owner-backend context)
+                             (export-render-context-state context)
+                             (export-option-explicit-p context :num)
+                             (export-option-value context :num)
+                             (export-option-explicit-p context :unknown)
+                             (export-option-value context :unknown)))
+                 (setf parent-observation
+                       (list (export-render-parent-renderer context)
+                             (export-render-parent-preamble context)
+                             (export-render-parent-trailer context)
+                             (export-render-parent-template
+                              context "pre" "body" "post")))
+                 (setf invalid-context-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda () (export-render-context-backend nil))))
+                 (setf invalid-frame-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda () (org-kit::export-render-frame-mode nil))))
+                 "child")))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-org document :api-registry-context-child
+                               :allow-raw-html t :context caller-context)
+                   :to-equal "<P|child|T>")
+           (expect (first context-observation)
+                   :to-be :api-registry-context-child)
+           (expect (second context-observation) :to-be t)
+           (expect (third context-observation) :to-equal "Caller title")
+           (expect (fourth context-observation) :to-be t)
+           (expect (fifth context-observation) :to-be-truthy)
+           (expect (sixth context-observation)
+                   :to-equal '((1 "Heading")))
+           (expect (length (seventh context-observation)) :to-be 1)
+           (expect (eighth context-observation) :to-be t)
+           (expect (ninth context-observation) :to-be nil)
+           (expect (tenth context-observation) :to-be :extension-value)
+           (expect (nth 10 context-observation)
+                   :to-be :api-registry-context-child)
+           (expect (nth 11 context-observation) :to-be nil)
+           (expect (nth 12 context-observation) :to-be t)
+           (expect (nth 13 context-observation) :to-be 2)
+           (expect (nth 14 context-observation) :to-be nil)
+           (expect (nth 15 context-observation) :to-be nil)
+           (expect parent-observation :to-equal '("parent" "P" "T"
+                                                  "<pre|body|post>"))
+           (expect view-list-isolated-p :to-be t)
+           (expect toc-isolated-p :to-be t)
+           (expect footnotes-isolated-p :to-be t)
+           (expect invalid-raw-kind-p :to-be t)
+           (expect invalid-extension-key-p :to-be t)
+           (expect invalid-explicit-option-key-p :to-be t)
+           (expect invalid-option-value-key-p :to-be t)
+           (expect invalid-context-p :to-be t)
+           (expect invalid-frame-p :to-be t)))))))
 
 (defun export-registry-test-with-builtin-backend (name arguments function)
   (let* ((registry org-kit::*export-backend-registry*)

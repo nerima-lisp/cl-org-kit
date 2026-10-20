@@ -704,6 +704,9 @@ Missing values stay last in both directions, and ties retain source order.")))
         (expect (export-view-node view) :to-be node)
         (expect (export-view-children view) :to-equal children)
         (expect (export-view-source-document view) :to-be source-document)
+        (progn
+          (expect (export-view-p view) :to-be t)
+          (expect (export-view-p node) :to-be nil))
         (setf (car children) nil)
         (expect (first (export-view-children view)) :to-be child-view)
         (expect (signals-type-error-p

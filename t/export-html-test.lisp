@@ -1263,7 +1263,7 @@ paragraph" table-list) :not :to-be nil))))
         (expect (> (length value) (* 256 1024)) :to-be t)
         (expect (< allocated (floor (length value) 2)) :to-be t))))
 
-  (it "uses the remaining text when an escaped HTML part omits its end"
+  (it "handles remaining text and empty HTML escape ranges"
     (let ((state (org-kit::%make-export-html-state :limits (make-limits))))
       (with-soft-assertions
         (expect (org-kit::export-html-escaped-output-length
@@ -1271,7 +1271,12 @@ paragraph" table-list) :not :to-be nil))))
                 :to-equal 1)
         (expect (org-kit::export-html-escaped-output-length
                  :attribute (string #\") 0 1)
-                :to-equal 6))))
+                :to-equal 6)
+        (expect (org-kit::export-html-escape-to-output-range
+                 state :text "" 0 0)
+                :to-be state)
+        (expect (coerce (org-kit::export-html-state-output state) 'string)
+                :to-equal ""))))
 
   (it "checks escaped HTML parts at their exact output boundary"
     (let* ((text (string #\"))

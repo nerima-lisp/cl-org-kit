@@ -1796,4 +1796,37 @@
                         :not :to-be nil))))
         (when registered-p
           (unregister-export-backend backend)))))
+  (it "uses GFM source text when a table cell has no value property"
+    (let* ((state (export-gfm-test-state))
+           (node (export-gfm-test-attached-node :table-cell "source|cell"))
+           (view (org-kit::%make-export-view :node node)))
+      (with-soft-assertions
+        (expect (org-kit::export-gfm-render-inline-view-legacy
+                 state view :table-cell-p t)
+                :to-equal "source\\|cell")
+        (expect (org-kit::export-gfm-render-view-legacy state view)
+                :to-equal "source\\|cell"))))
+  (it "preserves verse breaks and enforces limits across quoted paragraphs"
+    (let* ((verse-source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+BEGIN_VERSE~%one~%line~%~%two~%#+END_VERSE"))
+           (verse-output (export-org (parse-org verse-source) :gfm))
+           (quote-source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+BEGIN_QUOTE~%first~%~%second~%#+END_QUOTE"))
+           (quote-document
+             (parse-org quote-source
+                        :limits (make-limits :max-output-length 18)))
+           (quote-condition
+             (export-gfm-test-catch-error
+              (lambda () (export-org quote-document :gfm)))))
+      (with-soft-assertions
+        (expect verse-output
+                :to-equal (format nil "one  ~%line  ~%  ~%two"))
+        (expect (typep quote-condition 'org-resource-limit-error) :to-be t)
+        (when (typep quote-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name quote-condition)
+                  :to-be :max-output-length)
+          (expect (> (org-resource-limit-error-actual quote-condition) 18)
+                  :to-be t)))))
 )

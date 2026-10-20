@@ -1374,7 +1374,8 @@
            (link-registered-p nil)
            (inline-result nil)
            (fallback-result nil)
-           (output nil))
+           (output nil)
+           (context-error nil))
       (unwind-protect
            (progn
              (register-derived-export-backend
@@ -1391,11 +1392,20 @@
                        (node
                          (make-node :inline-src-block
                                     :properties (list :value "fallback"))))
-                  (setf inline-result
-                        (org-kit::export-latex-render-view
-                         state inline-view 0 :inline)
-                        fallback-result
-                        (export-render-node latex-context node))
+                  (progn
+                    (setf inline-result
+                          (org-kit::export-latex-render-view
+                           state inline-view 0 :inline)
+                          fallback-result
+                          (export-render-node latex-context node))
+                    (setf context-error
+                          (export-latex-test-catch-error
+                           (lambda ()
+                             (org-kit::export-latex-render-object
+                              state
+                              (make-node :footnote-reference
+                                         :properties (list :label "missing"))
+                              0)))))
                   (org-kit::export-latex-render-body latex-context)))
               :template
               (lambda (context preamble body trailer)
@@ -1422,7 +1432,13 @@
                        :to-be-truthy)
                (expect inline-result
                        :to-equal "\\texttt{inline}")
-               (expect fallback-result :to-equal "\\texttt{fallback}")
+               (progn
+                 (expect fallback-result :to-equal "\\texttt{fallback}")
+                 (expect (typep context-error 'org-export-error) :to-be t)
+                 (when (typep context-error 'org-export-error)
+                   (expect (org-export-error-backend context-error) :to-be backend)
+                   (expect (org-export-error-reason context-error)
+                           :to-be :unresolved-footnote)))
                (expect (typep invalid-arguments 'simple-error) :to-be t)
                (expect (search "Legacy body." rendered-document) :to-be-truthy)
                (expect (search "\\end{document}" rendered-document)
