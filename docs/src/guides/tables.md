@@ -296,6 +296,21 @@ Inspect and apply the returned plan as described in [Build and inspect a write
 plan](callbacks-and-write-plans.md#build-and-inspect-a-write-plan). Unknown
 options signal `org-table-error` naming the option.
 
+## CSV and TSV conversion
+
+`table-import` has the signature
+`(table-import document offset text &key format)` and inserts delimited text at
+the zero-based character `offset` as an aligned Org pipe table. `format` accepts
+`:csv`, `:tsv`, or `:auto`; automatic detection uses tabs when present and
+otherwise CSV. It returns an `edit-result` and preserves source outside the
+insertion. Quoted delimiters and doubled quotes follow Org import behavior.
+Multiline fields are rejected.
+
+`table-export` returns text without writing a file. Its format accepts `:csv`,
+`:tsv`, or `:auto`; the default and `:auto` format are TSV. CSV fields with a
+comma or quote are quoted, and embedded quotes are doubled. Hlines are omitted,
+as in Org export.
+
 ## Errors and limits
 
 Table-specific failures such as an unsupported table type, invalid index,

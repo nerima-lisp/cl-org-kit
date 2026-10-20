@@ -141,6 +141,8 @@
     "UPDATE-STATISTICS-COOKIES"
     "TABLE-RECALCULATE"
     "TABLE-PLOT-WRITE-PLAN"
+    "TABLE-IMPORT"
+    "TABLE-EXPORT"
  ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
@@ -353,6 +355,14 @@ CALLBACKS is a caller-owned callback registry used for quoted Lisp formulas.")
 SCRIPT-PATH and DATA-PATH are required relative paths; RADAR-PATH is required
 for radar plots. SCRIPT-CONTENT supplies the content named by a PLOT script
 option, and BASE-DIRECTORY resolves a relative image path.")
+      (expect (documentation 'table-import 'function)
+              :to-equal
+              "Insert CSV or TSV TEXT at OFFSET as an aligned Org pipe table.
+FORMAT may be :AUTO, :CSV, or :TSV. Return the validated edit result.")
+      (expect (documentation 'table-export 'function)
+              :to-equal
+              "Export an Org pipe table as CSV or TSV text without writing a file.
+FORMAT may be :AUTO, :CSV, or :TSV; :AUTO follows Org's default TSV format.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.
