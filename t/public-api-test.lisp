@@ -648,4 +648,118 @@ Missing values stay last in both directions, and ties retain source order.")))
 
   (it "keeps the package name stable and nickname-free"
     (expect (package-name (find-package "ORG-KIT")) :to-equal "ORG-KIT")
-    (expect (package-nicknames (find-package "ORG-KIT")) :to-equal '())))
+    (expect (package-nicknames (find-package "ORG-KIT")) :to-equal '()))
+  (it "validates caller context fields, views, and link results"
+  (labels ((signals-type-error-p (function)
+             (handler-case
+                 (progn (funcall function) nil)
+               (type-error () t))))
+    (let* ((author (copy-seq "Caller"))
+           (date (copy-seq "2030-01-02"))
+           (language (copy-seq "fr"))
+           (time-context
+             (make-time-context :reference-time (make-org-time-value "2030-01-02")
+                                :zone (make-fixed-time-zone 0)))
+           (context (make-export-context :author author :date date
+                                         :language language
+                                         :time-context time-context))
+           (source-document (parse-org "Export view source."))
+           (node (make-node :section))
+           (child-view (make-export-view (make-node :paragraph)))
+           (children (list child-view))
+           (view (make-export-view node :children children
+                                   :source-document source-document))
+           (destination (copy-seq "images/cover.png"))
+           (description (copy-seq "Cover image"))
+           (link-result (make-export-link-result :kind :image
+                                                 :destination destination
+                                                 :description description)))
+      (setf (char author 0) #\X
+            (char date 0) #\X
+            (char language 0) #\X
+            (char destination 0) #\X
+            (char description 0) #\X)
+      (with-soft-assertions
+        (expect (export-context-p context) :to-be t)
+        (expect (export-context-p nil) :to-be nil)
+        (expect (export-context-author context) :to-equal "Caller")
+        (expect (export-context-date context) :to-equal "2030-01-02")
+        (expect (export-context-language context) :to-equal "fr")
+        (expect (export-context-time-context context) :to-be time-context)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-context :author 42)))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-context :time-context :invalid)))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-context :extensions '(("bad-key" . nil)))))
+                :to-be t)
+        (let ((cyclic-extensions (list (cons :processor nil))))
+          (setf (cdr cyclic-extensions) cyclic-extensions)
+          (expect (signals-type-error-p
+                   (lambda ()
+                     (make-export-context :extensions cyclic-extensions)))
+                  :to-be t))
+        (expect (export-view-p view) :to-be t)
+        (expect (export-view-p nil) :to-be nil)
+        (expect (export-view-node view) :to-be node)
+        (expect (export-view-children view) :to-equal children)
+        (expect (export-view-source-document view) :to-be source-document)
+        (setf (car children) nil)
+        (expect (first (export-view-children view)) :to-be child-view)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-view nil)))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-view node :children (list :not-a-view))))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-view node :children (cons child-view :tail))))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-view node :source-document :not-a-document)))
+                :to-be t)
+        (expect (signals-type-error-p (lambda () (export-view-node nil)))
+                :to-be t)
+        (expect (signals-type-error-p (lambda () (export-view-children nil)))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (export-view-source-document nil)))
+                :to-be t)
+        (expect (export-link-result-kind link-result) :to-be :image)
+        (expect (export-link-result-destination link-result)
+                :to-equal "images/cover.png")
+        (expect (export-link-result-description link-result)
+                :to-equal "Cover image")
+        (let ((returned-destination (export-link-result-destination link-result))
+              (returned-description (export-link-result-description link-result)))
+          (setf (char returned-destination 0) #\Y
+                (char returned-description 0) #\Y)
+          (expect (export-link-result-destination link-result)
+                  :to-equal "images/cover.png")
+          (expect (export-link-result-description link-result)
+                  :to-equal "Cover image"))
+        (expect (signals-type-error-p
+                 (lambda () (make-export-link-result :kind :other
+                                                     :destination "path"
+                                                     :description "label")))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-link-result :kind :link
+                                                     :destination 42
+                                                     :description "label")))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (make-export-link-result :kind :link
+                                                     :destination "path"
+                                                     :description nil)))
+                :to-be t)
+        (expect (signals-type-error-p (lambda () (export-link-result-kind nil)))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (export-link-result-destination nil)))
+                :to-be t)
+        (expect (signals-type-error-p
+                 (lambda () (export-link-result-description nil)))
+                :to-be t))))))

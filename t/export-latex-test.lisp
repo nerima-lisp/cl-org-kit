@@ -1342,4 +1342,92 @@
            :to-be t)
           (expect (search (concatenate 'string header (string #\Newline))
                           preamble)
-                  :to-be-truthy))))))
+                  :to-be-truthy)))))
+  (it "verifies LaTeX link results and legacy render entry points"
+    (let* ((document
+             (parse-org
+              (export-latex-test-lines
+               "#+OPTIONS: toc:nil num:nil"
+               "#+ATTR_LATEX: :width 0.5\\textwidth"
+               "[[asset:https://cdn.example/image.png][Remote image]]"
+               "[[asset:images/local.png][Local image]]"
+               "[[asset:javascript:alert(1)][Fallback label]]"
+               ""
+               "Post blank"
+               ""
+               "")))
+           (legacy-document (parse-org "Legacy body."))
+           (legacy-state (export-latex-test-state legacy-document))
+           (legacy-view
+             (export-latex-test-view
+              legacy-document :inline-src-block
+              :properties (list :value "invalid")))
+           (invalid-arguments
+             (export-latex-test-catch-error
+              (lambda ()
+                (org-kit::export-latex-render-view
+                 legacy-state legacy-view :unknown-option t))))
+           (rendered-document
+             (org-kit::export-latex-render-document legacy-state))
+           (backend :latex-renderer-compatibility-test)
+           (registered-p nil)
+           (link-registered-p nil)
+           (inline-result nil)
+           (fallback-result nil)
+           (output nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :latex
+              :renderer
+              (lambda (context)
+                (let* ((latex-context (org-kit::export-context-for-owner context :latex))
+                       (state (org-kit::export-latex-set-render-context latex-context))
+                       (inline-view
+                         (export-latex-test-view
+                          document :inline-src-block
+                          :properties (list :value "inline")
+                          :post-blank 2))
+                       (node
+                         (make-node :inline-src-block
+                                    :properties (list :value "fallback"))))
+                  (setf inline-result
+                        (org-kit::export-latex-render-view
+                         state inline-view 0 :inline)
+                        fallback-result
+                        (export-render-node latex-context node))
+                  (org-kit::export-latex-render-body latex-context)))
+              :template
+              (lambda (context preamble body trailer)
+                (declare (ignore context preamble trailer))
+                body))
+             (setf registered-p t)
+             (register-export-link-type
+              backend "asset"
+              (lambda (path description frame context)
+                (declare (ignore frame context))
+                (make-export-link-result
+                 :kind :image :destination path :description description)))
+             (setf link-registered-p t
+                   output (export-org document backend))
+             (with-soft-assertions
+               (expect (search "\\includegraphics{https://cdn.example/image.png}"
+                               output)
+                       :to-be-truthy)
+               (expect (search "\\includegraphics{images/local.png}" output)
+                       :to-be-truthy)
+               (expect (search "Fallback label" output) :to-be-truthy)
+               (expect (search "javascript:alert(1)" output) :to-be nil)
+               (expect (search "% ATTR_LATEX: :width 0.5" output)
+                       :to-be-truthy)
+               (expect inline-result
+                       :to-equal "\\texttt{inline}")
+               (expect fallback-result :to-equal "\\texttt{fallback}")
+               (expect (typep invalid-arguments 'simple-error) :to-be t)
+               (expect (search "Legacy body." rendered-document) :to-be-truthy)
+               (expect (search "\\end{document}" rendered-document)
+                       :to-be-truthy)))
+        (when link-registered-p
+          (unregister-export-link-type backend "asset"))
+        (when registered-p
+          (unregister-export-backend backend))))))

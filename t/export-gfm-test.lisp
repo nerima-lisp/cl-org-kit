@@ -1641,4 +1641,157 @@
                (expect bold-frame-mode :to-be :inline)))
           (when registered-p
             (unregister-export-backend backend)))))
+  (it "covers direct GFM cell rendering and two-space inline post-blank output"
+    (let* ((state (export-gfm-test-state))
+           (child-node (export-gfm-test-attached-node :plain-text "child|value"))
+           (child-view (org-kit::%make-export-view :node child-node))
+           (child-cell
+             (export-gfm-test-view :table-cell :children (list child-view)))
+           (value-cell
+             (export-gfm-test-view :table-cell
+                                   :properties '(:value "value|cell")))
+           (inline-cell
+             (export-gfm-test-view :table-cell
+                                   :properties '(:value "inline|cell")))
+           (bold-child-node
+             (export-gfm-test-attached-node :plain-text "bold"))
+           (bold-view
+             (export-gfm-test-view
+              :bold :children
+              (list (org-kit::%make-export-view :node bold-child-node))
+              :post-blank 2))
+           (source-node
+             (export-gfm-test-attached-node :timestamp "source <text>"))
+           (preparation (org-kit::export-gfm-state-preparation state)))
+      (with-soft-assertions
+        (expect (org-kit::export-gfm-table-cell state child-cell)
+                :to-equal "child\\|value")
+        (expect (org-kit::export-gfm-table-cell state value-cell)
+                :to-equal "value\\|cell")
+        (expect (org-kit::export-gfm-render-inline-view
+                 state inline-cell :table-cell-p t)
+                :to-equal "inline\\|cell")
+        (expect (org-kit::export-gfm-render-inline-view state bold-view)
+                :to-equal "**bold**  ")
+        (expect (org-kit::export-gfm-render-view state child-cell)
+                :to-equal "child\\|value")
+        (expect (org-kit::export-gfm-render-view-legacy state value-cell)
+                :to-equal "value\\|cell")
+        (expect (org-kit::export-gfm-dispatch-view
+                 state bold-view :mode :inline)
+                :to-equal "**bold**  ")
+        (expect (org-kit::export-gfm-dispatch-view
+                 state child-cell :mode :block)
+                :to-equal "child\\|value")
+        (expect (org-kit::export-gfm-render-node-legacy
+                 state source-node nil nil)
+                :to-equal "source \\<text\\>")
+        (expect (org-kit::export-gfm-raw-html-enabled-p state) :to-be nil)
+        (setf (org-kit::export-preparation-allow-raw-html preparation) t)
+        (expect (org-kit::export-gfm-raw-html-enabled-p state) :to-be t))))
+  (it "renders GFM images only from safe registered link handlers"
+    (let ((backend :gfm-test-image-scheme)
+          (backend-registered-p nil)
+          (handler-registered-p nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend backend :gfm)
+            (setf backend-registered-p t)
+            (register-export-link-type
+             backend "image-scheme"
+             (lambda (path description frame context)
+               (declare (ignore frame context))
+               (make-export-link-result
+                :kind :image :destination path :description description)))
+            (setf handler-registered-p t)
+            (let ((remote
+                    (export-org
+                     (parse-org
+                      "[[image-scheme:https://cdn.example.test/remote.png][Remote image]]")
+                     backend))
+                  (relative
+                    (export-org
+                     (parse-org
+                      "[[image-scheme:assets/local.png][Local image]]")
+                     backend))
+                  (mail
+                    (export-org
+                     (parse-org
+                      "[[image-scheme:mailto:images@example.test][Mail image]]")
+                     backend)))
+              (with-soft-assertions
+                (expect remote
+                        :to-equal
+                        "![Remote image](<https://cdn.example.test/remote.png>)")
+                (expect relative
+                        :to-equal "![Local image](<assets/local.png>)")
+                (expect mail :to-equal "Mail image"))))
+        (when handler-registered-p
+          (unregister-export-link-type backend "image-scheme"))
+        (when backend-registered-p
+          (unregister-export-backend backend)))))
+  (it "rejects scheme-obfuscating GFM link abbreviations"
+    (labels ((view-for-node (node)
+               (org-kit::%make-export-view
+                :node node
+                :children (mapcar #'view-for-node (node-children node))
+                :source-document (node-document node)))
+             (check-case (source-path replacement)
+               (let* ((source (format nil "[[~A][Label]]" source-path))
+                      (document (parse-org source))
+                      (link
+                        (find-if (lambda (node) (eq (node-type node) :link))
+                                 (export-gfm-test-nodes document)))
+                      (separator (position #\: source-path))
+                      (path (if separator
+                                (subseq source-path (1+ separator))
+                                source-path)))
+                 (setf (getf (document-settings document) :link-abbrevs)
+                       (list (cons "unsafe" replacement))
+                       (node-property link :type) "unsafe"
+                       (node-property link :path) path
+                       (node-property link :format) :bracket)
+                 (let* ((preparation (org-kit::export-prepare document :gfm))
+                        (state
+                          (export-gfm-test-state-for-preparation preparation))
+                        (view (view-for-node link)))
+                   (expect
+                    (org-kit::export-gfm-link-abbreviation-prefix-unsafe-p
+                     link "unsafe" nil)
+                    :to-be t)
+                   (expect (org-kit::export-gfm-link-destination state link)
+                           :to-be nil)
+                   (expect (org-kit::export-gfm-render-link state view)
+                           :to-equal "Label")))))
+      (with-soft-assertions
+        (check-case "unsafe:payload" "javascript&colon;")
+        (check-case "unsafe" "javascript&colon;%s")
+        (check-case "unsafe" "javascript&colon;"))))
+  (it "indexes GFM link targets before derived renderer dispatch"
+    (let ((backend :gfm-test-render-views-before-index)
+          (registered-p nil)
+          (document
+            (parse-org
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%* Target~%:PROPERTIES:~%:CUSTOM_ID: stable~%:END:~%~%[[#stable][jump]]")))
+          (expected nil))
+      (unwind-protect
+          (progn
+            (setf expected (export-org document :gfm))
+            (register-derived-export-backend
+             backend :gfm
+             :renderer
+             (lambda (context)
+               (format nil "~{~A~^~%~%~}"
+                       (mapcar (lambda (view)
+                                 (export-render-view context view))
+                               (export-render-context-root-views context)))))
+            (setf registered-p t)
+            (let ((actual (export-org document backend)))
+              (with-soft-assertions
+                (expect actual :to-equal expected)
+                (expect (search "[jump](<#stable>)" actual)
+                        :not :to-be nil))))
+        (when registered-p
+          (unregister-export-backend backend)))))
 )

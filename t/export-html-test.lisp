@@ -1300,6 +1300,60 @@ paragraph" table-list) :not :to-be nil))))
                   :to-be :max-output-length)
           (expect (org-resource-limit-error-limit below) :to-be 5)
           (expect (org-resource-limit-error-actual below) :to-be 6)))))
+  (it "covers legacy HTML attribute validation and compatibility document rendering"
+      (let* ((paragraph-document (parse-org (format nil "Paragraph text.~%")))
+             (paragraph (export-html-test-node-of-type paragraph-document :paragraph))
+             (heading-document (parse-org (format nil "* Heading~%")))
+             (heading (export-html-test-node-of-type heading-document :headline))
+             (render-document (parse-org (format nil "#+TITLE: Prepared title~%Body text.~%")))
+             (paragraph-state nil)
+             (heading-state nil)
+             (output nil))
+        (setf (node-property paragraph :ATTR_HTML) ":class figure"
+              (node-property heading :ATTR_HTML) ":id heading"
+              paragraph-state
+              (org-kit::%make-export-html-state
+               :preparation (org-kit::export-prepare paragraph-document :html)
+               :limits (document-limits paragraph-document))
+              heading-state
+              (org-kit::%make-export-html-state
+               :preparation (org-kit::export-prepare heading-document :html)
+               :limits (document-limits heading-document))
+              output
+              (org-kit::export-render-preparation
+               (org-kit::export-prepare render-document :html) :html))
+        (let ((paragraph-error
+               (export-html-test-catch-error
+                (lambda ()
+                  (org-kit::export-html-render-paragraph
+                   paragraph-state paragraph nil))))
+              (heading-error
+               (export-html-test-catch-error
+                (lambda ()
+                  (org-kit::export-html-render-node-legacy
+                   heading-state heading nil nil)))))
+          (with-soft-assertions
+           (expect
+            (typep paragraph-error
+                   (find-symbol "ORG-EXPORT-UNSUPPORTED-SYNTAX" "ORG-KIT"))
+            :to-be t)
+           (expect
+            (and paragraph-error
+                 (eq (org-export-unsupported-syntax-feature paragraph-error)
+                     :html-attribute))
+            :to-be t)
+           (expect
+            (typep heading-error
+                   (find-symbol "ORG-EXPORT-UNSUPPORTED-SYNTAX" "ORG-KIT"))
+            :to-be t)
+           (expect
+            (and heading-error
+                 (eq (org-export-unsupported-syntax-feature heading-error)
+                     :html-attribute))
+            :to-be t)
+           (expect (search "Prepared title" output) :to-be-truthy)
+           (expect (search "Body text." output) :to-be-truthy)
+           (expect (search "</html>" output) :to-be-truthy)))))
 
 (describe "HTML export budget regressions"
   (it "enforces exact character output limits through export-org"

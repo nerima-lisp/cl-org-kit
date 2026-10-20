@@ -1823,4 +1823,142 @@
         (when (typep condition 'org-export-error)
           (expect (org-export-error-backend condition) :to-be :unknown)
           (expect (org-export-error-reason condition)
-                  :to-be :unsupported-backend))))))
+                  :to-be :unsupported-backend)))))
+  (it "validates filtered views, accepts TITLE, and checks export arguments, limits, and stages"
+      (let ((backend :api-export-core-filter-validation)
+            (mode :valid)
+            (acyclic-result nil)
+            (registered-p nil))
+        (labels ((new-view (node &key children)
+                           (make-export-view node :children children))
+                 (run-export (&optional (limits (make-limits)))
+                             (export-org (parse-org "Body" :limits limits) backend))
+                 (parse-tree-filter (views context)
+                                    (declare (ignore context))
+                                    (let ((node (export-view-node (first views))))
+                                      (case mode
+                                        (:valid
+                                         (let ((view (new-view node)))
+                                           (setf acyclic-result
+                                                 (typep view 'org-kit::acyclic-export-view))
+                                           (list view)))
+                                        (:invalid-root :not-a-list)
+                                        (:invalid-view (list :not-an-export-view))
+                                        (:invalid-node (list (org-kit::%make-export-view :node nil)))
+                                        (:invalid-children
+                                         (let ((view (org-kit::%make-export-view :node node
+                                                                                 :children (cons nil :tail))))
+                                           (setf acyclic-result
+                                                 (typep view 'org-kit::acyclic-export-view))
+                                           (list view)))
+                                        (:invalid-child
+                                         (let ((view (org-kit::%make-export-view :node node
+                                                                                 :children (list :not-a-view))))
+                                           (setf acyclic-result
+                                                 (typep view 'org-kit::acyclic-export-view))
+                                           (list view)))
+                                        (:invalid-source
+                                         (list (org-kit::%make-export-view
+                                                :node node :source-document :not-a-document)))
+                                        (:cycle
+                                         (let* ((children (list nil))
+                                                (view (org-kit::%make-export-view :node node
+                                                                                  :children children)))
+                                           (setf (car children) view
+                                                 acyclic-result
+                                                 (typep view 'org-kit::acyclic-export-view))
+                                           (list view)))
+                                        (:deep
+                                         (let ((view (new-view node)))
+                                           (loop repeat 8
+                                                 do (setf view (new-view node :children (list view))))
+                                           (list view)))
+                                        (:too-many
+                                         (loop repeat 20 append views))
+                                        (otherwise
+                                         (error "Unknown export-core coverage mode: ~S" mode))))))
+          (register-export-backend
+           backend
+           :renderer (lambda (context)
+                       (declare (ignore context))
+                       "rendered")
+           :node-policies (list (cons :keyword
+                                      (list :unsupported :feature :test-keyword-policy
+                                            :message "Unsupported test keyword")))
+           :filters (list (cons :parse-tree (list #'parse-tree-filter))))
+          (setf registered-p t)
+          (unwind-protect
+              (with-soft-assertions
+               (expect (run-export) :to-equal "rendered")
+               (expect acyclic-result :to-be t)
+               (let ((accepted-title-keyword-p
+                       (null (org-kit::export-validate-keywords
+                              (list (list nil "TITLE" "")) :html))))
+                 (expect accepted-title-keyword-p :to-be t))
+               (let* ((preparation
+                       (org-kit::export-prepare
+                        (parse-org "#+TITLE: Retained") backend))
+                      (keywords
+                       (export-core-test-view-nodes preparation :keyword)))
+                 (expect (mapcar (lambda (view)
+                                   (node-property
+                                    (org-kit::export-view-node view) :key))
+                                 keywords)
+                         :to-equal '("TITLE")))
+               (expect (typep :not-an-export-view
+                              'org-kit::acyclic-export-view)
+                       :to-be nil)
+               (dolist (invalid-mode '(:invalid-root :invalid-view :invalid-node
+                                                     :invalid-children :invalid-child
+                                                     :invalid-source :cycle))
+                 (setf mode invalid-mode)
+                 (expect (typep (export-core-test-catch-error #'run-export)
+                                'type-error)
+                         :to-be t)
+                 (when (member invalid-mode '(:invalid-children :invalid-child
+                                                                :cycle))
+                   (expect acyclic-result :to-be nil)))
+               (setf mode :deep)
+               (expect
+                (typep
+                 (export-core-test-catch-error
+                  (lambda ()
+                    (run-export (make-limits :max-element-depth 4))))
+                 'org-resource-limit-error)
+                :to-be t)
+               (setf mode :too-many)
+               (expect
+                (typep
+                 (export-core-test-catch-error
+                  (lambda ()
+                    (run-export (make-limits :max-export-expanded-nodes 10))))
+                 'org-resource-limit-error)
+                :to-be t)
+               (let ((invalid-document
+                      (export-core-test-catch-error
+                       (lambda () (export-org nil backend))))
+                     (invalid-backend
+                      (export-core-test-catch-error
+                       (lambda () (export-org (parse-org "Body") "html"))))
+                     (invalid-resolver
+                      (export-core-test-catch-error
+                       (lambda ()
+                         (export-org (parse-org "Body") backend
+                                     :include-resolver :not-a-function))))
+                     (invalid-stage-text
+                      (export-core-test-catch-error
+                       (lambda ()
+                         (org-kit::export-check-output-stage
+                          nil (make-limits) backend :body))))
+                     (invalid-stage-offset
+                      (export-core-test-catch-error
+                       (lambda ()
+                         (org-kit::export-check-output-stage
+                          "" (make-limits) backend :body :actual-offset -1)))))
+                 (dolist (condition (list invalid-document invalid-backend
+                                          invalid-resolver invalid-stage-text
+                                          invalid-stage-offset))
+                   (expect (typep condition 'type-error) :to-be t))))
+            (when registered-p
+              (unregister-export-backend backend)))))
+      ))

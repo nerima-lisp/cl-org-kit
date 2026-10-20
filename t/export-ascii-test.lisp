@@ -2384,4 +2384,132 @@
                (expect (export-org document backend)
                        :to-equal (format nil "~C~%" (code-char 27)))))
         (when registered-p
+          (unregister-export-backend backend)))))
+  (it "writes raw ASCII ranges with indentation, tab substitution, and uppercasing"
+    (let* ((preparation (export-ascii-test-preparation (parse-org "") nil))
+           (output (export-ascii-test-output-state preparation))
+           (tabbed (format nil "a~Cb~%" #\Tab)))
+      (setf (org-kit::export-ascii-output-indent output) 2)
+      (org-kit::export-ascii-output-write-range
+       output tabbed 0 (length tabbed) :substitute-tab-p t :raw-output-p t)
+      (org-kit::export-ascii-output-write-range
+       output "tail" 0 4 :uppercase-p t :raw-output-p t)
+      (with-soft-assertions
+        (expect (org-kit::export-ascii-output-string output)
+                :to-equal (format nil "  a b~%  TAIL"))
+        (expect (org-kit::export-ascii-output-count output)
+                :to-be 12))))
+  (it "trims whitespace from filtered ASCII plain text at inline boundaries"
+    (let ((backend :ascii-test-plain-text-trim)
+          (registered-p nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend
+             backend :ascii
+             :filters
+             (list
+              (cons :plain-text
+                    (list (lambda (value context)
+                            (declare (ignore context))
+                            (format nil " ~C~A ~C~C"
+                                    #\Tab value #\Return #\Newline))))))
+            (setf registered-p t)
+            (let ((output
+                    (export-org
+                     (parse-org
+                      (export-ascii-test-source
+                       "#+OPTIONS: toc:nil num:nil"
+                       ""
+                       "word"))
+                     backend)))
+              (with-soft-assertions
+                (expect output :to-equal (format nil "word~%")))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+  (it "removes post-blank indentation from captured ASCII blocks"
+    (let* ((preparation
+             (export-ascii-test-preparation (parse-org "") nil))
+           (output (export-ascii-test-output-state preparation))
+           (paragraph (make-node :paragraph :post-blank 2))
+           (rendered (format nil "body~%  ~%~%")))
+      (org-kit::export-ascii-output-write-range
+       output rendered 0 (length rendered) :raw-output-p t)
+      (org-kit::export-ascii-output-remove-node-post-blank
+       output paragraph 2)
+      (with-soft-assertions
+        (expect (org-kit::export-ascii-output-string output)
+                :to-equal (format nil "body~%"))
+        (expect (org-kit::export-ascii-output-count output) :to-be 5)
+        (expect (org-kit::export-ascii-output-line-start-p output) :to-be t))))
+  (it "rebuilds recursive ASCII views with their original source documents"
+    (let* ((document (parse-org "paragraph *bold*"))
+           (root (document-root document))
+           (view (org-kit::export-ascii-output-view-from-node root)))
+      (labels ((check-view (node current-view)
+                 (let ((view-children
+                         (org-kit::export-view-children current-view))
+                       (node-children (node-children node)))
+                   (expect (org-kit::export-view-node current-view)
+                           :to-be node)
+                   (expect (org-kit::export-view-source-document current-view)
+                           :to-be document)
+                   (expect (mapcar #'org-kit::export-view-node view-children)
+                           :to-equal node-children)
+                   (mapc #'check-view node-children view-children))))
+        (with-soft-assertions
+          (check-view root view)))))
+  (it "rejects raw ASCII element-filter output beyond the output limit"
+    (let ((backend :ascii-test-raw-filter-over-limit)
+          (registered-p nil)
+          (document
+            (parse-org
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              ""
+              "x")
+             :limits (make-limits :max-output-length 2)))
+          (condition nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend
+             backend :ascii
+             :filters
+             (list
+              (cons '(:element :plain-text)
+                    (list (lambda (value context)
+                            (declare (ignore value context))
+                            "too long")))))
+            (setf registered-p t
+                  condition
+                  (export-ascii-test-catch-error
+                   (lambda () (export-org document backend))))
+            (with-soft-assertions
+              (expect (typep condition 'org-resource-limit-error) :to-be t)
+              (when (typep condition 'org-resource-limit-error)
+                (expect (org-resource-limit-error-limit-name condition)
+                        :to-be :max-output-length)
+                (expect (> (org-resource-limit-error-actual condition) 2)
+                        :to-be t))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+  (it "builds an ASCII view when a renderer omits one"
+    (let* ((backend :ascii-test-node-without-view)
+           (document
+             (parse-org
+              (export-ascii-test-source
+               "#+OPTIONS: toc:nil num:nil" "" "body")))
+           (expected (export-org document :ascii))
+           (registered-p nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend
+             backend :ascii
+             :renderer
+             (lambda (context)
+               (export-render-node
+                context
+                (document-root (export-render-context-document context)))))
+            (setf registered-p t)
+            (expect (export-org document backend) :to-equal expected))
+        (when registered-p
           (unregister-export-backend backend))))))
