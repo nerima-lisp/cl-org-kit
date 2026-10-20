@@ -356,7 +356,14 @@ CALLBACKS is a caller-owned callback registry used for quoted Lisp formulas.")
               "Build a write plan for a table's plot script, data, and radar setup.
 SCRIPT-PATH and DATA-PATH are required relative paths; RADAR-PATH is required
 for radar plots. SCRIPT-CONTENT supplies the content named by a PLOT script
-option, and BASE-DIRECTORY resolves a relative image path.")
+option, and BASE-DIRECTORY resolves a relative image path.
+The generated script is executable gnuplot code built from document options
+and any supplied SCRIPT-CONTENT. It may run commands from those sources,
+including gnuplot's `system` function. Callers should pass scripts to gnuplot
+only when the document and any supplied script content are trusted. This
+library returns a write plan but does not create files or execute gnuplot.
+The image output named by FILE may be absolute or contain `..`, so it is not
+confined to the write-plan root.")
       (expect (documentation 'table-import 'function)
               :to-equal
               "Insert CSV or TSV TEXT at OFFSET as an aligned Org pipe table.

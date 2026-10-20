@@ -119,12 +119,32 @@
          (table-plot-parse-option-list text start end))
         (t (table-plot-parse-option-atom text start end))))
 
+(defun table-plot-validate-command-fields (fields target)
+  (labels ((contains-control-p (value)
+             (typecase value
+               (string
+                (some (lambda (character)
+                        (or (char= character #\Newline)
+                            (char= character #\Return)
+                            (zerop (char-code character))))
+                      value))
+               (cons (or (contains-control-p (car value))
+                         (contains-control-p (cdr value))))
+               (t nil))))
+    (dolist (field fields)
+      (when (contains-control-p (cdr field))
+        (table-plot-signal-error
+         target :invalid-plot-option
+         (format nil "Plot command field ~A contains a line break or NUL"
+                 (car field))))))
+  fields)
+
 (defun table-plot-read-options (text target)
   (let ((options (list :type "2d" :with "lines" :ind 0 :sets nil))
         (position 0))
     (loop
       (setf position (table-plot-skip-option-delimiters text position))
-      (when (>= position (length text)) (return options))
+      (when (>= position (length text)) (return))
       (let* ((start position)
              (colon (position #\: text :start position))
              (key-end (or colon
@@ -157,7 +177,17 @@
                   ((string= name "set") (push value (getf options :sets)))
                   ((string= name "labels") (setf (getf options :labels) value))
                   (t (setf (getf options :script) value)))
-            (setf position value-end)))))))
+            (setf position value-end)))))
+    (table-plot-validate-command-fields
+     (list (cons :file (getf options :file))
+           (cons :title (getf options :title))
+           (cons :sets (getf options :sets))
+           (cons :with (getf options :with))
+           (cons :labels (getf options :labels))
+           (cons :ind (getf options :ind))
+           (cons :deps (getf options :deps)))
+     target)
+    options))
 
 (defun table-plot-option-string (value)
   (typecase value
@@ -586,18 +616,28 @@
         (write-string line stream)
         (write-char #\Newline stream)))))
 (defun table-plot-write-plan (document target
-                              &key script-path data-path radar-path
-                                ((:script-content script-content) nil script-content-p)
-                                base-directory)
+                                       &key script-path data-path radar-path
+                                       ((:script-content script-content) nil script-content-p)
+                                       base-directory)
   "Build a write plan for a table's plot script, data, and radar setup.
 SCRIPT-PATH and DATA-PATH are required relative paths; RADAR-PATH is required
 for radar plots. SCRIPT-CONTENT supplies the content named by a PLOT script
-option, and BASE-DIRECTORY resolves a relative image path."
+option, and BASE-DIRECTORY resolves a relative image path.
+The generated script is executable gnuplot code built from document options
+and any supplied SCRIPT-CONTENT. It may run commands from those sources,
+including gnuplot's `system` function. Callers should pass scripts to gnuplot
+only when the document and any supplied script content are trusted. This
+library returns a write plan but does not create files or execute gnuplot.
+The image output named by FILE may be absolute or contain `..`, so it is not
+confined to the write-plan root."
   (let* ((table (table-edit-resolve-table document target))
          (limits (document-limits document))
          (source (document-text document))
          (option-text (node-property table :plot ""))
-         (options (table-plot-read-options option-text table))
+         (options
+          (progn
+            (check-limit limits :max-input-length (length source))
+            (table-plot-read-options option-text table)))
          (type (table-plot-option-string (getf options :type)))
          (rows (table-plot-rows table))
          (script-path (table-plot-path script-path limits))
@@ -610,20 +650,28 @@ option, and BASE-DIRECTORY resolves a relative image path."
                        (table-plot-path radar-path limits)))
          (budget (make-table-plot-budget :limits limits))
          (radar-ticks nil))
-    (check-limit limits :max-input-length (length source))
+    (table-plot-validate-command-fields
+     (list (cons :data-path data-path)
+           (cons :radar-path radar-path)
+           (cons :file
+                 (table-plot-gnuplot-file-path
+                  (getf options :file) base-directory)))
+     table)
     (unless (member type '("2d" "3d" "grid" "radar") :test #'string=)
       (table-plot-signal-error table :unsupported-plot-type
                                (format nil "Unsupported plot type ~A" type)))
     (multiple-value-bind (data-rows labels)
         (table-plot-prepare-rows rows options)
-      (setf (getf options :labels) labels)
+      (progn (setf (getf options :labels) labels)
+        (table-plot-validate-command-fields
+         (list (cons :labels labels)) table))
       (let* ((entry-count (if (string= type "radar") 3 2))
              (data-content
-               (with-output-to-string (stream)
-                 (if (member type '("3d" "grid") :test #'string=)
-                     (table-plot-grid-data data-rows options limits stream budget
-                                           data-path)
-                     (table-plot-write-data data-rows stream budget data-path))))
+              (with-output-to-string (stream)
+                (if (member type '("3d" "grid") :test #'string=)
+                    (table-plot-grid-data data-rows options limits stream budget
+                                          data-path)
+                  (table-plot-write-data data-rows stream budget data-path))))
              (entries (list (make-write-plan-entry data-path data-content))))
         (check-limit limits :max-write-plan-entries entry-count)
         (when (string= type "radar")
@@ -631,18 +679,18 @@ option, and BASE-DIRECTORY resolves a relative image path."
                 (table-plot-radar-tick-count data-rows limits)
                 (getf options :ticks) radar-ticks)
           (let ((radar-content
-                  (with-output-to-string (stream)
-                    (table-plot-write-radar-setup
-                     data-rows labels options limits radar-ticks stream budget
-                     radar-path))))
+                 (with-output-to-string (stream)
+                   (table-plot-write-radar-setup
+                    data-rows labels options limits radar-ticks stream budget
+                    radar-path))))
             (setf entries
                   (append entries
                           (list (make-write-plan-entry radar-path radar-content))))))
         (let ((script-content-text
-                (with-output-to-string (stream)
-                  (table-plot-script
-                   type data-rows options data-path radar-path base-directory
-                   script-content script-content-p stream budget script-path))))
+               (with-output-to-string (stream)
+                 (table-plot-script
+                  type data-rows options data-path radar-path base-directory
+                  script-content script-content-p stream budget script-path))))
           (setf entries
                 (append entries
                         (list (make-write-plan-entry script-path

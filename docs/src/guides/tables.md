@@ -291,7 +291,14 @@ paths with `:script-path` and `:data-path`; radar plots also require
 `:radar-path` for their setup data. If the `script` option refers to existing
 script content, supply it with `:script-content`; each `$datafile` placeholder
 in that content is replaced with `:data-path`. `file` names the image output
-inside the generated script. The library does not create files or run gnuplot.
+inside the generated script. The generated script is executable gnuplot code
+built from the document's options and any supplied script content. It may run
+commands from those sources, including gnuplot's `system` function. Pass it to
+gnuplot only when the document and any supplied script content are trusted.
+The library returns a write plan; it does not create files or execute gnuplot.
+The image output named by `file` may be an absolute path or contain `..`, so it
+is not confined to the write-plan root. Command-valued options reject line
+feeds, carriage returns, and NUL characters.
 Inspect and apply the returned plan as described in [Build and inspect a write
 plan](callbacks-and-write-plans.md#build-and-inspect-a-write-plan). Unknown
 options signal `org-table-error` naming the option.

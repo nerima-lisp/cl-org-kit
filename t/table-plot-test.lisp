@@ -486,5 +486,87 @@
         (expect (search tick-vector zero-ticks-script) :to-be nil)
         (expect (search "TicCount = 4" four-ticks-script) :to-be-truthy)
         (expect (search tick-vector four-ticks-script) :to-be-truthy))))
+  (it "rejects command controls in plot fields and retains file output paths"
+    (with-soft-assertions
+      (dolist (field '(("file" nil) ("title" nil) ("set" nil)
+                       ("with" nil) ("labels" t) ("ind" nil) ("deps" t)))
+        (dolist (control (list #\Newline #\Return (code-char 0)))
+          (let* ((name (first field))
+                 (invalid-value
+                   (if (char= control #\Newline)
+                       "bad\\nvalue"
+                       (concatenate 'string "bad" (string control) "value")))
+                 (encoded-value
+                   (if (second field)
+                       (concatenate 'string "(\"" invalid-value "\")")
+                       (concatenate 'string "\"" invalid-value "\"")))
+                 (option-text (format nil "~A:~A" name encoded-value)))
+            (multiple-value-bind (document table)
+                (table-plot-test-document
+                 (format nil "| x | y |~%| 1 | 2 |~%"))
+              (setf (node-property table :plot) option-text)
+              (let ((condition
+                      (table-plot-test-capture-error
+                       (lambda ()
+                         (org-kit::table-plot-write-plan
+                          document table :script-path "script.gp"
+                          :data-path "data.tsv")))))
+                (expect (typep condition 'org-table-error) :to-be t)
+                (when (typep condition 'org-table-error)
+                  (expect (org-table-error-reason condition)
+                          :to-be :invalid-plot-option)))))))
+      (dolist (control (list #\Newline #\Return (code-char 0)))
+        (multiple-value-bind (document table)
+            (table-plot-test-document
+             (format nil "| x | y |~%|---+---|~%| 1 | 2 |~%"))
+          (let ((header-cell (first (node-children (first (node-children table))))))
+            (setf (node-property header-cell :value)
+                  (concatenate 'string "bad" (string control) "header")))
+          (let ((condition
+                  (table-plot-test-capture-error
+                   (lambda ()
+                     (org-kit::table-plot-write-plan
+                      document table :script-path "script.gp"
+                      :data-path "data.tsv")))))
+            (expect (typep condition 'org-table-error) :to-be t)
+            (when (typep condition 'org-table-error)
+              (expect (org-table-error-reason condition)
+                      :to-be :invalid-plot-option)))))
+      (dolist (path-field '(:data-path :radar-path))
+        (dolist (control (list #\Newline #\Return))
+          (multiple-value-bind (document table)
+              (table-plot-test-document
+               (format nil "#+PLOT: type:radar~%| x | y |~%| 1 | 2 |~%"))
+            (let* ((invalid-path
+                     (concatenate 'string "bad" (string control) "path"))
+                   (condition
+                     (table-plot-test-capture-error
+                      (lambda ()
+                        (if (eq path-field :data-path)
+                            (org-kit::table-plot-write-plan
+                             document table :script-path "script.gp"
+                             :data-path invalid-path :radar-path "radar.dat")
+                            (org-kit::table-plot-write-plan
+                             document table :script-path "script.gp"
+                             :data-path "data.tsv" :radar-path invalid-path))))))
+              (expect (typep condition 'org-table-error) :to-be t)
+              (when (typep condition 'org-table-error)
+                (expect (org-table-error-reason condition)
+                        :to-be :invalid-plot-option))))))
+      (dolist (file-case '(("/tmp/plot.png" "set output '/tmp/plot.png'")
+                           ("../outside.png"
+                            "set output 'reports/../outside.png'")))
+        (multiple-value-bind (document table)
+            (table-plot-test-document
+             (format nil "| x | y |~%| 1 | 2 |~%"))
+          (setf (node-property table :plot)
+                (format nil "file:\"~A\"" (first file-case)))
+          (let* ((plan
+                   (org-kit::table-plot-write-plan
+                    document table :script-path "script.gp"
+                    :data-path "data.tsv" :base-directory "reports"))
+                 (script
+                   (table-plot-test-entry-content plan "script.gp")))
+            (expect (search (second file-case) script) :to-be-truthy))))))
 
 )
