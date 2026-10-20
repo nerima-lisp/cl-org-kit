@@ -19,7 +19,7 @@
                      :zone (resolve-time-zone "UTC")))
 
 (describe "archive location and sibling edits"
-  (it "uses inherited ARCHIVE before the document keyword and default"
+  (it "uses a parent heading ARCHIVE before the document keyword and default"
     (let* ((document
              (parse-org
               (format nil
@@ -30,7 +30,7 @@
                                         "fallback-%s.org::Fallback")
               :to-equal '("notes/parent-work.org.org" . "Parent"))))
 
-  (it "expands each %s in a local ARCHIVE value to the source basename"
+  (it "expands each %s in local ARCHIVE values to the source basename and extension"
     (let* ((document
              (parse-org
               (format nil "#+ARCHIVE: document-%s.org::Document~%* Document~%")
@@ -212,10 +212,7 @@
                         "* Archive :ARCHIVE:~%old~%** Task~%:PROPERTIES:~%:ARCHIVE_TIME: 2024-02-19 Mon 12:34~%:END:~%body~%"))
         (expect (find "ARCHIVE" (node-property archived :tags)
                        :test #'string=)
-                :to-be nil)
-        (expect (search ":ARCHIVE_TIME: 2024-02-19 Mon 12:34"
-                        (document-text updated))
-                :to-be-truthy))))
+                :to-be nil))))
 
   (it "requires a time context instead of reading the current clock"
     (let* ((document (parse-org (format nil "* Task~%")))

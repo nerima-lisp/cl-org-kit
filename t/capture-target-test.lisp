@@ -275,7 +275,7 @@
         (expect (typep condition 'org-capture-error) :to-be t)
         (when (typep condition 'org-capture-error)
           (expect (org-capture-error-reason condition) :to-be :invalid-template)))))
-  (it "inserts a space before LF after a regexp match ending in bare CR"
+  (it "inserts a space before LF when the regexp target line ends in bare CR"
     (let* ((source (format nil "* Target~%body~C" #\Return))
            (document (parse-org source :source-name "notes.org"))
            (template (capture-target-test-template (format nil "Entry~%")))
