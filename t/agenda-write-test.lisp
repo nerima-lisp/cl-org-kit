@@ -495,4 +495,21 @@
                       (eq (org-agenda-error-reason condition)
                           :unsupported-entry)))
                range-errors)
-       :to-equal (make-list 5 :initial-element t))))))
+       :to-equal (make-list 5 :initial-element t)))))
+          (it "preserves affiliated source lines while aligning promoted tagged headlines"
+  (let* ((document
+           (agenda-write-test-document
+            (format nil
+                    "#+NAME: Child~%** TODO~cChild :work:~%"
+                    #\Tab)))
+         (view
+           (agenda-match (list document) "TODO=\"TODO\""
+                         :time-context (agenda-write-test-context)))
+         (output (agenda-to-org view)))
+    (expect (document-text output)
+            :to-equal
+            (concatenate (intern "STRING" :cl)
+                         "#+NAME: Child" (string #\Newline)
+                         "* TODO" (string #\Tab) "Child"
+                         (make-string 58 :initial-element #\Space)
+                         ":work:" (string #\Newline))))))
