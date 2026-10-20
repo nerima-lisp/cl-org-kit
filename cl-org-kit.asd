@@ -133,6 +133,7 @@
                (:file "object-markup-test")
                (:file "timestamp-test")
                (:file "object-timestamp-test")
+               (:file "diary-sexp-test")
                (:file "object-links-test")
                (:file "org-id-test")
                (:file "link-resolution-test")

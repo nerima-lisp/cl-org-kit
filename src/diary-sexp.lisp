@@ -351,9 +351,8 @@
           (if (= month 12)
               (cl-date-kit:make-local-date (1+ year) 1 1)
               (cl-date-kit:make-local-date year (1+ month) 1))))
-    (1-
-     (- (cl-date-kit:local-date-to-epoch-day next)
-        (cl-date-kit:local-date-to-epoch-day first)))))
+    (- (cl-date-kit:local-date-to-epoch-day next)
+        (cl-date-kit:local-date-to-epoch-day first))))
 
 (defun diary-sexp-weekday-index (date)
   (position (cl-date-kit:day-of-week date)
@@ -457,9 +456,7 @@
                                (if (plusp count) 1 last-day))))
                     (and (integerp boundary-day)
                          (<= 1 boundary-day last-day)
-                         (diary-sexp-component-match-p
-                          month-selector
-                          boundary-month)
+                         (diary-sexp-component-match-p boundary-month month-selector)
                          (= boundary-date-day boundary-day)))))))))
 
 (defun diary-sexp-built-in-match-p (source date)

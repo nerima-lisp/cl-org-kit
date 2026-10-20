@@ -317,3 +317,41 @@
                  (format nil "<2026-10-12~c>" #\Newline))
                 :to-be
                 nil)))))
+(describe "diary timestamp scanner boundaries"
+  (it "recognizes Elisp character literal boundaries"
+    (with-soft-assertions
+      (expect (org-kit::%timestamp-diary-character-token-boundary-p "?(" 0)
+              :to-be-truthy)
+      (expect (org-kit::%timestamp-diary-character-token-boundary-p "x?(" 1)
+              :to-be nil)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?" 0 1)
+              :to-be nil)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?(" 0 2)
+              :to-be 2)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?\\(" 0 3)
+              :to-be 3)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?\\C-a" 0 5)
+              :to-be 5)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?\\C-\\(" 0 6)
+              :to-be 6)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?\\^(" 0 4)
+              :to-be 4)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?\\N{A}" 0 6)
+              :to-be 6)
+      (expect (org-kit::%timestamp-diary-character-literal-end "?\\N{A" 0 5)
+              :to-be 3)
+      (expect (org-kit::%timestamp-diary-character-literal-end "x?(" 1 3)
+              :to-be nil)))
+  (it "ignores parentheses in strings and comments until the line ending"
+    (let* ((quote-character (code-char 34))
+           (source (format nil "<%%(f ~C; )~C )>" quote-character quote-character))
+           (string-literal (timestamp-object-match source)))
+      (expect (node-end string-literal) :to-be (length source)))
+    (dolist (line-ending (list #\Newline #\Return))
+      (let* ((expression (format nil "%%(f ; )~C )" line-ending))
+             (timestamp (format nil "<%%(f ; )~C )>" line-ending)))
+        (with-soft-assertions
+          (expect (org-kit::%timestamp-diary-expression-end
+                   expression 0 (length expression))
+                  :to-be (length expression))
+          (expect (timestamp-object-match timestamp) :to-be nil))))))

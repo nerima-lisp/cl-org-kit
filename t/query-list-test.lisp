@@ -423,3 +423,19 @@
            :reference-time (cl-date-kit:make-local-date 2025 1 2)
            :callback-registry registry))
         (expect callback-count :to-be 0)))))
+(describe "structured diary list query validation"
+  (it "rejects extra diary match operands"
+    (let ((document (query-list-test-document))
+          (reference-time (cl-date-kit:make-local-date 2025 1 2)))
+      (signals org-query-error
+        (org-kit::query-list document (list :diary-match :extra)
+                             :scope :nodes
+                             :reference-time reference-time))))
+  (it "rejects non-registry callback values"
+    (let ((document (query-list-test-document)))
+      (signals type-error
+        (org-kit::query-list
+         document (list :diary-match)
+         :scope :nodes
+         :reference-time (cl-date-kit:make-local-date 2025 1 2)
+         :callback-registry :invalid)))))
