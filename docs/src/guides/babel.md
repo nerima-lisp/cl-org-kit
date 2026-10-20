@@ -48,6 +48,21 @@ plans; callers choose the executors and when to apply plans.
 
 (defparameter *consumer-block*
   (named-src-block *babel-document* "consumer"))
+
+(defparameter *subtotal-block*
+  (named-src-block *babel-document* "subtotal"))
+
+(defun first-node-of-type (document type)
+  (let ((found nil))
+    (org-kit:map-nodes
+     (lambda (node)
+       (when (and (null found) (eq (org-kit:node-type node) type))
+         (setf found node)))
+     (org-kit:document-root document))
+    found))
+
+(defparameter *subtotal-call*
+  (first-node-of-type *babel-document* :babel-call))
 ```
 
 ## Header arguments
@@ -95,12 +110,30 @@ For HTML, GFM, and ASCII export, `:exports` controls the source block and its re
 :PROPERTIES:
 :header-args:emacs-lisp+: :var child=1
 :END:
+#+NAME: inherited-block
 #+BEGIN_SRC emacs-lisp
 body
 #+END_SRC
 ```
 
-The source block resolves `SESSION` to `parent-language` and includes the `child=1` variable.
+Bind the document and its named source block before resolving parameters:
+
+```lisp
+(defparameter *inheritance-document*
+  (org-kit:parse-org
+   (format nil
+           "* Parent~%:PROPERTIES:~%:header-args: :session parent-generic~%:header-args:emacs-lisp: :session parent-language~%:END:~%** Child~%:PROPERTIES:~%:header-args:emacs-lisp+: :var child=1~%:END:~%#+NAME: inherited-block~%#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%")))
+
+(defparameter *inherited-block*
+  (named-src-block *inheritance-document* "inherited-block"))
+
+(org-kit:resolve-babel-parameters
+ *inheritance-document* *inherited-block*)
+```
+
+The result resolves `SESSION` to `parent-language` and includes the `child=1`
+variable. The named node is in this snippet's document, so the document and
+node are passed together.
 
 ```lisp
 (org-kit:resolve-babel-parameters *babel-document* *static-consumer-block*)
@@ -224,11 +257,18 @@ identifier. The executor owns any state associated with that identifier.
 (defparameter *babel-executors* (org-kit:make-callback-registry))
 
 (org-kit:register-babel-executor
- *babel-executors* "shell"
+ *babel-executors* "emacs-lisp"
  (lambda (body parameters variables)
    (declare (ignore parameters variables))
-   (funcall *caller-shell-runner* body)))
+   body))
+
+(org-kit:execute-babel-source-block
+ *babel-document* *subtotal-block* *babel-executors*)
 ```
+
+This demonstration executor returns the source text as its value. An executor
+for a real language would run or otherwise process `body` according to the
+caller's policy.
 
 The Common Lisp reference executor evaluates source-block code in the current
 Lisp process, so register it only for trusted documents. A custom executor may
@@ -260,6 +300,15 @@ named blocks in the current document first, then searches the supplied
 library does not load files. Call arguments and call-site headers override the
 target block's matching variable and parameter values.
 
+For example, `*subtotal-call*` is the parsed `#+CALL: subtotal()` node from the
+document fixture. Passing it with the same registry executes the named
+`subtotal` block:
+
+```lisp
+(org-kit:execute-babel-call
+ *babel-document* *subtotal-call* *babel-executors*)
+```
+
 `org-kit:update-babel-results` formats a supplied raw value and returns an
 `edit-result`. It does not change the document object. The `output` mode accepts
 only string values. Result formatting supports the requested `value` and
@@ -267,6 +316,14 @@ only string values. Result formatting supports the requested `value` and
 `raw`, `drawer`, `org`, `html`, and `code` formats, and `replace`, `append`,
 `prepend`, and `silent` operations. Unsupported result instructions signal
 `org-kit:org-babel-error` instead of being ignored.
+
+Its required arguments are a document, a source-block or `#+CALL` node from
+that document, and the raw result value:
+
+```lisp
+(org-kit:update-babel-results
+ *babel-document* *subtotal-call* "42")
+```
 
 ## Tangling
 
@@ -283,8 +340,17 @@ absolute path or parent component signals `org-kit:org-write-plan-error` while
 the plan is built.
 
 ```lisp
+(defparameter *tangle-document*
+  (org-kit:parse-org
+   (format nil "#+BEGIN_SRC emacs-lisp :tangle yes~%42~%#+END_SRC~%")
+   :source-name "example.org"))
+
 (defparameter *tangle-plan*
-  (org-kit:babel-tangle *babel-document*))
+  (org-kit:babel-tangle *tangle-document*))
+
+(org-kit:write-plan-entry-path
+ (aref (org-kit:write-plan-entries *tangle-plan*) 0))
+;; => "example.el"
 
 ;; Apply only after choosing a destination root.
 (org-kit:apply-write-plan *tangle-plan* *destination-root*)
