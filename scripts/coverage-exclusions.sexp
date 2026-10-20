@@ -7,6 +7,7 @@
 (:kind top-level-form :head "defvar" :reason "Top-level variable declaration has no independently executable coverage location." :reproduction "scripts/coverage-reproductions/defconstant.lisp")
 (:kind top-level-form :head "define-condition" :reason "Condition class metadata is expanded during compilation." :reproduction "scripts/coverage-reproductions/defstruct.lisp")
 (:kind top-level-form :head "defstruct" :reason "DEFSTRUCT slot declarations are expanded at compile time and have no runtime location." :reproduction "scripts/coverage-reproductions/defstruct.lisp")
+(:kind top-level-form :head "defclass" :reason "The coverage runner compiles cl-org-kit with ASDF before loading tests; SB-COVER leaves this class-definition form unexecuted after that phase defines the class." :reproduction "scripts/coverage-reproductions/defclass.lisp")
 (:kind top-level-form :head "deftype" :reason "Type definitions are compile-time declarations without runtime locations." :reproduction "scripts/coverage-reproductions/defconstant.lisp")
 (:kind top-level-form :head "eval-when" :reason "Compile/load-time macro expansion has no independent runtime coverage location." :reproduction "scripts/coverage-reproductions/defstruct.lisp")
 (:kind handler-clause :head "handler-case" :reason "SB-COVER does not attach an executable location to handler clause syntax." :reproduction "scripts/coverage-reproductions/handler-case.lisp")
