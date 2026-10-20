@@ -473,6 +473,16 @@
            (clock (first (org-kit::%lint-nodes document :clock))))
       (expect (org-kit::%lint-b-clock-canonical clock)
               :to-equal "CLOCK: [2024-01-01 Mon] => 10:05")))
+  (it "rejects mismatched end times on point timestamps"
+    (let ((timestamp
+            (org-kit::make-node
+             :timestamp
+             :properties '(:type :active
+                           :year-start 2024 :month-start 1 :day-start 1
+                           :hour-start 9 :minute-start 0
+                           :year-end 2024 :month-end 1 :day-end 1
+                           :hour-end 10 :minute-end 30))))
+      (expect (org-kit::%lint-b-timestamp-canonical timestamp) :to-be nil)))
   (it "checks planning repeaters and protected source regions"
     (let* ((document (parse-org "x"))
            (restart (org-kit::make-node
@@ -512,7 +522,15 @@
       (setf (org-kit::node-children root) (list restart zero different-modes))
       (expect (mapcar #'org-kit::org-lint-diagnostic-message
                       (org-kit::%lint-mismatched-planning-repeaters document nil))
-              :to-equal '("Different repeaters in SCHEDULED and DEADLINE timestamps.")))
+              :to-equal '("Different repeaters in SCHEDULED and DEADLINE timestamps."))
+      (progn
+        (setf (org-kit::node-property
+               (org-kit::node-property different-modes :deadline)
+               :repeater-type)
+              :restart)
+        (expect (mapcar #'org-kit::org-lint-diagnostic-message
+                        (org-kit::%lint-mismatched-planning-repeaters document nil))
+                :to-equal '())))
     (let* ((source ":LOGBOOK:")
            (document (parse-org source))
            (paragraph (org-kit::make-node :paragraph :begin 0 :end (length source))))

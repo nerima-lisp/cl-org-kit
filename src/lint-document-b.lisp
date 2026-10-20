@@ -204,7 +204,6 @@
                   (getf properties :minute-end) nil)))
         (unless range-p
           (unless (and (getf properties :hour-start)
-                       (getf properties :minute-start)
                        (getf properties :hour-end)
                        (getf properties :minute-end))
             (setf (getf properties :hour-end) (getf properties :hour-start)
@@ -422,18 +421,17 @@
                                  :export-block :src-block :verse-block))))
          (when (and drawer-line
                     (not protected)
-                    (if inside-drawer
-                        (not (string-equal drawer-line ":END:"))
-                        (not (%lint-b-ancestor-type-p node '(:drawer :property-drawer))))
+                    (or (not inside-drawer)
+                        (not (string-equal drawer-line ":END:"))))
            (push
             (%lint-report
              document "incomplete-drawer" start
              (if incomplete-root-drawer
                  (format nil "Possible incomplete drawer ~S" drawer-line)
                  (if inside-drawer
-                 (format nil "Possible misleading drawer entry ~S" drawer-line)
-                 (format nil "Possible incomplete drawer ~S" drawer-line))))
-            reports))))))
+                     (format nil "Possible misleading drawer entry ~S" drawer-line)
+                     (format nil "Possible incomplete drawer ~S" drawer-line))))
+            reports)))))
     (nreverse reports)))
 
 (defun %lint-indented-diary-sexp (document context)
