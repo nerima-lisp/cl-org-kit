@@ -748,7 +748,8 @@
         (expect (emitter-object-test-timestamp-output
                  (list :repeater-type mode :repeater-value 2 :repeater-unit unit))
                 :to-equal (format nil "<2026-10-13 ~A2~C>" prefix suffix))))
-    (dolist (case '((:all :day "-" #\d)
+    (dolist (case '((:all :hour "-" #\h)
+                    (:all :day "-" #\d)
                     (:all :week "-" #\w)
                     (:all :month "-" #\m)
                     (:all :year "-" #\y)
@@ -764,7 +765,6 @@
                           (:repeater-unit :day)
                           (:warning-type :unknown :warning-value 1 :warning-unit :day)
                           (:warning-type :all :warning-value 0 :warning-unit :day)
-                          (:warning-type :all :warning-value 1 :warning-unit :hour)
                           (:warning-value 1)
                           (:warning-unit :day)))
       (emitter-object-test-rejects-output

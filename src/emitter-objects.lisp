@@ -621,6 +621,7 @@
                           (:all "-")
                           (:first "--")))
                 (suffix (case unit
+                          (:hour #\h)
                           (:day #\d)
                           (:week #\w)
                           (:month #\m)

@@ -203,7 +203,7 @@
     (expect-document-b-diagnostic
      (format nil "CLOCK: [2026-10-19 Tue 09:00]--[2026-10-19 Tue 10:00] => 1:00~%")
      "clock-syntax" 1
-     (format nil "Potentially malformed CLOCK: line~%           CLOCK: [2026-10-19 Tue 09:00]--[2026-10-19 Tue 10:00] => 1:00~%Parsed as: CLOCK: [2026-10-19 Mon 09:00-10:00] =>  1:00"))
+     (format nil "Potentially malformed CLOCK: line~%           CLOCK: [2026-10-19 Tue 09:00]--[2026-10-19 Tue 10:00] => 1:00~%Parsed as: CLOCK: [2026-10-19 Mon 09:00]--[2026-10-19 Mon 10:00] =>  1:00"))
     (expect-document-b-clean
      (format nil "CLOCK: [2026-10-19 Mon]~%")
      "clock-syntax")
@@ -254,10 +254,14 @@
      "Inactive timestamp in DEADLINE will not appear in agenda.")
     (expect-document-b-clean
      (format nil "3. [@3] third~%4. fourth~%") "item-number")
+    (expect-document-b-diagnostic
+     "<2024-01-01 Tue +1d -2h>" "timestamp-syntax" 1
+     "Potentially malformed timestamp <2024-01-01 Tue +1d -2h>.  Parsed as: <2024-01-01 Mon +1d -2h>")
     (let* ((document (parse-org "<2024-01-01 Mon +1d -2h>"))
            (timestamp (first (org-kit::%lint-nodes document :timestamp))))
       (expect (org-kit::%lint-b-timestamp-canonical timestamp)
-              :to-equal "<2024-01-01 Mon +1d -2h>"))
+              :to-equal "<2024-01-01 Mon +1d -2h>")
+      (expect-document-b-clean "<2024-01-01 Mon +1d -2h>" "timestamp-syntax"))
     (expect-document-b-clean "[2026-10-19 Mon 09:00-10:00]"
                              "timestamp-syntax")
     (expect (org-kit::%lint-b-citation-prefix-end "text [cite: @item]" 5)
