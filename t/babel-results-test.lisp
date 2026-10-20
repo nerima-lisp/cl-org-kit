@@ -263,3 +263,419 @@
                 (format nil
                         "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC~%~%#+RESULTS[new-hash]: sample~%new value~%~%* Later~%outside~%")))))
 )
+(describe "Babel result boundaries"
+  (it "normalizes text line endings and writes vector table rows"
+    (let* ((source (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC~%"))
+           (crlf (format nil "~C~C" #\Return #\Newline))
+           (mixed-value
+             (concatenate (quote string)
+                          "first" crlf "second" (string #\Return)
+                          "third" (string #\Newline) "last" crlf))
+           (normalized (babel-results-test-update source mixed-value nil))
+           (table
+             (babel-results-test-update
+              source #(#(1 2) #(3 4))
+              (quote (("RESULTS" . "table"))))))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document normalized))
+                :to-equal
+                (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC~%#+RESULTS: sample~%first~%second~%third~%last~%"))
+        (expect (document-text (edit-result-updated-document table))
+                :to-equal
+                (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC~%#+RESULTS: sample~%| 1 | 2 |~%| 3 | 4 |~%")))))
+  (it "chooses the nearest newline style in mixed documents"
+    (let* ((crlf (format nil "~C~C" #\Return #\Newline))
+           (document
+             (parse-org
+              (concatenate (quote string) "first" crlf "second"
+                           (string #\Newline))))
+           (source (document-text document))
+           (newline (string #\Newline)))
+      (with-soft-assertions
+        (expect (org-kit::document-newline document) :to-equal :mixed)
+        (expect (org-kit::babel-results-newline document (length source))
+                :to-equal newline)
+        (expect (org-kit::babel-results-newline document (1- (length source)))
+                :to-equal crlf)
+        (expect (org-kit::babel-results-newline document 0)
+                :to-equal newline))))
+  (it "updates UTF-16 CRLF results without consuming whitespace after them"
+    (let* ((crlf (format nil "~C~C" #\Return #\Newline))
+           (source
+             (concatenate
+              (quote string)
+              "#+NAME: sample" crlf
+              "#+BEGIN_SRC text" crlf
+              "body" crlf
+              "#+END_SRC" crlf
+              crlf
+              "#+RESULTS: sample" crlf
+              "old" crlf
+              " " crlf
+              crlf
+              "* Later" crlf
+              "outside" crlf))
+           (octets
+             (cl-codec-kit:string-to-octets source :encoding :utf-16))
+           (document (parse-org octets :encoding :utf-16))
+           (block (babel-results-test-source-block document))
+           (edit (org-kit::update-babel-results document block "new"))
+           (updated (edit-result-updated-document edit)))
+      (with-soft-assertions
+        (expect (document-encoding document) :to-equal :utf-16)
+        (expect (document-text updated)
+                :to-equal
+                (concatenate
+                 (quote string)
+                 "#+NAME: sample" crlf
+                 "#+BEGIN_SRC text" crlf
+                 "body" crlf
+                 "#+END_SRC" crlf
+                 crlf
+                 "#+RESULTS: sample" crlf
+                 "new" crlf
+                 " " crlf
+                 crlf
+                 "* Later" crlf
+                 "outside" crlf)))))
+  (it "rejects invalid inputs, targets, result metadata, and code languages"
+    (let* ((source
+             (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC~%"))
+           (document (parse-org source))
+           (block (babel-results-test-source-block document))
+           (other-block
+             (babel-results-test-source-block (parse-org source)))
+           (invalid-document
+             (babel-results-test-condition
+              (lambda () (org-kit::update-babel-results nil nil "value"))))
+           (invalid-block
+             (babel-results-test-condition
+              (lambda () (org-kit::update-babel-results document nil "value"))))
+           (invalid-target
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::babel-results-anchor-offset
+                 document (document-root document)))))
+           (mismatched-block
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::babel-results-anchor-offset document other-block))))
+           (invalid-parameters
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::update-babel-results
+                 document block "value"
+                 :parameters (quote (("results" . "raw")))))))
+           (invalid-label
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::babel-results-marker-text
+                 nil (format nil "first~%second")))))
+           (invalid-hash
+             (babel-results-test-condition
+              (lambda () (org-kit::babel-results-validate-hash "bad[hash"))))
+           (invalid-hash-type
+             (babel-results-test-condition
+              (lambda () (org-kit::babel-results-validate-hash 42))))
+           (invalid-code-language
+             (babel-results-test-condition
+              (lambda ()
+                (babel-results-test-update
+                 source "value" (quote (("RESULTS" . "code")))
+                 :language (format nil "bad~%language")))))
+           (invalid-code-language-type
+             (babel-results-test-condition
+              (lambda ()
+                (babel-results-test-update
+                 source "value" (quote (("RESULTS" . "code")))
+                 :language 42))))
+           (invalid-table
+             (babel-results-test-condition
+              (lambda ()
+                (babel-results-test-update
+                 source "not a table" (quote (("RESULTS" . "table"))))))))
+      (with-soft-assertions
+        (expect (typep invalid-document 'type-error) :to-be t)
+        (expect (typep invalid-block 'type-error) :to-be t)
+        (expect (typep invalid-target 'org-babel-error) :to-be t)
+        (when (typep invalid-target 'org-babel-error)
+          (expect (org-babel-error-reason invalid-target)
+                  :to-equal :invalid-target))
+        (expect (typep mismatched-block 'org-babel-error) :to-be t)
+        (when (typep mismatched-block 'org-babel-error)
+          (expect (org-babel-error-reason mismatched-block)
+                  :to-equal :document-mismatch))
+        (expect (typep invalid-parameters 'type-error) :to-be t)
+        (expect (typep invalid-label 'org-babel-error) :to-be t)
+        (when (typep invalid-label 'org-babel-error)
+          (expect (org-babel-error-reason invalid-label)
+                  :to-equal :invalid-result-label))
+        (expect (typep invalid-hash 'org-babel-error) :to-be t)
+        (expect (typep invalid-hash-type 'org-babel-error) :to-be t)
+        (when (typep invalid-hash 'org-babel-error)
+          (expect (org-babel-error-reason invalid-hash)
+                  :to-equal :invalid-result-hash))
+        (expect (typep invalid-code-language 'org-babel-error) :to-be t)
+        (expect (typep invalid-code-language-type 'org-babel-error) :to-be t)
+        (when (typep invalid-code-language 'org-babel-error)
+          (expect (org-babel-error-reason invalid-code-language)
+                  :to-equal :invalid-result-language))
+        (expect (typep invalid-table 'org-babel-error) :to-be t)
+        (when (typep invalid-table 'org-babel-error)
+          (expect (org-babel-error-reason invalid-table)
+                  :to-equal :unsupported-result-format))))))
+(describe "Babel result helper boundaries"
+  (it "handles empty writes, trimmed line endings, and plain RESULTS keywords"
+    (let* ((document (parse-org ""))
+           (stream
+             (make-instance 'org-kit::babel-results-bounded-stream
+                            :document document))
+           (keyword
+             (org-kit:make-node
+              :keyword
+              :properties (list :key "RESULTS" :value "sample")))
+           (newline (string #\Newline))
+           (crlf (format nil "~C~C" #\Return #\Newline)))
+      (sb-gray:stream-write-string stream "")
+      (org-kit::babel-results-ensure-newline stream newline)
+      (org-kit::babel-results-ensure-newline stream newline)
+      (with-soft-assertions
+        (expect (org-kit::babel-results-stream-characters stream) :to-be 1)
+        (expect (get-output-stream-string
+                 (org-kit::babel-results-stream-output stream))
+                :to-equal
+                newline)
+        (expect (org-kit::babel-results-trim-final-newlines "") :to-equal "")
+        (expect (org-kit::babel-results-trim-final-newlines "value")
+                :to-equal
+                "value")
+        (expect (org-kit::babel-results-trim-final-newlines
+                 (concatenate 'string "value" crlf))
+                :to-equal
+                "value")
+        (expect (org-kit::babel-results-strip-final-newline "")
+                :to-equal
+                "")
+        (expect (org-kit::babel-results-strip-final-newline "value")
+                :to-equal
+                "value")
+        (expect
+         (multiple-value-list
+          (org-kit::babel-results-keyword-marker-fields keyword))
+         :to-equal
+         (list nil "sample" t)))))
+  (it "rejects invalid result parameters and string table rows"
+    (let* ((document
+             (parse-org
+              (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC")))
+           (block (babel-results-test-source-block document))
+           (key-error
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::babel-results-parameters
+                 document block (list (cons 42 "raw"))))))
+           (value-error
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::babel-results-parameters
+                 document block (list (cons "RESULTS" 42))))))
+           (row-error
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::babel-results-sequence "not a table row")))))
+      (with-soft-assertions
+        (expect (typep key-error 'type-error) :to-be t)
+        (expect (typep value-error 'type-error) :to-be t)
+        (expect (typep row-error 'org-kit:org-babel-error) :to-be t)
+        (when (typep row-error 'org-kit:org-babel-error)
+          (expect (org-kit:org-babel-error-reason row-error)
+                  :to-be
+                  :unsupported-result-format)))))
+  (it "uses the empty-content branches for append and prepend"
+    (let* ((source
+             (format nil
+                     "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC~%#+RESULTS: sample~%"))
+           (document (parse-org source))
+           (block (babel-results-test-source-block document))
+           (append-edit
+             (org-kit::update-babel-results
+              document block "added"
+              :parameters '(("RESULTS" . "append"))))
+           (prepend-edit
+             (org-kit::update-babel-results
+              document block "added"
+              :parameters '(("RESULTS" . "prepend"))))
+           (expected (format nil "~Aadded~%" source)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document append-edit))
+                :to-equal
+                expected)
+        (expect (document-text (edit-result-updated-document prepend-edit))
+                :to-equal
+                expected))))
+  (it "trims a CR-only post-blank and uses the node-begin fallback"
+    (let* ((cr-document
+             (parse-org (format nil "body~C" #\Return)))
+           (text (org-kit:document-text cr-document))
+           (cr-node
+             (org-kit:make-node :paragraph
+                                :end (length text)
+                                :post-blank 1))
+           (document
+             (parse-org
+              (format nil
+                      "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC")))
+           (block (babel-results-test-source-block document))
+           (anchor (org-kit::babel-results-anchor-offset document block))
+           (candidate
+             (org-kit:make-node
+              :table :begin anchor :end anchor
+              :properties (list :results "sample"))))
+      (org-kit:append-child (org-kit:node-parent block) candidate)
+      (with-soft-assertions
+        (expect (org-kit::babel-results-node-end-before-post-blank
+                 cr-document cr-node)
+                :to-be
+                (1- (length text)))
+        (expect
+         (multiple-value-list
+          (org-kit::babel-results-adjacent-region document block))
+         :to-equal
+         (list anchor anchor anchor nil "sample" t)))))
+  (it "covers result metadata and insertion boundaries"
+    (let* ((source
+             (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC"))
+           (document (parse-org source))
+           (block (babel-results-test-source-block document))
+           (flag-parameters
+             (org-kit::babel-results-parameters
+              document block '(("FLAG"))))
+           (non-keyword (org-kit:make-node :table
+                                           :properties (list :key "RESULTS")))
+           (non-string-keyword
+             (org-kit:make-node :keyword
+                                :properties (list :key 42 :value "sample")))
+           (other-keyword
+             (org-kit:make-node :keyword
+                                :properties (list :key "NOTRESULTS"
+                                                  :value "sample")))
+           (marker-document
+             (parse-org (format nil "#+RESULTS[broken: sample~%")))
+           (marker-node
+             (let ((node
+         (org-kit:make-node
+          :keyword :begin 0
+          :end (length (org-kit:document-text marker-document))
+          :properties (list :key "RESULTS[broken" :value "sample"))))
+      (org-kit:append-child (org-kit:document-root marker-document) node)
+      node))
+           (no-payload-marker (org-kit:make-node :keyword :post-blank 0))
+           (blank-marker (org-kit:make-node :keyword :post-blank 1))
+           (empty-document (parse-org ""))
+           (empty-node (org-kit:make-node :paragraph :end 0 :post-blank 1))
+           (lf-document (parse-org (format nil "a~%")))
+           (lf-node (org-kit:make-node :paragraph
+                                       :end (length (org-kit:document-text lf-document))
+                                       :post-blank 1))
+           (crlf-document
+             (parse-org (format nil "a~C~C" #\Return #\Newline)))
+           (crlf-node (org-kit:make-node
+                       :paragraph
+                       :end (length (org-kit:document-text crlf-document))
+                       :post-blank 1))
+           (space-document (parse-org (format nil "a ~C" #\Tab)))
+           (space-node (org-kit:make-node
+                        :paragraph
+                        :end (length (org-kit:document-text space-document))
+                        :post-blank 1))
+           (invalid-label
+             (babel-results-test-condition
+              (lambda () (org-kit::babel-results-marker-text nil 42))))
+           (insertion
+             (org-kit::babel-results-insertion-text
+              empty-document 0 "#+RESULTS:" "value")))
+      (with-soft-assertions
+        (expect (assoc "FLAG" flag-parameters :test #'string=) :not :to-be nil)
+        (expect (cdr (assoc "FLAG" flag-parameters :test #'string=)) :to-be nil)
+        (expect (multiple-value-list
+                 (org-kit::babel-results-keyword-marker-fields non-keyword))
+                :to-equal (list nil))
+        (expect (multiple-value-list
+                 (org-kit::babel-results-keyword-marker-fields non-string-keyword))
+                :to-equal (list nil))
+        (expect (multiple-value-list
+                 (org-kit::babel-results-keyword-marker-fields other-keyword))
+                :to-equal (list nil))
+        (expect (multiple-value-list
+                 (org-kit::babel-results-keyword-marker-fields marker-node))
+                :to-equal (list nil))
+        (expect (org-kit::babel-results-result-payload-node no-payload-marker)
+                :to-be nil)
+        (expect (org-kit::babel-results-result-payload-node blank-marker)
+                :to-be nil)
+        (expect (org-kit::babel-results-node-end-before-post-blank
+                 empty-document empty-node)
+                :to-be 0)
+        (expect (org-kit::babel-results-node-end-before-post-blank
+                 lf-document lf-node)
+                :to-be 1)
+        (expect (org-kit::babel-results-node-end-before-post-blank
+                 crlf-document crlf-node)
+                :to-be 1)
+        (expect (org-kit::babel-results-node-end-before-post-blank
+                 space-document space-node)
+                :to-be 1)
+        (expect (org-kit::babel-results-trim-final-newlines
+                 (concatenate 'string "value" (string #\Return)))
+                :to-equal "value")
+        (expect (org-kit::babel-results-trim-final-newlines
+                 (format nil "value~%~%"))
+                :to-equal "value")
+        (expect (typep invalid-label 'org-kit:org-babel-error) :to-be t)
+        (when (typep invalid-label 'org-kit:org-babel-error)
+          (expect (org-kit:org-babel-error-reason invalid-label)
+                  :to-be :invalid-result-label))
+        (expect insertion :to-equal (format nil "#+RESULTS:~%value~%")))))
+  (it "covers vector, code, and newline-only result paths"
+    (let* ((source
+             (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC"))
+           (document (parse-org source))
+           (block (babel-results-test-source-block document))
+           (newline-document (parse-org (string #\Newline)))
+           (newline-node (org-kit:make-node :paragraph :end 1 :post-blank 1))
+           (code
+             (org-kit::babel-results-render
+              document block "body" "value" "code" "text" 0))
+           (raw
+             (org-kit::babel-results-render
+              document block "body" "value" "raw" "text" 0)))
+      (with-soft-assertions
+        (expect (org-kit::babel-results-sequence #(1 2)) :to-equal '(1 2))
+        (expect code :to-equal
+                (format nil "#+BEGIN_SRC text~%body~%#+END_SRC"))
+        (expect raw :to-equal "body")
+        (expect (org-kit::babel-results-node-end-before-post-blank
+                 newline-document newline-node)
+                :to-be 0))))
+  (it "rejects scalar table values and unsupported render formats"
+    (let* ((source
+             (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC"))
+           (document (parse-org source))
+           (block (babel-results-test-source-block document))
+           (sequence-error
+             (babel-results-test-condition
+              (lambda () (org-kit::babel-results-sequence 42))))
+           (format-error
+             (babel-results-test-condition
+              (lambda ()
+                (org-kit::babel-results-render
+                 document block "body" "value" "unknown" "text" 0)))))
+      (with-soft-assertions
+        (expect (typep sequence-error 'org-kit:org-babel-error) :to-be t)
+        (when (typep sequence-error 'org-kit:org-babel-error)
+          (expect (org-kit:org-babel-error-reason sequence-error)
+                  :to-be :unsupported-result-format))
+        (expect (typep format-error 'org-kit:org-babel-error) :to-be t)
+        (when (typep format-error 'org-kit:org-babel-error)
+          (expect (org-kit:org-babel-error-reason format-error)
+                  :to-be :unsupported-result-format))))))

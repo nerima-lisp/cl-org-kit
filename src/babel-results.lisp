@@ -229,7 +229,10 @@
       ((string= format "code")
        (babel-results-write-wrapped
         output (format nil "#+BEGIN_SRC ~A" language) render-value
-        "#+END_SRC" newline)))
+        "#+END_SRC" newline))
+      (t
+       (babel-results-error :unsupported-result-format
+                            "Unsupported Babel result format" format)))
     (babel-results-trim-final-newlines
      (get-output-stream-string (babel-results-stream-output stream)))))
 
