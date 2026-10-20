@@ -365,3 +365,112 @@
        (diary-sexp-test-match "%%(diary-float month 1 1)"
                               (cl-date-kit:make-local-date 2026 5 4))
        :to-be nil))))
+(describe "diary parser boundary paths"
+  (it "rejects malformed direct scanner and parser states"
+    (flet ((make-parser (text)
+             (org-kit::%make-diary-sexp-parser
+              :text text :limits (make-limits)))
+           (expect-invalid (function)
+             (let ((condition (diary-sexp-test-condition function)))
+               (expect (typep condition
+                              (find-class
+                               (find-symbol "ORG-AGENDA-ERROR" "ORG-KIT")))
+                       :to-be t)
+               (when condition
+                 (expect (org-agenda-error-reason condition)
+                         :to-be :invalid-diary-expression)))))
+      (with-soft-assertions
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-scan-expression ")" 0 1 (make-limits))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-scan-expression "(x" 0 2 (make-limits))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-scan-expression
+            (format nil "~Cx" (code-char 34)) 0 2 (make-limits))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-parser-take (make-parser ""))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-parse-string
+            (make-parser (string (code-char 34))))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-parse-string
+            (make-parser
+             (format nil "~Ca~C" (code-char 34) (code-char 92))))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-parse-integer (make-parser "+"))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-parse-symbol (make-parser ")"))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-parse-list (make-parser "(") 1)))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-parse-value (make-parser "") 0)))
+        (expect-invalid
+         (lambda ()
+           (org-kit::diary-sexp-read-built-in-form "()" (make-limits)))))))
+  (it "covers source scanning exits, trivia, and empty list forms"
+    (let* ((date (cl-date-kit:make-local-date 2026 12 25))
+           (leading-comment (format nil "%%( ; lead~% diary-date 12 25 2026)"))
+           (comment-text (format nil "; skip to newline~%x")))
+      (with-soft-assertions
+        (expect (org-kit::diary-sexp-string-prefix-p "%%(" nil) :to-be nil)
+        (multiple-value-bind (expression entry found-p)
+            (org-kit::diary-sexp-source-parts nil)
+          (expect (list expression entry found-p) :to-equal (list nil nil nil)))
+        (multiple-value-bind (expression entry found-p)
+            (org-kit::diary-sexp-source-parts "not a timestamp" :timestamp-p t)
+          (expect (list expression entry found-p) :to-equal (list nil nil nil)))
+        (expect (org-kit::diary-sexp-source-skip-trivia "" 0) :to-be 0)
+        (expect (org-kit::diary-sexp-source-skip-trivia "  " 0) :to-be 2)
+        (expect (org-kit::diary-sexp-source-skip-trivia "x" 0) :to-be 0)
+        (expect (org-kit::diary-sexp-source-skip-trivia comment-text 0)
+                :to-be (position #\x comment-text))
+        (expect (org-kit::diary-sexp-top-level-operator "") :to-be nil)
+        (expect (org-kit::diary-sexp-top-level-operator "()") :to-be nil)
+        (expect
+         (org-kit::diary-sexp-scan-expression "#" 0 1 (make-limits))
+         :to-be t)
+        (expect (diary-sexp-test-match leading-comment date) :to-be t)
+        (expect
+         (diary-sexp-test-match "%%(diary-date () 25 2026)" date)
+         :to-be nil))))
+  (it "uses parsed document limits and covers date matcher boundaries"
+    (let* ((document (parse-org "%%(diary-date 12 25 2026)"))
+           (diary-node nil)
+           (date (cl-date-kit:make-local-date 2026 12 25))
+           (source nil))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :diary-sexp)
+           (setf diary-node node)))
+       (document-root document))
+      (setf source (org-kit::diary-sexp-source-for-node diary-node))
+      (with-soft-assertions
+        (expect (node-document diary-node) :to-be document)
+        (expect source :to-be-truthy)
+        (expect (org-kit::diary-sexp-component-match-p 1 (cons 1 2))
+                :to-be nil)
+        (expect (org-kit::diary-sexp-exact-date-ordinal nil 25 2026)
+                :to-be nil)
+        (expect (org-kit::diary-sexp-exact-date-ordinal 2 30 2026)
+                :to-be nil)
+        (expect
+         (diary-sexp-test-match "%%(diary-anniversary 12)" date)
+         :to-be nil)
+        (expect
+         (org-kit::diary-sexp-float-match-p
+          (list 5 1 most-positive-fixnum) (cl-date-kit:make-local-date 2026 5 4))
+         :to-be nil)
+        (expect
+         (org-kit::diary-sexp-float-match-p
+          (list 5 1 "count") (cl-date-kit:make-local-date 2026 5 4))
+         :to-be nil)))))

@@ -101,7 +101,7 @@
                   (diary-sexp-invalid-expression))
                 (decf depth)))
           (incf index))
-    (when (or in-string-p escaped-p (/= depth 0))
+    (when (or in-string-p (/= depth 0))
       (diary-sexp-invalid-expression))
     t))
 

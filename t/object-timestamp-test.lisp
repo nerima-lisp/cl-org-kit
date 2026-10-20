@@ -355,3 +355,12 @@
                    expression 0 (length expression))
                   :to-be (length expression))
           (expect (timestamp-object-match timestamp) :to-be nil))))))
+(describe "diary character literal guard boundaries"
+  (it "rejects empty ranges and non-character starters"
+    (with-soft-assertions
+      (expect
+       (org-kit::%timestamp-diary-character-literal-end "" 0 0)
+       :to-be nil)
+      (expect
+       (org-kit::%timestamp-diary-character-literal-end "x" 0 1)
+       :to-be nil))))
