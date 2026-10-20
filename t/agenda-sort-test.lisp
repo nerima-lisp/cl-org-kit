@@ -580,4 +580,40 @@
         (expect (agenda-sort-test-names
                  (org-kit::agenda-sort-view-entries
                   entries (quote (:todo-state-up))))
-                :to-equal (quote ("Finished" "Open")))))))
+                :to-equal (quote ("Finished" "Open"))))))
+  (it "ranks TODO states from string keyword settings"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+TODO: TODO NEXT WAIT | DONE~%* TODO First~%* NEXT Second~%* WAIT Third~%")))
+           (entries (agenda-sort-test-matches document)))
+      (setf (document-settings document)
+            (list :todo-keywords
+                  (list "TODO" "NEXT" "WAIT" "DONE")
+                  :todo-sequences nil))
+      (with-soft-assertions
+        (expect (mapcar (function org-kit::agenda-sort-view-entry-todo-rank)
+                        entries)
+                :to-equal (quote (-4 -3 -2)))
+        (expect (org-kit::agenda-sort-view-compare-todo-state
+                 (first entries) (second entries) :up)
+                :to-be -1)
+        (expect (org-kit::agenda-sort-view-compare-todo-state
+                 (second entries) (first entries) :up)
+                :to-be 1)
+        (expect (agenda-sort-test-names
+                 (org-kit::agenda-sort-view-entries
+                  entries (quote (:todo-state-up))))
+                :to-equal (quote ("First" "Second" "Third"))))))
+  (it "uses a deadline timestamp for :any when schedule is absent"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Deadline only~%DEADLINE: <2025-03-06 Thu>~%")))
+           (entry (first (agenda-sort-test-matches document)))
+           (timestamp
+             (org-kit::agenda-sort-view-entry-timestamp-node entry :any)))
+      (with-soft-assertions
+        (expect (list (node-property timestamp :type)
+                      (node-property timestamp :day-start))
+                :to-equal (quote (:active 6)))))))
