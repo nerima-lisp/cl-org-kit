@@ -1,11 +1,23 @@
 (in-package #:org-kit)
 
-(defstruct (org-lint-diagnostic (:constructor %make-org-lint-diagnostic)
-                                (:copier nil))
+(defstruct (org-lint-diagnostic
+            (:constructor %make-org-lint-diagnostic-raw)
+            (:copier nil))
   "A checker finding. POSITION is the 1-based character position Org reports."
   (checker "" :type string :read-only t)
-  (position 1 :type (integer 1 *) :read-only t)
+  (position 1 :type integer :read-only t)
   (message "" :type string :read-only t))
+
+(defun %make-org-lint-diagnostic (&key (checker "") (position 1) (message ""))
+  (unless (stringp checker)
+    (error 'type-error :datum checker :expected-type 'string))
+  (unless (typep position '(integer 1 *))
+    (error 'type-error :datum position :expected-type '(integer 1 *)))
+  (unless (stringp message)
+    (error 'type-error :datum message :expected-type 'string))
+  (%make-org-lint-diagnostic-raw :checker checker
+                                 :position position
+                                 :message message))
 
 (defparameter *org-lint-checkers*
   '(("misplaced-heading" %lint-misplaced-heading :document-only nil)

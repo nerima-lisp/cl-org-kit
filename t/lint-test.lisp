@@ -71,16 +71,24 @@ body
   (it "requires an already parsed document"
     (signals org-kit-error (org-lint (make-document "Text.")))))
 (describe "Org lint validation edge cases"
-  (it "uses diagnostic defaults"
+  (it "uses diagnostic defaults and validates explicit positions"
     (let ((diagnostic (org-kit::%make-org-lint-diagnostic)))
       (expect (org-kit::org-lint-diagnostic-checker diagnostic) :to-equal "")
       (expect (org-kit::org-lint-diagnostic-position diagnostic) :to-be 1)
-      (expect (org-kit::org-lint-diagnostic-message diagnostic) :to-equal "")))
-  (it "rejects invalid documents and diagnostic positions"
+      (expect (org-kit::org-lint-diagnostic-message diagnostic) :to-equal ""))
+    (let ((diagnostic (org-kit::%make-org-lint-diagnostic
+                       :checker "checker" :position 3 :message "message")))
+      (expect (org-kit::org-lint-diagnostic-position diagnostic) :to-be 3)))
+  (it "rejects invalid diagnostic values"
     (signals type-error (org-lint nil))
-    (let ((position (read-from-string "0")))
-      (signals type-error
-        (org-kit::%make-org-lint-diagnostic :position position))))
+    (signals type-error
+      (org-kit::%make-org-lint-diagnostic :checker 42))
+    (signals type-error
+      (org-kit::%make-org-lint-diagnostic :position 0))
+    (signals type-error
+      (org-kit::%make-org-lint-diagnostic :position "3"))
+    (signals type-error
+      (org-kit::%make-org-lint-diagnostic :message 42)))
   (it "rejects malformed context plist shapes"
     (let ((document (parse-org "Text.")))
       (signals org-kit-error (org-lint document :context :invalid))
