@@ -478,4 +478,73 @@
           (expect (org-resource-limit-error-limit-name condition)
                   :to-be :max-search-work)
           (expect (org-resource-limit-error-limit condition) :to-be 5)
-          (expect (org-resource-limit-error-actual condition) :to-be 10))))))
+          (expect (org-resource-limit-error-actual condition) :to-be 10)))))
+  (it "covers link-resolution boundary and malformed input branches"
+      (let* ((document (parse-org "* Target"))
+             (index (org-kit::make-link-resolution-index document))
+             (default-resolution (org-kit::make-link-resolution))
+             (raw-resolution (org-kit::%make-link-resolution :resolved nil nil))
+             (cookie-results
+              (mapcar
+               (lambda (arguments)
+                 (apply #'org-kit::link-resolution-statistics-cookie-end arguments))
+               '(( "[" 1) ("[" 0) ("[x]" 0) ("[12" 0) ("[12x]" 0)
+                 ("[12/34]" 0) ("[12/" 0) ("[12%" 0))))
+             (invalid-status
+              (link-resolution-test-catch-error
+               (lambda ()
+                 (let ((status (gensym "INVALID-STATUS-")))
+                   (org-kit::%make-link-resolution status nil nil)))))
+             (duplicate-document
+              (parse-org
+               (format nil
+                       "* Repeated~%:PROPERTIES:~%:CUSTOM_ID: repeated~%:CUSTOM_ID: repeated~%:END:~%")))
+             (duplicate-index (org-kit::make-link-resolution-index duplicate-document))
+             (unparsed-document (make-document ""))
+             (unparsed-index (org-kit::make-link-resolution-index unparsed-document))
+             (unparsed-result
+              (org-kit::resolve-link-with-index
+               (make-node :link :properties '(:type "fuzzy" :path "Missing"))
+               unparsed-index))
+             (malformed-results
+              (mapcar
+               (lambda (properties)
+                 (link-resolution-status
+                  (org-kit::resolve-link-with-index
+                   (make-node :link :properties properties)
+                   index)))
+               '((:type 42 :path "Target")
+                 (:type "id" :path 42)
+                 (:type "custom-id" :path 42)
+                 (:type "fuzzy" :path 42)
+                 (:type "radio" :path 42))))
+             (private-path-error
+              (link-resolution-test-catch-error
+               (lambda () (org-kit::link-resolution-read-file nil nil nil))))
+             (empty-option-candidates
+              (org-kit::link-resolution-file-search-candidates index document ""))
+             (non-string-search-match
+              (org-kit::link-resolution-search-text-matches-p
+               index document "target" 42 nil)))
+        (with-soft-assertions
+         (expect (link-resolution-status default-resolution) :to-be :unresolved)
+         (expect (link-resolution-status raw-resolution) :to-be :resolved)
+         (expect (link-resolution-target raw-resolution) :to-be nil)
+         (expect (link-resolution-candidates raw-resolution) :to-equal nil)
+         (expect cookie-results :to-equal '(nil nil nil nil nil 7 nil nil))
+         (expect (typep invalid-status 'type-error) :to-be t)
+         (expect (length (gethash "repeated"
+                                  (org-kit::%link-resolution-index-custom-ids
+                                   duplicate-index)))
+                 :to-be 1)
+         (expect (document-root unparsed-document) :to-be nil)
+         (expect (link-resolution-status unparsed-result) :to-be :unresolved)
+         (expect malformed-results
+                 :to-equal '(:unresolved :unresolved :unresolved :unresolved
+                                         :unresolved))
+         (expect (typep private-path-error 'org-link-resolution-error) :to-be t)
+         (when (typep private-path-error 'org-link-resolution-error)
+           (expect (org-link-resolution-error-reason private-path-error)
+                   :to-be :invalid-file-path))
+         (expect (length empty-option-candidates) :to-be 1)
+         (expect non-string-search-match :to-be nil)))))
