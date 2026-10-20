@@ -67,6 +67,20 @@
          (expect (document-text (edit-result-updated-document result))
                  :to-equal expected)
          (expect (document-text document) :to-equal source))))
+  (it "leaves diary sexp timestamps unchanged while shifting regular timestamps"
+    (let* ((source
+             (format nil
+                     "* Task~%<%%%%(diary-date 12 25 2026)>~%<2026-03-02 Mon>~%* Peer~%"))
+           (expected
+             (format nil
+                     "* Task~%<%%%%(diary-date 12 25 2026)>~%<2026-03-02 Mon>~%* Task~%<%%%%(diary-date 12 25 2026)>~%<2026-03-03 Tue>~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 1 :day)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
 
   (it "regenerates only cloned root IDs deterministically"
     (let* ((source
