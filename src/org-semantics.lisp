@@ -476,13 +476,12 @@ contributes, :DOCUMENT for a #+PROPERTY fallback, or NIL when absent."
                (declare (ignore source))
                property)))
     (or category-override
-        (if (programmatic-category-p)
-            (multiple-value-bind (category present)
-                (inherited-category-value)
-              (if present
-                  category
-                  (effective-category-property)))
-            (effective-category-property))
+        (multiple-value-bind (category present)
+            (inherited-category-value)
+          (declare (ignore present))
+          (if (programmatic-category-p)
+              category
+              (effective-category-property)))
         (getf (document-settings document) :category)
         (let ((source-name (document-source-name document)))
           (when source-name
