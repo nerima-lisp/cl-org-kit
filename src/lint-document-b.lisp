@@ -180,112 +180,106 @@
                        document "LaTeX-$" (+ begin start 3)
                        "$ symbol potentially matching LaTeX fragment boundary.  Consider using \\dollar entity."))))
 
-(defun %lint-b-weekday (year month day)
-  (when (and (<= 1 month 12) (<= 1 day 31) (>= year 1))
-    (let ((month-length
-            (case month
-              ((1 3 5 7 8 10 12) 31)
-              ((4 6 9 11) 30)
-              (2 (if (or (zerop (mod year 400))
-                         (and (zerop (mod year 4))
-                              (not (zerop (mod year 100)))))
-                     29 28)))))
-      (when (<= day month-length)
-        (case (nth-value 6
-               (decode-universal-time
-                (encode-universal-time 0 0 12 day month year 0) 0))
-          (0 "Mon")
-          (1 "Tue")
-          (2 "Wed")
-          (3 "Thu")
-          (4 "Fri")
-          (5 "Sat")
-          (6 "Sun"))))))
-
-(defun %lint-b-unit-char (unit)
-  (case unit
-    (:hour #\h)
-    (:day #\d)
-    (:week #\w)
-    (:month #\m)
-    (:year #\y)))
-
-(defun %lint-b-timestamp-adjustments (timestamp)
-  (with-output-to-string (stream)
-    (let ((mode (node-property timestamp :repeater-type))
-          (amount (node-property timestamp :repeater-value))
-          (unit (%lint-b-unit-char (node-property timestamp :repeater-unit))))
-      (when (and mode amount unit)
-        (format stream " ~A~D~C"
-                (case mode (:cumulate "+") (:catch-up "++") (:restart ".+"))
-                amount unit)))
-    (let ((mode (node-property timestamp :warning-type))
-          (amount (node-property timestamp :warning-value))
-          (unit (%lint-b-unit-char (node-property timestamp :warning-unit))))
-      (when (and mode amount unit)
-        (format stream " ~A~D~C"
-                (case mode (:first "--") (:all "-")) amount unit)))))
-
-(defun %lint-b-timestamp-endpoint (timestamp suffix)
-  (let* ((year (node-property timestamp (if suffix :year-end :year-start)))
-         (month (node-property timestamp (if suffix :month-end :month-start)))
-         (day (node-property timestamp (if suffix :day-end :day-start)))
-         (hour (node-property timestamp (if suffix :hour-end :hour-start)))
-         (minute (node-property timestamp (if suffix :minute-end :minute-start)))
-         (weekday (and (integerp year) (integerp month) (integerp day)
-                       (%lint-b-weekday year month day))))
-    (when (and weekday (integerp year) (integerp month) (integerp day))
-      (with-output-to-string (stream)
-        (format stream "~4,'0D-~2,'0D-~2,'0D ~A" year month day weekday)
-        (when (and (integerp hour) (integerp minute))
-          (format stream " ~2,'0D:~2,'0D" hour minute))))))
-
 (defun %lint-b-timestamp-canonical (timestamp)
-  (let* ((type (node-property timestamp :type))
-         (opening (case type ((:inactive :inactive-range) #\[)
-                        ((:active :active-range) #\<)))
-         (closing (case type ((:inactive :inactive-range) #\])
-                        ((:active :active-range) #\>)))
-         (range-p (member type '(:active-range :inactive-range) :test #'eq))
-         (start (and opening (%lint-b-timestamp-endpoint timestamp nil)))
-         (end (and opening (%lint-b-timestamp-endpoint timestamp t)))
-         (hour (node-property timestamp :hour-start))
-         (minute (node-property timestamp :minute-start))
-         (end-hour (node-property timestamp :hour-end))
-         (end-minute (node-property timestamp :minute-end))
-         (same-date (and (= (node-property timestamp :year-start 0)
-                            (node-property timestamp :year-end 0))
-                         (= (node-property timestamp :month-start 0)
-                            (node-property timestamp :month-end 0))
-                         (= (node-property timestamp :day-start 0)
-                            (node-property timestamp :day-end 0))))
-         (time-range (and range-p same-date
-                          (integerp hour) (integerp minute)
-                          (integerp end-hour) (integerp end-minute))))
-    (when (and opening start end)
-      (with-output-to-string (stream)
-        (write-char opening stream)
-        (write-string start stream)
-        (cond
-          (time-range
-           (format stream "-~2,'0D:~2,'0D" end-hour end-minute)
-           (write-string (%lint-b-timestamp-adjustments timestamp) stream)
-           (write-char closing stream))
-          (range-p
-           (write-string (%lint-b-timestamp-adjustments timestamp) stream)
-           (write-char closing stream)
-           (write-string "--" stream)
-           (write-char opening stream)
-           (write-string end stream)
-           (write-string (%lint-b-timestamp-adjustments timestamp) stream)
-           (write-char closing stream))
-          (t
-           (when (and (integerp hour) (integerp minute)
-                      (integerp end-hour) (integerp end-minute)
-                      (or (/= hour end-hour) (/= minute end-minute)))
-             (format stream "-~2,'0D:~2,'0D" end-hour end-minute))
-           (write-string (%lint-b-timestamp-adjustments timestamp) stream)
-           (write-char closing stream)))))))
+  (handler-case
+      (let* ((type (node-property timestamp :type))
+             (range-p (member type '(:active-range :inactive-range) :test #'eq))
+             (properties (node-properties timestamp)))
+        (let ((source-hour-start (getf properties :hour-start))
+              (source-minute-start (getf properties :minute-start)))
+          ;; Org 9.8.10 drops a timestamp's time when either field is missing.
+          (unless (eql (null (getf properties :hour-start))
+                       (null (getf properties :minute-start)))
+            (setf (getf properties :hour-start) nil
+                  (getf properties :minute-start) nil))
+          (when range-p
+            ;; Org 9.8.10 fills a missing end hour or minute from the start's matching field.
+            (setf (getf properties :hour-end)
+                  (or (getf properties :hour-end) source-hour-start)
+                  (getf properties :minute-end)
+                  (or (getf properties :minute-end) source-minute-start)))
+          (unless (eql (null (getf properties :hour-end))
+                       (null (getf properties :minute-end)))
+            (setf (getf properties :hour-end) nil
+                  (getf properties :minute-end) nil)))
+        (unless range-p
+          (unless (and (getf properties :hour-start)
+                       (getf properties :minute-start)
+                       (getf properties :hour-end)
+                       (getf properties :minute-end))
+            (setf (getf properties :hour-end) (getf properties :hour-start)
+                  (getf properties :minute-end) (getf properties :minute-start))))
+        (flet ((endpoint-canonical (end-p)
+                                   (let* ((year-key (if end-p :year-end :year-start))
+                                          (month-key (if end-p :month-end :month-start))
+                                          (day-key (if end-p :day-end :day-start))
+                                          (hour-key (if end-p :hour-end :hour-start))
+                                          (minute-key (if end-p :minute-end :minute-start))
+                                          (year (getf properties year-key))
+                                          (month (getf properties month-key))
+                                          (day (getf properties day-key))
+                                          (hour (getf properties hour-key))
+                                          (minute (getf properties minute-key))
+                                          (point-properties (copy-list properties)))
+                                     (setf (getf point-properties :type)
+                                           (if (eq type :active-range) :active :inactive)
+                                           (getf point-properties :year-start) year
+                                           (getf point-properties :month-start) month
+                                           (getf point-properties :day-start) day
+                                           (getf point-properties :hour-start) hour
+                                           (getf point-properties :minute-start) minute
+                                           (getf point-properties :year-end) year
+                                           (getf point-properties :month-end) month
+                                           (getf point-properties :day-end) day
+                                           (getf point-properties :hour-end) hour
+                                           (getf point-properties :minute-end) minute)
+                                     (emitter-object-timestamp
+                                      (make-node :timestamp :properties point-properties)))))
+          (let* ((canonical-timestamp (make-node :timestamp :properties properties))
+                 (emitted (emitter-object-timestamp canonical-timestamp))
+                 (range-delimiter
+                  (case type
+                    (:active-range ">--<")
+                    (:inactive-range "]--[")))
+                 (raw-text (node-text timestamp))
+                 (source-date-range-p
+                  (and range-delimiter raw-text
+                       (search range-delimiter raw-text)))
+                 (canonical
+                  (if (and source-date-range-p
+                           (not (search range-delimiter emitted)))
+                      ;; Emission folds same-date ranges into one time range; keep the source "--".
+                      (concatenate 'string
+                                   (endpoint-canonical nil)
+                                   "--"
+                                   (endpoint-canonical t))
+                    emitted))
+                 (start (timestamp-start canonical-timestamp))
+                 (end (and range-p (timestamp-end canonical-timestamp))))
+            (when (and start
+                       (<= 1 (org-time-value-year start) 9999)
+                       (or (not range-p)
+                           (and end
+                                (<= 1 (org-time-value-year end) 9999))))
+              (let* ((start-weekday (edit-todo-weekday-name start))
+                     (with-start-weekday
+                      (concatenate 'string
+                                   (subseq canonical 0 11)
+                                   " " start-weekday
+                                   (subseq canonical 11)))
+                     (separator
+                      (and range-delimiter
+                           (search range-delimiter with-start-weekday))))
+                (if separator
+                    (let ((end-date-start (+ separator (length range-delimiter))))
+                      (concatenate 'string
+                                   (subseq with-start-weekday 0 (+ end-date-start 10))
+                                   " " (edit-todo-weekday-name end)
+                                   (subseq with-start-weekday (+ end-date-start 10))))
+                  with-start-weekday))))))
+    (org-kit-error ()
+      ;; Invalid timestamps have no normalized text to compare.
+      nil)))
 
 (defun %lint-timestamp-syntax (document context)
   (declare (ignore context))
