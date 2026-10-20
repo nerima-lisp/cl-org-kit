@@ -116,18 +116,17 @@
                     (append patches
                             (list (edit-make-patch weekday-start weekday-end
                                                    weekday target))))
-              (setf patches
-                    (append patches
-                            (list (edit-make-patch
-                                   date-end date-end
-                                   (format nil "~A~A"
-                                           (if (and (< date-end close-position)
-                                                    (%timestamp-whitespace-p
-                                                     (char source date-end)))
-                                               ""
-                                               " ")
-                                           weekday)
-                                   target)))))
+              (let* ((token-start
+                       (%timestamp-skip-whitespace source date-end close-position))
+                     (replacement
+                       (format nil "~A~A~A"
+                               (if (> token-start date-end) "" " ")
+                               weekday
+                               (if (< token-start close-position) " " ""))))
+                (setf patches
+                      (append patches
+                              (list (edit-make-patch token-start token-start
+                                                     replacement target))))))
         patches)))))
 
 (defun edit-timestamp-adjusted-date (source endpoint-range component delta target)

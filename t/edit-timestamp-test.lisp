@@ -297,4 +297,191 @@
                 (org-kit::toggle-timestamp-active document
                                                  foreign-timestamp)))))
       (edit-timestamp-test-assert-error condition :foreign-node)
-      (expect (document-text document) :to-equal "<2024-01-31 Wed>"))))
+      (expect (document-text document) :to-equal "<2024-01-31 Wed>")))
+  (it "rejects malformed timestamp source ranges"
+      (flet ((expect-invalid (thunk)
+                             (edit-timestamp-test-assert-error
+                              (edit-timestamp-test-condition thunk)
+                              :invalid-value)))
+        (let* ((document (make-document "x"))
+               (timestamp (make-node :timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-endpoint-ranges
+              document timestamp timestamp))))
+        (let* ((source "<x>--")
+               (document (make-document source))
+               (timestamp (make-node :timestamp :begin 0 :end (length source))))
+          (expect (org-kit::edit-timestamp-endpoint-ranges
+                   document timestamp timestamp)
+                  :to-equal '((0 2))))
+        (let* ((source "abc")
+               (document (make-document source))
+               (timestamp (make-node :timestamp :begin 0 :end (length source))))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-endpoint-ranges
+              document timestamp timestamp))))
+        (let* ((source "<abc")
+               (document (make-document source))
+               (timestamp (make-node :timestamp :begin 0 :end (length source))))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-endpoint-ranges
+              document timestamp timestamp))))
+        (let* ((source "<2024-01-01>--<2024-01-02>--<2024-01-03>")
+               (document (make-document source))
+               (timestamp (make-node :timestamp :begin 0 :end (length source))))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-endpoint-ranges
+              document timestamp timestamp))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::edit-timestamp-endpoint-index
+            :middle '((0 2)) "timestamp")))
+        (let* ((source "<bad>")
+               (document (make-document source))
+               (timestamp (make-node :timestamp :begin 0 :end (length source)))
+               (date (cl-date-kit:make-local-date 2024 2 1)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-date-patches
+              document '(0 4) date timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-adjusted-date
+              source '(0 4) :day 1 timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-find-time
+              source '(0 4) timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::edit-timestamp-adjustment-layout
+              source '(0 4) :repeater timestamp))))))
+  (it "preserves weekday placement and rejects invalid timestamp edits"
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 >"
+       "<2024-02-01 Thu>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :day 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 10:25>"
+       "<2024-02-01 Thu 10:25>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :day 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1d>"
+       "<2024-02-01 Thu +1d>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :day 1)))
+      (edit-timestamp-test-check-edit
+       "[2024-01-31 Wed]--[2024-02-01 Thu]"
+       "<2024-01-31 Wed>--<2024-02-01 Thu>"
+       #'org-kit::toggle-timestamp-active)
+      (flet ((expect-invalid (thunk)
+                             (edit-timestamp-test-assert-error
+                              (edit-timestamp-test-condition thunk)
+                              :invalid-value)))
+        (expect-invalid
+         (lambda ()
+           (org-kit::adjust-timestamp nil nil :day 1)))
+        (let* ((document (parse-org "<2024-01-31 Wed>"))
+               (timestamp (edit-timestamp-test-first-node document :timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::adjust-timestamp document timestamp :day 1
+                                        :endpoint :middle))))
+        (let* ((document (parse-org "<2024-01-31 Wed>"))
+               (timestamp (edit-timestamp-test-first-node document :timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::adjust-timestamp document timestamp :hour 1))))
+        (let* ((source "<2024-01-31 09:00-10:00>--<2024-02-01 12:00-13:00>")
+               (document (parse-org source))
+               (timestamp (edit-timestamp-test-first-node document :timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::adjust-timestamp document timestamp :hour 1))))
+        (let* ((source "<9999-12-31>")
+               (document (parse-org source))
+               (timestamp (edit-timestamp-test-first-node document :timestamp)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::adjust-timestamp document timestamp :year 1)))
+          (expect-invalid
+           (lambda ()
+             (org-kit::adjust-timestamp document timestamp :day 1))))
+        (expect-invalid
+         (lambda ()
+           (org-kit::edit-timestamp-toggled-type :diary nil)))))
+  (it "steps every repeater unit and retains its prefix"
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1h>"
+       "<2024-01-31 +1h>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit -1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1d>"
+       "<2024-01-31 +1w>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1d>"
+       "<2024-01-31 +1d>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit -1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1w>"
+       "<2024-01-31 +1m>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1w>"
+       "<2024-01-31 +1d>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit -1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1m>"
+       "<2024-01-31 +1y>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1m>"
+       "<2024-01-31 +1w>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit -1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1y>"
+       "<2024-01-31 +1m>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit -1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 +1y>"
+       "<2024-01-31 +1y>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 ++1d>"
+       "<2024-01-31 ++1w>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 .+1d>"
+       "<2024-01-31 .+1w>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :repeater-unit 1)))
+      (edit-timestamp-test-check-edit
+       "<2024-01-31 --1d>"
+       "<2024-01-31 --1w>"
+       (lambda (document timestamp)
+         (org-kit::adjust-timestamp document timestamp :warning-unit 1)))
+      (let* ((document (parse-org "<2024-01-31 Wed>"))
+             (timestamp (edit-timestamp-test-first-node document :timestamp))
+             (condition
+              (edit-timestamp-test-condition
+               (lambda ()
+                 (org-kit::adjust-timestamp document timestamp
+                                            :repeater-amount 1)))))
+        (edit-timestamp-test-assert-error condition :invalid-value))))
