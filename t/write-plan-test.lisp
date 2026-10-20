@@ -1645,4 +1645,39 @@
                        :to-be nil))
              (expect (probe-file
                       (write-plan-test-path root "stream-failure.txt"))
-                     :to-be nil))))))))
+                     :to-be nil)))))))
+  (it "rejects a parent descriptor on a different device"
+    (write-plan-test-call-with-directory
+     (lambda (directory)
+       (let* ((canonical-root (org-kit::write-plan-canonical-root directory))
+              (root-fd (org-kit::write-plan-open-root-directory canonical-root))
+              (parent-fd (org-kit::write-plan-duplicate-close-on-exec root-fd))
+              (entry (make-write-plan-entry "target.txt" "value"))
+              (record (list entry "target.txt" (list "target.txt")))
+              (stat-dev-symbol (find-symbol "STAT-DEV" "SB-POSIX"))
+              (original-stat-dev (symbol-function stat-dev-symbol))
+              (calls 0)
+              (condition nil))
+         (unwind-protect
+              (progn
+                (setf (symbol-function stat-dev-symbol)
+                      (lambda (stat)
+                        (let ((device (funcall original-stat-dev stat)))
+                          (if (= (incf calls) 2) (1+ device) device))))
+                (setf condition
+                      (handler-case
+                          (progn
+                            (org-kit::write-plan-verify-parent-directory
+                             root-fd record parent-fd)
+                            nil)
+                        (org-write-plan-error (error-condition)
+                          error-condition))))
+           (setf (symbol-function stat-dev-symbol) original-stat-dev)
+           (sb-posix:close parent-fd)
+           (sb-posix:close root-fd))
+         (with-soft-assertions
+           (expect calls :to-be 2)
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when (typep condition 'org-write-plan-error)
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :containment-lost))))))))
