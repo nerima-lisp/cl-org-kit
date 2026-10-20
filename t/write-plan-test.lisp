@@ -1951,13 +1951,15 @@
               (marker (write-plan-test-path directory "marker"))
               (plan (make-write-plan
                      (list (make-write-plan-delete-entry "folder"))))
-              (condition (write-plan-test-capture-error plan root)))
+              (condition (progn
+                          (write-plan-test-write-text marker "marker content")
+                          (write-plan-test-capture-error plan root))))
          (with-soft-assertions
            (expect (typep condition 'org-write-plan-error) :to-be t)
            (when (typep condition 'org-write-plan-error)
              (expect (org-write-plan-error-reason condition)
                      :to-be :target-not-regular-file))
-           (expect (probe-file marker) :to-be-truthy)))))
+           (expect (write-plan-test-read-text marker) :to-equal "marker content")))))
   (it "rejects dot and empty delete paths as root selectors"
     (write-plan-test-call-with-directory
      (lambda (root)
