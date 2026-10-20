@@ -135,4 +135,11 @@
       (with-soft-assertions
         (expect stored-link :to-equal "[[*Round trip]]")
         (expect (link-resolution-status resolution) :to-be :resolved)
-        (expect (link-resolution-target resolution) :to-be heading)))))
+        (expect (link-resolution-target resolution) :to-be heading))))
+  (it "rejects headings whose raw title is not a string"
+    (let* ((document (parse-org (format nil "* Heading~%")))
+           (heading (first (store-link-test-headings document))))
+      (setf (node-property heading :raw-value) nil)
+      (store-link-test-expect-error
+       (lambda () (org-kit:store-link heading :style :heading))
+       :missing-heading-title))))
