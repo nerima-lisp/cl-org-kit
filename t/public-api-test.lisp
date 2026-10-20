@@ -140,6 +140,7 @@
     "STATISTICS-COOKIE-UPDATE-OLD-VALUE" "STATISTICS-COOKIE-UPDATE-NEW-VALUE"
     "UPDATE-STATISTICS-COOKIES"
     "TABLE-RECALCULATE"
+    "TABLE-PLOT-WRITE-PLAN"
  ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
@@ -346,6 +347,12 @@ docs/src/reference/node-model.md.")
               "Recalculate a pipe table's TBLFM formulas and return its validated edit result.
 FUNCTIONS is an alist of string names and call-scoped function designators.
 CALLBACKS is a caller-owned callback registry used for quoted Lisp formulas.")
+      (expect (documentation 'table-plot-write-plan 'function)
+              :to-equal
+              "Build a write plan for a table's plot script, data, and radar setup.
+SCRIPT-PATH and DATA-PATH are required relative paths; RADAR-PATH is required
+for radar plots. SCRIPT-CONTENT supplies the content named by a PLOT script
+option, and BASE-DIRECTORY resolves a relative image path.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.

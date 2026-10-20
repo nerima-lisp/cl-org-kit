@@ -282,12 +282,28 @@ literal, so the callback receives `'(identity $1)`. The library never evaluates
 Emacs Lisp. A missing evaluator signals `org-elisp-evaluator-error` with reason
 `:unregistered`; evaluator results must be strings or real numbers.
 
+## Plot write plans
+
+`table-plot-write-plan` reads the table's `#+PLOT` options and returns a
+`write-plan` for the script and data. It supports the `title`, `ind`, `deps`,
+`type`, `with`, `file`, `set`, `labels`, and `script` options. Pass safe relative
+paths with `:script-path` and `:data-path`; radar plots also require
+`:radar-path` for their setup data. If the `script` option refers to existing
+script content, supply it with `:script-content`; each `$datafile` placeholder
+in that content is replaced with `:data-path`. `file` names the image output
+inside the generated script. The library does not create files or run gnuplot.
+Inspect and apply the returned plan as described in [Build and inspect a write
+plan](callbacks-and-write-plans.md#build-and-inspect-a-write-plan). Unknown
+options signal `org-table-error` naming the option.
+
 ## Errors and limits
 
-Table-specific failures such as an unsupported table type, invalid index, or
-ambiguous sort range signal `org-table-error`. General edit validation can
-signal `org-edit-error`. If an edit exceeds the document's output,
-encoded-output, or node-count ceiling, it signals `org-resource-limit-error`.
+Table-specific failures such as an unsupported table type, invalid index,
+ambiguous sort range, or unsupported plot option signal `org-table-error`.
+General edit validation can signal `org-edit-error` for an invalid target, a
+node from another document, or a target of the wrong type. If an edit or
+write-plan exceeds a document's input, output, encoded-output, node-count, or
+write-plan ceiling, it signals `org-resource-limit-error`.
 
 Formula token, syntax-depth, numeric-literal precision, and exponent limits
 apply to formula remapping during structural edits and to `table-recalculate`.
