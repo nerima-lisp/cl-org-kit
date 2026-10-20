@@ -1491,4 +1491,23 @@
       (expect
        (< (org-kit::org-table-unsupported-syntax-position condition) 2)
        :to-be t)))
+  (it "serializes numeric callback values in quoted Lisp ranges"
+    (let* ((quote-character (code-char 39))
+           (formula (format nil "@2$4=~A(list $1..$3)" quote-character))
+           (assignment (table-recalculate-test-assignment formula))
+           (expression (org-kit::table-calc-assignment-expression assignment))
+           (source (org-kit::table-calc-expression-value expression))
+           (expanded
+             (org-kit::table-recalculate-expand-elisp-expression
+              source expression assignment 2 4 3 4 (make-hash-table) nil nil
+              (lambda (row column)
+                (declare (ignore row))
+                (case column
+                  (1 1)
+                  (2 "")
+                  (3 3)))
+              nil (make-limits) (org-kit::make-table-calc-work-budget)))
+           (expected
+             (format nil "~A(list ~S ~S)" quote-character "1" "3")))
+      (expect expanded :to-equal expected)))
 )
