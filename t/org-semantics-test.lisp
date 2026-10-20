@@ -415,3 +415,19 @@
           (effective-property document heading "RESULT" :inherit t)
         (expect value :to-equal "global-value")
         (expect source :to-be :document)))))
+
+(describe "Org category fallback"
+  (it "uses the caller fallback when a heading and document have no category"
+    (let* ((document (parse-org "* Heading"))
+           (heading (first (org-semantics-test-headings document))))
+      (with-soft-assertions
+        (expect (org-kit::org-effective-category
+                 document heading :fallback "Uncategorized")
+                :to-equal "Uncategorized")
+        (expect (org-kit::org-effective-category document heading)
+                :to-be nil)
+        (expect (org-kit::org-effective-category
+                 document heading
+                 :category-override "Pinned"
+                 :fallback "Uncategorized")
+                :to-equal "Pinned")))))
