@@ -368,5 +368,48 @@
          (expect (document-text (edit-result-updated-document marker-result))
                  :to-equal (format nil "~%"))
          (expect (document-text (edit-result-updated-document blank-result))
-                 :to-equal (format nil " ~C: ~%" #\Tab))))))
+                 :to-equal (format nil " ~C: ~%" #\Tab)))))
+  (it "handles item-like prefixes and line-boundary selections"
+    (let* ((item-cases
+            (list (list "+ plus item" "plus item")
+                  (list "12x malformed ordered" "- 12x malformed ordered")
+                  (list "12.missing separator" "- 12.missing separator")
+                  (list "+missing separator" "- +missing separator")))
+           (heading-source (format nil "*text~%"))
+           (heading-document (parse-org heading-source))
+           (heading-result
+            (org-kit::toggle-heading heading-document (make-edit-span 0 0)))
+           (empty-headline-source (format nil "* ~%"))
+           (empty-headline-document (parse-org empty-headline-source))
+           (comment-result
+            (org-kit::toggle-heading-comment
+             empty-headline-document (make-edit-span 0 0)))
+           (mixed-source (format nil "plain~%: fixed~%"))
+           (mixed-document (parse-org mixed-source))
+           (mixed-result
+            (org-kit::toggle-fixed-width
+             mixed-document (make-edit-span 0 (length mixed-source))))
+           (block-source
+            (format nil "#+BEGIN_SRC text~%body~%#+END_SRC~%following~%"))
+           (block-document (parse-org block-source))
+           (following-point (search "following" block-source))
+           (following-result
+            (org-kit::toggle-heading
+             block-document (make-edit-span following-point following-point))))
+      (with-soft-assertions
+        (dolist (fixture item-cases)
+          (let* ((source (format nil "~A~%" (first fixture)))
+                 (document (parse-org source))
+                 (result (org-kit::toggle-item document (make-edit-span 0 0))))
+            (expect (document-text (edit-result-updated-document result))
+                    :to-equal (format nil "~A~%" (second fixture)))))
+        (expect (document-text (edit-result-updated-document heading-result))
+                :to-equal (format nil "* *text~%"))
+        (expect (document-text (edit-result-updated-document comment-result))
+                :to-equal (format nil "* COMMENT~%"))
+        (expect (document-text (edit-result-updated-document mixed-result))
+                :to-equal (format nil ": plain~%: fixed~%"))
+        (expect (document-text (edit-result-updated-document following-result))
+                :to-equal
+                (format nil "#+BEGIN_SRC text~%body~%#+END_SRC~%* following~%"))))))
 

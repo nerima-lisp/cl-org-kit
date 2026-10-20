@@ -264,25 +264,37 @@
                 :to-equal
                 (format nil "  #+begin_quote~%  #+end_quote~%")))))
 
-  (it "escapes Org markers and leaves ordinary example text intact"
-    (let* ((source (format nil " ,* item~% ,#+name: block"))
-           (document (parse-org source))
-           (result
-             (org-kit::insert-structure-template
-              document (make-edit-span 0 (length source)) "example"))
-           (plain-source "ordinary text")
-           (plain-document (parse-org plain-source))
-           (plain-result
-             (org-kit::insert-structure-template
-              plain-document
-              (make-edit-span 0 (length plain-source)) "example")))
+  (it "escapes Org markers and preserves ordinary example content"
+    (let* ((escaped-source (format nil " ,* item~% ,#+name: block"))
+           (escaped-document (parse-org escaped-source))
+           (escaped-result
+             (org-kit:insert-structure-template
+              escaped-document
+              (make-edit-span 0 (length escaped-source)) "example"))
+           (cases
+             (list
+              (list (format nil "first ordinary line~%second ordinary line")
+                    (format nil
+                            "#+begin_example~%first ordinary line~%second ordinary line~%#+end_example~%"))
+              (list ""
+                    (format nil "#+begin_example~%#+end_example~%"))
+              (list "   "
+                    (format nil "   #+begin_example~%   #+end_example~%"))
+              (list ","
+                    (format nil "#+begin_example~%,~%#+end_example~%"))
+              (list "#"
+                    (format nil "#+begin_example~%#~%#+end_example~%")))))
       (with-soft-assertions
-        (expect (document-text (edit-result-updated-document result))
+        (expect (document-text (edit-result-updated-document escaped-result))
                 :to-equal
                 (format nil " #+begin_example~% ,,* item~% ,,#+name: block~% #+end_example~%"))
-        (expect (document-text (edit-result-updated-document plain-result))
-                :to-equal
-                (format nil "#+begin_example~%ordinary text~%#+end_example~%"))
-        (expect (document-text document) :to-equal source)
-        (expect (document-text plain-document) :to-equal plain-source)))))
+        (dolist (fixture cases)
+          (let* ((source (first fixture))
+                 (document (parse-org source))
+                 (result
+                   (org-kit:insert-structure-template
+                    document (make-edit-span 0 (length source)) "example")))
+            (expect (document-text (edit-result-updated-document result))
+                    :to-equal (second fixture))
+            (expect (document-text document) :to-equal source)))))))
 
