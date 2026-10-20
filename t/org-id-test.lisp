@@ -287,4 +287,42 @@
       (expect (typep condition 'org-id-error) :to-be t)
       (when (typep condition 'org-id-error)
         (expect (org-id-error-reason condition) :to-be :duplicate-id))
-      (expect (document-text document) :to-equal source)))))
+      (expect (document-text document) :to-equal source))))
+  (it "covers line-terminator IDs and same-heading index cases"
+      (let* ((newline-id (format nil "line~%break"))
+             (return-id (format nil "carriage~Creturn" #\Return))
+             (unparsed-document (make-document ""))
+             (unparsed-index (make-org-id-index unparsed-document))
+             (duplicate-document
+              (parse-org
+               (format nil
+                       "* Repeated~%:PROPERTIES:~%:ID: same~%:ID: same~%:END:~%")))
+             (duplicate-index (make-org-id-index duplicate-document))
+             (duplicate-heading (org-id-test-heading duplicate-document "Repeated"))
+             (identifier "00010203-0405-4607-8809-0a0b0c0d0e0f")
+             (existing-document
+              (parse-org
+               (format nil
+                       "* Existing~%:PROPERTIES:~%:ID: ~A~%:END:~%"
+                       identifier)))
+             (existing-heading (org-id-test-heading existing-document "Existing"))
+             (existing-source (document-text existing-document)))
+        (org-id-test-expect-error
+         (lambda () (org-id-index-candidates unparsed-index newline-id))
+         :invalid-id)
+        (org-id-test-expect-error
+         (lambda () (org-id-index-candidates unparsed-index return-id))
+         :invalid-id)
+        (with-soft-assertions
+         (expect (document-root unparsed-document) :to-be nil)
+         (expect (org-id-index-candidates unparsed-index "absent") :to-equal nil)
+         (expect (org-id-index-candidates duplicate-index "same")
+                 :to-equal (list duplicate-heading)))
+        (multiple-value-bind (updated returned-id)
+            (set-heading-id existing-document existing-heading
+                            :random-source (org-id-test-random-source))
+          (with-soft-assertions
+           (expect returned-id :to-equal identifier)
+           (expect (document-text updated) :to-equal existing-source)
+           (expect (org-id-index-candidates (make-org-id-index updated) identifier)
+                   :to-equal (list (org-id-test-heading updated "Existing"))))))))
