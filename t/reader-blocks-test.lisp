@@ -366,7 +366,7 @@
            (comments-and-call
             (parse-org (reader-blocks-test-lines "# spaced comment"
                                                  "#plain comment"
-                                                 "#+CALL: bare-call")))
+                                                 "#+CALL: bare-call()")))
            (comments (reader-blocks-test-elements comments-and-call :comment))
            (call (first (reader-blocks-test-elements comments-and-call
                                                      :babel-call))))

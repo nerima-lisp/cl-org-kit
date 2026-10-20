@@ -192,7 +192,7 @@
 
 (defun babel-results-render (document block value channel format language offset)
   (let* ((stream (make-instance 'babel-results-bounded-stream :document document))
-         (output (babel-results-stream-output stream))
+         (output stream)
          (newline (babel-results-newline document offset))
          (render-value (if (string= channel "output")
                            (if (stringp value)
@@ -231,7 +231,7 @@
         output (format nil "#+BEGIN_SRC ~A" language) render-value
         "#+END_SRC" newline)))
     (babel-results-trim-final-newlines
-     (get-output-stream-string output))))
+     (get-output-stream-string (babel-results-stream-output stream)))))
 
 (defun babel-results-anchor-offset (document block)
   (unless (member (node-type block) '(:src-block :babel-call) :test #'eq)

@@ -135,12 +135,16 @@
     (block boundary
       (loop while (< scan limit)
             do (cond
+                 ((reader-heading-level context scan limit)
+                  (return-from boundary (values scan scan 0 scan nil)))
                  ((reader-blank-line-p context scan)
                   (multiple-value-bind (after count)
                       (reader-skip-blank-lines context scan limit)
                     (let ((next-marker (reader-list-marker-at context after limit))
                           (next-indent (reader-line-indentation context after limit)))
                       (cond
+                        ((reader-heading-level context after limit)
+                         (return-from boundary (values scan scan 0 scan nil)))
                         ((and next-marker (= next-indent base-indent))
                          (return-from boundary (values after scan count after t)))
                         ((and (< after limit) (> next-indent base-indent))

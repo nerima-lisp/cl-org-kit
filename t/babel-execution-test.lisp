@@ -215,7 +215,9 @@
               :confirmation-function
               (lambda (block parameters)
                 (expect (eq block query-block) :to-be t)
-                (expect (assoc "EVAL" parameters :test #'string=) :to-be t)
+                (expect
+                 (not (null (assoc "EVAL" parameters :test #'string=)))
+                 :to-be t)
                 nil))))
       (with-soft-assertions
         (expect (org-kit:babel-execution-result-status skipped) :to-be :skipped)

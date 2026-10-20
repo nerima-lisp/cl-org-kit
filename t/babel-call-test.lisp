@@ -70,7 +70,7 @@
            (call (first (babel-call-test-nodes document :babel-call)))
            (registry (org-kit:make-callback-registry))
            (observed nil)
-           (original-source (emit-org document)))
+           (original-source (emit-org (document-root document))))
       (org-kit:register-babel-executor
        registry "emacs-lisp"
        (lambda (body parameters variables)
@@ -115,14 +115,14 @@
                (org-kit:babel-execution-result-edit-result result)))
              :to-equal
              (format nil "~A#+RESULTS:~%done~%" original-source))
-            (expect (emit-org document) :to-equal original-source)))))
+            (expect (emit-org (document-root document)) :to-equal original-source)))))
 
   (it "resolves supplied library documents after the local document"
     (let* ((document (parse-org "#+CALL: library-task(9)"))
            (call (first (babel-call-test-nodes document :babel-call)))
            (library
              (parse-org
-              "#+NAME: library-task\n#+BEGIN_SRC emacs-lisp :var value=0\nbody\n#+END_SRC"))
+              (format nil "#+NAME: library-task~%#+BEGIN_SRC emacs-lisp :var value=0~%body~%#+END_SRC")))
            (registry (org-kit:make-callback-registry))
            (observed nil))
       (org-kit:register-babel-executor
@@ -143,7 +143,7 @@
   (it "executes inline calls without using a persistent result anchor"
     (let* ((document
              (parse-org
-              "#+NAME: inline-task\n#+BEGIN_SRC emacs-lisp :var value=0\nbody\n#+END_SRC\n\ncall_inline-task(8)"))
+              (format nil "#+NAME: inline-task~%#+BEGIN_SRC emacs-lisp :var value=0~%body~%#+END_SRC~%~%call_inline-task(8)")))
            (call
              (first (babel-call-test-nodes document :inline-babel-call)))
            (registry (org-kit:make-callback-registry))

@@ -278,68 +278,72 @@
 
 (defun babel-tangle-mode (value)
   (let ((mode
-          (cond
-            ((and (integerp value) (<= 0 value #o777))
-             value)
-            ((not (stringp value))
-             (babel-tangle-signal-error :invalid-tangle-mode
-                                        "Invalid :tangle-mode" value))
-            ((and (member (length value) '(4 5))
-                  (char= (char value 0) #\o)
-                  (let ((digits (subseq value 1)))
-                    (and (every (lambda (character)
-                                  (find character "01234567"))
-                                digits)
-                         (member (length digits) '(3 4)))))
-             (parse-integer value :start 1 :radix 8))
-            ((and (= (length value) 9)
-                  (loop for index from 0 below 9
-                        for character = (char value index)
-                        always
-                        (case (mod index 3)
-                          (0 (find character "r-"))
-                          (1 (find character "w-"))
-                          (2 (if (< index 8)
-                                 (find character "xs-")
-                                 (find character "x-"))))))
-             (loop with mode = 0
-                   for index from 0 below 9
-                   for character = (char value index)
-                   do (case character
-                        (#\r
-                         (incf mode (case index (0 #o400) (3 #o040) (6 #o004))))
-                        (#\w
-                         (incf mode (case index (1 #o200) (4 #o020) (7 #o002))))
-                        (#\x
-                         (incf mode (case index (2 #o100) (5 #o010) (8 #o001))))
-                        (#\s
-                         (setf mode
-                               (logior mode
-                                       (case index (2 #o4000) (5 #o2000))))))
-                   finally (return mode)))
-            ((and (plusp (length value))
-                  (every (lambda (character) (find character "0123456789"))
-                         value))
-             (let* ((number (parse-integer value))
-                    (octal (format nil "~O" number)))
-               (if (and (= (length octal) 3)
-                        (every (lambda (character)
-                                 (find character "01234567"))
-                               octal))
-                   number
-                   (babel-tangle-signal-error :invalid-tangle-mode
-                                              "Invalid :tangle-mode" value))))
-            ((position-if (lambda (character) (find character "+-=")) value)
-             (babel-tangle-parse-symbolic-mode value))
-            (t
-             (babel-tangle-signal-error :invalid-tangle-mode
-                                        "Invalid :tangle-mode" value)))))
+         (cond
+          ((and (integerp value) (<= 0 value #o777))
+           value)
+          ((not (stringp value))
+           (if (integerp value)
+               (babel-tangle-signal-error :invalid-tangle-mode
+                                          "Invalid :tangle-mode"
+                                          (format nil "~O" value))
+             (error 'type-error :datum value
+                    :expected-type '(or integer string))))
+          ((and (member (length value) '(4 5))
+                (char= (char value 0) #\o)
+                (let ((digits (subseq value 1)))
+                  (and (every (lambda (character)
+                                (find character "01234567"))
+                              digits)
+                       (member (length digits) '(3 4)))))
+           (parse-integer value :start 1 :radix 8))
+          ((and (= (length value) 9)
+                (loop for index from 0 below 9
+                      for character = (char value index)
+                      always
+                      (case (mod index 3)
+                        (0 (find character "r-"))
+                        (1 (find character "w-"))
+                        (2 (if (< index 8)
+                               (find character "xs-")
+                             (find character "x-"))))))
+           (loop with mode = 0
+                 for index from 0 below 9
+                 for character = (char value index)
+                 do (case character
+                      (#\r
+                       (incf mode (case index (0 #o400) (3 #o040) (6 #o004))))
+                      (#\w
+                       (incf mode (case index (1 #o200) (4 #o020) (7 #o002))))
+                      (#\x
+                       (incf mode (case index (2 #o100) (5 #o010) (8 #o001))))
+                      (#\s
+                       (setf mode
+                             (logior mode
+                                     (case index (2 #o4000) (5 #o2000))))))
+                 finally (return mode)))
+          ((and (plusp (length value))
+                (every (lambda (character) (find character "0123456789"))
+                       value))
+           (let* ((number (parse-integer value))
+                  (octal (format nil "~O" number)))
+             (if (and (= (length octal) 3)
+                      (every (lambda (character)
+                               (find character "01234567"))
+                             octal))
+                 number
+               (babel-tangle-signal-error :invalid-tangle-mode
+                                          "Invalid :tangle-mode" value))))
+          ((position-if (lambda (character) (find character "+-=")) value)
+           (babel-tangle-parse-symbolic-mode value))
+          (t
+           (babel-tangle-signal-error :invalid-tangle-mode
+                                      "Invalid :tangle-mode" value)))))
     (if (<= 0 mode #o777)
         mode
-        (babel-tangle-signal-error
-         :invalid-tangle-mode
-         "Unsupported special permission bits in :tangle-mode"
-         value))))
+      (babel-tangle-signal-error
+       :invalid-tangle-mode
+       "Unsupported special permission bits in :tangle-mode"
+       value))))
 
 (defun babel-tangle-comment-kinds (parameters)
   (let* ((present-p (babel-tangle-parameter-present-p parameters "COMMENTS"))

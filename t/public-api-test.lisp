@@ -270,7 +270,12 @@ docs/src/reference/node-model.md.")
     names))
 
 (defparameter +generated-structure-function-owners+
-  '((callback-registry-p . callback-registry)
+  '((babel-execution-result-p . babel-execution-result)
+    (babel-execution-result-status . babel-execution-result)
+    (babel-execution-result-value . babel-execution-result)
+    (babel-execution-result-hash . babel-execution-result)
+    (babel-execution-result-edit-result . babel-execution-result)
+    (callback-registry-p . callback-registry)
     (write-plan-entry-p . write-plan-entry)
     (write-plan-p . write-plan)
     (make-org-workflow-options . org-workflow-options)

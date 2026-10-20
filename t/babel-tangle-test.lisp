@@ -92,13 +92,13 @@
                 :to-equal '("default.txt" "custom.lisp" "guide.el" "inherited.el"))
         (expect (write-plan-entry-content
                  (babel-tangle-test-entry plan "default.txt"))
-                :to-equal "default body\n")
+                :to-equal (format nil "default body~%"))
         (expect (write-plan-entry-content
                  (babel-tangle-test-entry plan "custom.lisp"))
-                :to-equal "custom body\n")
+                :to-equal (format nil "custom body~%"))
         (expect (write-plan-entry-content
                  (babel-tangle-test-entry plan "inherited.el"))
-                :to-equal "inherited body\n"))))
+                :to-equal (format nil "inherited body~%")))))
 
   (it "filters languages and preserves Org tangle body indentation"
     (let* ((document
@@ -132,9 +132,9 @@
         (expect (length (write-plan-entries plan)) :to-be 1)
         (expect (write-plan-entry-content
                  (aref (write-plan-entries plan) 0))
-                :to-equal "(kept)\n\nskipped\n")
+                :to-equal (format nil "(kept)~%~%skipped~%"))
         (expect (write-plan-entry-content trim-entry)
-                :to-equal "first\nsecond\n"))))
+                :to-equal (format nil "first~%second~%")))))
 
   (it "adds shebang, mode, and directory creation to the plan"
     (let* ((parent-directory "babel-tangle-no-write-parent")
@@ -148,14 +148,14 @@
            (entry (aref (write-plan-entries (babel-tangle document)) 0))
            (special-document
              (babel-tangle-test-document
-              "#+BEGIN_SRC shell :tangle special.sh :tangle-mode u+x\nbody\n#+END_SRC"))
+              (format nil "#+BEGIN_SRC shell :tangle special.sh :tangle-mode u+x~%body~%#+END_SRC")))
            (special-entry
              (aref (write-plan-entries (babel-tangle special-document)) 0)))
       (with-soft-assertions
         (expect (write-plan-entry-path entry)
                 :to-equal "babel-tangle-no-write-parent/nested/run.sh")
         (expect (write-plan-entry-content entry)
-                :to-equal "#!/bin/sh\necho ready\n")
+                :to-equal (format nil "#!/bin/sh~%echo ready~%"))
         (expect (write-plan-entry-mode entry) :to-be #o755)
         (expect (write-plan-entry-create-directories-p entry) :to-be t)
         (expect parent-existed-p :to-be nil)
@@ -187,7 +187,7 @@
                    0))
            (empty-comment-document
              (babel-tangle-test-document
-              "#+BEGIN_SRC text :tangle empty-comments.txt :comments link\nbody\n#+END_SRC"))
+              (format nil "#+BEGIN_SRC text :tangle empty-comments.txt :comments link~%body~%#+END_SRC")))
            (empty-comment-entry
              (aref (write-plan-entries
                     (babel-tangle
@@ -200,9 +200,9 @@
       (with-soft-assertions
         (expect (write-plan-entry-content entry)
                 :to-equal
-                "# source context\n# source link\nanswer=42\necho $answer\n# source ends here\n")
+                (format nil "# source context~%# source link~%answer=42~%echo $answer~%# source ends here~%"))
         (expect (write-plan-entry-content empty-comment-entry)
-                :to-equal "body\n"))))
+                :to-equal (format nil "body~%")))))
 
   (it "expands noweb references in the tangle context"
     (let* ((document
@@ -220,7 +220,7 @@
                "#+END_SRC")))
            (entry (aref (write-plan-entries (babel-tangle document)) 0)))
       (expect (write-plan-entry-content entry)
-              :to-equal "before\nfragment\nafter\n")))
+              :to-equal (format nil "before~%fragment~%after~%"))))
 
   (it "rejects unsafe paths and invalid language filters"
     (flet ((assert-condition (condition type reader reason)
@@ -229,24 +229,24 @@
                (expect (funcall reader condition) :to-be reason))))
       (let* ((default-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text\nbody\n#+END_SRC"))
+                (format nil "#+BEGIN_SRC text~%body~%#+END_SRC")))
              (parent-path-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle a/../../escape.txt\nbody\n#+END_SRC"))
+                (format nil "#+BEGIN_SRC text :tangle a/../../escape.txt~%body~%#+END_SRC")))
              (absolute-path-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle /tmp/outside.txt\nbody\n#+END_SRC"))
+                (format nil "#+BEGIN_SRC text :tangle /tmp/outside.txt~%body~%#+END_SRC")))
              (null-path-document
                (babel-tangle-test-document
                 (format nil "#+BEGIN_SRC text :tangle bad~Cpath.txt~%body~%#+END_SRC"
                         #\Null)))
              (self-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle same.org\nbody\n#+END_SRC"
+                (format nil "#+BEGIN_SRC text :tangle same.org~%body~%#+END_SRC")
                 :source-name "same.org"))
              (invalid-regexp-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle out.txt\nbody\n#+END_SRC"))
+                (format nil "#+BEGIN_SRC text :tangle out.txt~%body~%#+END_SRC")))
              (parent-error
                (babel-tangle-test-condition
                 (lambda () (babel-tangle parent-path-document))))
@@ -301,28 +301,28 @@
                (expect (funcall reader condition) :to-be reason))))
       (let* ((comments-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle comments.txt :comments link\nbody\n#+END_SRC"))
+                (format nil "#+BEGIN_SRC text :tangle comments.txt :comments link~%body~%#+END_SRC")))
              (variables-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle variables.txt :var x=1\nbody\n#+END_SRC"))
+                (format nil "#+BEGIN_SRC text :tangle variables.txt :var x=1~%body~%#+END_SRC")))
              (mode-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle mode.txt :tangle-mode o1000\nbody\n#+END_SRC"))
+                (format nil "#+BEGIN_SRC text :tangle mode.txt :tangle-mode o1000~%body~%#+END_SRC")))
              (limited-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle limited.txt\nbody\n#+END_SRC"
+                (format nil "#+BEGIN_SRC text :tangle limited.txt~%body~%#+END_SRC")
                 :limits (make-limits :max-write-plan-bytes 4)))
              (output-length-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle length.txt\nbody\n#+END_SRC"
+                (format nil "#+BEGIN_SRC text :tangle length.txt~%body~%#+END_SRC")
                 :limits (make-limits :max-output-length 4)))
              (output-octets-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle octets.txt\nbody\n#+END_SRC"
+                (format nil "#+BEGIN_SRC text :tangle octets.txt~%body~%#+END_SRC")
                 :limits (make-limits :max-output-octets 4)))
              (expansion-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle expanded.txt\nbody\n#+END_SRC"
+                (format nil "#+BEGIN_SRC text :tangle expanded.txt~%body~%#+END_SRC")
                 :limits (make-limits :max-babel-expanded-characters 3)))
              (entry-limit-document
                (babel-tangle-test-document
@@ -337,7 +337,7 @@
                 :limits (make-limits :max-write-plan-entries 1)))
              (path-limit-document
                (babel-tangle-test-document
-                "#+BEGIN_SRC text :tangle nested/file.txt\nbody\n#+END_SRC"
+                (format nil "#+BEGIN_SRC text :tangle nested/file.txt~%body~%#+END_SRC")
                 :limits (make-limits :max-write-plan-path-depth 1)))
              (comments-error
                (babel-tangle-test-condition
