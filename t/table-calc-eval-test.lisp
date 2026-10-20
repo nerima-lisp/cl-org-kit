@@ -1063,4 +1063,66 @@
              (table-calc-eval-test-cell-map))
             :default limits (org-kit::make-table-calc-work-budget) "target")
          (error (condition) condition))
-       :unsupported-mode))))
+       :unsupported-mode)))
+  (it "covers empty coercions, duration bounds, zero formatting, and malformed Taylor ASTs"
+    (let ((limits (make-limits)))
+      (with-soft-assertions
+        (dolist (text '("" ":12" "1:02:3"))
+          (expect (org-kit::table-calc-duration-cell-seconds text)
+                  :to-be nil))
+        (expect (org-kit::table-calc-coerce-reference-value "" limits nil) :to-equal "")
+        (expect (org-kit::table-calc-taylor-float-string 0d0)
+                :to-equal "0")
+        (expect (org-kit::table-calc-number-base10-order 0 limits)
+                :to-be 0)
+        (expect (org-kit::table-calc-scientific-string 0 2 nil limits t)
+                :to-equal "0.00e+00")
+        (expect (table-calc-eval-test-evaluate "@1$1=taylor(exp(x),x=1,2)")
+                :to-equal "2.71828182846 x + 1.35914091423 (x - 1)^2 + 0")
+        (table-calc-eval-test-expect-table-error
+         (table-calc-eval-test-condition
+          "@1$1=taylor(exp(x),x=1,string(\"2\"))")
+         :unsupported-mode)
+        (expect
+         (org-kit::table-calc-number-rational
+          (org-kit::table-calc-evaluate-vector
+           :vsum
+           (org-kit::%make-table-calc-remote-range-value '("2" "3"))
+           :default nil limits (org-kit::make-table-calc-work-budget) "target"))
+         :to-equal 5)
+        (table-calc-eval-test-expect-table-error
+         (table-calc-eval-test-condition
+          "@1$1=vsum(remote(inputs,@1$1..@1$2))"
+          :remote-function (lambda (name reference row column)
+                             (declare (ignore name reference row column))
+                             42))
+         :invalid-function-result)
+        (flet ((expression (kind value children)
+                 (org-kit::%make-table-calc-expression
+                  :kind kind :start 0 :end 0 :value value
+                  :children children :depth 1)))
+          (let* ((symbol (expression :symbol "x" nil))
+                 (other-symbol (expression :symbol "y" nil))
+                 (number (expression :number 2 nil))
+                 (variable-assignment
+                   (expression :assignment nil
+                               (list symbol (expression :number 1 nil))))
+                 (degree (expression :number 2 nil))
+                 (bad-functions
+                   (list (expression :function :exp (list symbol))
+                         (expression :function "sin" (list symbol))
+                         (expression :function "exp" nil)
+                         (expression :function "exp" (list number))
+                         (expression :function "exp" (list other-symbol)))))
+            (dolist (function-expression bad-functions)
+              (table-calc-eval-test-expect-table-error
+               (handler-case
+                   (org-kit::table-calc-taylor-number
+                    (expression :taylor nil
+                                (list function-expression
+                                      variable-assignment degree))
+                    nil nil :default limits
+                    (org-kit::make-table-calc-work-budget) "target"
+                    nil nil nil nil nil nil)
+                 (error (condition) condition))
+               :unsupported-mode))))))))
