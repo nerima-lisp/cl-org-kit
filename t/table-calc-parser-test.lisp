@@ -926,4 +926,53 @@
                       :to-be :unsupported-function-argument))))
         (expect (org-kit::table-calc-format-precision "x.2f") :to-be nil)
         (expect (org-kit::table-calc-format-precision "%.2g") :to-be nil))))
+  (it "covers quoted Lisp reader boundaries"
+    (let* ((quote-character (code-char 39))
+           (quoted-form
+             (format nil "~A(foo ?x ?~Cz)" quote-character (code-char 92)))
+           (wrong-start
+             (handler-case
+                 (progn
+                   (org-kit::table-calc-lisp-form-end "not quoted" 0)
+                   nil)
+               (error (condition) condition)))
+           (reader-eval
+             (table-calc-test-condition
+              (format nil "$1=~A(#.value)" quote-character)))
+           (reader-dispatch
+             (table-calc-test-condition
+              (format nil "$1=~A(#x10)" quote-character)))
+           (condition-class
+             (find-class
+              (intern "ORG-TABLE-UNSUPPORTED-SYNTAX" :org-kit))))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-lisp-form-end quoted-form 0)
+                :to-be (length quoted-form))
+        (expect (typep wrong-start condition-class) :to-be t)
+        (when (typep wrong-start condition-class)
+          (expect (org-kit::org-table-unsupported-syntax-feature wrong-start)
+                  :to-be :quoted-lisp))
+        (expect (typep reader-eval condition-class) :to-be t)
+        (when (typep reader-eval condition-class)
+          (expect (org-kit::org-table-unsupported-syntax-feature reader-eval)
+                  :to-be :reader-eval))
+        (progn
+          (expect (typep reader-dispatch condition-class) :to-be t)
+          (let ((terminal-dispatch
+                 (table-calc-test-condition
+                  (format nil "$1=~A(#" quote-character))))
+            (expect (typep terminal-dispatch condition-class) :to-be t)
+            (when (typep terminal-dispatch condition-class)
+              (expect (org-kit::org-table-unsupported-syntax-feature terminal-dispatch)
+                      :to-be :reader-dispatch)))
+          (let ((terminal-character
+                 (table-calc-test-condition
+                  (format nil "$1=~A(?" quote-character))))
+            (expect (typep terminal-character condition-class) :to-be t)
+            (when (typep terminal-character condition-class)
+              (expect (org-kit::org-table-unsupported-syntax-feature terminal-character)
+                      :to-be :quoted-lisp))))
+        (when (typep reader-dispatch condition-class)
+          (expect (org-kit::org-table-unsupported-syntax-feature reader-dispatch)
+                  :to-be :reader-dispatch)))))
 )
