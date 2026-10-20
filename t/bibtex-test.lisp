@@ -256,30 +256,59 @@
                 :to-equal
                 (format nil "@article{empty,~%  title={}~%}~%")))))
 
-  (it "reports missing types and keys and rejects malformed entry delimiters"
+  (it "reports parser and Org validation errors with bounded context"
     (let ((cases
-            '(("@{key, author={A}}" :missing-type)
-              ("@article{, author={A}}" :missing-key)
-              ("@unknown{key, title={T}}" :unknown-type)
-              ("@article[key, author={A}]" :malformed-delimiter)
-              ("@article{key, author={A}, title={T}, journal={J}, year={1843}" :unclosed-entry)
-              ("@article{untitled, author={A}}" :missing-title))))
+            (list
+             (list "@{key, author={A}}" :missing-type)
+             (list "@article{, author={A}}" :missing-key)
+             (list "@unknown{key, title={T}}" :unknown-type)
+             (list "@article[key, author={A}]" :malformed-delimiter)
+             (list "@article" :malformed-delimiter)
+             (list "@misc{open-key" :unclosed-entry)
+             (list "@misc{bad key, title={T}}" :malformed-key)
+             (list "@misc{comma-eof," :unclosed-entry)
+             (list "@misc{after-value, title={T}," :unclosed-entry)
+             (list "@misc{bare-eof, title=bare" :unclosed-entry)
+             (list "@misc{missing-field, =x}" :missing-field)
+             (list "@misc{k, title}" :malformed-field)
+             (list "@misc{k, title" :malformed-field)
+             (list "@misc{duplicate, title={T}, title={U}}" :duplicate-field)
+             (list "@misc{unclosed-value, title={T" :unclosed-value)
+             (list "@misc(k, title=foo})" :malformed-delimiter)
+             (list "" :empty-input)
+             (list "% comment only" :empty-input)
+             (list "not BibTeX" :unexpected-token))))
       (with-soft-assertions
         (dolist (case cases)
-          (let ((input (first case))
-                (reason (second case)))
-            (expect (plusp (length input)) :to-be t)
-            (bibtex-test-expect-error
-             (bibtex-test-condition
-              (lambda () (bibtex-import (parse-org "") input)))
-             reason)))
+          (bibtex-test-expect-error
+           (bibtex-test-condition
+            (lambda () (bibtex-import (parse-org "") (first case))))
+           (second case)))
+        (let* ((input "@misc{empty}")
+               (condition
+                 (bibtex-test-condition
+                  (lambda () (bibtex-import (parse-org "") input)))))
+          (bibtex-test-expect-error condition :missing-title))
         (let* ((input "@misc{untitled, author={Ada}}")
                (condition
                  (bibtex-test-condition
                   (lambda () (bibtex-import (parse-org "") input)))))
           (bibtex-test-expect-error condition :missing-title)
           (when (typep condition 'org-bibtex-error)
-            (expect (org-bibtex-error-position condition) :to-be 0)))
+            (let ((report (princ-to-string condition)))
+              (expect (org-bibtex-error-position condition) :to-be 0)
+              (expect (org-bibtex-error-context condition) :to-equal input)
+              (expect report
+                      :to-equal
+                      "BibTeX entry is missing its title (missing-title) at position 0 near \"@misc{untitled, author={Ada}}\""))))
+        (let* ((input
+                 (concatenate 'string "% leading" (string #\Newline)
+                              "@misc{comments, title={T}}% trailing"))
+               (updated
+                 (edit-result-updated-document
+                  (bibtex-import (parse-org "") input)))
+               (heading (first (bibtex-test-headlines updated))))
+          (expect (bibtex-test-property heading "TITLE") :to-equal "T"))
         (let* ((document (parse-org (format nil "* No properties~%")))
                (heading (first (bibtex-test-headlines document)))
                (condition
@@ -331,4 +360,114 @@
                 :to-equal
                 (concatenate
                  'string source
-                 (format nil "~%* Added~%:PROPERTIES:~%:TITLE:    Added~%:BTYPE:    article~%:CUSTOM_ID: added~%:AUTHOR:   Ada~%:JOURNAL:  Notes~%:YEAR:     1843~%:END:~%")))))))
+                 (format nil "~%* Added~%:PROPERTIES:~%:TITLE:    Added~%:BTYPE:    article~%:CUSTOM_ID: added~%:AUTHOR:   Ada~%:JOURNAL:  Notes~%:YEAR:     1843~%:END:~%"))))))
+  (it "appends imports without a separator to a newline-terminated document"
+    (let* ((source (format nil "* Existing~%"))
+           (input "@misc{added, title={Added}}")
+           (document (parse-org source))
+           (updated
+             (edit-result-updated-document (bibtex-import document input))))
+      (with-soft-assertions
+        (expect (document-text document) :to-equal source)
+        (expect (document-text updated)
+                :to-equal
+                (concatenate
+                 'string source
+                 (format nil
+                         "* Added~%:PROPERTIES:~%:TITLE:    Added~%:BTYPE:    misc~%:CUSTOM_ID: added~%:END:~%"))))))
+  (it "skips generated-property alignment for a NIL property value"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Has value~%:PROPERTIES:~%:NOTE: value~%:END:~%")))
+           (heading (first (bibtex-test-headlines document)))
+           (section (find :section (node-children heading) :key #'node-type))
+           (drawer
+             (find :property-drawer (node-children section) :key #'node-type))
+           (property
+             (find :node-property (node-children drawer) :key #'node-type)))
+      (setf (node-property property :value) nil)
+      (expect (eq (org-kit::bibtex-align-generated-properties
+                   document heading)
+                  document)
+              :to-be t)))
+  (it "leaves property alignment unchanged when there is no drawer"
+    (let* ((document (parse-org (format nil "* Plain~%")))
+           (heading (first (bibtex-test-headlines document))))
+      (expect (eq (org-kit::bibtex-align-generated-properties
+                   document heading)
+                  document)
+              :to-be t)))
+  (it "reports unknown export types with type context"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Unsupported~%:PROPERTIES:~%:BTYPE: future~%:CUSTOM_ID: key~%:END:~%")))
+           (heading (first (bibtex-test-headlines document)))
+           (condition
+             (bibtex-test-condition
+              (lambda () (bibtex-export document heading)))))
+      (with-soft-assertions
+        (bibtex-test-expect-error condition :unknown-type)
+        (when (typep condition 'org-bibtex-error)
+          (let ((report (princ-to-string condition)))
+            (expect (org-bibtex-error-context condition) :to-equal "future")
+            (expect (search "Unknown BibTeX entry type" report)
+                    :to-be-truthy)
+            (expect (search "unknown-type" report) :to-be-truthy))))))
+  (it "validates BibTeX document, input, and prefix arguments"
+    (let ((input "@misc{prefix, title={T}}"))
+      (with-soft-assertions
+        (let ((condition
+                (bibtex-test-condition
+                 (lambda () (bibtex-import nil input)))))
+          (expect (typep condition 'type-error) :to-be t))
+        (let ((condition
+                (bibtex-test-condition
+                 (lambda () (bibtex-export nil nil)))))
+          (expect (typep condition 'type-error) :to-be t))
+        (let ((condition
+                (bibtex-test-condition
+                 (lambda () (bibtex-import (make-document "") input)))))
+          (bibtex-test-expect-error condition :invalid-document))
+        (let ((condition
+                (bibtex-test-condition
+                 (lambda () (bibtex-export (make-document "") nil)))))
+          (bibtex-test-expect-error condition :invalid-document))
+        (let ((condition
+                (bibtex-test-condition
+                 (lambda () (bibtex-import (parse-org "") nil)))))
+          (bibtex-test-expect-error condition :invalid-input))
+        (dolist (prefix
+                 (list 7 ":" (format nil "bad~%prefix")
+                       (format nil "bad~Cprefix" #\Return)))
+          (let ((condition
+                  (bibtex-test-condition
+                   (lambda ()
+                     (bibtex-import (parse-org "") input :prefix prefix)))))
+            (bibtex-test-expect-error condition :invalid-prefix))))))
+  (it "normalizes escaped, nested, and concatenated BibTeX values"
+    (let* ((escape (string #\\))
+           (input
+             (concatenate 'string
+                          "@misc{values, title=\"A "
+                          escape
+                          "\"quoted"
+                          escape
+                          "\" title\", note={{Nested} text}, year=1, howpublished={Wrapped} # {tail}, url=\"Quoted\" # \" tail\"}"))
+           (expected-title
+             (concatenate 'string "A " escape "\"quoted" escape "\" title"))
+           (updated
+             (edit-result-updated-document
+              (bibtex-import (parse-org "") input)))
+           (heading (first (bibtex-test-headlines updated))))
+      (with-soft-assertions
+        (expect (bibtex-test-property heading "TITLE")
+                :to-equal expected-title)
+        (expect (bibtex-test-property heading "NOTE")
+                :to-equal "{Nested} text")
+        (expect (bibtex-test-property heading "YEAR") :to-equal "1")
+        (expect (bibtex-test-property heading "HOWPUBLISHED")
+                :to-equal "Wrapped} # {tail")
+        (expect (bibtex-test-property heading "URL")
+                :to-equal "Quoted\" # \" tail")))))

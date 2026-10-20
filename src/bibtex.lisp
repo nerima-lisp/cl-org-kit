@@ -120,38 +120,17 @@
 
 (defun bibtex-strip-outer-braces (value)
   (if (and (>= (length value) 2)
-           (char= (char value 0) #\{))
-      (let ((depth 0)
-            (closing-position nil))
-        (loop for position from 0 below (length value)
-              for character = (char value position)
-              do (cond ((char= character #\{) (incf depth))
-                       ((char= character #\})
-                        (decf depth)
-                        (when (zerop depth)
-                          (setf closing-position position)
-                          (return)))))
-        (if (eql closing-position (1- (length value)))
-            (subseq value 1 closing-position)
-            value))
-      value))
+           (char= (char value 0) #\{)
+           (char= (char value (1- (length value))) #\}))
+      (subseq value 1 (1- (length value)))
+    value))
 
 (defun bibtex-strip-outer-quotes (value)
   (if (and (>= (length value) 2)
-           (char= (char value 0) #\"))
-      (let ((escaped-p nil)
-            (closing-position nil))
-        (loop for position from 1 below (length value)
-              for character = (char value position)
-              do (cond (escaped-p (setf escaped-p nil))
-                       ((char= character #\\) (setf escaped-p t))
-                       ((char= character #\")
-                        (setf closing-position position)
-                        (return))))
-        (if (eql closing-position (1- (length value)))
-            (subseq value 1 closing-position)
-            value))
-      value))
+           (char= (char value 0) #\")
+           (char= (char value (1- (length value))) #\"))
+      (subseq value 1 (1- (length value)))
+    value))
 
 (defun bibtex-normalize-value (value)
   (bibtex-collapse-whitespace
@@ -232,17 +211,15 @@
             ((char= (char input position) closing-delimiter)
              (return-from bibtex-parse-fields
                (values (nreverse fields) (1+ position))))
-            ((char= (char input position) #\,)
+            (t
+             ;; BIBTEX-READ-VALUE leaves POSITION on a comma or the closing delimiter.
              (incf position)
              (let ((next (bibtex-skip-whitespace input position)))
                (when (and (< next (length input))
                           (char= (char input next) closing-delimiter))
                  (return-from bibtex-parse-fields
                    (values (nreverse fields) (1+ next))))
-               (setf position next)))
-            (t
-             (bibtex-signal-error input position :malformed-field
-                                  "Expected a comma or entry delimiter"))))))))
+               (setf position next)))))))))
 
 (defun bibtex-parse-entry (input position)
   (let ((entry-position position))
