@@ -349,12 +349,15 @@
                    (return))))))
 
 (defun table-plot-write-radar-setup (rows labels options limits ticks
-                                    stream budget path)
+                                          stream budget path)
   (declare (ignore options))
   (unless labels
     (table-plot-signal-error path :missing-plot-labels
                              "Radar plots require labels for the data columns"))
-  (table-plot-write-text stream "# Data\n$Data <<HEREHAVESOMEDATA\n" budget path)
+  (table-plot-write-text stream (format nil
+                                        "~A~%~A~%"
+                                        "# Data"
+                                        "$Data <<HEREHAVESOMEDATA") budget path)
   (table-plot-write-text stream
                          (format nil "\"~{~A~^\" \"~}\"~%"
                                  (mapcar #'table-plot-option-string labels))
@@ -368,7 +371,13 @@
                (mapcar #'table-plot-option-string (rest row)))
        budget path)))
   (table-plot-write-text stream
-                         "HEREHAVESOMEDATA\nHeaderLines = 1\n\n# Settings for scale and offset adjustments\n# axis min max tics axisLabelXoff axisLabelYoff\n$Settings <<EOD\n"
+                         (format nil
+                                 "~A~%~A~%~%~A~%~A~%~A~%"
+                                 "HEREHAVESOMEDATA"
+                                 "HeaderLines = 1"
+                                 "# Settings for scale and offset adjustments"
+                                 "# axis min max tics axisLabelXoff axisLabelYoff"
+                                 "$Settings <<EOD")
                          budget path)
   (dolist (row (append rows (when rows (list (first rows)))))
     (let* ((values (mapcar (lambda (value) (table-plot-number value limits))
@@ -377,11 +386,11 @@
            (maximum (if values (reduce #'max values) 0d0))
            (range (- maximum minimum))
            (factor (if (zerop range) 1d0
-                       (expt 10d0 (ceiling (- 1 (log range 10d0))))))
+                     (expt 10d0 (ceiling (- 1 (log range 10d0))))))
            (nice-min (if (zerop range) minimum
-                         (/ (float (floor (* minimum factor)) 1d0) factor)))
+                       (/ (float (floor (* minimum factor)) 1d0) factor)))
            (nice-max (if (zerop range) maximum
-                         (/ (float (ceiling (* maximum factor)) 1d0) factor))))
+                       (/ (float (ceiling (* maximum factor)) 1d0) factor))))
       (table-plot-write-text
        stream
        (format nil "\"~A\" ~A ~A ~D~%"
@@ -390,7 +399,7 @@
                (table-plot-real-string nice-max)
                (if (zerop ticks) 2 ticks))
        budget path)))
-  (table-plot-write-text stream "EOD\n" budget path))
+  (table-plot-write-text stream (format nil "EOD~%") budget path))
 
 (defun table-plot-normalized-frequencies (values)
   (let ((counts nil)
@@ -452,23 +461,23 @@
              (maximum (if values (reduce #'max values) 0d0))
              (range (- maximum minimum))
              (factor (if (zerop range) 1d0
-                         (expt 10d0 (ceiling (- 1 (log range 10d0))))))
+                       (expt 10d0 (ceiling (- 1 (log range 10d0))))))
              (nice-min (if (zerop range) minimum
-                           (/ (float (floor (* minimum factor)) 1d0) factor)))
+                         (/ (float (floor (* minimum factor)) 1d0) factor)))
              (nice-max (if (zerop range) maximum
-                           (/ (float (ceiling (* maximum factor)) 1d0) factor)))
+                         (/ (float (ceiling (* maximum factor)) 1d0) factor)))
              (normalized (round (* factor (- nice-max nice-min))))
              (normalized (if (zerop (mod normalized 10))
                              (/ normalized 10)
-                             normalized)))
+                           normalized)))
         (setf weighted-frequencies
               (table-plot-merge-frequencies
                weighted-frequencies
                (table-plot-normalized-frequencies
-                (table-plot-prime-factors normalized)))))
+                (table-plot-prime-factors normalized))))))
     (let* ((frequencies (stable-sort weighted-frequencies #'> :key #'cdr))
            (picked (table-plot-nice-frequency-pick frequencies)))
-      (if picked (reduce #'* picked) 0)))))
+      (if picked (reduce #'* picked) 0))))
 (defun table-plot-prime-factors (number)
   (let ((value number)
         (factor 2)

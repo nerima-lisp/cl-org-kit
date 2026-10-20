@@ -93,7 +93,7 @@
           (when (typep condition 'org-table-error)
             (expect (org-table-error-reason condition) :to-be :unknown-plot-option)
             (expect (search "bogus" (org-kit-error-message condition))
-                    :to-be-truthy)))))
+                    :to-be-truthy))))))
 
   (it "returns radar data, script, and setup as three plan entries"
     (multiple-value-bind (document table)
@@ -134,52 +134,227 @@
           (expect (search "\"Second\" 0.0 12.0 6" radar) :to-be-truthy)
           (expect (search "\"Third\" 0.0 14.0 6" radar) :to-be-truthy)))))
 
-  (it "enforces document, output, entry, byte, and path limits"
-    (let ((source (format nil "| x | y |~%|---+---|~%| 1 | 2 |~%")))
+  (it "parses plot options and applies them to the generated script"
+    (let* ((source
+             (format nil
+                     "#+PLOT: title:\"Quarterly \\\"net\\\"\" ind:1 deps:(2,3) type:2d with:linespoints file:\"charts/sales.svg\" set:\"grid\" labels:(\"Region\" \"Net Sales\")~%| North | 10 | 12 |~%| South | 5 | 8 |~%"))
+           (document (parse-org source))
+           (table (table-plot-test-find-table (document-root document)))
+           (plan (org-kit::table-plot-write-plan
+                  document table :script-path #p"plot/script.gp"
+                  :data-path "plot/data.tsv" :base-directory "reports/"))
+           (script (table-plot-test-entry-content plan "plot/script.gp")))
+      (with-soft-assertions
+        (expect (search "set term svg " script) :to-be-truthy)
+        (expect (search "set output 'reports/charts/sales.svg'" script)
+                :to-be-truthy)
+        (expect (search "set title 'Quarterly \"net\"'" script)
+                :to-be-truthy)
+        (expect (search "set grid" script) :to-be-truthy)
+        (expect (search "using 1:2 with linespoints title 'Net Sales'" script)
+                :to-be-truthy)
+        (expect (search "using 1:3 with linespoints title '3'" script)
+                :to-be-truthy))))
+
+  (it "quotes data fields while preserving numeric spelling and empty cells"
+    (multiple-value-bind (document table)
+        (table-plot-test-document
+         (format nil
+                 "| Empty | Code | Plus | Invalid | Quoted |~%|-------+------+------+---------+--------|~%| | 001 | +2 | -x | Say \"yes\" |~%"))
+      (let ((plan (org-kit::table-plot-write-plan
+                   document table :script-path "script.gp" :data-path "data.tsv")))
+        (with-soft-assertions
+          (expect (table-plot-test-entry-content plan "data.tsv")
+                  :to-equal (format nil "~C001~C+2~C\"-x\"~C\"Say \"\"yes\"\"\""
+                                    #\Tab #\Tab #\Tab #\Tab))))))
+
+  (it "renders grid and three-dimensional data plans"
+    (multiple-value-bind (document table)
+        (table-plot-test-document
+         (format nil
+                 "#+PLOT: type:grid deps:(2,3)~%| Name | A | B |~%|------+---+---|~%| East | 1 | nope |~%| West | 2 | 4 |~%"))
+      (let* ((plan (org-kit::table-plot-write-plan
+                    document table :script-path "grid.gp" :data-path "grid.tsv"))
+             (data (table-plot-test-entry-content plan "grid.tsv"))
+             (script (table-plot-test-entry-content plan "grid.gp")))
+        (with-soft-assertions
+          (expect data :to-equal
+                  (format nil
+                          "0  0.500000  1.000000~%0  1.500000  1.000000~%0  1.500000  2.000000~%0  2.500000  2.000000~%~%1  0.500000  0.000000~%1  1.500000  0.000000~%1  1.500000  4.000000~%1  2.500000  4.000000~%~%"))
+          (expect (search "splot 'grid.tsv' with pm3d title ''" script)
+                  :to-be-truthy)))
+    (multiple-value-bind (document table)
+        (table-plot-test-document
+         (format nil "#+PLOT: type:3d~%| Name | A | B |~%|------+---+---|~%| East | 1 | 2 |~%"))
+      (let* ((plan (org-kit::table-plot-write-plan
+                    document table :script-path "three.gp" :data-path "three.tsv"))
+             (script (table-plot-test-entry-content plan "three.gp")))
+        (with-soft-assertions
+          (expect (search "splot 'three.tsv' matrix with lines title ''" script)
+                  :to-be-truthy)
+          (expect (table-plot-test-entry-content plan "three.tsv")
+                  :to-equal
+                  (format nil "0  0.500000  0.000000~%0  1.500000  0.000000~%~%1  0.500000  1.000000~%1  1.500000  1.000000~%~%")))))))
+
+  (it "replaces every datafile token in a supplied script and resolves output paths"
+    (multiple-value-bind (document table)
+        (table-plot-test-document
+         (format nil
+                 "#+PLOT: file:\"/tmp/chart.svg\" script:\"load $datafile; load $datafile\"~%| x | y |~%|---+---|~%| 1 | 2 |~%"))
+      (let* ((plan (org-kit::table-plot-write-plan
+                    document table :script-path "script.gp" :data-path "data.tsv"
+                    :script-content "load $datafile; load $datafile"
+                    :base-directory "ignored/"))
+             (script (table-plot-test-entry-content plan "script.gp")))
+        (with-soft-assertions
+          (expect (search "set term svg " script) :to-be-truthy)
+          (expect (search "set output '/tmp/chart.svg'" script) :to-be-truthy)
+          (expect (search "load data.tsv; load data.tsv" script) :to-be-truthy)
+          (expect (search "$datafile" script) :to-be nil))))
+    (with-soft-assertions
+      (expect (org-kit::table-plot-replace-datafile "unchanged" "data.tsv")
+              :to-equal "unchanged")
+      (expect (org-kit::table-plot-gnuplot-file-path "chart" #p"reports/")
+              :to-equal "reports/chart")
+      (expect (org-kit::table-plot-gnuplot-file-path "chart" "reports")
+              :to-equal "reports/chart")
+      (expect (org-kit::table-plot-file-extension "chart.svg") :to-equal "svg")
+      (expect (org-kit::table-plot-file-extension "dir.with.dot/chart")
+              :to-be nil)
+      (expect (org-kit::table-plot-option-string 12) :to-equal "12")
+      (expect (org-kit::table-plot-option-string 'lines) :to-equal "lines")
+      (expect (org-kit::table-plot-option-string '(a b)) :to-equal "(A B)")))
+
+  (it "rejects malformed plot options, unsupported types, and missing radar inputs"
+    (dolist (case (list
+                   (list (format nil "#+PLOT: title:~%| x | y |~%|---+---|~%| 1 | 2 |~%")
+                         'org-table-error :invalid-plot-option)
+                   (list (format nil "#+PLOT: malformed~%| x | y |~%|---+---|~%| 1 | 2 |~%")
+                         'org-table-error :unknown-plot-option)
+                   (list (format nil "#+PLOT: deps:(2 3~%| x | y |~%|---+---|~%| 1 | 2 |~%")
+                         'org-table-error :invalid-plot-option)
+                   (list (format nil "#+PLOT: type:pie~%| x | y |~%|---+---|~%| 1 | 2 |~%")
+                         'org-table-error :unsupported-plot-type)
+                   (list (format nil "#+PLOT: type:radar~%| x | y |~%|---+---|~%| 1 | 2 |~%")
+                         'org-table-error :missing-radar-path)))
       (multiple-value-bind (document table)
-          (table-plot-test-oversized-document source)
+          (table-plot-test-document (first case))
         (let ((condition
                 (table-plot-test-capture-error
                  (lambda ()
                    (org-kit::table-plot-write-plan
-                    document table :script-path "script.gp"
-                    :data-path "data.tsv")))))
-          (expect (typep condition 'org-resource-limit-error) :to-be t)
-          (when (typep condition 'org-resource-limit-error)
-            (expect (org-resource-limit-error-limit-name condition)
-                    :to-be :max-input-length))))
-      (dolist (case (list
-                     (list :max-output-length 1)
-                     (list :max-output-octets 1)
-                     (list :max-write-plan-entries 1)
-                     (list :max-write-plan-bytes 1)))
-        (let* ((limit-name (first case))
-               (limits (apply #'make-limits (list limit-name (second case))))
-               (document (parse-org source :limits limits))
-               (table (table-plot-test-find-table (document-root document)))
-               (condition
+                    document table :script-path "script.gp" :data-path "data.tsv")))))
+          (expect (typep condition (second case)) :to-be t)
+          (when (typep condition 'org-table-error)
+            (expect (org-table-error-reason condition) :to-be (third case))))))
+    (multiple-value-bind (document table)
+        (table-plot-test-document
+         (format nil "| x | y |~%|---+---|~%| 1 | 2 |~%"))
+      (let ((condition
+              (table-plot-test-capture-error
+               (lambda ()
+                 (org-kit::table-plot-write-plan
+                  document table :script-path nil :data-path "data.tsv")))))
+        (expect (typep condition 'type-error) :to-be t)))
+    (let ((condition
+            (table-plot-test-capture-error
+             (lambda ()
+               (org-kit::table-plot-option-value-end
+                (format nil "\"unfinished~%value\"") 0 nil)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-table-error) :to-be t)
+        (when (typep condition 'org-table-error)
+          (expect (org-table-error-reason condition) :to-be :invalid-plot-option)))))
+
+  (it "formats radar values and selects normalized tick frequencies"
+    (with-soft-assertions
+      (expect (org-kit::table-plot-prime-factors 1) :to-equal nil)
+      (expect (org-kit::table-plot-prime-factors 12) :to-equal '(3 2 2))
+      (expect (org-kit::table-plot-real-string 4) :to-equal "4")
+      (expect (org-kit::table-plot-real-string 4.0d0) :to-equal "4.0")
+      (expect (org-kit::table-plot-real-string 4.125d0) :to-equal "4.125")
+      (expect (org-kit::table-plot-normalized-frequencies nil) :to-be nil)
+      (expect (org-kit::table-plot-normalized-frequencies '(2 2 3))
+              :to-equal '((2 . 0.6666666666666666d0) (3 . 0.3333333333333333d0)))
+      (expect (org-kit::table-plot-merge-frequencies
+               '((2 . 0.5d0) (3 . 0.5d0)) '((3 . 0.25d0) (5 . 0.75d0)))
+              :to-equal '((2 . 0.5d0) (3 . 0.75d0) (5 . 0.75d0)))
+      (expect (org-kit::table-plot-nice-frequency-pick nil) :to-be nil)
+      (expect (org-kit::table-plot-nice-frequency-pick '((2 . 1d0)))
+              :to-equal '(2))
+      (expect (org-kit::table-plot-nice-frequency-pick
+               '((2 . 0.8d0) (3 . 0.2d0)))
+              :to-equal '(2 2))
+      (expect (org-kit::table-plot-nice-frequency-pick
+               '((2 . 0.6d0) (3 . 0.4d0)))
+              :to-equal '(2 3))
+      (expect (org-kit::table-plot-nice-frequency-pick
+               '((1 . 1/3) (2 . 1/3) (3 . 1/3)))
+              :to-equal '(3 2 1)))
+    (multiple-value-bind (document table)
+        (table-plot-test-document
+         (format nil "#+PLOT: type:radar~%| Flat | 5 | 10 |~%"))
+      (let ((condition
+              (table-plot-test-capture-error
+               (lambda ()
+                 (org-kit::table-plot-write-plan
+                  document table :script-path "flat.gp" :data-path "flat.tsv"
+                  :radar-path "flat.dat")))))
+        (with-soft-assertions
+          (expect (typep condition 'org-table-error) :to-be t)
+          (when (typep condition 'org-table-error)
+            (expect (org-table-error-reason condition) :to-be :missing-plot-labels))))))
+
+  (it "enforces document, output, entry, byte, and path limits"
+      (let ((source (format nil "| x | y |~%|---+---|~%| 1 | 2 |~%")))
+        (multiple-value-bind (document table)
+            (table-plot-test-oversized-document source)
+          (let ((condition
                  (table-plot-test-capture-error
                   (lambda ()
                     (org-kit::table-plot-write-plan
                      document table :script-path "script.gp"
                      :data-path "data.tsv")))))
-          (expect (typep condition 'org-resource-limit-error) :to-be t)
-          (when (typep condition 'org-resource-limit-error)
-            (expect (org-resource-limit-error-limit-name condition)
-                    :to-be limit-name))))
-      (multiple-value-bind (document table) (table-plot-test-document source)
-        (dolist (path-case '(("long/script.gp" "data.tsv" :max-write-plan-path-bytes 4)
-                             ("deep/nested/script.gp" "data.tsv" :max-write-plan-path-depth 1)))
-          (let ((condition
+            (expect (typep condition 'org-resource-limit-error) :to-be t)
+            (when (typep condition 'org-resource-limit-error)
+              (expect (org-resource-limit-error-limit-name condition)
+                      :to-be :max-input-length))))
+        (dolist (case (list
+                       (list :max-output-length 1)
+                       (list :max-output-octets 1)
+                       (list :max-write-plan-entries 1)
+                       (list :max-write-plan-bytes 1)))
+          (let* ((limit-name (first case))
+                 (limits (apply #'make-limits (list limit-name (second case))))
+                 (document (parse-org source :limits limits))
+                 (table (table-plot-test-find-table (document-root document)))
+                 (condition
+                  (table-plot-test-capture-error
+                   (lambda ()
+                     (org-kit::table-plot-write-plan
+                      document table :script-path "script.gp"
+                      :data-path "data.tsv")))))
+            (expect (typep condition 'org-resource-limit-error) :to-be t)
+            (when (typep condition 'org-resource-limit-error)
+              (expect (org-resource-limit-error-limit-name condition)
+                      :to-be limit-name))))
+        (dolist (path-case
+                 (list (list "long/script.gp" :max-write-plan-path-bytes 4)
+                       (list "deep/nested/script.gp" :max-write-plan-path-depth 1)))
+          (let* ((limits
+                  (apply (symbol-function (find-symbol "MAKE-LIMITS" "ORG-KIT"))
+                         (rest path-case)))
+                 (document (parse-org source :limits limits))
+                 (table (table-plot-test-find-table (document-root document)))
+                 (condition
                   (table-plot-test-capture-error
                    (lambda ()
                      (org-kit::table-plot-write-plan
                       document table :script-path (first path-case)
-                      :data-path (second path-case)
-                      :limits (apply #'make-limits
-                                     (list (third path-case) (fourth path-case))))))))
-            (expect (typep condition 'org-resource-limit-error) :to-be t)
-            (when (typep condition 'org-resource-limit-error)
+                      :data-path "data.tsv")))))
+            (expect (typep condition (quote org-resource-limit-error)) :to-be t)
+            (when (typep condition (quote org-resource-limit-error))
               (expect (org-resource-limit-error-limit-name condition)
-                      :to-be (third path-case)))))))))
+                      :to-be (second path-case)))))))
+
 )
