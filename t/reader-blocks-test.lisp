@@ -507,7 +507,10 @@
            (call (first (reader-blocks-test-elements call-document :babel-call)))
            (header-call-source
             (format nil "#+CALL: foo[:inside](bar) :outside~%"))
-           (header-call-document (parse-org header-call-source))
+           (header-call-document
+            (parse-org
+             (cl-codec-kit:string-to-octets header-call-source
+                                            :encoding :utf-8)))
            (header-call
             (first
              (reader-blocks-test-elements header-call-document :babel-call)))
@@ -536,7 +539,13 @@
         (expect (node-property header-call :inside-header) :to-equal ":inside")
         (expect (node-property header-call :arguments) :to-equal "bar")
         (expect (node-property header-call :end-header) :to-equal ":outside")
-        (expect (emit-org (document-root header-call-document)) :to-equal header-call-source)
+        (expect
+         (cl-codec-kit:string-to-octets
+          (emit-org (document-root header-call-document))
+          :encoding :utf-8)
+         :to-equalp
+         (cl-codec-kit:string-to-octets header-call-source
+                                        :encoding :utf-8))
         (expect (node-property source-block :header) :to-equal ":var value")
         (expect (emit-org (document-root headers-document)) :to-equal headers-source)
         (expect

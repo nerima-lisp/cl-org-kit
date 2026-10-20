@@ -1339,12 +1339,31 @@
     (dolist (node
              (list
               (make-node :babel-call :properties (list :call "run" :inside-header t))
+              (make-node :babel-call :properties (list :call "run" :inside-header ""))
               (make-node :babel-call :properties (list :call "run" :end-header t))
+              (make-node :babel-call :properties (list :call "run" :end-header ""))
+              (make-node :babel-call :properties (list :call "run["))
+              (make-node :babel-call :properties (list :call "run]"))
+              (make-node :babel-call :properties (list :call "run"
+                                                       :inside-header "bad]header"))
+              (make-node :babel-call :properties (list :call "run"
+                                                       :inside-header
+                                                       (format nil "bad~%header")))
+              (make-node :babel-call :properties (list :call "run"
+                                                       :inside-header
+                                                       (format nil "bad~Cheader" #\Return)))
+              (make-node :babel-call :properties (list :call "run"
+                                                       :end-header
+                                                       (format nil "bad~%header")))
+              (make-node :babel-call :properties (list :call "run"
+                                                       :end-header
+                                                       (format nil "bad~Cheader" #\Return)))
               (make-node :babel-call :properties (list :call " run"))
               (make-node :babel-call :properties (list :call "run("))
               (make-node :babel-call :properties (list :call "run)"))
               (make-node :babel-call :properties (list :call "run()"))
               (make-node :babel-call :properties (list :call "run" :arguments ""))
+              (make-node :babel-call :properties (list :call "run" :arguments 7))
               (make-node :babel-call :properties (list :call "run" :arguments " padded "))
               (make-node :babel-call :properties (list :call "run" :arguments "a(b"))
               (make-node :babel-call :properties (list :call "run" :arguments "a)b"))))
