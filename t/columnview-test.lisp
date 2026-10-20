@@ -319,7 +319,7 @@
                 (lambda () (org-kit::column-view-data document)))))
         (columnview-test-expect-error condition :invalid-summary-type))))
 
-  (it "keeps empty parser inputs and unsupported summary fallback explicit"
+  (it "keeps empty parser and summary inputs explicit"
     (let* ((number-column
              (org-kit::%make-column-view-column :property "Number"))
            (duration-column
@@ -327,6 +327,18 @@
            (unsupported-column
              (org-kit::%make-column-view-column :property "Value"
                                                  :summary :unsupported))
+           (empty-estimate-column
+             (org-kit::%make-column-view-column :property "Estimate"
+                                                 :summary :estimate-sum))
+           (empty-number-column
+             (org-kit::%make-column-view-column :property "Number"
+                                                 :summary :sum))
+           (empty-checkbox-column
+             (org-kit::%make-column-view-column :property "Flag"
+                                                 :summary :checkbox-all))
+           (empty-time-column
+             (org-kit::%make-column-view-column :property "Duration"
+                                                 :summary :time-sum))
            (number-error
              (columnview-test-capture-condition
               (lambda ()
@@ -337,6 +349,14 @@
                 (org-kit::column-view-parse-duration duration-column "")))))
       (columnview-test-expect-error number-error :invalid-summary-value)
       (columnview-test-expect-error duration-error :invalid-summary-value)
+      (expect (org-kit::column-view-summary-value empty-estimate-column nil)
+              :to-equal "")
+      (expect (org-kit::column-view-summary-value empty-number-column nil)
+              :to-equal "")
+      (expect (org-kit::column-view-summary-value empty-checkbox-column nil)
+              :to-equal "")
+      (expect (org-kit::column-view-summary-value empty-time-column nil)
+              :to-equal "")
       (expect (org-kit::column-view-summary-value unsupported-column nil)
               :to-equal "")))
 
