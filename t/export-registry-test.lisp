@@ -572,6 +572,26 @@
                                   :api-registry-renderer-result-type)))
                    :to-be t)
            (expect filter-ran-p :to-be nil))))))
+  (it "rejects non-string results from public filters"
+    (let ((backend :api-registry-invalid-filter-result))
+      (export-registry-test-with-root-backend
+       backend
+       (list :renderer
+             (lambda (context)
+               (declare (ignore context))
+               "body")
+             :filters
+             (list (cons :body
+                         (list (lambda (value context)
+                                 (declare (ignore value context))
+                                 :not-a-string)))))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (export-org (parse-org "Filter result.") backend)))
+                   :to-be t))))))
+
 
   (it "uses the nearest complete option specification for defaults"
     (let ((root :api-registry-option-default-root)
@@ -654,6 +674,172 @@
         (when failure
           (expect (org-export-error-reason failure)
                   :to-be :invalid-option-specification)))))
+  (it "rejects cyclic vector defaults during backend registration"
+    (let ((backend :api-registry-vector-default-cycle)
+          (cyclic (make-array 1)))
+      (setf (aref cyclic 0) cyclic)
+      (with-soft-assertions
+        (expect (org-export-error-reason
+                 (export-registry-test-registration-error
+                  (lambda ()
+                    (register-export-backend
+                     backend
+                     :renderer (function identity)
+                     :option-specifications
+                     (list (list :key :cycle :token "cycle"
+                                 :parser (function identity)
+                                 :default cyclic))))))
+                :to-be :invalid-option-specification))
+      (export-registry-test-with-root-backend
+       backend
+       (list :renderer (lambda (context)
+                         (declare (ignore context))
+                         "registered"))
+       (lambda ()
+         (expect (export-org (parse-org "Vector default.") backend)
+                 :to-equal "registered")))))
+  (it "validates remaining public backend registration boundaries"
+    (labels ((registration-condition (backend &rest arguments)
+               (let ((registered-p nil))
+                 (unwind-protect
+                      (handler-case
+                          (progn
+                            (apply #'register-export-backend backend arguments)
+                            (setf registered-p t)
+                            nil)
+                        (org-export-registration-error (condition)
+                          condition))
+                   (when registered-p
+                     (unregister-export-backend backend)))))
+             (registration-reason (backend &rest arguments)
+               (let ((condition
+                       (apply #'registration-condition backend arguments)))
+                 (and condition (org-export-error-reason condition))))
+             (signals-type-error-p (backend &rest arguments)
+               (let ((registered-p nil))
+                 (unwind-protect
+                      (handler-case
+                          (progn
+                            (apply #'register-export-backend backend arguments)
+                            (setf registered-p t)
+                            nil)
+                        (type-error () t))
+                   (when registered-p
+                     (unregister-export-backend backend))))))
+      (with-soft-assertions
+        (expect (registration-reason (intern "" :keyword)
+                                     :renderer #'identity)
+                :to-be :invalid-backend-name)
+        (expect (registration-reason
+                 :api-registry-filter-wrong-head
+                 :renderer #'identity
+                 :filters (list (cons '(:other :paragraph) (list #'identity))))
+                :to-be :invalid-filter-stage)
+        (expect (registration-reason
+                 :api-registry-filter-short-element-stage
+                 :renderer #'identity
+                 :filters (list (cons '(:element) (list #'identity))))
+                :to-be :invalid-filter-stage)
+        (expect (registration-reason
+                 :api-registry-filter-long-element-stage
+                 :renderer #'identity
+                 :filters
+                 (list (cons '(:element :paragraph :extra) (list #'identity))))
+                :to-be :invalid-filter-stage)
+        (expect (signals-type-error-p
+                 :api-registry-filter-entry-is-not-a-cons
+                 :renderer #'identity
+                 :filters (list 42))
+                :to-be t)
+        (expect (registration-reason
+                 :api-registry-unknown-transcoder-node
+                 :renderer #'identity
+                 :transcoders (list (cons :unknown-node #'identity)))
+                :to-be :invalid-transcoder)
+        (expect (registration-reason
+                 :api-registry-unknown-policy-node
+                 :renderer #'identity
+                 :node-policies (list (cons :unknown-node :default)))
+                :to-be :invalid-node-policy)
+        (expect (signals-type-error-p
+                 :api-registry-odd-option-specification
+                 :renderer #'identity
+                 :option-specifications
+                 (list '(:key :odd :token "odd" :parser #'identity :default)))
+                :to-be t)
+        (expect (registration-reason
+                 :api-registry-empty-option-token
+                 :renderer #'identity
+                 :option-specifications
+                 (list (list :key :empty-token :token ""
+                             :parser #'identity)))
+                :to-be :invalid-option-specification))))
+
+  (it "applies backend-specific unsupported-node policies"
+    (let ((backend :api-registry-unsupported-node-policy)
+          (condition nil))
+      (export-registry-test-with-root-backend
+       backend
+       (list :renderer (function export-registry-test-render-views)
+             :node-policies
+             (list (cons :paragraph
+                         (list :unsupported :feature :api-registry-paragraph
+                               :message "Paragraphs are unsupported."))))
+       (lambda ()
+         (setf condition
+               (handler-case
+                   (progn (export-org (parse-org "Policy target.") backend) nil)
+                 (org-export-unsupported-syntax (error) error)))
+         (with-soft-assertions
+           (expect (typep condition 'org-export-unsupported-syntax) :to-be t)
+           (when condition
+             (expect (org-export-unsupported-syntax-backend condition)
+                     :to-be backend)
+             (expect (org-export-unsupported-syntax-feature condition)
+                     :to-be :api-registry-paragraph)))))))
+  (it "validates link handler mutation argument types"
+    (let ((backend :api-registry-link-argument-validation))
+      (export-registry-test-with-root-backend
+       backend
+       (list :renderer (lambda (context)
+                         (declare (ignore context))
+                         "registered"))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (register-export-link-type
+                       "not-a-keyword" "custom" (function identity))))
+                   :to-be t)
+           (expect (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (register-export-link-type
+                       backend 42 (function identity))))
+                   :to-be t)
+           (expect (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (register-export-link-type
+                       backend "custom" 42)))
+                   :to-be t)
+           (expect (org-export-error-reason
+                    (export-registry-test-registration-error
+                     (lambda ()
+                       (register-export-link-type
+                        backend "" (function identity)))))
+                   :to-be :invalid-link-type-handler)
+           (expect (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (unregister-export-backend "not-a-keyword")))
+                   :to-be t)
+           (expect (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (unregister-export-link-type "not-a-keyword" "custom")))
+                   :to-be t)
+           (expect (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (unregister-export-link-type backend 42)))
+                   :to-be t))))))
+
 
   (it "passes post-blank output to element filters"
     (let ((filtered-value nil))
@@ -834,6 +1020,215 @@
            (expect node-view-error :to-be t)
            (expect view-mode-error :to-be t)
            (expect view-boolean-error :to-be t))))))
+  (it "validates public render helper input boundaries"
+    (let ((view-input-error nil)
+          (node-input-error nil)
+          (node-mode-error nil)
+          (node-table-cell-error nil)
+          (node-breaks-error nil)
+          (node-view-error nil))
+      (export-registry-test-with-root-backend
+       :api-registry-render-helper-inputs
+       (list :renderer
+             (lambda (context)
+               (let* ((node (make-node :paragraph))
+                      (wrong-view
+                        (make-export-view (make-node :plain-text))))
+                 (setf view-input-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda () (export-render-view context nil)))
+                       node-input-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda () (export-render-node context "not-a-node")))
+                       node-mode-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-node context node :mode :invalid)))
+                       node-table-cell-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-node context node :table-cell-p :yes)))
+                       node-breaks-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-node
+                           context node :preserve-source-breaks-p :yes)))
+                       node-view-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-node context node :view wrong-view)))))
+               "rendered"))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-org (parse-org "Render helper inputs.")
+                               :api-registry-render-helper-inputs)
+                   :to-equal "rendered")
+           (expect view-input-error :to-be t)
+           (expect node-input-error :to-be t)
+           (expect node-mode-error :to-be t)
+           (expect node-table-cell-error :to-be t)
+           (expect node-breaks-error :to-be t)
+           (expect node-view-error :to-be t)))))
+    (let ((non-node-error nil)
+          (mismatched-node-error nil)
+          (parent-result-error nil))
+      (export-registry-test-with-backend-pair
+       :api-registry-parent-node-result
+       :api-registry-parent-node-result-child
+       (list :renderer #'export-registry-test-render-views
+             :transcoders
+             (list (cons :paragraph
+                         (lambda (node view frame context)
+                           (declare (ignore node view frame context))
+                           42))))
+       (list :transcoders
+             (list (cons :paragraph
+                         (lambda (node view frame context)
+                           (declare (ignore view frame))
+                           (setf non-node-error
+                                 (export-registry-test-signals-type-error-p
+                                  (lambda ()
+                                    (export-render-parent-node
+                                     context "not-a-node")))
+                                 mismatched-node-error
+                                 (export-registry-test-signals-program-error-p
+                                  (lambda ()
+                                    (export-render-parent-node
+                                     context (make-node :plain-text))))
+                                 parent-result-error
+                                 (export-registry-test-signals-type-error-p
+                                  (lambda ()
+                                    (export-render-parent-node context node))))
+                           "child"))))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-org (parse-org "Parent node helper.")
+                               :api-registry-parent-node-result-child)
+                   :to-equal "child")
+           (expect non-node-error :to-be t)
+           (expect mismatched-node-error :to-be t)
+           (expect parent-result-error :to-be t)))))
+    (let ((missing-parent-error nil))
+      (export-registry-test-with-root-backend
+       :api-registry-root-parent-node
+       (list :renderer #'export-registry-test-render-views
+             :transcoders
+             (list (cons :paragraph
+                         (lambda (node view frame context)
+                           (declare (ignore view frame))
+                           (setf missing-parent-error
+                                 (export-registry-test-signals-program-error-p
+                                  (lambda ()
+                                    (export-render-parent-node context node))))
+                           "root"))))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-org (parse-org "Root parent node.")
+                               :api-registry-root-parent-node)
+                   :to-equal "root")
+           (expect missing-parent-error :to-be t))))))
+
+  (it "resolves parent components through ancestry and validates callback results"
+    (let* ((root :api-registry-parent-components-root)
+           (middle :api-registry-parent-components-middle)
+           (child :api-registry-parent-components-child)
+           (root-registered-p nil)
+           (middle-registered-p nil)
+           (child-registered-p nil)
+           (parent-components nil))
+      (unwind-protect
+           (progn
+             (register-export-backend
+              root :renderer (lambda (context)
+                               (declare (ignore context))
+                               "root"))
+             (setf root-registered-p t)
+             (register-derived-export-backend middle root)
+             (setf middle-registered-p t)
+             (register-derived-export-backend
+              child middle
+              :renderer
+              (lambda (context)
+                (setf parent-components
+                      (list (export-render-parent-renderer context)
+                            (export-render-parent-preamble context)
+                            (export-render-parent-trailer context)
+                            (export-render-parent-template
+                             context "P" "B" "T")))
+                "child"))
+             (setf child-registered-p t)
+             (with-soft-assertions
+               (expect (export-org (parse-org "Parent components.") child)
+                       :to-equal "child")
+               (expect parent-components :to-equal '("root" "" "" "PBT"))))
+        (when child-registered-p
+          (unregister-export-backend child))
+        (when middle-registered-p
+          (unregister-export-backend middle))
+        (when root-registered-p
+          (unregister-export-backend root))))
+    (let ((renderer-error nil)
+          (preamble-error nil)
+          (trailer-error nil)
+          (template-input-error nil)
+          (template-result-error nil))
+      (export-registry-test-with-backend-pair
+       :api-registry-invalid-parent-components
+       :api-registry-invalid-parent-components-child
+       (list :renderer (lambda (context)
+                         (declare (ignore context))
+                         nil)
+             :preamble-renderer (lambda (context)
+                                  (declare (ignore context))
+                                  :not-a-string)
+             :trailer-renderer (lambda (context)
+                                 (declare (ignore context))
+                                 :not-a-string)
+             :template (lambda (context preamble body trailer)
+                         (declare (ignore context preamble body trailer))
+                         :not-a-string))
+       (list :renderer
+             (lambda (context)
+               (setf renderer-error
+                     (export-registry-test-signals-type-error-p
+                      (lambda () (export-render-parent-renderer context)))
+                     preamble-error
+                     (export-registry-test-signals-type-error-p
+                      (lambda () (export-render-parent-preamble context)))
+                     trailer-error
+                     (export-registry-test-signals-type-error-p
+                      (lambda () (export-render-parent-trailer context)))
+                     template-input-error
+                     (export-registry-test-signals-type-error-p
+                      (lambda ()
+                        (export-render-parent-template
+                         context nil "body" "trailer")))
+                     template-result-error
+                     (export-registry-test-signals-type-error-p
+                      (lambda ()
+                        (export-render-parent-template
+                         context "pre" "body" "post"))))
+               "child")
+             :preamble-renderer (lambda (context)
+                                  (declare (ignore context))
+                                  "")
+             :trailer-renderer (lambda (context)
+                                 (declare (ignore context))
+                                 "")
+             :template (lambda (context preamble body trailer)
+                         (declare (ignore context preamble trailer))
+                         body))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-org (parse-org "Parent callback results.")
+                               :api-registry-invalid-parent-components-child)
+                   :to-equal "child")
+           (expect renderer-error :to-be t)
+           (expect preamble-error :to-be t)
+           (expect trailer-error :to-be t)
+           (expect template-input-error :to-be t)
+           (expect template-result-error :to-be t))))))
+
 
   (it "registers and removes backend-local link handlers"
     (let ((parent :api-registry-link-parent)
@@ -2431,6 +2826,59 @@
                (lambda ()
                  (export-org document :api-registry-native-sink-renderer-result)))
               :to-be t)))))))
+  (it "rejects negative native sink offsets through registered callbacks"
+    (let ((negative-initial-offset-p nil)
+          (offset-calls 0))
+      (export-registry-test-with-builtin-backend
+       :api-registry-negative-native-offset
+       (list :renderer
+             (lambda (context)
+               (let ((sink (make-export-registry-test-native-sink)))
+                 (dolist (view (export-render-context-root-views context))
+                   (org-kit::export-render-view-to-sink context sink view))
+                 (export-registry-test-native-sink-string sink nil)))
+             :native-sink-renderer
+             (function export-registry-test-native-sink-renderer)
+             :native-sink-scratch
+             (function export-registry-test-native-sink-scratch)
+             :native-sink-string
+             (function export-registry-test-native-sink-string)
+             :native-sink-write-string
+             (function export-registry-test-native-sink-write-string)
+             :native-sink-append-node-result
+             (function export-registry-test-native-sink-append-node-result)
+             :native-sink-output-offset
+             (lambda (sink context)
+               (declare (ignore sink context))
+               (incf offset-calls)
+               (if negative-initial-offset-p
+                   -1
+                   (if (= offset-calls 1) 0 -1))))
+       (lambda ()
+         (let ((document (parse-org "Native sink offset.")))
+           (with-soft-assertions
+             (let ((condition
+                    (handler-case
+                        (progn
+                          (export-org document :api-registry-negative-native-offset)
+                          nil)
+                      (type-error (caught) caught))))
+               (expect (typep condition (quote type-error)) :to-be t)
+               (when condition
+                 (expect (type-error-datum condition) :to-be -1))
+               (expect (>= offset-calls 2) :to-be t))
+             (setf negative-initial-offset-p t
+                   offset-calls 0)
+             (let ((condition
+                    (handler-case
+                        (progn
+                          (export-org document :api-registry-negative-native-offset)
+                          nil)
+                      (type-error (caught) caught))))
+               (expect (typep condition (quote type-error)) :to-be t)
+               (when condition
+                 (expect (type-error-datum condition) :to-be -1))
+               (expect offset-calls :to-be 1))))))))
   (it "renders derived views through the parent backend"
     (let ((parent-frame-fields nil)
           (parent-result "parent"))

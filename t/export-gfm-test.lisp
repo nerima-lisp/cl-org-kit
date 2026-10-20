@@ -1730,6 +1730,34 @@
           (unregister-export-link-type backend "image-scheme"))
         (when backend-registered-p
           (unregister-export-backend backend)))))
+  (it "renders registered GFM links through safe handler results"
+    (let ((backend :gfm-test-link-result)
+          (backend-registered-p nil)
+          (handler-registered-p nil)
+          (output nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend backend :gfm)
+            (setf backend-registered-p t)
+            (register-export-link-type
+             backend "link-scheme"
+             (lambda (path description frame context)
+               (declare (ignore frame context))
+               (make-export-link-result
+                :kind :link
+                :destination (format nil "https://links.example.test/~A" path)
+                :description description)))
+            (setf handler-registered-p t
+                  output
+                  (export-org
+                   (parse-org "[[link-scheme:article][Article]]")
+                   backend))
+            (expect output
+                    :to-equal "[Article](<https://links.example.test/article>)"))
+        (when handler-registered-p
+          (unregister-export-link-type backend "link-scheme"))
+        (when backend-registered-p
+          (unregister-export-backend backend)))))
   (it "rejects scheme-obfuscating GFM link abbreviations"
     (labels ((view-for-node (node)
                (org-kit::%make-export-view
@@ -1794,6 +1822,36 @@
                 (expect actual :to-equal expected)
                 (expect (search "[jump](<#stable>)" actual)
                         :not :to-be nil))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+  (it "keeps GFM parent rendering stable when invoked repeatedly"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+OPTIONS: toc:nil num:nil~%* Target~%:PROPERTIES:~%:CUSTOM_ID: stable~%:END:~%~%[[#stable][jump]]")))
+           (backend :gfm-test-repeated-parent-renderer)
+           (registered-p nil)
+           (first-render nil)
+           (second-render nil)
+           (expected (export-org document :gfm))
+           (actual nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend
+             backend :gfm
+             :renderer
+             (lambda (context)
+               (setf first-render (export-render-parent-renderer context)
+                     second-render (export-render-parent-renderer context))
+               second-render))
+            (setf registered-p t
+                  actual (export-org document backend))
+            (with-soft-assertions
+              (expect first-render :to-equal expected)
+              (expect second-render :to-equal expected)
+              (expect actual :to-equal expected)
+              (expect (search "[jump](<#stable>)" actual)
+                      :not :to-be nil)))
         (when registered-p
           (unregister-export-backend backend)))))
   (it "uses GFM source text when a table cell has no value property"

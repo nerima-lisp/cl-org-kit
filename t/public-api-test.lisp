@@ -650,6 +650,18 @@ Missing values stay last in both directions, and ties retain source order.")))
   (it "keeps the package name stable and nickname-free"
     (expect (package-name (find-package "ORG-KIT")) :to-equal "ORG-KIT")
     (expect (package-nicknames (find-package "ORG-KIT")) :to-equal '()))
+  (it "rejects extension entries that are not keyword pairs"
+    (let ((condition
+           (handler-case
+               (progn
+                 (make-export-context :extensions (list :not-a-pair))
+                 nil)
+             (type-error (caught) caught))))
+      (with-soft-assertions
+        (expect (not (null condition)) :to-be t)
+        (when condition
+          (expect (type-error-datum condition)
+                  :to-equal (list :not-a-pair))))))
   (it "validates caller context fields, views, and link results"
   (labels ((signals-type-error-p (function)
              (handler-case

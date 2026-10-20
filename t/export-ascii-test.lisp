@@ -2458,6 +2458,104 @@
                    (mapc #'check-view node-children view-children))))
         (with-soft-assertions
           (check-view root view)))))
+  (it "renders a multi-part ASCII table cell through the public API"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              ""
+              "| plain *emphasis* |"))
+           (document (parse-org source))
+           (cell (export-ascii-test-find-node (document-root document) :table-cell))
+           (output (export-org document :ascii)))
+      (with-soft-assertions
+        (expect (> (length (node-children cell)) 1) :to-be t)
+        (expect (search "*emphasis*" output) :not :to-be nil))))
+  (it "trims all whitespace returned by an ASCII plain-text filter"
+    (let ((backend :ascii-test-all-whitespace-filter)
+          (registered-p nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend
+             backend :ascii
+             :filters
+             (list
+              (cons :plain-text
+                    (list (lambda (value context)
+                            (declare (ignore value context))
+                            (format nil "~C~C~C~C"
+                                    #\Space #\Tab #\Return #\Newline))))))
+            (setf registered-p t)
+            (let ((output
+                    (export-org
+                     (parse-org
+                      (export-ascii-test-source
+                       "#+OPTIONS: toc:nil num:nil"
+                       ""
+                       "word"))
+                     backend)))
+              (expect output :to-equal (string #\Newline))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+  (it "preserves filtered ASCII suffixes around post-blank in heading sections"
+    (let* ((backend :ascii-test-post-blank-filter-boundaries)
+           (registered-p nil)
+           (document
+             (parse-org
+              (export-ascii-test-source
+               "#+OPTIONS: toc:nil num:nil"
+               "* Heading"
+               ""
+               "body"
+               ""
+               ""
+               "")))
+           (paragraph
+             (export-ascii-test-find-node (document-root document) :paragraph))
+           (section (node-parent paragraph))
+           (post-blank (node-post-blank paragraph))
+           (filtered-value ""))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend
+             backend :ascii
+             :filters
+             (list
+              (cons '(:element :paragraph)
+                    (list (lambda (value context)
+                            (declare (ignore value context))
+                            filtered-value)))))
+            (setf registered-p t)
+            (let* ((empty-output
+                     (progn
+                       (setf filtered-value "")
+                       (export-org document backend)))
+                   (blank-only-output
+                     (progn
+                       (setf filtered-value
+                             (make-string post-blank :initial-element #\Newline))
+                       (export-org document backend)))
+                   (mismatch-output
+                     (progn
+                       (setf filtered-value "kept-filter-tail")
+                       (export-org document backend)))
+                   (indented-tail-output
+                     (progn
+                       (setf filtered-value
+                             (concatenate
+                              'string "body" (string #\Newline) " X"
+                              (make-string post-blank
+                                           :initial-element #\Newline)))
+                       (export-org document backend))))
+              (with-soft-assertions
+                (expect (plusp post-blank) :to-be t)
+                (expect (node-type section) :to-be :section)
+                (expect (node-type (node-parent section)) :to-be :headline)
+                (expect blank-only-output :to-equal empty-output)
+                (expect (search "kept-filter-tail" mismatch-output)
+                        :not :to-be nil)
+                (expect (search (format nil "body~%   X") indented-tail-output) :not :to-be nil))))
+        (when registered-p
+          (unregister-export-backend backend)))))
   (it "rejects raw ASCII element-filter output beyond the output limit"
     (let ((backend :ascii-test-raw-filter-over-limit)
           (registered-p nil)

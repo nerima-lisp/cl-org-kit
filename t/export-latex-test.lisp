@@ -1446,4 +1446,87 @@
         (when link-registered-p
           (unregister-export-link-type backend "asset"))
         (when registered-p
+          (unregister-export-backend backend)))))
+  (it "falls back for unsafe registered LaTeX link results"
+    (let ((backend :latex-test-unsafe-link-result)
+          (backend-registered-p nil)
+          (handler-registered-p nil)
+          (output nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend backend :latex)
+            (setf backend-registered-p t)
+            (register-export-link-type
+             backend "unsafe-link"
+             (lambda (path description frame context)
+               (declare (ignore path frame context))
+               (make-export-link-result
+                :kind :link
+                :destination "javascript:alert(1)"
+                :description description)))
+            (setf handler-registered-p t
+                  output
+                  (export-org
+                   (parse-org "[[unsafe-link:target][Blocked label]]")
+                   backend))
+            (with-soft-assertions
+              (expect
+               (and (search "Blocked label" output)
+                    (not (search "\\href{" output))
+                    (not (search "javascript:alert(1)" output)))
+                  :to-be t)))
+        (when handler-registered-p
+          (unregister-export-link-type backend "unsafe-link"))
+        (when backend-registered-p
+          (unregister-export-backend backend)))))
+  (it "rejects LaTeX render options without values"
+    (let* ((document (parse-org "Body"))
+           (state (export-latex-test-state document))
+           (view
+             (export-latex-test-view
+              document :inline-src-block :properties (list :value "sample")))
+           (condition
+             (handler-case
+                 (progn
+                   (org-kit::export-latex-render-view state view :table-cell-p)
+                   nil)
+               (simple-error (caught) caught))))
+      (with-soft-assertions
+        (expect (not (null condition)) :to-be t)
+        (when condition
+          (expect (simple-condition-format-control condition)
+                  :to-equal "Invalid LaTeX render arguments")))))
+  (it "preserves spacing owned by a registered LaTeX transcoder"
+    (let* ((document (parse-org "Before /styled/ after."))
+           (inline-node nil)
+           (backend :latex-test-inline-spacing)
+           (registered-p nil)
+           (output nil))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :italic)
+           (setf inline-node node)))
+       (document-root document))
+      (when inline-node
+        (setf (node-post-blank inline-node) 2))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend
+             backend :latex
+             :transcoders
+             (list
+              (cons :italic
+                    (lambda (node view frame context)
+                      (declare (ignore node view frame context))
+                      "OVERRIDE  "))))
+            (setf registered-p t
+                  output (export-org document backend))
+            (with-soft-assertions
+              (expect inline-node :not :to-be nil)
+              (when inline-node
+                (expect (node-post-blank inline-node) :to-be 2)
+                (expect (search "OVERRIDE   after." output)
+                        :not :to-be nil)
+                (expect (search "OVERRIDE after." output) :to-be nil))))
+        (when registered-p
           (unregister-export-backend backend))))))

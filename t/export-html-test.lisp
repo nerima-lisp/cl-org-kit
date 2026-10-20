@@ -797,6 +797,17 @@
         (expect (search "href=\"https://example.test\"" title-objects)
                 :not :to-be nil)
         (expect (search "Footnote aside" title-objects) :not :to-be nil))))
+  (it "suppresses the HTML document heading when title is disabled"
+    (let ((output
+           (export-org
+            (parse-org
+             (format nil
+                     "#+TITLE: Hidden title~%#+OPTIONS: title:nil~%Body remains.~%"))
+            :html)))
+      (with-soft-assertions
+        (expect (search "<h1 class=\"title\">Hidden title</h1>" output)
+                :to-be nil)
+        (expect (search "Body remains." output) :not :to-be nil))))
 
   (it "uses the public export API's default string output"
     (let ((output (export-org (parse-org "default output") :html)))
@@ -1723,4 +1734,58 @@ paragraph" table-list) :not :to-be nil))))
                        :not :to-be nil)
                (expect link-wrapper-calls :to-be 1)))
           (when registered-p
-            (unregister-export-backend backend))))))
+            (unregister-export-backend backend)))))
+  (it "renders registered HTML links and images only for safe destinations"
+    (let ((backend :html-test-link-results)
+          (backend-registered-p nil)
+          (image-registered-p nil)
+          (link-registered-p nil)
+          (output nil))
+      (unwind-protect
+          (progn
+            (register-derived-export-backend backend :html)
+            (setf backend-registered-p t)
+            (register-export-link-type
+             backend "image-scheme"
+             (lambda (path description frame context)
+               (declare (ignore frame context))
+               (make-export-link-result
+                :kind :image :destination path :description description)))
+            (setf image-registered-p t)
+            (register-export-link-type
+             backend "link-scheme"
+             (lambda (path description frame context)
+               (declare (ignore frame context))
+               (make-export-link-result
+                :kind :link
+                :destination (format nil "https://links.example.test/~A" path)
+                :description description)))
+            (setf link-registered-p t
+                  output
+                  (export-org
+                   (parse-org
+                    (format nil
+                            "[[image-scheme:https://cdn.example.test/remote.png][Remote image]]~%[[image-scheme:assets/local.png][Local image]]~%[[image-scheme:mailto:images@example.test][Mail image]]~%[[link-scheme:article][Article]]~%"))
+                   backend))
+            (with-soft-assertions
+              (expect (search
+                       "<img src=\"https://cdn.example.test/remote.png\" alt=\"Remote image\" />"
+                       output)
+                      :not :to-be nil)
+              (expect (search
+                       "<img src=\"assets/local.png\" alt=\"Local image\" />"
+                       output)
+                      :not :to-be nil)
+              (expect (search "src=\"mailto:images@example.test\"" output)
+                      :to-be nil)
+              (expect (search "Mail image" output) :not :to-be nil)
+              (expect (search
+                       "href=\"https://links.example.test/article\">Article</a>"
+                       output)
+                      :not :to-be nil)))
+        (when link-registered-p
+          (unregister-export-link-type backend "link-scheme"))
+        (when image-registered-p
+          (unregister-export-link-type backend "image-scheme"))
+        (when backend-registered-p
+          (unregister-export-backend backend))))))
