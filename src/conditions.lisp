@@ -438,7 +438,7 @@ is a bounded, escaped excerpt."))
   ((reason :initarg :reason :initform nil)
    (context :initarg :context :initform nil))
   (:report (lambda (condition stream)
-             (format stream "~A (~(~A~))~@[ for ~A~]"
+             (format stream "~A~@[ (~(~A~))~]~@[ for ~A~]"
                      (org-kit-error-message condition)
                      (org-capture-error-reason condition)
                      (bounded-text (org-capture-error-context condition)))))
@@ -456,7 +456,7 @@ is a bounded, escaped excerpt."))
   ((reason :initarg :reason :initform nil)
    (context :initarg :context :initform nil))
   (:report (lambda (condition stream)
-             (format stream "~A (~(~A~))~@[ for ~A~]"
+             (format stream "~A~@[ (~(~A~))~]~@[ for ~A~]"
                      (org-kit-error-message condition)
                      (org-archive-error-reason condition)
                      (org-archive-error-context condition))))
@@ -474,7 +474,7 @@ is a bounded, escaped excerpt."))
   ((reason :initarg :reason :initform nil)
    (context :initarg :context :initform nil))
   (:report (lambda (condition stream)
-             (format stream "~A (~(~A~))~@[ for ~A~]"
+             (format stream "~A~@[ (~(~A~))~]~@[ for ~A~]"
                      (org-kit-error-message condition)
                      (org-attachment-error-reason condition)
                      (org-attachment-error-context condition))))

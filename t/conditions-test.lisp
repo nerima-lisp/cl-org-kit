@@ -206,3 +206,51 @@
         (expect (org-babel-error-reason bare) :to-be nil)
         (expect (org-babel-error-context bare) :to-be nil)
         (expect (report bare) :to-equal "Cannot resolve Babel input")))))
+(describe "capture, archive, and attachment error reports"
+  (it "escapes capture context and exposes optional fields"
+    (let* ((context (format nil "Tasks~%One"))
+           (full (make-condition 'org-capture-error
+                                 :message "Capture failed"
+                                 :reason :invalid-target
+                                 :context context))
+           (bare (make-condition 'org-capture-error :message "Capture failed")))
+      (with-soft-assertions
+        (expect (subtypep 'org-capture-error 'org-kit-error) :to-be t)
+        (expect (org-capture-error-reason full) :to-be :invalid-target)
+        (expect (org-capture-error-context full) :to-equal context)
+        (expect (princ-to-string full)
+                :to-equal "Capture failed (invalid-target) for Tasks\\nOne")
+        (expect (org-capture-error-reason bare) :to-be nil)
+        (expect (org-capture-error-context bare) :to-be nil)
+        (expect (princ-to-string bare) :to-equal "Capture failed"))))
+  (it "reports archive reason and context, omitting absent fields"
+    (let ((full (make-condition 'org-archive-error
+                                :message "Archive failed"
+                                :reason :missing-source
+                                :context "tasks/archive.org"))
+          (bare (make-condition 'org-archive-error :message "Archive failed")))
+      (with-soft-assertions
+        (expect (subtypep 'org-archive-error 'org-kit-error) :to-be t)
+        (expect (org-archive-error-reason full) :to-be :missing-source)
+        (expect (org-archive-error-context full) :to-equal "tasks/archive.org")
+        (expect (princ-to-string full)
+                :to-equal "Archive failed (missing-source) for tasks/archive.org")
+        (expect (org-archive-error-reason bare) :to-be nil)
+        (expect (org-archive-error-context bare) :to-be nil)
+        (expect (princ-to-string bare) :to-equal "Archive failed"))))
+  (it "reports attachment reason and context, omitting absent fields"
+    (let ((full (make-condition 'org-attachment-error
+                                :message "Attachment failed"
+                                :reason :invalid-name
+                                :context "tasks/file.pdf"))
+          (bare (make-condition 'org-attachment-error
+                                :message "Attachment failed")))
+      (with-soft-assertions
+        (expect (subtypep 'org-attachment-error 'org-kit-error) :to-be t)
+        (expect (org-attachment-error-reason full) :to-be :invalid-name)
+        (expect (org-attachment-error-context full) :to-equal "tasks/file.pdf")
+        (expect (princ-to-string full)
+                :to-equal "Attachment failed (invalid-name) for tasks/file.pdf")
+        (expect (org-attachment-error-reason bare) :to-be nil)
+        (expect (org-attachment-error-context bare) :to-be nil)
+        (expect (princ-to-string bare) :to-equal "Attachment failed")))))
