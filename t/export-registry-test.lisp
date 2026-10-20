@@ -2324,7 +2324,24 @@
                                             :destination destination
                                             :description description)))
       (with-soft-assertions
-        (expect checked-specifications :to-equal specifications)
+        (progn
+          (expect checked-specifications :to-equal specifications)
+          (expect
+           (org-export-error-reason
+            (export-registry-test-registration-error
+             (lambda ()
+               (org-kit::export-registration-check-option-specifications
+                (list (list :token "custom" :key "custom"
+                            :parser (function identity)))))))
+           :to-be :invalid-option-specification)
+          (expect
+           (org-export-error-reason
+            (export-registry-test-registration-error
+             (lambda ()
+               (org-kit::export-registration-check-option-specifications
+                (list (list :token 42 :key :custom
+                            :parser (function identity)))))))
+           :to-be :invalid-option-specification))
         (expect (org-kit::export-common-node-policies)
                 :to-equal '((:property-drawer . :prune-children)
                             (:node-property . :prune-children)
