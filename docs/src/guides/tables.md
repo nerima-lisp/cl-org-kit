@@ -301,9 +301,10 @@ options signal `org-table-error` naming the option.
 `table-import` has the signature
 `(table-import document offset text &key format)` and inserts delimited text at
 the zero-based character `offset` as an aligned Org pipe table. `format` accepts
-`:csv`, `:tsv`, or `:auto`; automatic detection uses tabs when present and
-otherwise CSV. It returns an `edit-result` and preserves source outside the
-insertion. Quoted delimiters and doubled quotes follow Org import behavior.
+`:csv`, `:tsv`, or `:auto`; automatic detection chooses TSV when it finds a tab
+outside quoted text and CSV otherwise. It returns an `edit-result` and preserves
+source outside the insertion. CSV supports quoted fields, including quoted
+delimiters and doubled quotes. In TSV, quote characters are ordinary text.
 Multiline fields are rejected.
 
 `table-export` returns text without writing a file. Its format accepts `:csv`,
@@ -325,10 +326,12 @@ SEND parameters accept these common keys: `:sep`, `:hsep`, `:hline`, `:splice`,
 `:hllfmt`, `:backend`, and `:raw`. The `latex` transformation also accepts
 `:booktabs` and `:environment`; `texinfo` also accepts `:columns`. Values must
 be strings, integers, `t`, or `nil`; executable and list-valued parameters are
-rejected. For example,
+rejected. `:raw` is accepted but currently has no effect. `:fmt` and `:hfmt`
+templates apply to `generic` without `:backend`, `csv`, and `tsv`; the other
+transformations ignore them. For example,
 `#+ORGTBL: SEND summary generic :sep "," :skip 1` uses commas between cells and
-skips the first input row. `:fmt` and `:hfmt` set string templates with `%s`
-placeholders for data and header cells.
+skips the first input row. The `:fmt` and `:hfmt` string templates accept `%s`
+placeholders for data and header cells in those transformations.
 
 ## Transpose
 
