@@ -252,6 +252,10 @@
                           (org-kit::agenda-sort-view-entries
                            (list todo scheduled deadline habit timestamp) '(:habit-down)))
                   :to-equal '("Todo" "Scheduled" "Deadline" "Timestamp" "Habit"))
+          (expect (org-kit::agenda-sort-view-compare-habit habit todo :up) :to-be -1)
+          (expect (org-kit::agenda-sort-view-compare-habit habit todo :down) :to-be 1)
+          (expect (org-kit::agenda-sort-view-compare-habit todo habit :up) :to-be 1)
+          (expect (org-kit::agenda-sort-view-compare-habit todo habit :down) :to-be -1)
           (expect (mapcar #'agenda-entry-headline
                           (org-kit::agenda-sort-view-entries
                            (list todo scheduled deadline habit timestamp) '(:time-up)))
@@ -616,4 +620,108 @@
       (with-soft-assertions
         (expect (list (node-property timestamp :type)
                       (node-property timestamp :day-start))
-                :to-equal (quote (:active 6)))))))
+                :to-equal (quote (:active 6))))))
+  (it "rejects malformed timestamps and end-of-input positions"
+    (let* ((invalid-timestamps
+             (list "<" "<20a5-03-05>" "<2025-a3-05>" "<2025-0a-05>"
+                   "<2025/03-05>" "<2025-03x05>" "<2025-03-a5>"
+                   "<2025-03-0a>" "<2025-03-05x>"))
+           (bad-timestamp-ends
+             (mapcar (lambda (text)
+                       (org-kit::agenda-sort-view-time-timestamp-end text 0))
+                     invalid-timestamps)))
+      (with-soft-assertions
+        (expect bad-timestamp-ends
+                :to-equal (make-list (length invalid-timestamps) :initial-element nil))
+        (expect (org-kit::agenda-sort-view-time-timestamp-end
+                 "[2025-03-05]" 0)
+                :to-be (length "[2025-03-05]"))
+        (expect (org-kit::agenda-sort-view-time-timestamp-end "x" 1)
+                :to-be nil))))
+  (it "rejects incomplete and malformed plain-time tokens"
+    (with-soft-assertions
+      (expect (org-kit::agenda-sort-view-plain-time-at "." 1)
+              :to-be nil)
+      (expect (org-kit::agenda-sort-view-plain-time-at "8:" 0)
+              :to-be nil)
+      (expect (org-kit::agenda-sort-view-plain-time-at "8:x0" 0)
+              :to-be nil)))
+  (it "rejects invalid sort strategies"
+    (let* ((document
+             (parse-org
+              (format nil "#+TODO: TODO | DONE~%* TODO First~%* TODO Second~%")))
+           (entries (agenda-sort-test-matches document))
+           (invalid-strategy
+             (agenda-sort-test-error-reason
+              (lambda ()
+                (org-kit::agenda-sort-view-entries entries (list 17))))))
+      (expect invalid-strategy :to-be :invalid-option)))
+  (it "ignores malformed timestamp properties and statistics cookies"
+    (let* ((empty-cookie
+             (make-node :statistics-cookie :properties (list :value "[/2]")))
+           (empty-cookie-heading
+             (make-node :headline
+                        :properties (list :raw-value "Empty" :title (list empty-cookie))))
+           (empty-cookie-entry (make-agenda-match-entry :node empty-cookie-heading))
+           (non-string-cookie
+             (make-node :statistics-cookie :properties (list :value 42)))
+           (non-string-cookie-heading
+             (make-node :headline
+                        :properties (list :raw-value "Non-string"
+                                          :title (list non-string-cookie))))
+           (non-string-cookie-entry
+             (make-agenda-match-entry :node non-string-cookie-heading))
+           (non-string-property
+             (make-node :node-property :properties (list :value 42)))
+           (property-heading
+             (make-node :headline
+                        :properties (list :raw-value "Property")
+                        :children (list non-string-property)))
+           (property-entry (make-agenda-match-entry :node property-heading)))
+      (with-soft-assertions
+        (expect (org-kit::agenda-sort-view-entry-timestamp-node
+                 property-entry :active)
+                :to-be nil)
+        (expect (org-kit::agenda-sort-view-entry-statistics empty-cookie-entry)
+                :to-be 0)
+        (expect (org-kit::agenda-sort-view-entry-statistics
+                 non-string-cookie-entry)
+                :to-be 0))))
+  (it "ties distinct entries with zero rank from malformed TODO settings"
+    (let* ((document
+             (parse-org
+              (format nil "#+TODO: TODO | DONE~%* TODO First~%* TODO Second~%")))
+           (entries (agenda-sort-test-matches document)))
+      (setf (document-settings document)
+            (list :todo-keywords (list 17) :todo-sequences nil))
+      (with-soft-assertions
+        (expect (mapcar (function org-kit::agenda-sort-view-entry-todo-rank)
+                        entries)
+                :to-equal (list 0 0))
+        (expect (org-kit::agenda-sort-view-compare-todo-state
+                 (first entries) (second entries) :up)
+                :to-be nil)
+        (expect (org-kit::agenda-sort-view-compare-todo-state
+                 (second entries) (first entries) :up)
+                :to-be nil))))
+  (it "orders habitual entries first for :habit-up and last for :habit-down"
+    (let ((non-habit (make-agenda-entry :kind :scheduled))
+          (habit (make-agenda-entry :kind :scheduled :habit-p t)))
+      (with-soft-assertions
+        (expect (org-kit::agenda-sort-view-entries
+                 (list non-habit habit) (quote (:habit-up)))
+                :to-equal (list habit non-habit))
+        (expect (org-kit::agenda-sort-view-entries
+                 (list non-habit habit) (quote (:habit-down)))
+                :to-equal (list non-habit habit)))))
+  (it "falls back to priority urgency for a future deadline row"
+    (let* ((document
+             (parse-org
+              (format nil "* TODO Deadline~%DEADLINE: <2025-03-07 Fri>~%")))
+           (heading (first (agenda-sort-test-matches document)))
+           (entry
+             (agenda-sort-test-agenda-entry
+              document heading :deadline "2025-03-05"))
+           (context (agenda-sort-test-context "2025-03-04T12:00:00+00:00")))
+      (expect (org-kit::agenda-sort-view-entry-urgency entry context)
+              :to-be (org-kit::agenda-sort-view-entry-priority entry)))))

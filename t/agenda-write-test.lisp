@@ -512,4 +512,52 @@
                          "#+NAME: Child" (string #\Newline)
                          "* TODO" (string #\Tab) "Child"
                          (make-string 58 :initial-element #\Space)
-                         ":work:" (string #\Newline))))))
+                         ":work:" (string #\Newline)))))
+          (it "renders selected source headlines from multiple documents"
+              (let* ((first-document (parse-org (format nil "* TODO First~%")))
+                     (second-document (parse-org (format nil "* TODO Second~%")))
+                     (first-heading (first (agenda-write-test-headings first-document)))
+                     (second-heading (first (agenda-write-test-headings second-document)))
+                     (output
+                       (agenda-to-org
+                        (list (make-agenda-match-entry :document first-document
+                                                       :node first-heading)
+                              (make-agenda-match-entry :document second-document
+                                                       :node second-heading)))))
+                (expect (document-text output)
+                        :to-equal (format nil "* TODO First~%* TODO Second~%"))))
+          (it "rejects improper agenda entry lists"
+              (let ((entry-error
+                      (agenda-write-test-error
+                       (lambda ()
+                         (agenda-to-org
+                          (make-agenda-result
+                           :entries
+                           (cons (make-agenda-entry :headline "Detached") :tail)))))))
+                (with-soft-assertions
+                  (expect (typep entry-error 'org-agenda-error) :to-be t)
+                  (when (typep entry-error 'org-agenda-error)
+                    (expect (org-agenda-error-reason entry-error)
+                            :to-be :unsupported-entry)))))
+          (it "rejects invalid dates when writing a date heading"
+              (let ((date-error
+                      (agenda-write-test-error
+                       (lambda ()
+                         (org-kit::agenda-write-date-heading "not a date")))))
+                (with-soft-assertions
+                  (expect (typep date-error 'org-agenda-error) :to-be t)
+                  (when (typep date-error 'org-agenda-error)
+                    (expect (org-agenda-error-reason date-error)
+                            :to-be :invalid-option)))))
+          (it "rejects unsupported categories with a named agenda error"
+              (let* ((entry (make-agenda-entry :headline "Invalid category"
+                                               :category '("invalid")))
+                     (result (make-agenda-result :entries (list entry)))
+                     (category-error
+                       (agenda-write-test-error
+                        (lambda () (agenda-format-text result)))))
+                (with-soft-assertions
+                  (expect (typep category-error 'org-agenda-error) :to-be t)
+                  (when (typep category-error 'org-agenda-error)
+                    (expect (org-agenda-error-reason category-error)
+                            :to-be :invalid-option))))))

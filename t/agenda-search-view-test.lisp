@@ -166,4 +166,24 @@
         (expect (typep work-error 'org-resource-limit-error) :to-be t)
         (when (typep work-error 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name work-error)
-                  :to-be :max-search-work))))))
+                  :to-be :max-search-work)))))
+  (it "deduplicates headings when a document is listed twice"
+      (let* ((document (parse-org (format nil "* Match~%needle ~%")))
+             (entries (agenda-search-view (list document document) "needle")))
+        (with-soft-assertions
+          (expect (agenda-search-view-test-titles entries)
+                  :to-equal (list "Match")))))
+  (it "handles trailing whitespace in a flexible phrase matcher"
+    (let* ((term
+             (org-kit::%make-agenda-search-view-term
+              :required :flexible-phrase "amber "))
+           (work-state
+             (org-kit::%make-agenda-search-work-state (make-limits))))
+      (with-soft-assertions
+        (expect (org-kit::agenda-search-work-state-used work-state)
+                :to-be 0)
+        (expect (org-kit::agenda-search-view-term-matches-p
+                 term "amber  " work-state)
+                :to-be t)
+        (expect (org-kit::agenda-search-work-state-used work-state)
+                :to-be 42)))))

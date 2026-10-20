@@ -146,7 +146,11 @@
            (cond
              ((null category) "")
              ((stringp category) category)
-             ((symbolp category) (symbol-name category))))
+             ((symbolp category) (symbol-name category))
+             (t
+              (agenda-write-signal-invalid
+               category
+               "Agenda categories must be strings or symbols"))))
          (field (if (equal category-text "")
                     ""
                     (concatenate 'string category-text ":"))))

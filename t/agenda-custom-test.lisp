@@ -381,4 +381,22 @@
                  (expect (org-resource-limit-error-limit-name condition)
                          :to-be
                          :max-agenda-entries)
-                 (expect (typep invalid-callbacks 'type-error) :to-be t)))))
+                 (expect (typep invalid-callbacks 'type-error) :to-be t))))
+          (it "rejects improper ELisp expression forms"
+              (let* ((document (agenda-custom-test-document))
+                     (condition
+                      (agenda-custom-test-error
+                       (lambda ()
+                         (agenda-custom
+                          (list document)
+                          (list (list :key "improper" :type :match
+                                      :match (cons :elisp "query-source")))
+                          :time-context (agenda-custom-test-context))))))
+                (with-soft-assertions
+                 (expect (typep condition
+                                (find-class (intern "ORG-AGENDA-ERROR" :org-kit)))
+                         :to-be t)
+                 (when (typep condition
+                              (find-class (intern "ORG-AGENDA-ERROR" :org-kit)))
+                   (expect (org-agenda-error-reason condition)
+                           :to-be :invalid-option))))))
