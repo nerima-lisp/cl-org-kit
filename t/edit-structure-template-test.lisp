@@ -296,5 +296,19 @@
                     document (make-edit-span 0 (length source)) "example")))
             (expect (document-text (edit-result-updated-document result))
                     :to-equal (second fixture))
-            (expect (document-text document) :to-equal source)))))))
+            (expect (document-text document) :to-equal source))))))
+  (it "preserves an indented blank internal line in a verbatim block"
+    (let* ((source (format nil "first line~%   ~%last line"))
+           (document (parse-org source))
+           (result
+            (org-kit:insert-structure-template document
+                                               (make-edit-span 0
+                                                               (length source))
+                                               "example")))
+      (with-soft-assertions
+       (expect (document-text (edit-result-updated-document result))
+               :to-equal
+               (format nil
+                       "#+begin_example~%first line~%   ~%last line~%#+end_example~%"))
+       (expect (document-text document) :to-equal source)))))
 

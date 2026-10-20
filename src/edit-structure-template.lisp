@@ -204,11 +204,7 @@
                        do (incf start))
                  (subseq trailing start)))
              (body-ending
-               (if (and (plusp (length escaped-body))
-                        (not (char= (char escaped-body
-                                         (1- (length escaped-body)))
-                                    #\Newline)))
-                   newline ""))
+               (if (plusp (length escaped-body)) newline ""))
              (close-ending
                (if (or (plusp (length trimmed-trailing))
                        (and (< end (length source))
