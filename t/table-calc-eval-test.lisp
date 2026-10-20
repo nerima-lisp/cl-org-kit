@@ -1077,6 +1077,7 @@
                 :to-be 0)
         (expect (org-kit::table-calc-scientific-string 0 2 nil limits t)
                 :to-equal "0.00e+00")
+        (expect (org-kit::table-calc-scientific-string 1d12 2 nil limits t) :to-equal "1.00e+12")
         (expect (table-calc-eval-test-evaluate "@1$1=taylor(exp(x),x=1,2)")
                 :to-equal "2.71828182846 x + 1.35914091423 (x - 1)^2 + 0")
         (table-calc-eval-test-expect-table-error

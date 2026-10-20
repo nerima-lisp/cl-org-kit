@@ -326,8 +326,7 @@
             (fives (table-calc-factor-count denominator 5)))
        (unless (= denominator (* (expt 2 twos) (expt 5 fives)))
          (let* ((precision (limit-value limits :max-formula-precision))
-                (order (if (zerop value) 0
-                           (floor (log (float (abs value) 1d0) 10d0))))
+                (order (floor (log (float (abs value) 1d0) 10d0)))
                 (scale (max 0 (- precision 1 order)))
                 (coefficient (table-calc-round-integer
                               (* (abs numerator) (expt 10 scale)) denominator)))
@@ -785,8 +784,7 @@
          (places (max 0 (- 11 order)))
          (text (format nil "~,VF" places number))
          (trimmed (string-right-trim "0" text)))
-    (if (and (plusp (length trimmed))
-             (char= (char trimmed (1- (length trimmed))) #\.))
+    (if (char= (char trimmed (1- (length trimmed))) #\.)
         (subseq trimmed 0 (1- (length trimmed)))
         trimmed)))
 
