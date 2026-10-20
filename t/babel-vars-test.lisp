@@ -817,3 +817,14 @@
         (when (typep condition 'org-babel-error)
           (expect (org-babel-error-reason condition)
                   :to-equal :unresolved-call-target))))))
+(describe "Babel reader errors"
+  (it "catches reader errors for numeric-looking tokens"
+    (let ((reader-condition
+            (babel-vars-test-condition
+             (lambda () (read-from-string ".")))))
+      (with-soft-assertions
+        (expect (org-kit::babel-numeric-token-p ".") :to-be t)
+        (expect (typep reader-condition 'reader-error) :to-be t)
+        (expect (multiple-value-list
+                 (org-kit::babel-parse-number "."))
+                :to-equal '(nil nil))))))
