@@ -402,3 +402,20 @@
     (expect
      (org-kit::%timestamp-diary-character-literal-end "?\\C-" 0 4)
      :to-be 4)))
+(describe "timestamp window rejection edges"
+  (it "accepts repeater windows and rejects warning or incomplete windows"
+    (let ((catch-up-window
+            (timestamp-object-match "<2026-10-12 ++1w/2w>")))
+      (with-soft-assertions
+        (expect (list (timestamp-object-property catch-up-window :repeater-type)
+                      (timestamp-object-property catch-up-window :repeater-value)
+                      (timestamp-object-property catch-up-window :repeater-unit)
+                      (timestamp-object-property catch-up-window
+                                                 :repeater-window-value)
+                      (timestamp-object-property catch-up-window
+                                                 :repeater-window-unit))
+                :to-equal '(:catch-up 1 :week 2 :week))
+        (expect (timestamp-object-match "<2026-10-12 -1d/2d>") :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12 +1d/2>") :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12 +1d/x>") :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12 +1d2d>") :to-be nil)))))

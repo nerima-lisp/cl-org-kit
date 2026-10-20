@@ -354,4 +354,230 @@
                 :to-equal
                 '("Untimed 8" "Timestamp only <2025-03-05 Wed 01:00>"
                   "Evening 8PM" "Morning [2025-03-05 Wed 02:00] 8:30"
-                  "Range 7am-9am" "Midnight 12am"))))))
+                  "Range 7am-9am" "Midnight 12am")))))
+  (it "reads agenda-row keys and filters timestamps by source type"
+    (let* ((rows
+             (list
+              (make-agenda-entry :kind :todo :headline "Zebra" :todo-state "TODO"
+                                 :effective-tags '("project" "z") :category "Beta")
+              (make-agenda-entry :kind :todo :headline "alpha" :todo-state "WAIT"
+                                 :effective-tags '("project" "a") :category "Gamma")
+              (make-agenda-entry :kind :todo :headline "Beta" :todo-state "DONE"
+                                 :effective-tags nil :category "Alpha")))
+           (source-document
+             (parse-org
+              (format nil
+                      "* Active~%:PROPERTIES:~%:NOTE: <2025-03-04 Tue>~%:END:~%* Inactive~%:PROPERTIES:~%:NOTE: [2025-03-03 Mon]~%:END:~%")))
+           (source-headings (agenda-sort-test-matches source-document))
+           (active-node
+             (org-kit::agenda-sort-view-entry-timestamp-node
+              (first source-headings) :active))
+           (inactive-node
+             (org-kit::agenda-sort-view-entry-timestamp-node
+              (second source-headings) :inactive))
+           (active-row
+             (make-agenda-entry :kind :timestamp :source-node active-node))
+           (inactive-row
+             (make-agenda-entry :kind :timestamp :source-node inactive-node)))
+      (with-soft-assertions
+        (expect (mapcar (function agenda-entry-headline)
+                 (org-kit::agenda-sort-view-entries
+                  rows (quote (:alpha-up))))
+                :to-equal '("alpha" "Beta" "Zebra"))
+        (expect (mapcar (function agenda-entry-headline)
+                 (org-kit::agenda-sort-view-entries
+                  rows (quote (:category-up))))
+                :to-equal '("Beta" "Zebra" "alpha"))
+        (expect (mapcar (function agenda-entry-headline)
+                 (org-kit::agenda-sort-view-entries
+                  rows (quote (:tag-up))))
+                :to-equal '("alpha" "Zebra" "Beta"))
+        (expect (mapcar (function agenda-entry-headline)
+                 (org-kit::agenda-sort-view-entries
+                  rows (quote (:tag-down))))
+                :to-equal '("Beta" "Zebra" "alpha"))
+        (expect (mapcar #'org-kit::agenda-sort-view-entry-todo-state rows)
+                :to-equal '("TODO" "WAIT" "DONE"))
+        (expect (org-kit::agenda-sort-view-entry-priority (first rows))
+                :to-be 1000)
+        (expect (list (org-kit::agenda-sort-view-compare-strings nil nil :up)
+                      (org-kit::agenda-sort-view-compare-strings nil "A" :up)
+                      (org-kit::agenda-sort-view-compare-strings "A" nil :up))
+                :to-equal '(nil 1 -1))
+        (expect (mapcar
+                 (lambda (kind)
+                   (not (null
+                         (org-kit::agenda-sort-view-entry-timestamp
+                          active-row kind))))
+                 '(:active :inactive :any))
+                :to-equal '(t nil t))
+        (expect (mapcar
+                 (lambda (kind)
+                   (not (null
+                         (org-kit::agenda-sort-view-entry-timestamp
+                          inactive-row kind))))
+                 '(:active :inactive :any))
+                :to-equal '(nil t t)))))
+  (it "preserves sorted vectors and rejects malformed entry sequences"
+    (let* ((entries (agenda-sort-test-matches
+                     (parse-org (agenda-sort-test-source))))
+           (vector (coerce entries 'vector))
+           (sorted-vector
+             (org-kit::agenda-sort-view-entries vector '(:alpha-up)))
+           (pair (subseq entries 0 2))
+           (circular (list (first entries))))
+      (setf (cdr circular) circular)
+      (with-soft-assertions
+        (expect (typep sorted-vector 'vector) :to-be-truthy)
+        (expect (agenda-sort-test-names (coerce sorted-vector 'list))
+                :to-equal '("Alpha" "Beta" "Delta" "Plain"))
+        (dolist (criterion '(:user-defined-up :user-defined-down))
+          (expect (agenda-sort-test-names
+                   (org-kit::agenda-sort-view-entries
+                    pair (list criterion)
+                    :user-defined-sorter
+                    (lambda (left right)
+                      (declare (ignore left right))
+                      nil)))
+                  :to-equal '("Beta" "Alpha")))
+        (expect (agenda-sort-test-error-reason
+                 (lambda ()
+                   (org-kit::agenda-sort-view-entries
+                    entries '(:user-defined-up))))
+                :to-be :invalid-option)
+        (expect (agenda-sort-test-error-reason
+                 (lambda ()
+                   (org-kit::agenda-sort-view-entries 42 '(:alpha-up))))
+                :to-be :unsupported-entry)
+        (expect (agenda-sort-test-error-reason
+                 (lambda ()
+                   (org-kit::agenda-sort-view-entries circular '(:alpha-up))))
+                :to-be :unsupported-entry))))
+  (it "handles bare timestamp closers, line breaks, and time token boundaries"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Bare <2025-03-05> 6:15pm~%* Invalid suffix 7:15pmx~%* Boundary~%")))
+           (entries (agenda-sort-test-matches document))
+           (bare (first entries))
+           (invalid (second entries))
+           (boundary (third entries))
+           (boundary-node (agenda-match-entry-node boundary)))
+      (with-soft-assertions
+        (expect (org-kit::agenda-sort-view-match-entry-time-key bare)
+                :to-be 1815)
+        (expect (org-kit::agenda-sort-view-match-entry-time-key invalid)
+                :to-be nil)
+        (dolist (line-break (list #\Newline #\Return))
+          (setf (node-property boundary-node :raw-value)
+                (format nil "Unclosed <2025-03-05 Wed~c8:30>" line-break))
+          (expect (org-kit::agenda-sort-view-match-entry-time-key boundary)
+                  :to-be
+                  830)))))
+  (it "keeps planning and timestamp lookup within the source headline"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Parent~%** Child~%<2025-03-05 Wed>~%* Deadline~%DEADLINE: <2025-03-06 Thu>~%* Short~%SCHEDULED: <2025-03-05 Wed +1d>~%* Habit~%SCHEDULED: <2025-03-05 Wed +1w>~%:PROPERTIES:~%:STYLE: habit~%:END:~%")))
+           (headings (agenda-sort-test-matches document))
+           (parent (first headings))
+           (child (second headings))
+           (deadline-heading (third headings))
+           (short-heading (fourth headings))
+           (habit-heading (fifth headings))
+           (child-timestamp
+             (org-kit::agenda-sort-view-entry-timestamp-node child :active))
+           (deadline-timestamp
+             (org-kit::agenda-sort-view-entry-timestamp-node
+              deadline-heading :deadline))
+           (short-entry
+             (agenda-sort-test-agenda-entry
+              document short-heading :scheduled "2025-03-05" :habit-p t))
+           (habit-entry
+             (agenda-sort-test-agenda-entry
+              document habit-heading :scheduled "2025-03-05"))
+           (deadline-entry
+             (agenda-sort-test-agenda-entry
+              document deadline-heading :deadline "2025-03-05"))
+           (timestamp-entry
+             (make-agenda-entry
+              :date (make-org-time-value "2025-03-05")
+              :kind :timestamp :headline "Habit timestamp" :habit-p t
+              :source-node (agenda-match-entry-node habit-heading)))
+           (missing-scheduled (make-agenda-entry :kind :scheduled))
+           (missing-deadline (make-agenda-entry :kind :deadline))
+           (context (agenda-sort-test-context "2025-03-05T12:00:00+00:00")))
+      (with-soft-assertions
+        (expect (org-kit::agenda-sort-view-entry-timestamp-node parent :active)
+                :to-be nil)
+        (expect (node-property child-timestamp :day-start) :to-be 5)
+        (expect (node-property deadline-timestamp :day-start) :to-be 6)
+        (expect (list (not (null
+                            (org-kit::agenda-sort-view-entry-habit-p habit-entry)))
+                      (null
+                       (org-kit::agenda-sort-view-entry-habit-p deadline-entry)))
+                :to-equal '(t t))
+        (expect (mapcar #'agenda-entry-headline
+                        (org-kit::agenda-sort-view-entries
+                         (list deadline-entry habit-entry) '(:habit-up)))
+                :to-equal '("Habit" "Deadline"))
+        (expect (mapcar #'agenda-entry-headline
+                        (org-kit::agenda-sort-view-entries
+                         (list deadline-entry habit-entry) '(:habit-down)))
+                :to-equal '("Deadline" "Habit"))
+        (expect (agenda-sort-test-error-reason
+                 (lambda ()
+                   (org-kit::agenda-sort-view-entry-urgency
+                    missing-scheduled context)))
+                :to-be :unsupported-entry)
+        (expect (agenda-sort-test-error-reason
+                 (lambda ()
+                   (org-kit::agenda-sort-view-entry-urgency
+                    missing-deadline context)))
+                :to-be :unsupported-entry)
+        (let ((original-repeat-days
+              (symbol-function
+               (quote org-kit::agenda-habit-repeat-days))))
+          (unwind-protect
+               (progn
+                 (expect
+                  (list
+                   (org-kit:org-timestamp-view-repeater-amount
+                    (agenda-entry-timestamp short-entry))
+                   (org-kit:org-timestamp-view-repeater-unit
+                    (agenda-entry-timestamp short-entry)))
+                  :to-equal (quote (1 :day)))
+                 (setf (symbol-function
+                        (quote org-kit::agenda-habit-repeat-days))
+                       (constantly 0))
+                 (expect
+                  (agenda-sort-test-error-reason
+                   (lambda ()
+                     (org-kit::agenda-sort-view-entry-urgency
+                      short-entry context)))
+                  :to-be :unsupported-entry))
+            (setf (symbol-function
+                   (quote org-kit::agenda-habit-repeat-days))
+                  original-repeat-days)))
+        (expect (org-kit::agenda-sort-view-entry-urgency timestamp-entry context)
+                :to-be
+                (org-kit::agenda-sort-view-entry-urgency habit-entry context)))))
+  (it "ranks canonical structured TODO keyword settings"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+TODO: TODO | DONE~%* TODO Open~%* DONE Finished~%")))
+           (entries (agenda-sort-test-matches document)))
+      (setf (document-settings document)
+            (list :todo-keywords
+                  (list (list :keyword "TODO")
+                        (list :keyword "DONE"))
+                  :todo-sequences nil))
+      (with-soft-assertions
+        (expect (mapcar (function org-kit::agenda-sort-view-entry-todo-rank)
+                        entries)
+                :to-equal (quote (-2 -1)))
+        (expect (agenda-sort-test-names
+                 (org-kit::agenda-sort-view-entries
+                  entries (quote (:todo-state-up))))
+                :to-equal (quote ("Finished" "Open")))))))
