@@ -564,7 +564,7 @@
           (org-kit::reader-blocks-call-fields
            "combine[:var value=1](2)[]"))
          :to-equal
-         (list "combine" ":var value=1" "2" nil))
+         (list "combine" ":var value=1" "2" "[]"))
         (expect
          (multiple-value-list
           (org-kit::reader-blocks-call-fields "foo[:inside"))
