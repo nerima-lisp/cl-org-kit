@@ -182,7 +182,7 @@ listed order. Callback values are:
 | Stage | Value |
 |---|---|
 | `:options` | The explicit option alist; defaults are read separately with `export-option-value`. |
-| `:parse-tree` | The list of prepared root `export-view` values. |
+| `:parse-tree` | The list of prepared root `export-view` values. Use `org-kit:export-view-p` to test a value before passing it to a view accessor. |
 | `:plain-text` | The rendered string for a plain-text node. |
 | `(:element node-type)` | The rendered string for one node. |
 | `:body` | The body string after rendering. |
