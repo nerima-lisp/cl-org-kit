@@ -856,6 +856,23 @@
                       (list assignment) #(#(t)) 1 2 table
                       (make-limits) (org-kit::make-table-calc-work-budget))))
                   :to-equal '(:table :invalid-reference))))))
+  (it "rejects a range end beyond planner row bounds"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "| a | b |~%|---+---|~%| 1 | 2 |~%| 3 | 4 |~%")))
+           (table
+             (table-recalculate-test-find-node
+              (document-root document) :table))
+           (assignment
+             (table-recalculate-test-assignment "@1$1..@3$2=1")))
+      (expect
+       (table-recalculate-test-condition
+        (lambda ()
+          (org-kit::table-recalculate-plan-field-assignments
+           (list assignment) #(#(t t) #(t t)) 2 2 table
+           (make-limits) (org-kit::make-table-calc-work-budget))))
+       :to-equal (quote (:table :invalid-reference)))))
 
   (it "rejects field ranges that extend past a ragged row"
     (let* ((document (parse-org (format nil "| a | b |~%|---+---|~%| 1 | 2 |~%")))
@@ -1236,4 +1253,15 @@
             (org-kit::table-recalculate-remote-table
              context "duplicate" "table")))
          :unknown-remote-table))))
+  (it "preserves parser errors before range normalization"
+    (let* ((limits (make-limits))
+           (condition
+             (table-recalculate-test-caught-condition
+              (lambda ()
+                (org-kit::table-recalculate-parse-formula "x" limits nil)))))
+      (expect (typep condition (quote org-table-unsupported-syntax))
+              :to-be t)
+      (expect
+       (< (org-kit::org-table-unsupported-syntax-position condition) 2)
+       :to-be t)))
 )

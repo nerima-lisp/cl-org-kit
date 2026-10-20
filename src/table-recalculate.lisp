@@ -446,10 +446,7 @@
         (loop for row from row-start to row-end
               do (loop for column from column-start to column-end
                        do (table-calc-charge-work limits work-budget 1)
-                          (unless (and (<= 1 row row-count)
-                                       (<= 1 column column-count)
-                                       (table-recalculate-cell
-                                        standard-rows row column))
+                          (unless (table-recalculate-cell standard-rows row column)
                             (table-recalculate-signal-error
                              target :invalid-reference
                              "Formula assignment target is outside the table"))
