@@ -414,6 +414,15 @@
                   text
                   (emitter-append-post-blank text node))))))))
 
+(defun emitter-babel-call-arguments-balanced-p (arguments open close)
+  (let* ((text (format nil "~C~A~C" open arguments close))
+         (length (length text)))
+    (multiple-value-bind (contents-begin contents-end after)
+        (other-object-paired-span text 0 length open close)
+      (and after
+           (= after length)
+           (string= (subseq text contents-begin contents-end) arguments)))))
+
 (defun emitter-latex-environment (node)
   (let* ((value (emitter-normalize-newlines
                  (emitter-required-string node :value)))
@@ -620,24 +629,32 @@
        (let ((call (emitter-line-value node
                                        (emitter-required-string node :call)
                                        "Babel call name"))
-             (arguments (node-property node :arguments)))
-         (when (or (node-property node :inside-header)
-                   (node-property node :end-header))
-           (emitter-fail node "Babel call headers are not retained by the parser"))
+             (inside-header
+               (emitter-object-header-value
+                node (node-property node :inside-header) :inside-header))
+             (arguments (node-property node :arguments))
+             (end-header
+               (emitter-object-header-value
+                node (node-property node :end-header) :end-header)))
          (unless (and (string= call (string-trim '(#\Space #\Tab) call))
                       (not (find #\( call)) (not (find #\) call)))
            (emitter-fail node "Babel call name cannot be reparsed exactly"))
          (when (and arguments
-                    (or (zerop (length arguments))
-                        (not (string= arguments
-                                      (string-trim '(#\Space #\Tab) arguments)))
-                        (find #\( arguments) (find #\) arguments)))
+                    (not (and (stringp arguments)
+                              (plusp (length arguments))
+                              (string= arguments
+                                       (string-trim '(#\Space #\Tab) arguments))
+                              (emitter-babel-call-arguments-balanced-p
+                               arguments #\( #\)))))
            (emitter-fail node "Babel call arguments cannot be reparsed exactly"))
-         (format nil "#+CALL: ~A~@[~A~]~%"
+         (format nil "#+CALL: ~A~A~@[~A~]~A~%"
                  call
+                 (if inside-header (format nil "[~A]" inside-header) "")
                  (and arguments
-                      (format nil "(~A)" (emitter-line-value node arguments
-                                                              "Babel arguments"))))))
+                      (format nil "(~A)"
+                              (emitter-line-value node arguments
+                                                  "Babel arguments")))
+                 (if end-header (format nil "[~A]" end-header) ""))))
       (:clock
        (let ((timestamp (node-property node :value))
              (status (node-property node :status)))

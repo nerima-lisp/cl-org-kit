@@ -509,15 +509,67 @@
      (min limit after-line))))
 
 (defun reader-blocks-call-fields (value)
-  "Return a Babel call's name and argument source text."
-  (let ((open (position #\( value)))
-    (if open
-        (let* ((close (position #\) value :start open))
-               (name (reader-blocks-trim (subseq value 0 open)))
-               (arguments
-                (and close (reader-blocks-trim (subseq value (1+ open) close)))))
-          (values name (and arguments (plusp (length arguments)) arguments)))
-        (values (reader-blocks-trim value) nil))))
+  "Return a CALL name, inside header, arguments, and end header."
+  (let* ((text (reader-blocks-trim value))
+         (length (length text))
+         (name-end (position-if (lambda (character)
+                                  (find character "[]()"))
+                                text))
+         (name (reader-blocks-trim
+                (subseq text 0 (or name-end length))))
+         (position (or name-end length))
+         (inside-header nil)
+         (arguments nil)
+         (end-header nil))
+    (labels ((skip-space ()
+               (loop while (and (< position length)
+                                (member (char text position)
+                                        (list #\Space #\Tab)))
+                     do (incf position)))
+             (read-field (open close)
+               (other-object-paired-span text position length open close))
+             (unclosed-header ()
+               (return-from reader-blocks-call-fields
+                 (values name nil nil (subseq text (length name))))))
+      (when (zerop (length name))
+        (return-from reader-blocks-call-fields (values text nil nil nil)))
+      (when name-end
+        (skip-space)
+        (when (and (< position length) (char= (char text position) #\[))
+          (multiple-value-bind (start end after)
+              (read-field #\[ #\])
+            (unless after
+              (unclosed-header))
+            (let ((trimmed (reader-blocks-trim (subseq text start end))))
+              (setf inside-header (and (plusp (length trimmed)) trimmed)
+                    position after)))
+          (skip-space))
+        (when (and (< position length) (char= (char text position) #\())
+          (multiple-value-bind (start end after)
+              (read-field #\( #\))
+            (unless after
+              (unclosed-header))
+            (let ((trimmed (reader-blocks-trim (subseq text start end))))
+              (setf arguments (and (plusp (length trimmed)) trimmed)
+                    position after))))
+        (skip-space)
+        (when (and (< position length) (char= (char text position) #\[))
+          (multiple-value-bind (start end after)
+              (read-field #\[ #\])
+            (unless after
+              (unclosed-header))
+            (let ((trimmed (reader-blocks-trim (subseq text start end))))
+              (setf end-header (and (plusp (length trimmed)) trimmed)
+                    position after))))
+        (let ((trailing (reader-blocks-trim (subseq text position))))
+          (when (plusp (length trailing))
+            (setf end-header
+                  (reader-blocks-trim
+                   (if end-header
+                       (format nil "~A ~A" end-header trailing)
+                       trailing))
+                  position length)))
+      (values name inside-header arguments end-header)))))
 
 (defun reader-blocks-keyword-node (context start
                                            limit
@@ -528,7 +580,8 @@
   "Build a keyword or Babel-call node from parsed keyword fields."
   (let ((end (min limit after-line)))
     (if (string= key "CALL")
-        (multiple-value-bind (call arguments) (reader-blocks-call-fields value)
+        (multiple-value-bind (call inside-header arguments end-header)
+            (reader-blocks-call-fields value)
           (make-reader-node context
                             :babel-call
                             :begin
@@ -539,11 +592,11 @@
                             (list :call
                                   call
                                   :inside-header
-                                  nil
+                                  inside-header
                                   :arguments
                                   arguments
                                   :end-header
-                                  nil)
+                                  end-header)
                             :depth
                             depth))
         (make-reader-node context

@@ -1,7 +1,9 @@
-# Babel headers and noweb
+# Babel
 
-The Babel APIs resolve source block parameters and expand noweb references from an Org document.
-They do not execute source blocks; callers supply executable results through a result resolver.
+The Babel APIs resolve headers and variables, expand noweb references, execute
+blocks through registered executors, return result updates as edit results, and
+build tangle write plans. They do not start external processes or apply tangle
+plans; callers choose the executors and when to apply plans.
 
 ## Example document and source block
 
@@ -71,6 +73,9 @@ The `+` suffix appends a property value to its layer.
 | Result channel | `output`, `value` |
 
 Choose at most one value from each group. A later value replaces only an earlier value from the same group.
+Header resolution preserves this option set. `update-babel-results` supports a
+defined subset of formats and operations; it signals an error for parsed options
+that its writer does not support.
 For HTML, GFM, and ASCII export, `:exports` controls the source block and its results:
 
 | `:exports` value | Rendered content |
@@ -205,3 +210,94 @@ Depth and cumulative expanded-character ceilings signal `org-kit:org-resource-li
 
 See [Resource limits](../reference/node-model.md#resource-limits) for the Babel ceilings.
 See [API stability](../reference/api-stability.md) for the public API policy.
+
+## Executing source blocks and calls
+
+`org-kit:register-babel-executor` registers an executor in a caller-owned
+`org-kit:callback-registry` under the `:babel-executor` kind and a language
+name. No executor is registered by default. The executor receives the expanded
+body, the resolved header-parameter alist, and the resolved variable alist.
+Parameter keys are uppercase strings, and `"SESSION"` carries the session
+identifier. The executor owns any state associated with that identifier.
+
+```lisp
+(defparameter *babel-executors* (org-kit:make-callback-registry))
+
+(org-kit:register-babel-executor
+ *babel-executors* "shell"
+ (lambda (body parameters variables)
+   (declare (ignore parameters variables))
+   (funcall *caller-shell-runner* body)))
+```
+
+The Common Lisp reference executor evaluates source-block code in the current
+Lisp process, so register it only for trusted documents. A custom executor may
+also evaluate or pass block bodies to another program; its caller decides which
+documents it may process.
+
+`org-kit:execute-babel-source-block` runs a source block through its registered
+executor and returns an `org-kit:babel-execution-result`. Its status is
+`:executed`, `:cached`, `:skipped`, or `:cancelled`. Executed results include
+the raw value, the cache hash when enabled, and an `edit-result` for the
+`#+RESULTS` update. A skipped, cancelled, or cached result leaves the document
+unchanged.
+
+Pass `:evaluation-context :export` when preparing an export. `:eval no` and
+`:eval never` skip execution; `:eval no-export` skips only in export context.
+For `:eval query`, pass a `:confirmation-function` that receives the block and
+its effective parameters. A missing confirmation function signals
+`org-kit:org-babel-error` with reason `:confirmation-required`.
+
+For `:cache yes`, pass a `:hash-function` that accepts the expanded body,
+effective parameters, and resolved variable values, and returns a string. A
+matching hash on the adjacent `#+RESULTS[hash]` line skips execution. The hash
+identifies inputs for cache invalidation; it is not an integrity check. Inline
+calls have no persistent `#+RESULTS` line, so they run on each request.
+
+`org-kit:execute-babel-call` accepts a `#+CALL` or inline-call node. It resolves
+named blocks in the current document first, then searches the supplied
+`:library-documents` in order. Those documents are parsed by the caller; the
+library does not load files. Call arguments and call-site headers override the
+target block's matching variable and parameter values.
+
+`org-kit:update-babel-results` formats a supplied raw value and returns an
+`edit-result`. It does not change the document object. The `output` mode accepts
+only string values. Result formatting supports the requested `value` and
+`output` modes, `table`, `list`, `verbatim`,
+`raw`, `drawer`, `org`, `html`, and `code` formats, and `replace`, `append`,
+`prepend`, and `silent` operations. Unsupported result instructions signal
+`org-kit:org-babel-error` instead of being ignored.
+
+## Tangling
+
+`org-kit:babel-tangle` returns an `org-kit:write-plan`. It groups blocks by
+their `:tangle` path in document order and applies `:mkdirp`, `:comments`,
+`:shebang`, `:padline`, and `:tangle-mode`. `:tangle yes` derives the output
+name from the document source name and block language. `:target-file` supplies
+the default path when `:tangle` is absent from generic or language-specific
+properties, heading properties, and the source block header or switches. An
+explicit `:tangle` value at any of those levels, including `:tangle no`, takes
+precedence. `:language-regexp` filters blocks by language. Every plan
+path is relative to the root later passed to `org-kit:apply-write-plan`; an
+absolute path or parent component signals `org-kit:org-write-plan-error` while
+the plan is built.
+
+```lisp
+(defparameter *tangle-plan*
+  (org-kit:babel-tangle *babel-document*))
+
+;; Apply only after choosing a destination root.
+(org-kit:apply-write-plan *tangle-plan* *destination-root*)
+```
+
+Tangling never writes files. It uses `org-kit:expand-babel-noweb` with the
+`:tangle` context. `:comment-renderer` receives `(block kind target-path)`,
+where `kind` is `:link` or `:org`. For `:link`, it returns the before-body and
+after-body strings as two values. For `:org`, it returns the before-body string.
+`:comments no` requests no comment renderer; `yes`, `link`, and `noweb` request
+`:link`; `org` requests `:org`; and `both` requests `:org` followed by `:link`.
+The library has no built-in comment renderer, so every requested comment mode
+requires `:comment-renderer`. `:variable-renderer` receives
+`(block resolved-variable-alist)` and is required for blocks with `:var`.
+Tangle content and result formatting enforce the document's Babel and
+write-plan limits before constructing output strings.

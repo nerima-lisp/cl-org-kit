@@ -10,6 +10,8 @@
   (active-blocks (make-hash-table :test #'eq))
   (expanded-characters 0))
 
+(defvar *babel-noweb-root-parameters* nil)
+
 (defun babel-noweb-normalize-body (body)
   (let ((length (length body)))
     (cond
@@ -79,7 +81,11 @@
                            "Unsupported Babel :noweb mode" mode)))))
 
 (defun babel-noweb-parameter (block name document)
-  (let* ((parameters (resolve-babel-parameters document block))
+  (let* ((override *babel-noweb-root-parameters*)
+         (parameters
+           (if (and override (eq block (car override)))
+               (cdr override)
+               (resolve-babel-parameters document block)))
          (position (position name parameters :key #'car :test #'string=)))
     (and position
          (babel-noweb-normalize-parameter-value
@@ -378,13 +384,15 @@
 
 (defun expand-babel-noweb (document src-block
                           &key (context nil context-supplied-p)
-                            result-resolver)
+                            result-resolver parameters)
   "Expand SRC-BLOCK's noweb references in DOCUMENT for CONTEXT.
 
-CONTEXT is :EVAL, :TANGLE, or :EXPORT. The returned source body has its final
-line ending removed, as in Org Babel. Plain references insert named source text;
-parenthesized references such as <<name()>> use RESULT-RESOLVER, called with the
-executable block name and resolved variable alist. Source code is never run here."
+CONTEXT is :EVAL, :TANGLE, or :EXPORT. PARAMETERS, when supplied, is the
+already-resolved header alist to use for SRC-BLOCK. Plain references insert
+named source text; parenthesized references such as <<name()>> use
+RESULT-RESOLVER, called with the executable block name and resolved variable
+alist. The returned body has its final line ending removed. Source code is never
+run here."
   (validate-babel-source-block document src-block)
   (unless context-supplied-p
     (setf context :eval))
@@ -404,10 +412,13 @@ executable block name and resolved variable alist. Source code is never run here
                    :context context
                    :source-blocks source-blocks
                    :reference-groups reference-groups))
-           (parameters (resolve-babel-parameters document src-block))
+           (effective-parameters (or parameters
+                                     (resolve-babel-parameters document src-block)))
            (body (babel-noweb-normalize-body
                   (or (node-property src-block :value) "")))
-           (action (babel-noweb-mode-action parameters context)))
+           (action (babel-noweb-mode-action effective-parameters context))
+           (*babel-noweb-root-parameters*
+             (and parameters (cons src-block parameters))))
       (case action
         (:preserve body)
         (:strip (babel-noweb-strip-references noweb body))

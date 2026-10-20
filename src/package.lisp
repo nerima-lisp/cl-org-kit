@@ -92,6 +92,14 @@
    #:parse-org #:write-org #:emit-org
    ;; Babel header arguments
    #:resolve-babel-parameters #:resolve-babel-variables #:expand-babel-noweb
+   #:babel-tangle #:update-babel-results
+   #:register-babel-executor
+   #:make-babel-shell-reference-executor
+   #:make-babel-common-lisp-reference-executor
+   #:execute-babel-source-block #:execute-babel-call
+   #:babel-execution-result #:babel-execution-result-p
+   #:babel-execution-result-status #:babel-execution-result-value
+   #:babel-execution-result-hash #:babel-execution-result-edit-result
    ;; Format-preserving headline edits
    #:set-heading-todo #:set-heading-priority #:adjust-heading-priority
    #:replace-heading-title

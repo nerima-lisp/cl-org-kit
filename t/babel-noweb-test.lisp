@@ -745,3 +745,29 @@
                 :to-be t)
         (expect (null (org-kit::babel-noweb-delimiters "<<trailing >>" 0))
                 :to-be t)))))
+
+(describe "Babel noweb effective parameters"
+  (it "uses caller-merged noweb settings for the source block"
+    (let* ((document
+             (parse-org
+              (babel-noweb-test-lines
+               "#+NAME: fragment"
+               "#+BEGIN_SRC text"
+               "first"
+               "second"
+               "#+END_SRC"
+               ""
+               "#+NAME: consumer"
+               "#+BEGIN_SRC text :noweb no"
+               "  <<fragment>>"
+               "#+END_SRC")))
+           (block (babel-noweb-test-named-src-block document "consumer"))
+           (parameters (resolve-babel-parameters document block))
+           (effective
+             (org-kit::babel-merge-header-parameter
+              (org-kit::babel-merge-header-parameter parameters "NOWEB" "yes")
+              "NOWEB-PREFIX" "no")))
+      (expect (expand-babel-noweb document block
+                                  :context :eval
+                                  :parameters effective)
+              :to-equal (babel-noweb-test-lines "  first" "second")))))

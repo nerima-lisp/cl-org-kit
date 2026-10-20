@@ -29,12 +29,27 @@ signals `org-elisp-evaluator-error` with reason `:unregistered`.
 
 A callback registered as an executor reports a timeout by signalling `org-callback-timeout-error`. The condition provides `org-callback-error-kind`, `org-callback-error-name`, and `org-callback-error-reason`; the reason defaults to `:timeout`. `invoke-callback` propagates the condition unchanged. The executor enforces its own deadline. cl-org-kit does not start a process or thread or interrupt the callback to enforce it.
 
-The same registry can supply named functions to other features. For example, a caller can register a
-Babel executor under kind `:babel-executor` and name `"python"`, then call it with
-`(org-kit:invoke-callback registry :babel-executor "python" source)`. `register-callback` folds kinds
-to uppercase and names to lowercase. Registering the same kind and name again replaces the earlier
-function. Registry operations are not thread-safe. Callers must synchronize access when multiple
-threads register or invoke callbacks through the same registry.
+The same registry can supply named functions to other features. A Babel executor
+receives the expanded body, resolved parameter alist, and resolved variable
+alist:
+
+```lisp
+(let ((registry (org-kit:make-callback-registry))
+      (body "print(1)")
+      (parameters nil)
+      (variables nil))
+  (org-kit:register-babel-executor
+   registry "python"
+   (lambda (body parameters variables)
+     (list body parameters variables)))
+  (org-kit:invoke-callback
+   registry :babel-executor "python" body parameters variables))
+```
+
+`register-callback` folds kinds to uppercase and names to lowercase. Registering
+the same kind and name again replaces the earlier function. Registry operations
+are not thread-safe. Callers must synchronize access when multiple threads
+register or invoke callbacks through the same registry.
 
 ## Build and inspect a write plan
 
@@ -52,9 +67,10 @@ a later operation fails.
 
 `write-plan-entry-mode` reports `#o644` when `:mode` is omitted. Applying an
 entry also tracks whether the caller supplied `:mode`. If `:mode` is omitted,
-apply preserves an existing regular file's mode and uses `#o644` for a new file.
-If `:mode` is supplied, apply sets that mode exactly, regardless of the process
-umask.
+apply preserves an existing regular file's `rwx` bits and uses `#o644` for a new
+file. A supplied `:mode` may range from `#o0000` through `#o777`; special
+permission bits are rejected. Apply sets supplied bits exactly, regardless of
+the process umask.
 
 Set `:create-directories-p t` when applying the plan may need to create missing
 parent directories.
@@ -95,12 +111,13 @@ directory target or another special file is rejected.
 
 ## Validation and limits
 
-Before creating directories or files, `apply-write-plan` checks every path, duplicate paths,
-target types, entry count, and total content size. It rejects absolute paths, any `..` component,
-duplicate normalized paths, file-and-parent conflicts, and existing symlinks in each path component
-below `output-root`, including the target. Paths that differ only by letter case are also treated as
-duplicates, which reduces aliases on case-insensitive filesystems. A plan rejected during this
-initial full preflight creates no directories or target files.
+Before creating directories or files, `apply-write-plan` checks every path,
+duplicate path, target type, entry count, and total content size. It rejects
+absolute paths, any `..` component, duplicate normalized paths, file-and-parent
+conflicts, and existing symlinks in each path component below `output-root`,
+including the target. Paths that differ only by letter case are also treated as
+duplicates, which reduces aliases on case-insensitive filesystems. A plan
+rejected during this full preflight creates no directories or target files.
 
 `make-limits` accepts `:max-write-plan-entries`, `:max-write-plan-bytes`,
 `:max-write-plan-path-bytes`, and `:max-write-plan-path-depth`. The content-byte
@@ -111,31 +128,31 @@ are checked before normalization. Their defaults are 4096 bytes and 128
 components. Exceeding any limit signals `org-resource-limit-error` before
 filesystem changes.
 
-During application, the library opens the resolved output root and walks each parent component
-with `openat` using `O_DIRECTORY | O_NOFOLLOW`. It creates missing parent directories with
-`mkdirat`, then keeps the final parent descriptor while it creates a same-directory temporary file
-with `openat` using `O_CREAT`, `O_EXCL`, and `O_NOFOLLOW`. It sets the file mode, calls `fsync`, and
-uses `renameat` relative to that parent descriptor to replace the target atomically on the same
-filesystem. Filesystem operation failures usually signal `org-write-plan-error` with reason
-`:io-failed`; `org-kit:org-write-plan-error-cause` returns the underlying condition when available.
-If a parent disappears after preflight and directory creation is disabled, the reason is
-`:missing-parent-directory`. A plan with multiple files is not transactional: a failure while
-applying a later entry can leave earlier entries applied.
+After preflight succeeds, the library opens the resolved output root and walks
+each parent component with `openat` using `O_DIRECTORY | O_NOFOLLOW`. It creates
+missing parent directories with `mkdirat`, then creates a same-directory
+temporary file with `openat` using `O_CREAT`, `O_EXCL`, and `O_NOFOLLOW`. It sets
+the file mode, calls `fsync`, and uses `renameat` relative to the held parent
+descriptor to replace the target atomically on the same filesystem.
 
-The final parent descriptor keeps file creation and rename attached to the
-directory opened for that entry. After each write, the library opens the parent
-path again from the root descriptor and compares its device and inode with the
-descriptor used for the write. If they differ or the path cannot be reopened,
-it signals `org-write-plan-error` with reason `:containment-lost` and stops
-before applying later entries.
+Before writing an entry, a missing parent with directory creation disabled
+signals `org-write-plan-error` with reason `:missing-parent-directory`.
 
-The check catches a missing or different parent at the re-open. A path restored
-before that check is not detected, and a rename can still happen during a write
-or after the check. Callers must ensure that no other actor can rename or
-replace path components while the plan is applied. The library rejects absolute
-paths, `..`, NUL, and symlink components; those checks
-do not remove the concurrent-rename trust boundary. A concurrent rename can
-move an already-written file.
+After each write, the library opens the parent path again from the root
+descriptor and compares its device and inode with the descriptor used for the
+write. If they differ or the path cannot be reopened, it signals
+`org-write-plan-error` with reason `:containment-lost` and stops before applying
+later entries. Other filesystem failures usually signal `:io-failed`, with the
+underlying condition available from
+`org-kit:org-write-plan-error-cause`. A plan with multiple files is not
+transactional, so a later failure can leave earlier entries applied.
+
+The parent check catches a path that is missing or different when it is opened
+again. It does not detect a path restored before that check, or a rename during
+or after the write. Callers must prevent other actors from renaming or
+replacing path components while the plan is applied. Absolute paths, `..`, NUL,
+and symlinks are rejected, but concurrent renames can still move an
+already-written file.
 
 Preflight conflict keys are case-folded and normalized to NFC, so canonically
 equivalent spellings of a path are treated as duplicates. Filesystem operations

@@ -519,4 +519,54 @@
         (expect (node-property example :value)
                 :to-equal
                 (format nil ",#~%")))))
-)
+
+  (it "parses standard #+CALL fields, empty end headers, and unclosed delimiters"
+    (let* ((source
+             "#+CALL: combine[:var first=1](2, (list 3 4), \"literal (pair)\")[:results output]")
+           (document (parse-org source))
+           (call (first (reader-blocks-test-elements document :babel-call))))
+      (with-soft-assertions
+        (expect (node-property call :call) :to-equal "combine")
+        (expect (node-property call :inside-header)
+                :to-equal
+                ":var first=1")
+        (expect (node-property call :arguments)
+                :to-equal
+                "2, (list 3 4), \"literal (pair)\"")
+        (expect (node-property call :end-header)
+                :to-equal
+                ":results output")
+        (expect
+         (multiple-value-list
+          (org-kit::reader-blocks-call-fields
+           (subseq source (length "#+CALL: "))))
+         :to-equal
+         (list "combine"
+               ":var first=1"
+               "2, (list 3 4), \"literal (pair)\""
+               ":results output"))
+        (expect
+         (multiple-value-list
+          (org-kit::reader-blocks-call-fields
+           "combine[:var value=1](2)[]"))
+         :to-equal
+         (list "combine" ":var value=1" "2" nil))
+        (expect
+         (multiple-value-list
+          (org-kit::reader-blocks-call-fields "broken[inside"))
+         :to-equal
+         (list "broken" nil nil "[inside"))
+        (expect
+         (multiple-value-list
+          (org-kit::reader-blocks-call-fields "broken (2, (list 3 4)"))
+         :to-equal
+         (list "broken" nil nil " (2, (list 3 4)"))
+        (expect
+         (multiple-value-list
+          (org-kit::reader-blocks-call-fields
+           "broken[:var first=1](2)[unfinished"))
+         :to-equal
+         (list "broken" nil nil "[:var first=1](2)[unfinished"))
+        (expect (emit-org (document-root document))
+                :to-equal
+                source)))))
