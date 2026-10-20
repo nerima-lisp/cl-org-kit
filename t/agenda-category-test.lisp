@@ -69,4 +69,22 @@
              (agenda-result-entries
               (agenda (list document) date date :time-context context))))
       (expect (mapcar (function agenda-entry-category) entries)
-              :to-equal (list "Project")))))
+              :to-equal (list "Project"))))
+  (it "uses programmatic heading categories and honors explicit overrides"
+  (let* ((document
+           (parse-org
+            (format nil "#+CATEGORY: DocumentCategory~%* Parent~%** Child")))
+         (parent (agenda-category-test-heading document "Parent"))
+         (child (agenda-category-test-heading document "Child")))
+    (setf (node-property parent :CATEGORY) "ProgrammaticParent")
+    (with-soft-assertions
+      (expect (org-kit::agenda-heading-category document parent)
+              :to-equal "ProgrammaticParent")
+      (expect (org-kit::agenda-heading-category document child)
+              :to-equal "ProgrammaticParent")
+      (setf (node-property child :CATEGORY) "ProgrammaticChild")
+      (expect (org-kit::agenda-heading-category document child)
+              :to-equal "ProgrammaticChild")
+      (expect (org-kit::org-effective-category
+               document child :category-override "ContextCategory")
+              :to-equal "ContextCategory")))))
