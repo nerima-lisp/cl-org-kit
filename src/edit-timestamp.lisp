@@ -73,15 +73,6 @@
               (edit-timestamp-field-key :month endpoint) month
               (edit-timestamp-field-key :day endpoint) day))))
 
-(defun edit-timestamp-weekday-name (date)
-  (or (cdr (assoc (cl-date-kit:day-of-week date)
-                  '((:monday . "Mon") (:tuesday . "Tue")
-                    (:wednesday . "Wed") (:thursday . "Thu")
-                    (:friday . "Fri") (:saturday . "Sat")
-                    (:sunday . "Sun"))))
-      (edit-signal-error date :invalid-value
-                         "Timestamp date has no weekday name")))
-
 (defun edit-timestamp-weekday-span (source date-end close-position)
   (let ((cursor (%timestamp-skip-whitespace source date-end close-position)))
     (when (< cursor close-position)
@@ -103,23 +94,21 @@
       (unless date-end
         (edit-signal-error target :invalid-value
                            "Timestamp endpoint has no concrete date"))
-      (let* ((weekday (edit-timestamp-weekday-name date))
+      (let* ((formatted-date (edit-todo-format-point-timestamp date))
+             (weekday (edit-todo-weekday-name date))
              (year-position (1+ opening))
              (month-position (+ year-position 5))
              (day-position (+ year-position 8))
              (patches
                (list (edit-make-patch
                       year-position (+ year-position 4)
-                      (format nil "~4,'0D" (cl-date-kit:local-date-year date))
-                      target)
+                      (subseq formatted-date 0 4) target)
                      (edit-make-patch
                       month-position (+ month-position 2)
-                      (format nil "~2,'0D" (cl-date-kit:local-date-month date))
-                      target)
+                      (subseq formatted-date 5 7) target)
                      (edit-make-patch
                       day-position (+ day-position 2)
-                      (format nil "~2,'0D" (cl-date-kit:local-date-day date))
-                      target))))
+                      (subseq formatted-date 8 10) target))))
         (multiple-value-bind (weekday-start weekday-end)
             (edit-timestamp-weekday-span source date-end close-position)
           (if weekday-start
@@ -131,14 +120,13 @@
                     (append patches
                             (list (edit-make-patch
                                    date-end date-end
-                                   (concatenate
-                                    'string
-                                    (if (and (< date-end close-position)
-                                             (%timestamp-whitespace-p
-                                              (char source date-end)))
-                                        ""
-                                        " ")
-                                    weekday)
+                                   (format nil "~A~A"
+                                           (if (and (< date-end close-position)
+                                                    (%timestamp-whitespace-p
+                                                     (char source date-end)))
+                                               ""
+                                               " ")
+                                           weekday)
                                    target)))))
         patches)))))
 
