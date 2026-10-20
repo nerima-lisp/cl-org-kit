@@ -11,9 +11,9 @@ Examples require the project and its runtime dependencies on ASDF's
 configured through a `#+TODO` line, the `:todo-keywords` argument passed to
 `parse-org`, or `:todo-keywords` in the `:settings` plist passed to `parse-org`.
 Pass `nil` to remove a TODO keyword. The function returns the updated
-document; the original document remains unchanged. The edit reparses the
-document, so find the headline again in the returned document with `map-nodes`
-before making another edit, as shown in the example below.
+document; the original document remains unchanged. Each edit reparses the
+document, so use `map-nodes` to find the target headline in the returned document
+before making another edit. A headline node from the old parse cannot be reused.
 
 ~~~lisp
 (require :asdf)
@@ -57,16 +57,19 @@ argument, for example `(org-kit:adjust-heading-priority document heading :up)`;
 `:previous-direction` is a keyword option. The first adjustment of an unmarked
 heading assigns the configured default. Moving past a range endpoint removes
 the priority marker. Both priority functions return the updated document, and
-each edit reparses it. Find the target headline again in the returned document
-with `map-nodes` (as in the first example above) before making another edit; a
-headline node from the original document belongs to its old parse. To wrap from
-A to C, call
-`(org-kit:adjust-heading-priority document heading :up)`; this removes `[#A]` and
-leaves the heading unmarked. On the updated document and heading, call
-`(org-kit:adjust-heading-priority updated-document updated-heading :up :previous-direction :up)`
-to set `[#C]`. `:previous-direction` tells the second call that the first call
-cleared the marker while moving in the same direction.
-Without a matching
+each edit reparses it. To wrap from A to C with `:up`:
+
+1. Call `(org-kit:adjust-heading-priority document heading :up)`. It removes
+   `[#A]` and returns `updated-document` with the heading unmarked.
+2. Run the same `map-nodes` selection on `updated-document` to get
+   `updated-heading`. The original headline node belongs to the old parse.
+3. Call
+   `(org-kit:adjust-heading-priority updated-document updated-heading :up :previous-direction :up)`.
+   `:previous-direction` tells this call that the previous `:up` already
+   cleared the marker, so this call sets `[#C]`.
+
+To wrap from C to A, use `:down` for both calls and pass
+`:previous-direction :down` on the second. Without a matching
 `:previous-direction`, an unmarked heading starts at the configured default.
 When a directive has at least three values, its first three values must define
 a valid range and default; otherwise a priority edit or priority sort signals
@@ -146,6 +149,9 @@ off every logging setting it does not name. Its words can be `logdone`,
 TODO keyword specs such as `WAIT(w@/!)`, which replace the markers on the
 `#+TODO` line; `nil` turns all logging off.
 
+In these markers, `!` records a state change and `@` requests a note; `/`
+separates the markers for unfinished and done states.
+
 Without `LOGGING`, state-change lines follow the `#+TODO` markers. Done and
 repeat logging each come from the `:log-done` or `:log-repeat` argument given
 to `make-org-workflow-options`, and otherwise from the last `logdone`-family
@@ -158,9 +164,9 @@ As in Org, removing a TODO keyword writes no state-change line, and a
 `lognotedone` closing note is written only when no state-change line is.
 
 An unknown state, invalid heading, or conflicting edit signals
-`org-edit-error`. For `++` repeaters, a DONE transition advances the heading's
-repeating timestamps by intervals until they fall after the supplied `:at`
-time. The document's
+`org-edit-error`. For `++` repeaters, which keep the original interval cadence
+and skip missed occurrences, a DONE transition advances the heading's repeating
+timestamps until they fall after the supplied `:at` time. The document's
 `:max-future-repeats` limit caps these interval advances and defaults to 10,000.
 Set it with `:max-future-repeats` in a `make-limits` value passed as `:limits`
 to `parse-org`. Exceeding it signals `org-resource-limit-error`.
@@ -174,7 +180,6 @@ Changing a heading to a DONE state is refused with `org-edit-error` reason
 - An unfinished TODO ancestor is blocked by an earlier unfinished TODO sibling
   in an ordered parent sequence. For example, if `* Project` is ordered, an
   unfinished `** TODO Prep` before `** TODO A` blocks a target nested under A.
-  The sibling relation is between Prep and A, whose parent is Project.
 
 Put `:ORDERED: t` in the parent heading's `:PROPERTIES:` drawer to mark its child
 sequence as ordered. Put `:NOBLOCKING: t` in the target heading's drawer to skip
@@ -208,10 +213,21 @@ The result is `1`: the parent headline is blocked by its unfinished child.
 
 ## Build a TODO list and agenda
 
-Agenda calls require an explicit time context. This makes the reference time,
-time zone, and daylight-saving-time policy part of the call instead of using
-the machine's current clock. Agenda dates are date-only `org-time-value`
-objects, created with `make-org-time-value`.
+The released 0.1.0 agenda and query APIs include `agenda` for date-range
+agendas, `agenda-todo-list`, `agenda-match`, and `query-match-now`. This guide
+also covers the TODO editing, priority, and transition APIs from the released
+0.1.0 package. The agenda APIs added to this source tree after the 0.2.0
+release are not part of the released package. They include search and
+stuck-project views, sorting and category support, time grids, custom agenda
+views, and agenda text, Org, and edit output. To run those examples, use the
+working-checkout setup in [Development](../project/development.md), not the
+release-tag setup in [Getting Started](../getting-started.md).
+
+The date-range, TODO-list, and match calls below require an explicit time
+context. This makes the reference time, time zone, and daylight-saving-time
+policy part of the call instead of using the machine's current clock. Agenda
+dates are date-only `org-time-value` objects, created with
+`make-org-time-value`.
 
 ~~~lisp
 (require :asdf)
@@ -267,21 +283,19 @@ arrived and the deadline is still ahead, an agenda row is dated on the reference
 date if that date is in range.
 `:scheduled-delay` is a nonnegative integer day count. An explicit delay on the
 `SCHEDULED` timestamp, such as `--2d` (add two days), overrides that option.
-The visibility date is the source scheduled date plus the effective delay. The
-source date is the delay base; a reminder row is dated on the reference date,
-and a repeat row is dated on its occurrence date.
+The visibility date is the source scheduled date plus the effective delay.
 With zero delay, the first row is dated on the source scheduled date. With a
-positive delay, that row is omitted; after the source date is overdue and the
+positive delay, that row is omitted; after the source date has passed and the
 visibility date arrives, `agenda` adds a reminder dated on the reference date
 if that date is in range. A task scheduled for March 3 with `--2d` has a
-visibility date of March 5; with a March 4 reference date it has no row yet,
-and at a March 5 reference date its reminder row is dated March 5. A repeat row
-appears on its occurrence date once that date is visible.
-`agenda-entry-scheduled-delay-state` returns
-`:delayed` for a reminder or repeat row when the base `SCHEDULED` date is before
-the reference date and the effective delay is positive. The flag follows that
-base date, so a repeat row can be delayed even when its occurrence date is in
-the future.
+visibility date of March 5: it has no row with a March 4 reference date, and its
+reminder row is dated March 5 when the reference date reaches March 5. Repeat
+rows appear on their occurrence dates once visible.
+`agenda-entry-scheduled-delay-state` returns `:delayed` for a reminder or repeat
+row when the original `SCHEDULED` date precedes the reference date and the
+effective delay is positive, including a repeat row whose occurrence date is
+still in the future. The flag uses the source `SCHEDULED` date, not the repeat
+occurrence date. This accessor and flag are cl-org-kit metadata.
 
 `:future-repeats` can be `:all`, `:next`, or `:none`. For repeating scheduled or
 deadline entries, this setting controls repeat occurrences; the original row
@@ -294,16 +308,23 @@ not document resource limits.
 
 Use `agenda-result-entries` to read rows and `agenda-entry-headline`,
 `agenda-entry-kind`, `agenda-entry-date`, `agenda-entry-heading-path`, and the
-other `agenda-entry-*` accessors to inspect them. The matcher signature is
-`(agenda-match documents match &key time-context)`. It returns matching
-headlines in document order as `agenda-match-entry` values, with document,
-node, heading path, and source line information. Read those fields with
+other `agenda-entry-*` accessors to inspect them. `agenda-todo-list` has
+signature
+`(agenda-todo-list documents &key match time-context sorting-strategy user-defined-sorter)`.
+The matcher signature is
+`(agenda-match documents match &key time-context sorting-strategy user-defined-sorter)`.
+It returns matching headlines in document order by default as
+`agenda-match-entry` values, with document, node, heading path, and source line
+information. Read those fields with
 `agenda-match-entry-document`, `agenda-match-entry-node`,
-`agenda-match-entry-heading-path`, and `agenda-match-entry-line`. It requires
-the same explicit time context as the agenda calls. `agenda-entry-headline`
+`agenda-match-entry-heading-path`, and `agenda-match-entry-line`.
+`agenda-entry-headline`
 returns a raw headline title string, while `agenda-match-entry-node` returns a
 headline node. In the example, `node-property` with `:raw-value` reads that
 node's raw title, and `agenda-match-entry-line` returns its source line.
+
+`agenda` has signature
+`(agenda documents start-date end-date &key time-context (warning-days 14) (scheduled-delay 0) (future-repeats :all) sorting-strategy user-defined-sorter)`.
 
 `query-match-now` has the signature
 `(query-match-now document match &key time-context context)` and returns
@@ -348,16 +369,16 @@ range. `agenda-entry-habit-p` identifies such a row in
 `agenda-result-entries`; `agenda-entry-habit-consistency` returns one
 `(:date ... :status ...)` plist for each date in the inclusive agenda range. A
 heading is a habit when its `STYLE` property is `habit`.
-Dates use date-only `org-time-value` objects. Existing DONE transition log
-entries on the habit heading contribute completion dates; transitions without
-a DONE log entry do not add one. When the heading is currently done, its
-`CLOSED` timestamp also contributes a date. These dates have status
-`:completed`.
-Child-heading DONE logs and their `CLOSED` timestamps do not count. Dates before
-the first due date and through each due date are `:within-schedule`; later
-dates are `:late` until the next due date. The current `SCHEDULED` timestamp is
-the due date for its pending occurrence after the latest completion. Earlier
-due dates are reconstructed from completion dates using the repeater mode:
+Dates use date-only `org-time-value` objects. A TODO transition contributes a
+completion date only when the habit heading has a timestamped DONE state-change
+entry, such as `- State "DONE" from "TODO" [2025-01-05 Sun]`. When the heading
+is currently done, its `CLOSED` timestamp also contributes a date. These dates
+have status `:completed`; child-heading DONE logs and their `CLOSED` timestamps
+do not count. Dates before the first due date and through each due date are
+`:within-schedule`; later dates are `:late` until the next due date. The current
+`SCHEDULED` timestamp is the due date for its pending occurrence after the
+latest completion. Earlier due dates are reconstructed from completion dates
+using the repeater mode:
 
 - `.+` sets the next due date one interval after each earlier completion.
 - `+` keeps the original cadence. For each DONE log, count the later DONE logs
@@ -370,6 +391,11 @@ due dates are reconstructed from completion dates using the repeater mode:
   With the same weekly schedule and DONE dates, the January 15 completion is
   due January 22; the February 1 completion is due February 5, skipping January
   29 because it is before that completion.
+
+For a daily `.+1d` habit scheduled for January 10 with heading-local DONE logs on
+January 5 and January 9, those completions set the next due dates to January 6
+and January 10. Across January 5–10, the statuses are `:completed` on January 5
+and 9, `:within-schedule` on January 6 and 10, and `:late` on January 7 and 8.
 
 For reconstructed earlier due dates, month intervals use 30.4 days per month
 and year intervals use 365.25 days per year; the day count is rounded down.
@@ -413,5 +439,325 @@ document without an override contributes the default. Pass a limits object to
 `parse-org` to change a ceiling, for example
 `:limits (org-kit:make-limits :max-agenda-range-days 90 :max-future-repeats 500)`.
 
+### Search headings and find stuck projects
+
+`agenda-search-view` has signature
+`(agenda-search-view documents query &key sorting-strategy user-defined-sorter time-context)`.
+It searches each headline's subtree text, including the headline itself and
+descendant content, and returns matching headlines as `agenda-match-entry`
+values. The first non-whitespace character selects the mode. If it is not `+`,
+`-`, or `{`, the trimmed query is searched as one case-insensitive phrase.
+Spaces in the phrase match any run of whitespace in the subtree text. Quotes
+have no grouping role in this mode and are searched literally. Otherwise, the
+query uses Boolean mode. Separate Boolean snippets with whitespace. A
+double-quoted snippet keeps a multiword text phrase together; braces keep a
+regular expression together, including whitespace in its pattern. In Boolean
+mode, `+` marks a positive snippet and `-` marks a veto. An unprefixed snippet
+is also positive, and every positive snippet is required to match. Any matching
+negative snippet rejects the headline. `{regexp}` uses Emacs
+regular-expression syntax and matches case-insensitively. A query with only veto
+snippets matches headlines whose subtrees match none of them. In the example,
+`release` and `{notes}` must match, while `draft` must not.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(let* ((document
+         (org-kit:parse-org
+          (format nil "#+TODO: TODO | DONE~%~%* TODO Release notes~%")))
+       (entries
+         (org-kit:agenda-search-view
+          (list document) "+release -draft {notes}")))
+  (mapcar #'org-kit:agenda-match-entry-line entries))
+~~~
+
+`agenda-stuck-projects` has signature
+`(agenda-stuck-projects documents stuck-projects &key time-context sorting-strategy user-defined-sorter)`.
+It returns remaining candidates as a list of `agenda-match-entry` values. It
+takes an Org matcher and three veto criteria as a four-element list:
+`(matcher todo-veto tags-veto subtree-regexp)`. The matcher selects candidate
+headings first. The vetoes inspect each candidate's whole subtree, including its
+own heading. A candidate is removed if any heading in that subtree has an
+unfinished TODO keyword listed in `todo-veto` or an explicit tag listed in
+`tags-veto`, or if `subtree-regexp` matches the whole subtree text. The TODO
+veto `"*"` matches any unfinished TODO keyword. The tag veto `"*"` matches any
+explicit tag on the candidate or one of its descendants. A tag check uses only
+tags written on each heading; inherited tags do not trigger a veto. An empty or
+`nil` regular expression disables that veto. At least one of the three veto
+criteria must be set. Each nested candidate is checked independently against
+its own subtree, so a descendant that vetoes its parent may still be returned
+as a candidate itself.
+
+For example, this call keeps a project whose only child is already done:
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(let* ((document
+         (org-kit:parse-org
+          (format nil
+                  "#+TODO: TODO NEXT | DONE~%~%* TODO Project~%** DONE Completed work~%")))
+       (time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2025-01-01T12:00:00")
+          :zone (org-kit:make-fixed-time-zone 0))))
+  (org-kit:agenda-stuck-projects
+   (list document) '("TODO=\"TODO\"" ("NEXT") nil nil)
+   :time-context time-context))
+~~~
+
+The matcher may contain relative date terms, so `agenda-stuck-projects` needs
+the same explicit `:time-context` used by `agenda`. Its `subtree-regexp` veto is
+case-sensitive; search-view `{regexp}` terms are case-insensitive. Search and
+stuck-project views accept `:sorting-strategy` and `:user-defined-sorter`; their
+default order is document order.
+
+Search strings obey `:max-input-length` (67,108,864 characters by default).
+Stuck-project match syntax uses each source document's input-length limit.
+Regex patterns obey `:max-search-regex-length` (4,096 characters by default).
+`agenda-search-view` counts phrase and regex matching against
+`:max-search-work` (67,108,864 work units by default). Phrase and regex work is
+cumulative per document. `agenda-stuck-projects` applies the per-document limit
+to its subtree regex checks. Search and stuck-project results obey
+`:max-agenda-entries` (1,000,000 by default). With multiple documents,
+regex-length and entry-count limits use the lowest corresponding value. Search
+query length also uses the lowest input-length limit.
+
+### Sort agenda views
+
+Pass `:sorting-strategy` as an ordered proper list of supported keyword criteria to `agenda`,
+`agenda-todo-list`, `agenda-match`, `agenda-search-view`, or
+`agenda-stuck-projects`. A `nil` strategy keeps the view's default order. A
+non-`nil` strategy stably sorts a copy, so equal entries keep their prior
+relative order. Criteria are applied in list order. An improper list or an
+unsupported key signals `org-agenda-error` with reason `:invalid-option`.
+Custom view definitions accept the same keys in their `:options` plist.
+
+The supported criteria are:
+
+- Time and timestamp: `:time-up`, `:time-down`, `:timestamp-up`,
+  `:timestamp-down`, `:scheduled-up`, `:scheduled-down`, `:deadline-up`,
+  `:deadline-down`, `:ts-up`, `:ts-down`, `:tsia-up`, and `:tsia-down`.
+- Category and tags: `:category-keep`, `:category-up`, `:category-down`,
+  `:tag-up`, and `:tag-down`.
+- Heading metadata: `:priority-up`, `:priority-down`, `:urgency-up`,
+  `:urgency-down`, `:todo-state-up`, `:todo-state-down`, `:effort-up`,
+  `:effort-down`, `:habit-up`, `:habit-down`, `:alpha-up`, and `:alpha-down`.
+- Caller comparator: `:user-defined-up` and `:user-defined-down`.
+
+`:time-up` and `:time-down` compare time of day, ignoring the date. Agenda rows
+use their row timestamp; match and search entries use the first standalone clock
+time in the headline title. `:timestamp-up` and `:timestamp-down` compare dates:
+agenda rows use their row timestamp, while match and search entries use the
+heading's first available timestamp, preferring `SCHEDULED`, `DEADLINE`, active,
+then inactive. `:scheduled-up` and `:scheduled-down` compare only the heading's
+`SCHEDULED` timestamp; among agenda rows, only scheduled rows have a value.
+`:ts-up` and `:ts-down` sort by active timestamps on the heading;
+`:tsia-up` and `:tsia-down` sort by inactive timestamps.
+
+`:category-keep` stops the entire comparison for a pair with different
+categories. Later criteria are skipped for that pair, preserving its prior
+relative order.
+
+For example, sort a date-range agenda by category and then by deadline:
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(let* ((document
+         (org-kit:parse-org
+          (format nil
+                  "#+TODO: TODO | DONE~%~%* TODO Publish release~%DEADLINE: <2025-01-02 Thu>~%")))
+       (time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2025-01-01T12:00:00")
+          :zone (org-kit:make-fixed-time-zone 0)))
+       (date (org-kit:make-org-time-value "2025-01-02"))
+       (result
+         (org-kit:agenda (list document) date date
+                         :time-context time-context
+                         :sorting-strategy '(:category-up :deadline-up))))
+  (mapcar #'org-kit:agenda-entry-headline
+          (org-kit:agenda-result-entries result)))
+~~~
+
+The caller comparator takes two agenda or match entries. Return `-1` when the
+first argument sorts before the second, `1` when it sorts after, or `nil` when
+they compare equal. Pass it as `:user-defined-sorter` when the strategy includes
+`:user-defined-up` or `:user-defined-down`; the down variant reverses the
+arguments. A missing comparator or a return value other than `-1`, `1`, or
+`nil` signals `org-agenda-error` with reason `:invalid-option`. Urgency criteria
+require an explicit `:time-context`.
+
+### Categories and time grids
+
+Agenda entries expose `agenda-entry-category`. It follows Org category
+resolution: an effective `CATEGORY` property, the document's `#+CATEGORY`, the
+source file's basename, then `"???"` when none is available.
+
+`agenda-time-grid` has signature
+`(agenda-time-grid documents start-date end-date &key time-context times remove-match)`.
+It returns rows for explicit clock ticks over an inclusive range of date-only
+`org-time-value` values. By default it uses `'(800 1000 1200 1400 1600 1800 2000)`.
+Pass `:times` to choose a different list of `HHMM` integers; `2400` is also
+accepted. The function keeps the supplied order and duplicates. Its result uses
+`agenda-time-grid-row-date`, `agenda-time-grid-row-time`, and
+`agenda-time-grid-row-current-p` accessors.
+
+Pass `:time-context` to add a current-time marker using the local date and time
+at its reference instant; the function does not read the system clock. The
+marker is a separate row after that date's configured ticks. `:remove-match t`
+removes a configured tick only when both its date and `HHMM` match the start
+time of a generated agenda row with a time-of-day timestamp. Date-only and
+untimed rows do not match. This option requires `:time-context`; it does not
+remove the current-time marker.
+
+The grid uses the `:max-agenda-range-days` and `:max-agenda-entries` limits
+described above for its inclusive date span and generated rows.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(let* ((document
+         (org-kit:parse-org
+          (format nil
+                  "#+TODO: TODO | DONE~%~%* TODO Meeting~%SCHEDULED: <2025-01-01 Wed 09:00>~%")))
+       (start (org-kit:make-org-time-value "2025-01-01"))
+       (end (org-kit:make-org-time-value "2025-01-02"))
+       (rows (org-kit:agenda-time-grid
+              (list document) start end :times '(900 1200 1500))))
+  (mapcar (lambda (row)
+            (list (org-kit:org-time-value-iso8601
+                   (org-kit:agenda-time-grid-row-date row))
+                  (org-kit:agenda-time-grid-row-time row)
+                  (org-kit:agenda-time-grid-row-current-p row)))
+          rows))
+~~~
+
+### Define custom agenda views
+
+`agenda-custom` has signature
+`(agenda-custom documents definitions &key time-context callbacks)`. It
+evaluates definitions in order and returns one `agenda-custom-view` for each
+definition. Every definition is a property list
+with a unique nonempty `:key` (a string, symbol, or character) and a `:type` of
+`:agenda`, `:todo`, `:match`, or `:search`. `:description` is optional. An
+`:agenda` definition needs
+`:start-date` and `:end-date`; `:match` and `:search` definitions need their
+corresponding `:match` or `:search` string. A `:todo` definition can omit
+`:match` to include every unfinished TODO heading.
+
+Use `:options` for settings accepted by the selected view. `:agenda` accepts
+`:warning-days`, `:scheduled-delay`, and `:future-repeats`; all four view types
+accept `:sorting-strategy` and `:user-defined-sorter`. `agenda-custom-view-key`,
+`agenda-custom-view-description`, `agenda-custom-view-type`, and
+`agenda-custom-view-result` read the returned view. Agenda and TODO definitions
+contain an `agenda-result`; match and search definitions contain a list of
+`agenda-match-entry` values.
+
+The number of definitions is limited by `:max-agenda-entries` across the
+source documents.
+
+Agenda, TODO, and match definitions require the explicit `:time-context` passed
+to `agenda-custom`. A search definition uses that context when its sorting
+strategy contains an urgency criterion. A definition may wrap its `:match` or
+`:search` value as `(:elisp expression)` to evaluate it through
+`evaluate-elisp`; pass a `callback-registry` as `:callbacks` when that
+expression needs registered callbacks. The evaluated expression must return a
+string. `evaluate-elisp` passes the expression unchanged to the registered
+Emacs Lisp evaluator; the library does not parse or evaluate it. For an evaluator
+that reads Emacs Lisp source, `(:elisp "\"+release {notes}\"")` evaluates to
+the search string `+release {notes}`. See
+[Callbacks and Write Plans](callbacks-and-write-plans.md) for evaluator
+registration.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(let* ((document
+         (org-kit:parse-org
+          (format nil "#+TODO: TODO | DONE~%~%* TODO Draft release notes~%")))
+       (time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2025-01-01T12:00:00")
+          :zone (org-kit:make-fixed-time-zone 0)))
+       (views
+         (org-kit:agenda-custom
+          (list document)
+          '((:key "open" :description "Open tasks" :type :todo)
+            (:key "release" :type :search :search "+release {notes}"
+             :options (:sorting-strategy (:alpha-up))))
+          :time-context time-context)))
+  (mapcar (lambda (view)
+            (list (org-kit:agenda-custom-view-key view)
+                  (org-kit:agenda-format-text view)))
+          views))
+~~~
+
+### Format or copy agenda results
+
+`agenda-format-text` has signature `(agenda-format-text view)`. It returns
+stable plain text for an agenda result, a list of match entries, or a custom
+view. It follows Org 9.8.10's default agenda buffer layout: date headings align
+weekday and date, rows prefix the category and available time or status
+information. When a row has tags, the formatter combines its TODO keyword and
+headline title into one body, separating them with a space when both exist. If
+the body is shorter than 50 characters, padding brings it to that width before
+the tag suffix; otherwise one separator space remains. Category and
+time/status prefixes are outside the body, so they shift the tag suffix on the
+full line. Match rows have no time prefix.
+
+`agenda-to-org` has signature `(agenda-to-org view)` and returns an Org document
+containing copies of selected headings and their section bodies. Each copy runs
+through the line before its first child heading, if present, so child subtrees
+are excluded. When selected rows yield identical source fragments, the fragment
+is copied once before heading levels are normalized. Every selected heading is
+written at level 1, so selected parent and child headings remain separate. The
+fragments are concatenated without blank lines. Text outside the selected
+heading sections is omitted; keyword lines within a copied section are retained.
+Serialize the returned document with `write-org` when you need a string.
+
+`agenda-write-into` has signature
+`(agenda-write-into document view start end &key (format :text))`. It returns an
+`edit-result` that replaces the half-open, zero-based character range `[start,
+end)` in the document's source with `:text` output by default or `:org` output
+when requested.
+Use `edit-result-updated-document` to read the changed document. These APIs
+return strings, documents, or edits; they do not write files.
+
+Formatting and Org conversion enforce the contributing documents'
+`:max-agenda-entries`, `:max-output-length`, and `:max-output-octets` limits.
+The default output ceilings are 67,108,864 characters and 268,435,456 UTF-8
+bytes.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(let* ((document
+         (org-kit:parse-org
+          (format nil
+                  "#+TODO: TODO | DONE~%~%* TODO Publish release~%DEADLINE: <2025-01-02 Thu>~%")))
+       (time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2025-01-01T12:00:00")
+          :zone (org-kit:make-fixed-time-zone 0)))
+       (date (org-kit:make-org-time-value "2025-01-02"))
+       (result
+         (org-kit:agenda (list document) date date
+                         :time-context time-context))
+       (text (org-kit:agenda-format-text result))
+       (org-text
+         (org-kit:write-org (org-kit:agenda-to-org result)
+                            :output-type :string)))
+  (list text org-text))
+~~~
+
 See [Clock](clock.md) for clock aggregation and
-[API Stability](../reference/api-stability.md) for the 0.2.0 public API scope.
+[API Stability](../reference/api-stability.md), which defines the released
+0.2.0 API scope and identifies agenda APIs added after that release.

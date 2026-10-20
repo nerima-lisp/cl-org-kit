@@ -214,7 +214,7 @@
     "AGENDA-ENTRY-DATE" "AGENDA-ENTRY-KIND" "AGENDA-ENTRY-HEADLINE"
     "AGENDA-ENTRY-HEADING-PATH" "AGENDA-ENTRY-TIMESTAMP"
     "AGENDA-ENTRY-WARNING-STATE" "AGENDA-ENTRY-SCHEDULED-DELAY-STATE"
-    "AGENDA-ENTRY-TODO-STATE" "AGENDA-ENTRY-EFFECTIVE-TAGS"
+    "AGENDA-ENTRY-TODO-STATE" "AGENDA-ENTRY-EFFECTIVE-TAGS" "AGENDA-ENTRY-CATEGORY"
     "AGENDA-ENTRY-HABIT-P" "AGENDA-ENTRY-HABIT-CONSISTENCY"
     "AGENDA-ENTRY-SOURCE-NODE"
     "AGENDA-RESULT" "MAKE-AGENDA-RESULT" "AGENDA-RESULT-P"
@@ -224,7 +224,7 @@
     "AGENDA-MATCH-ENTRY-DOCUMENT" "AGENDA-MATCH-ENTRY-NODE"
     "AGENDA-MATCH-ENTRY-HEADING-PATH" "AGENDA-MATCH-ENTRY-LINE"
     "AGENDA-MATCH-ENTRY-END-LINE"
-    "AGENDA" "AGENDA-TODO-LIST" "AGENDA-MATCH"
+    "AGENDA" "AGENDA-TODO-LIST" "AGENDA-MATCH" "AGENDA-SEARCH-VIEW" "AGENDA-STUCK-PROJECTS" "AGENDA-TIME-GRID" "AGENDA-TIME-GRID-ROW" "AGENDA-TIME-GRID-ROW-P" "AGENDA-TIME-GRID-ROW-DATE" "AGENDA-TIME-GRID-ROW-TIME" "AGENDA-TIME-GRID-ROW-CURRENT-P" "AGENDA-CUSTOM" "AGENDA-CUSTOM-VIEW" "AGENDA-CUSTOM-VIEW-P" "AGENDA-CUSTOM-VIEW-KEY" "AGENDA-CUSTOM-VIEW-DESCRIPTION" "AGENDA-CUSTOM-VIEW-TYPE" "AGENDA-CUSTOM-VIEW-RESULT" "AGENDA-FORMAT-TEXT" "AGENDA-TO-ORG" "AGENDA-WRITE-INTO"
     ;; Effective Org semantics
     "EFFECTIVE-HEADING-TAGS" "EFFECTIVE-PROPERTY" "STARTUP-OPTIONS"
     ;; Org IDs
@@ -361,7 +361,11 @@ docs/src/reference/node-model.md.")
     (org-lint-diagnostic-p . org-lint-diagnostic)
     (org-lint-diagnostic-checker . org-lint-diagnostic)
     (org-lint-diagnostic-position . org-lint-diagnostic)
-    (org-lint-diagnostic-message . org-lint-diagnostic)))
+    (org-lint-diagnostic-message . org-lint-diagnostic)
+    (agenda-time-grid-row-p . agenda-time-grid-row)
+    (agenda-time-grid-row-date . agenda-time-grid-row)
+    (agenda-time-grid-row-time . agenda-time-grid-row)
+    (agenda-time-grid-row-current-p . agenda-time-grid-row)))
 
 (defun public-function-documentation (symbol)
   (or (documentation symbol 'function)

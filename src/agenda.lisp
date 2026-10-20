@@ -7,13 +7,13 @@
                          (:predicate %agenda-entry-p))
   "One normalized agenda row associated with a source headline and timestamp."
   date date-order-key kind headline heading-path timestamp warning-state
-  scheduled-delay-state todo-state effective-tags habit-p habit-consistency
-  source-node)
+  scheduled-delay-state todo-state effective-tags category habit-p
+  habit-consistency source-node)
 
 (defun make-agenda-entry (&key date kind headline heading-path timestamp
                                warning-state scheduled-delay-state todo-state
-                               effective-tags habit-p habit-consistency source-node)
-  "Return an agenda row with its date, kind, headline, and source values."
+                               effective-tags category habit-p habit-consistency source-node)
+  "Return an agenda row with its date, kind, headline, and category."
   (let ((date-order-key
           (when (and (org-time-value-p date)
                      (eq (org-time-value-kind date) :date))
@@ -27,7 +27,8 @@
                         :warning-state warning-state
                         :scheduled-delay-state scheduled-delay-state
                         :todo-state todo-state :effective-tags effective-tags
-                        :habit-p habit-p :habit-consistency habit-consistency
+                        :category category :habit-p habit-p
+                        :habit-consistency habit-consistency
                         :source-node source-node)))
 
 (defun agenda-entry-p (object)
@@ -69,6 +70,10 @@
 (defun agenda-entry-effective-tags (entry)
   "Return ENTRY's effective tags, including inherited tags."
   (%agenda-entry-effective-tags entry))
+
+(defun agenda-entry-category (entry)
+  "Return the effective Org category for ENTRY."
+  (%agenda-entry-category entry))
 
 (defun agenda-entry-habit-p (entry)
   "Return true when ENTRY's headline has the habit style."
@@ -246,7 +251,7 @@ are :LATE."
    (org-time-zone-backend (org-time-context-zone time-context))))
 
 (defun agenda-heading-data (document heading indices)
-  "Return normalized title, path, TODO state, effective tags, and habit flag."
+  "Return normalized title, path, TODO state, tags, habit flag, and category."
   (multiple-value-bind (style found-p)
       (effective-property document heading "STYLE")
     (declare (ignore found-p))
@@ -255,7 +260,8 @@ are :LATE."
             (node-property heading :todo-keyword)
             (node-property heading :todo-type)
             (effective-heading-tags document heading)
-            (and (stringp style) (string-equal style "habit")))))
+            (and (stringp style) (string-equal style "habit"))
+            (agenda-heading-category document heading))))
 
 (defun agenda-planning-node (heading)
   "Return HEADING's planning child, if present."
@@ -469,13 +475,18 @@ are :LATE."
                             current amount unit time-context)))
     (nreverse dates)))
 
-(defun agenda-habit-repeat-days (view)
-  (floor (* (org-timestamp-view-repeater-amount view)
-            (ecase (org-timestamp-view-repeater-unit view)
+(defun agenda-habit-duration-days (amount unit)
+  (floor (* amount
+            (ecase unit
               (:day 1)
               (:week 7)
               (:month 30.4)
               (:year 365.25)))))
+
+(defun agenda-habit-repeat-days (view)
+  (agenda-habit-duration-days
+   (org-timestamp-view-repeater-amount view)
+   (org-timestamp-view-repeater-unit view)))
 
 (defun agenda-habit-next-due-ordinal
     (completion-ordinal view scheduled-ordinal later-completion-count previous-due)
@@ -592,8 +603,10 @@ are :LATE."
           (agenda-time-value-date (or (org-timestamp-view-end view)
                                       (org-timestamp-view-start view)))))
 
-(defun agenda-match (documents match &key time-context)
-  "Return matched headlines in document order using an explicit TIME-CONTEXT."
+(defun agenda-match (documents match
+                     &key time-context sorting-strategy user-defined-sorter)
+  "Return matched headlines in document order using an explicit TIME-CONTEXT.
+SORTING-STRATEGY may override source order with Org agenda sort keys."
   (let* ((documents (agenda-normalize-documents documents))
          (time-context (agenda-require-time-context time-context))
          (limits (agenda-operation-limits documents))
@@ -613,7 +626,9 @@ are :LATE."
                    :heading-path (node-heading-path-with-indices node indices)
                    :line line :end-line end-line)
                   matches)))))
-    (nreverse matches)))
+    (agenda-sort-view-entries (nreverse matches) sorting-strategy
+                              :user-defined-sorter user-defined-sorter
+                              :time-context time-context)))
 
 (defstruct (agenda-build-state (:constructor %make-agenda-build-state))
   limits entry-count repeat-count entries)
@@ -828,7 +843,7 @@ after the later of VIEW's date and the reference date."
                                       view warning-state scheduled-delay-state
                                       source-node)
   "Build one normalized row using precomputed HEADING-DATA."
-  (destructuring-bind (headline path todo-state todo-type tags habit-p
+  (destructuring-bind (headline path todo-state todo-type tags habit-p category
                        &optional habit-consistency)
       heading-data
     (declare (ignore todo-type))
@@ -842,6 +857,7 @@ after the later of VIEW's date and the reference date."
      :scheduled-delay-state scheduled-delay-state
      :todo-state todo-state
      :effective-tags tags
+     :category category
      :habit-p (and (eq kind :scheduled) habit-p)
      :habit-consistency (and (eq kind :scheduled) habit-p habit-consistency)
      :source-node source-node)))
@@ -1028,11 +1044,13 @@ after the later of VIEW's date and the reference date."
                &key time-context callback-registry
                  (warning-days 14)
                  (scheduled-delay 0)
-                 (future-repeats :all))
+                 (future-repeats :all)
+                 sorting-strategy user-defined-sorter)
   "Return agenda rows for inclusive START-DATE through END-DATE.
 TIME-CONTEXT is required and is the only source of reference time. For unknown
 diary forms, CALLBACK-REGISTRY supplies the Emacs Lisp evaluator; an empty
-registry is used when it is omitted."
+registry is used when it is omitted. SORTING-STRATEGY may override the existing
+date and kind order."
   (let* ((documents (agenda-normalize-documents documents))
          (time-context (agenda-require-time-context time-context))
          (start-date (agenda-require-date start-date))
@@ -1101,14 +1119,21 @@ registry is used when it is omitted."
                start-local end-local future-repeats time-context)))
           (agenda-add-diary-rows state document-diary-sources
                                  start-local end-local callback-registry)))
-      (make-agenda-result
-       :entries (agenda-sort-entries
-                 (nreverse (agenda-build-state-entries state)))
-       :start-date start-date :end-date end-date :time-context time-context))))
+      (let ((entries (agenda-sort-entries
+                      (nreverse (agenda-build-state-entries state)))))
+        (make-agenda-result
+         :entries (agenda-sort-view-entries
+                   entries sorting-strategy
+                   :user-defined-sorter user-defined-sorter
+                   :time-context time-context)
+         :start-date start-date :end-date end-date :time-context time-context)))))
 
-(defun agenda-todo-list (documents &key match time-context)
-  "Return all non-DONE TODO headlines in document order.
-MATCH uses the existing Org match syntax; TIME-CONTEXT is required."
+(defun agenda-todo-list (documents
+                         &key match time-context sorting-strategy
+                           user-defined-sorter)
+  "Return non-DONE TODO headlines in document order.
+MATCH uses Org match syntax and TIME-CONTEXT is required. SORTING-STRATEGY
+may override source order."
   (let* ((documents (agenda-normalize-documents documents))
          (time-context (agenda-require-time-context time-context))
          (limits (agenda-operation-limits documents))
@@ -1135,6 +1160,11 @@ MATCH uses the existing Org match syntax; TIME-CONTEXT is required."
                         (multiple-value-list
                          (agenda-heading-data document heading indices))
                         :todo nil nil nil nil heading))))))))
-    (make-agenda-result :entries (nreverse (agenda-build-state-entries state))
-                        :start-date nil :end-date nil
-                        :time-context time-context)))
+    (make-agenda-result
+     :entries (agenda-sort-view-entries
+               (nreverse (agenda-build-state-entries state))
+               sorting-strategy
+               :user-defined-sorter user-defined-sorter
+               :time-context time-context)
+     :start-date nil :end-date nil
+     :time-context time-context)))

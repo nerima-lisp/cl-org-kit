@@ -95,6 +95,7 @@
                (:file "clocktable")
                (:file "dynamic-blocks")
                (:file "columnview")
+               (:file "agenda-category")
                (:file "edit-clocktable")
                ;; F agenda
                ;; Unit E1 export core
@@ -122,7 +123,12 @@
                (:file "lint-document-a")
                (:file "lint-document-b")
                (:file "lint-context")
-)
+               (:file "agenda-sort")
+               (:file "agenda-search-view")
+               (:file "agenda-stuck-projects")
+               (:file "agenda-time-grid")
+               (:file "agenda-custom")
+               (:file "agenda-write"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -225,6 +231,13 @@
                (:file "columnview-test")
                (:file "edit-todo-state-test")
                (:file "agenda-test")
+               (:file "agenda-category-test")
+               (:file "agenda-sort-test")
+               (:file "agenda-search-view-test")
+               (:file "agenda-stuck-projects-test")
+               (:file "agenda-time-grid-test")
+               (:file "agenda-custom-test")
+               (:file "agenda-write-test")
                ;; Unit E1 export core
                (:file "clocktable-test")
                (:file "export-core-test")
@@ -241,8 +254,7 @@
                (:file "lint-document-a-test")
                (:file "lint-document-b-test")
                (:file "lint-context-test")
-               (:file "crypt-test")
-)
+               (:file "crypt-test"))
   :perform (test-op (operation component)
              (declare (ignore operation component))
              (unless (uiop:symbol-call :cl-org-kit/test :run-tests)
