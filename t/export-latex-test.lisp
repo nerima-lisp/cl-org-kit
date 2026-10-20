@@ -1525,7 +1525,7 @@
               (expect inline-node :not :to-be nil)
               (when inline-node
                 (expect (node-post-blank inline-node) :to-be 2)
-                (expect (search "OVERRIDE   after." output)
+                (expect (search "OVERRIDE    after." output)
                         :not :to-be nil)
                 (expect (search "OVERRIDE after." output) :to-be nil))))
         (when registered-p
