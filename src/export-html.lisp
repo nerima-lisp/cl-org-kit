@@ -262,9 +262,21 @@
   state)
 
 (defun export-html-escape-to-output-range (state context text start end)
-  (unless (member context '(:text :attribute) :test #'eq)
+  (unless (or (eq context :text) (eq context :attribute))
     (export-error :html :invalid-escape-context nil
                   "Unknown HTML escaping context"))
+  (when (= start end)
+    (return-from export-html-escape-to-output-range state))
+  (unless
+      (loop for position from start below end
+            for character = (char text position)
+            thereis (or (char= character #\&)
+                        (char= character #\<)
+                        (char= character #\>)
+                        (and (eq context :attribute)
+                             (char= character #\"))))
+    (return-from export-html-escape-to-output-range
+      (export-html-write-range state text start end)))
   (let ((run-start start))
     (loop for position from start below end
           for character = (char text position)
@@ -286,7 +298,7 @@
                (setf run-start (1+ position))
           finally (when (< run-start end)
                     (export-html-write-range state text run-start end)))
-  state))
+    state))
 
 (defun export-html-escape-to-output (state context text)
   (export-html-escape-to-output-range state context text 0 (length text)))
