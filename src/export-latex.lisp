@@ -1036,6 +1036,8 @@
            (and (eq (export-render-context-backend context) :latex)
                 (= (length ancestry) 1)
                 (null (org-kit::%export-backend-descriptor-filters
+                       (first ancestry)))
+                (null (org-kit::%export-backend-descriptor-link-type-handlers
                        (first ancestry))))))
     (if legacy-path-p
         (let ((legacy-state
