@@ -499,23 +499,33 @@
                 :to-equal
                 ""))))
 
-  (it "parses empty fixed-width content and Babel-call arguments"
+  (it "parses empty fixed-width content and Babel-call headers"
     (let* ((fixed-document (parse-org ":"))
            (fixed-width
             (first
              (reader-blocks-test-elements fixed-document :fixed-width)))
            (call-document (parse-org "#+CALL: foo(bar)"))
            (call (first (reader-blocks-test-elements call-document :babel-call)))
+           (header-call-document
+            (parse-org "#+CALL: foo[:inside](bar) :outside"))
+           (header-call
+            (first
+             (reader-blocks-test-elements header-call-document :babel-call)))
+           (malformed-call (first (reader-blocks-test-elements (parse-org "#+CALL: foo[:inside") :babel-call)))
            (example-document
             (parse-org
              (reader-blocks-test-lines "#+BEGIN_EXAMPLE" ",#" "#+END_EXAMPLE")))
            (example
-            (first
-             (reader-blocks-test-elements example-document :example-block))))
+            (first (reader-blocks-test-elements example-document :example-block))))
       (with-soft-assertions
         (expect (node-property fixed-width :value) :to-equal "")
         (expect (node-property call :call) :to-equal "foo")
         (expect (node-property call :arguments) :to-equal "bar")
+        (expect (node-property header-call :call) :to-equal "foo")
+        (expect (node-property header-call :inside-header) :to-equal ":inside")
+        (expect (node-property header-call :arguments) :to-equal "bar")
+        (expect (node-property header-call :end-header) :to-equal ":outside")
+        (expect (node-property malformed-call :end-header) :to-equal "[:inside")
         (expect (node-property example :value)
                 :to-equal
                 (format nil ",#~%")))))

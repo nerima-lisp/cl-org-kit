@@ -25,7 +25,7 @@
     ("wrong-header-argument" nil :dependency-wait (:babel-header-arguments))
     ("wrong-header-value" nil :dependency-wait (:babel-header-arguments))
     ("named-result" nil :dependency-wait (:babel-header-arguments))
-    ("empty-header-argument" nil :dependency-wait (:babel-header-arguments))
+    ("empty-header-argument" %lint-empty-header-argument :document-only nil)
     ("deprecated-category-setup" %lint-deprecated-category-setup :document-only nil)
     ("invalid-coderef-link" %lint-invalid-coderef-link :document-only nil)
     ("invalid-custom-id-link" %lint-invalid-custom-id-link :document-only nil)

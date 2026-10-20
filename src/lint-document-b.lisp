@@ -719,3 +719,91 @@
                 reports)))))))
     (nreverse reports)))
 
+(defun %lint-b-affiliated-header-values (document node)
+  (let ((begin (node-begin node))
+        (end (node-post-affiliated node))
+        (headers nil))
+    (when (and begin end (< begin end))
+      (%lint-b-lines
+       document
+       (lambda (line-start line-end line)
+         (declare (ignore line-end))
+         (when (and (<= begin line-start) (< line-start end))
+           (let ((colon (position #\: line :start 2)))
+             (when (and colon
+                        (member
+                         (string-trim '(#\Space #\Tab)
+                                      (subseq line 2 colon))
+                         '("HEADER" "HEADERS")
+                         :test #'string-equal))
+               (push (subseq line (1+ colon)) headers)))))))
+    (nreverse headers)))
+
+(defun %lint-empty-header-argument (document context)
+  (declare (ignore context))
+  (labels ((org-header-whitespace-p (character)
+             (or (babel-whitespace-p character)
+                 (char= character #\Page)
+                 (let ((vertical-tab (code-char 11)))
+                   (and vertical-tab (char= character vertical-tab)))))
+           (trim-org-header-whitespace (text)
+             (let ((start (position-if-not #'org-header-whitespace-p text))
+                   (end (position-if-not #'org-header-whitespace-p text
+                                          :from-end t)))
+               (if start (subseq text start (1+ end)) ""))))
+    (let ((reports nil))
+      (loop for node in (%lint-nodes document)
+            for type = (node-type node)
+            for headers =
+              (case type
+                (:src-block
+                 (append
+                  (remove-if-not (function stringp)
+                                 (list (node-property node :parameters)
+                                       (node-property node :switches)))
+                  (%lint-b-affiliated-header-values document node)))
+                (:inline-src-block
+                 (list (node-property node :parameters)))
+                ((:babel-call :inline-babel-call)
+                 (list (node-property node :inside-header)
+                       (node-property node :end-header))))
+            do (loop for header in headers
+                     when (stringp header)
+                       do (let ((starts (babel-header-argument-starts header)))
+                            (loop for argument
+                                    in (babel-parse-header-arguments header)
+                                  for (start . name-end) in starts
+                                  for next-entry
+                                    in (append (cdr starts) (list nil))
+                                  for raw-value =
+                                    (subseq header name-end
+                                            (if next-entry
+                                                (car next-entry)
+                                                (length header)))
+                                  for suffix =
+                                    (trim-org-header-whitespace raw-value)
+                                  for equals-token-p =
+                                    (and (plusp (length raw-value))
+                                         (char= (char raw-value 0) #\=)
+                                         (notany #'org-header-whitespace-p
+                                                 suffix))
+                                  for name =
+                                    (if equals-token-p
+                                        (concatenate
+                                         'string
+                                         (subseq header start name-end)
+                                         suffix)
+                                        (subseq header start name-end))
+                                  when (or (null (cdr argument))
+                                           equals-token-p)
+                                    do (push
+                                        (%lint-report
+                                         document "empty-header-argument"
+                                         (or (node-post-affiliated node)
+                                             (node-begin node))
+                                         (format nil
+                                                 "Empty value in header argument \"~A\""
+                                                 name))
+                                        reports)))))
+      (nreverse reports))))
+

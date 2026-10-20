@@ -509,66 +509,44 @@
      (min limit after-line))))
 
 (defun reader-blocks-call-fields (value)
-  "Return a CALL name, inside header, arguments, and end header."
-  (let* ((text (reader-blocks-trim value))
-         (length (length text))
-         (name-end (position-if (lambda (character)
-                                  (find character "[]()"))
-                                text))
-         (name (reader-blocks-trim
-                (subseq text 0 (or name-end length))))
-         (position (or name-end length))
+  "Return a Babel call name, headers, and argument source text."
+  (let* ((limit (length value))
+         (opening
+           (position-if
+            (lambda (character)
+              (find character "[]()"))
+            value))
+         (name (reader-blocks-trim (subseq value 0 (or opening limit))))
+         (position (or opening limit))
          (inside-header nil)
          (arguments nil)
          (end-header nil))
-    (labels ((skip-space ()
-                         (loop while (and (< position length)
-                                          (member (char text position)
-                                                  (list #\Space #\Tab)))
-                               do (incf position)))
-             (read-field (open close)
-                         (other-object-paired-span text position length open close))
-             (unclosed-header ()
-                              (return-from reader-blocks-call-fields
-                                           (values name nil nil (subseq text (length name))))))
-      (when (zerop (length name))
-        (return-from reader-blocks-call-fields (values text nil nil nil)))
-      (when name-end
-        (skip-space)
-        (when (char= (char text position) #\[)
-          (multiple-value-bind (start end after)
-              (read-field #\[ #\])
-            (unless after
-              (unclosed-header))
-            (let ((trimmed (reader-blocks-trim (subseq text start end))))
-              (setf inside-header (and (plusp (length trimmed)) trimmed)
-                    position after)))
-          (skip-space))
-        (when (and (< position length) (char= (char text position) #\())
-          (multiple-value-bind (start end after)
-              (read-field #\( #\))
-            (unless after
-              (unclosed-header))
-            (let ((trimmed (reader-blocks-trim (subseq text start end))))
-              (setf arguments (and (plusp (length trimmed)) trimmed)
-                    position after))))
-        (skip-space)
-        (when (and (< position length) (char= (char text position) #\[))
-          (multiple-value-bind (start end after)
-              (read-field #\[ #\])
-            (unless after
-              (unclosed-header))
-            (let ((trimmed (reader-blocks-trim (subseq text start end))))
-              (setf end-header (and (plusp (length trimmed)) trimmed)
-                    position after))))
-        (let ((trailing (reader-blocks-trim (subseq text position))))
-          (when (plusp (length trailing))
-            (setf end-header
+    (when (and (< position limit)
+               (char= (char value position) #\[))
+      (multiple-value-bind (contents-begin contents-end after)
+          (other-object-paired-span value position limit #\[ #\])
+        (unless after
+          ;; Org keeps unmatched header text in :end-header.
+          (return-from reader-blocks-call-fields (values name nil nil (subseq value position))))
+        (setf inside-header
+              (other-object-normalize-header value contents-begin contents-end)
+              position after)))
+    (when (and (< position limit)
+               (char= (char value position) #\())
+      (multiple-value-bind (contents-begin contents-end after)
+          (other-object-paired-span value position limit #\( #\))
+        (when after
+          (let ((text
                   (reader-blocks-trim
-                   (if end-header
-                       (format nil "~A ~A" end-header trailing)
-                     trailing))
-                  position length)))) (values name inside-header arguments end-header))))
+                   (subseq value contents-begin contents-end))))
+            (when (plusp (length text))
+              (setf arguments text))
+            (setf position after)))))
+    (when (< position limit)
+      (let ((text (reader-blocks-trim (subseq value position))))
+        (when (plusp (length text))
+          (setf end-header text))))
+    (values name inside-header arguments end-header)))
 
 (defun reader-blocks-keyword-node (context start
                                            limit

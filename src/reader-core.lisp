@@ -99,13 +99,17 @@
 
 (defun reader-affiliated-keyword-p (key)
   "Return true when KEY can attach to the following element."
-  (or (member key '("NAME" "CAPTION" "HEADER" "PLOT" "RESULTS") :test #'string=)
+  (or (member key '("NAME" "CAPTION" "HEADER" "HEADERS" "PLOT" "RESULTS")
+              :test #'string=)
       (and (>= (length key) 5) (string= key "ATTR_" :end1 5 :end2 5))))
 
 (defun reader-affiliation-property (key)
-  (intern (if (and (>= (length key) 5) (string= key "ATTR_" :end1 5 :end2 5))
-              (string-upcase key)
-              key)
+  (intern (cond
+            ((and (>= (length key) 5)
+                  (string= key "ATTR_" :end1 5 :end2 5))
+             (string-upcase key))
+            ((string= key "HEADERS") "HEADER")
+            (t key))
           :keyword))
 
 (defun reader-affiliations-at (context start limit)

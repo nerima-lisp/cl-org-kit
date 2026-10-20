@@ -42,7 +42,7 @@
                "#+begin_src emacs-lisp"
                "child scope"
                "#+end_src"
-               "#+HEADER: :session affiliated :results raw :var header=5 :header-flag"
+               "#+HEADERS: :session affiliated :results raw :var header=5 :header-flag"
                "#+begin_src emacs-lisp"
                "affiliated header"
                "#+end_src"

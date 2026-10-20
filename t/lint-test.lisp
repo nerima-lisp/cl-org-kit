@@ -20,7 +20,7 @@
       (expect (set-difference registered on-disk :test #'string=) :to-equal '())
       (expect (set-difference on-disk registered :test #'string=) :to-equal '())))
 
-  (it "registers all 61 active Org checker names and four deferred checkers"
+  (it "registers all 61 Org checker names: 58 dispatchable and three deferred"
     (let* ((table org-kit::*org-lint-checkers*)
            (active (remove-if (lambda (checker)
                                 (eq (third checker) :dependency-wait))
@@ -29,11 +29,11 @@
                                       (eq (third checker) :dependency-wait))
                                     table)))
       (expect (length table) :to-be 61)
-      (expect (count :document-only table :key #'third) :to-be 45)
+      (expect (count :document-only table :key #'third) :to-be 46)
       (expect (count :caller-material table :key #'third) :to-be 12)
-      (expect (count :dependency-wait table :key #'third) :to-be 4)
-      (expect (length active) :to-be 57)
-      (expect (length deferred) :to-be 4)
+      (expect (count :dependency-wait table :key #'third) :to-be 3)
+      (expect (length active) :to-be 58)
+      (expect (length deferred) :to-be 3)
       (expect (length (remove-duplicates table :key #'first :test #'string-equal))
               :to-be 61)))
 

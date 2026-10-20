@@ -521,3 +521,91 @@
                      (parse-org (format nil "#+TITLE: x~%[cite:@reference]")) nil))
             :to-equal '("Possibly missing \"PRINT_BIBLIOGRAPHY\" keyword")))
 )
+
+(describe "empty Babel header argument checker"
+  (it "matches Org's valueless source-block header tokens"
+    (expect-document-b-diagnostic
+     (format nil "#+BEGIN_SRC emacs-lisp :results :exports code~%body~%#+END_SRC~%")
+     "empty-header-argument" 1
+     "Empty value in header argument \":results\"")
+    (expect-document-b-diagnostic
+     (format nil "#+BEGIN_SRC emacs-lisp :results=~%body~%#+END_SRC~%")
+     "empty-header-argument" 1
+     "Empty value in header argument \":results=\"")
+    (expect-document-b-diagnostic
+     (format nil "#+BEGIN_SRC emacs-lisp :results=foo~%body~%#+END_SRC~%")
+     "empty-header-argument" 1
+     "Empty value in header argument \":results=foo\"")
+    (expect-document-b-clean
+     (format nil "#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%")
+     "empty-header-argument")
+    (expect-document-b-clean
+     (format nil "#+BEGIN_SRC emacs-lisp :results output~%body~%#+END_SRC~%")
+     "empty-header-argument")
+    (expect-document-b-clean
+     (format nil "#+BEGIN_SRC emacs-lisp :results= output~%body~%#+END_SRC~%")
+     "empty-header-argument"))
+
+  (it "checks affiliated HEADER and HEADERS lines"
+    (let ((source
+            (format nil
+                    "#+HEADERS: :cache~%#+HEADER: :results output~%#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%")))
+      (expect-document-b-diagnostic
+       source "empty-header-argument" (1+ (search "#+BEGIN_SRC" source))
+       "Empty value in header argument \":cache\""))
+    (expect-document-b-clean
+     (format nil "#+HEADER: :results output~%#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%")
+     "empty-header-argument")
+    (expect-document-b-clean
+     (format nil "#+HEADERS: :results output~%#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%")
+     "empty-header-argument")
+    (expect-document-b-clean
+     (format nil "#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%")
+     "empty-header-argument"))
+
+  (it "detects empty inline-source headers and ignores absent or populated headers"
+    (expect-document-b-diagnostic
+     "Text src_emacs-lisp[:exports]{(+ 1 1)}."
+     "empty-header-argument" 6
+     "Empty value in header argument \":exports\"")
+    (expect-document-b-clean
+     "Text src_emacs-lisp{(+ 1 1)}."
+     "empty-header-argument")
+    (expect-document-b-clean
+     "Text src_emacs-lisp[:exports code]{(+ 1 1)}."
+     "empty-header-argument"))
+
+  (it "detects empty inline Babel call headers before and after arguments"
+    (expect-document-b-diagnostic
+     "Text call_demo[:results](value)."
+     "empty-header-argument" 6
+     "Empty value in header argument \":results\"")
+    (expect-document-b-diagnostic
+     "Text call_demo(value)[:exports]."
+     "empty-header-argument" 6
+     "Empty value in header argument \":exports\"")
+    (expect-document-b-clean
+     "Text call_demo(value)."
+     "empty-header-argument")
+    (expect-document-b-clean
+     "Text call_demo[:results output](value)."
+     "empty-header-argument")
+    (expect-document-b-clean
+     "Text call_demo(value)[:exports results]."
+     "empty-header-argument"))
+
+  (it "detects empty block Babel-call headers and ignores absent or populated values"
+    (expect-document-b-diagnostic
+     "#+CALL: demo[:results](value)"
+     "empty-header-argument" 1
+     "Empty value in header argument \":results\"")
+    (expect-document-b-diagnostic
+     "#+CALL: demo(value) :exports"
+     "empty-header-argument" 1
+     "Empty value in header argument \":exports\"")
+    (expect-document-b-clean
+     "#+CALL: demo(value)"
+     "empty-header-argument")
+    (expect-document-b-clean
+     "#+CALL: demo[:results output](value) :exports code"
+     "empty-header-argument")))
