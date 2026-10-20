@@ -368,11 +368,11 @@
     (unless (stringp before)
       (babel-tangle-signal-error :invalid-comment-renderer-result
                                  "Comment renderer must return a string"
-                                 kind))
+                                 (string-downcase (symbol-name kind))))
     (when (and (eq kind :link) (not (stringp after)))
       (babel-tangle-signal-error :invalid-comment-renderer-result
                                  "Link comment renderer must return two strings"
-                                 kind))
+                                 (string-downcase (symbol-name kind))))
     (values (if (plusp (length before))
                 (babel-tangle-ensure-newline before)
                 "")
