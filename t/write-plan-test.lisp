@@ -1680,4 +1680,14 @@
            (expect (typep condition 'org-write-plan-error) :to-be t)
            (when (typep condition 'org-write-plan-error)
              (expect (org-write-plan-error-reason condition)
-                     :to-be :containment-lost))))))))
+                     :to-be :containment-lost)))))))
+  (it "handles absent, unbound, and bound optional POSIX symbols"
+    (let ((unbound-symbol (make-symbol "UNBOUND")))
+      (with-soft-assertions
+        (expect (org-kit::write-plan-symbol-value nil) :to-be nil)
+        (expect (org-kit::write-plan-symbol-value unbound-symbol)
+                :to-be nil)
+        (expect
+         (org-kit::write-plan-symbol-value
+          (find-symbol "*FEATURES*" :cl))
+         :to-equal *features*)))))

@@ -1,16 +1,19 @@
 ;;;; src/write-plan.lisp
 (in-package #:org-kit)
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defun write-plan-symbol-value (symbol)
+    (and symbol (boundp symbol) (symbol-value symbol))))
 
 (defconstant +write-plan-f-dupfd-cloexec+
   (or (let ((symbol (find-symbol "F-DUPFD-CLOEXEC" :sb-posix)))
-        (and symbol (boundp symbol) (symbol-value symbol)))
+        (write-plan-symbol-value symbol))
       #+darwin 67
       #+linux 1030
       (error "F_DUPFD_CLOEXEC is not defined for this platform.")))
 
 (defconstant +write-plan-o-cloexec+
   (or (let ((symbol (find-symbol "O-CLOEXEC" :sb-posix)))
-        (and symbol (boundp symbol) (symbol-value symbol)))
+        (write-plan-symbol-value symbol))
       #+darwin #x01000000
       #+linux #x00080000
       (error "O_CLOEXEC is not defined for this platform.")))
