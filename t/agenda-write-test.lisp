@@ -425,4 +425,74 @@
                    (agenda-write-into :not-a-document nil 0 0)))
                 'type-error)
                :to-be
-               t)))))
+               t))))
+          (it "aligns promoted tagged headings by display width and rejects invalid sources and ranges"
+  (let* ((document
+           (parse-org
+            (format nil "* Parent~%** TODO~cChild :work:" #\Tab)))
+         (child (second (agenda-write-test-headings document)))
+         (org-document
+           (agenda-to-org
+            (agenda-match (list document) "TODO=\"TODO\""
+                          :time-context (agenda-write-test-context))))
+         (detached-heading
+           (make-node :headline
+                      :properties (list :level 1 :raw-value "Detached")))
+         (invalid-views
+           (list
+            (make-agenda-result
+             :entries (list (make-agenda-entry :headline "No source")))
+            (make-agenda-result
+             :entries (list (make-agenda-entry :source-node detached-heading)))
+            (list (make-agenda-match-entry :document document :node :invalid))
+            (list (make-agenda-match-entry :document :invalid :node child))
+            (list (make-agenda-match-entry
+                   :document document :node (document-root document)))))
+         (invalid-entry-errors
+           (mapcar (lambda (view)
+                     (agenda-write-test-error
+                      (lambda () (agenda-to-org view))))
+                   invalid-views))
+         (range-document
+           (parse-org
+            (format nil
+                    "* TODO MissingBegin~%* TODO MissingEnd~%* TODO OutOfRange~%* TODO MarkerOutside~%* TODO NoMarker~%")))
+         (range-errors
+           (let ((headings (agenda-write-test-headings range-document)))
+             (setf (org-kit::%node-begin (first headings)) nil
+                   (org-kit::%node-end (second headings)) nil
+                   (org-kit::%node-end (third headings))
+                   (1+ (length (document-text range-document)))
+                   (org-kit::%node-begin (fourth headings))
+                   (1+ (node-begin (fourth headings)))
+                   (org-kit::%node-post-affiliated (fifth headings))
+                   (1+ (node-post-affiliated (fifth headings))))
+             (mapcar
+              (lambda (heading)
+                (agenda-write-test-error
+                 (lambda ()
+                   (agenda-to-org
+                    (make-agenda-result
+                     :entries (list (make-agenda-entry :source-node heading)))))))
+              headings))))
+    (with-soft-assertions
+      (expect (document-text org-document)
+              :to-equal
+              (concatenate (intern "STRING" :cl)
+                           "* TODO" (string #\Tab) "Child"
+                           (make-string 58 :initial-element #\Space)
+                           ":work:" (string #\Newline)))
+      (expect
+       (mapcar (lambda (condition)
+                 (and (typep condition (intern "ORG-AGENDA-ERROR" :org-kit))
+                      (eq (org-agenda-error-reason condition)
+                          :unsupported-entry)))
+               invalid-entry-errors)
+       :to-equal (make-list 5 :initial-element t))
+      (expect
+       (mapcar (lambda (condition)
+                 (and (typep condition (intern "ORG-AGENDA-ERROR" :org-kit))
+                      (eq (org-agenda-error-reason condition)
+                          :unsupported-entry)))
+               range-errors)
+       :to-equal (make-list 5 :initial-element t))))))
