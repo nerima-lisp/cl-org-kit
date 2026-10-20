@@ -100,6 +100,7 @@
                ;; Unit E5 LaTeX export
                (:file "export-latex")
                (:file "agenda")
+               (:file "table-radio")
                (:file "crypt")
 )
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
@@ -154,6 +155,7 @@
                (:file "table-recalculate-test")
                (:file "table-plot-test")
                (:file "table-import-export-test")
+               (:file "table-radio-test")
                (:file "conformance-test")
                (:file "edit-patches-test")
                (:file "edit-plain-list-test")

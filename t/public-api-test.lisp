@@ -143,6 +143,7 @@
     "TABLE-PLOT-WRITE-PLAN"
     "TABLE-IMPORT"
     "TABLE-EXPORT"
+    "TABLE-SEND-RADIO"
  ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
@@ -363,6 +364,10 @@ FORMAT may be :AUTO, :CSV, or :TSV. Return the validated edit result.")
               :to-equal
               "Export an Org pipe table as CSV or TSV text without writing a file.
 FORMAT may be :AUTO, :CSV, or :TSV; :AUTO follows Org's default TSV format.")
+      (expect (documentation 'table-send-radio 'function)
+              :to-equal
+              "Transform a radio table and replace matching RECEIVE bodies.
+Return the validated edit result, preserving all source outside those bodies.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.

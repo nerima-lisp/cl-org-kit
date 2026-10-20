@@ -311,6 +311,25 @@ Multiline fields are rejected.
 comma or quote are quoted, and embedded quotes are doubled. Hlines are omitted,
 as in Org export.
 
+## Radio tables
+
+`table-send-radio` transforms a table with one or more consecutive
+`#+ORGTBL: SEND` directives on the lines immediately before it. For each SEND
+name, it replaces the body between matching `BEGIN RECEIVE ORGTBL` and
+`END RECEIVE ORGTBL` markers; names match without regard to case. It returns an
+`edit-result`; text outside the receive bodies is preserved. The supported
+formats are `orgtbl`, `generic`, `csv`, `tsv`, `latex`, `html`, and `texinfo`.
+SEND parameters accept these common keys: `:sep`, `:hsep`, `:hline`, `:splice`,
+`:skip`, `:tstart`, `:tend`, `:lstart`, `:lend`, `:llstart`, `:llend`, `:hlstart`,
+`:hlend`, `:hllstart`, `:hllend`, `:fmt`, `:hfmt`, `:lfmt`, `:llfmt`, `:hlfmt`,
+`:hllfmt`, `:backend`, and `:raw`. The `latex` transformation also accepts
+`:booktabs` and `:environment`; `texinfo` also accepts `:columns`. Values must
+be strings, integers, `t`, or `nil`; executable and list-valued parameters are
+rejected. For example,
+`#+ORGTBL: SEND summary generic :sep "," :skip 1` uses commas between cells and
+skips the first input row. `:fmt` and `:hfmt` set string templates with `%s`
+placeholders for data and header cells.
+
 ## Errors and limits
 
 Table-specific failures such as an unsupported table type, invalid index,
