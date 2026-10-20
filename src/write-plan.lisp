@@ -87,16 +87,33 @@ missing parent directories."
   (copy-seq (%write-plan-entry-path entry)))
 
 (defun write-plan-entry-content (entry)
-  "Return a copy of ENTRY's text string or octet-vector content."
+  "Return a copy of ENTRY's content, or NIL for a delete entry."
   (copy-seq (%write-plan-entry-content entry)))
 
 (defun write-plan-entry-mode (entry)
-  "Return ENTRY's permission bits."
+  "Return the permission bits for ENTRY, or NIL for a delete entry."
   (%write-plan-entry-mode entry))
+
+(defun write-plan-entry-operation (entry)
+  "Return ENTRY operation, either :WRITE or :DELETE."
+  (if (null (%write-plan-entry-content entry)) :delete :write))
 
 (defun write-plan-entry-create-directories-p (entry)
   "Return true when ENTRY permits creation of missing parent directories."
   (%write-plan-entry-create-directories-p entry))
+
+(defun make-write-plan-delete-entry (path)
+  "Return a write-plan entry that removes one relative path when applied."
+  (unless (or (stringp path) (pathnamep path))
+    (error 'type-error :datum path :expected-type '(or string pathname)))
+  (%make-write-plan-entry
+   :path (copy-seq (if (pathnamep path)
+                       (sb-ext:native-namestring path)
+                       path))
+   :content nil
+   :mode nil
+   :mode-supplied-p nil
+   :create-directories-p nil))
 
 (defstruct (write-plan
             (:constructor %make-write-plan)
@@ -352,15 +369,21 @@ missing parent directories."
 (defun write-plan-encode-entry (entry index total limits)
   (let* ((content (%write-plan-entry-content entry))
          (path (%write-plan-entry-path entry))
-         (byte-count (if (stringp content)
-                         (write-plan-string-byte-count content path limits total)
-                         (length content)))
+         (delete-p (null content))
+         (byte-count
+           (if delete-p
+               0
+               (if (stringp content)
+                   (write-plan-string-byte-count content path limits total)
+                   (length content))))
          (next-total (+ total byte-count)))
     (check-limit limits :max-write-plan-bytes next-total)
     (let ((bytes
-            (if (stringp content)
-                (write-plan-encode-string content path)
-                (copy-seq content))))
+            (if delete-p
+                (make-array 0 :element-type '(unsigned-byte 8))
+                (if (stringp content)
+                    (write-plan-encode-string content path)
+                    (copy-seq content)))))
       (unless (= (length bytes) byte-count)
         (write-plan-error :utf-8-size-mismatch path))
       (list entry index bytes next-total))))
@@ -393,11 +416,15 @@ missing parent directories."
       (write-plan-check-path-conflicts records)
       (let ((canonical-root (write-plan-canonical-root root)))
         (dolist (record records)
-          (setf (seventh record)
-                (write-plan-inspect-entry canonical-root (second record)
-                                          (third record)
-                                          (%write-plan-entry-create-directories-p
-                                           (first record)))))
+          (let* ((entry (first record))
+                 (existing-mode
+                   (write-plan-inspect-entry
+                    canonical-root (second record) (third record)
+                    (%write-plan-entry-create-directories-p entry))))
+            (when (and (eq (write-plan-entry-operation entry) :delete)
+                       (null existing-mode))
+              (write-plan-error :missing-target (second record)))
+            (setf (seventh record) existing-mode)))
         (values canonical-root records)))))
 
 (defun write-plan-syscall-result (result name)
@@ -572,6 +599,39 @@ missing parent directories."
    (%write-plan-renameat parent-fd temporary-name parent-fd target-name)
    "renameat"))
 
+(defun write-plan-apply-delete-record (root-fd record)
+  (let ((path (second record))
+        (parent-fd nil))
+    (unwind-protect
+         (handler-case
+             (progn
+               (sb-sys:without-interrupts
+                 (setf parent-fd
+                       (write-plan-open-parent-directory root-fd record)))
+               (handler-case
+                   (sb-sys:without-interrupts
+                     (write-plan-syscall-result
+                      (%write-plan-unlinkat
+                       parent-fd (car (last (third record))) 0)
+                      "unlinkat"))
+                 (sb-posix:syscall-error (condition)
+                   (if (= (sb-posix:syscall-errno condition) sb-posix:enoent)
+                       (write-plan-error :missing-target path condition)
+                       (error condition))))
+               (write-plan-verify-parent-directory root-fd record parent-fd)
+               (sb-sys:without-interrupts
+                 (sb-posix:close parent-fd)
+                 (setf parent-fd nil))
+               path)
+           (org-write-plan-error (condition)
+             (error condition))
+           (error (condition)
+             (write-plan-error :io-failed path condition)))
+      (when parent-fd
+        (sb-sys:without-interrupts
+          (ignore-errors (sb-posix:close parent-fd))
+          (setf parent-fd nil))))))
+
 (defun write-plan-apply-record (root-fd record random-state)
   (let ((path (second record))
         (parent-fd nil))
@@ -646,18 +706,19 @@ missing parent directories."
           (setf parent-fd nil))))))
 
 (defun apply-write-plan (plan root &key (limits (make-limits)))
-  "Validate PLAN in full, then replace each target below ROOT through a
-same-directory temporary file and rename. ROOT must name an existing
-directory; a symlink used as ROOT resolves to its target. All paths are relative
-POSIX paths. Every entry and limit is checked before directory or file creation.
-Returns normalized relative paths in plan order; a multi-file plan is not
-transactional. The caller must prevent other actors from renaming or replacing
-path components during application. The library rejects absolute paths, `..`,
-NUL, and symlink components below the resolved root. After each write, it
-compares the opened parent's device and inode with a root-relative re-open. That
-check reports a missing or different parent. A path restored before the check
-is not detected. The check cannot prevent a rename during a write or after the
-check."
+  "Validate PLAN in full. Write entries replace targets through same-directory
+temporary files and rename; delete entries remove existing regular files.
+ROOT must name an existing directory; a symlink used as ROOT resolves to its
+target. All paths are relative POSIX paths. Every entry and limit is checked
+before directory or file creation. Delete targets must exist as regular files
+during preflight. Returns normalized relative paths in plan order; a multi-file
+plan is not transactional. The caller must prevent other actors from renaming
+or replacing path components during application. The library rejects absolute
+paths, `..`, NUL, and symlink components below the resolved root. After each
+operation, it compares the opened parent device and inode with a root-relative
+re-open. This detects a missing or different parent after the operation, but a
+path restored before the check or a rename during or after the operation is not
+detected."
   (multiple-value-bind (canonical-root records)
       (write-plan-prepare plan root limits)
     (handler-case
@@ -669,8 +730,11 @@ check."
                    (setf root-fd
                          (write-plan-open-root-directory canonical-root)))
                  (mapcar (lambda (record)
-                           (write-plan-apply-record root-fd record
-                                                    random-state))
+                           (if (eq (write-plan-entry-operation (first record))
+                                   :delete)
+                               (write-plan-apply-delete-record root-fd record)
+                               (write-plan-apply-record root-fd record
+                                                        random-state)))
                          records))
             (sb-sys:without-interrupts
               (when root-fd

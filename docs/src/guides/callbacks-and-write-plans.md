@@ -42,6 +42,14 @@ threads register or invoke callbacks through the same registry.
 changes. Entry paths are relative POSIX paths. The library encodes string
 content as UTF-8 and writes octet vectors unchanged.
 
+Use `make-write-plan-delete-entry` to add a file deletion to a plan.
+`write-plan-entry-operation` returns `:write` or `:delete` when inspecting an
+entry. A delete entry has no content, and applying it requires an existing
+regular file below the output root. Deletions share the same path validation,
+conflict checks, and resource limits as writes. A mixed plan is applied in
+entry order and is not transactional; earlier operations may remain applied if
+a later operation fails.
+
 `write-plan-entry-mode` reports `#o644` when `:mode` is omitted. Applying an
 entry also tracks whether the caller supplied `:mode`. If `:mode` is omitted,
 apply preserves an existing regular file's mode and uses `#o644` for a new file.

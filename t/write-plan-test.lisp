@@ -109,6 +109,131 @@
            (funcall thunk))
       (setf (symbol-function symbol) original))))
 
+(describe "write plan deletions"
+  (it "plans a delete without changing the file and applies it below the root"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "attachment.bin"))
+              (entry (make-write-plan-delete-entry "attachment.bin"))
+              (plan (make-write-plan (list entry))))
+         (write-plan-test-write-text target "content")
+         (expect (write-plan-entry-operation entry) :to-be :delete)
+         (expect (write-plan-entry-mode entry) :to-be nil)
+         (expect (probe-file target) :to-be-truthy)
+         (expect (apply-write-plan plan root)
+                 :to-equal (list "attachment.bin"))
+         (expect (probe-file target) :to-be nil)))))
+  (it "rejects an escaping delete before applying earlier writes"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((outside-name (format nil "boundary-~A" (gensym)))
+              (outside-path (write-plan-test-path
+                             root (format nil "../~A" outside-name)))
+              (first-target (write-plan-test-path root "nested/write.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry
+                            "nested/write.txt" "new" :create-directories-p t)
+                           (make-write-plan-delete-entry
+                            (format nil "../~A" outside-name)))))
+              (condition (write-plan-test-capture-error plan root)))
+         (expect (typep condition (find-class (quote org-write-plan-error)))
+                 :to-be t)
+         (when (typep condition (find-class (quote org-write-plan-error)))
+           (expect (org-write-plan-error-reason condition)
+                   :to-be :parent-component))
+         (expect (probe-file first-target) :to-be nil)
+         (expect (probe-file outside-path) :to-be nil)))))
+  (it "rejects missing and symlinked delete targets during preflight"
+    (write-plan-test-call-with-directory
+     (lambda (base)
+       (let* ((root (write-plan-test-child-directory base "root"))
+              (outside (write-plan-test-child-directory base "outside"))
+              (first-target (write-plan-test-path root "first.txt"))
+              (sentinel (write-plan-test-path outside "sentinel.txt"))
+              (parent-link (write-plan-test-path root "linked-parent"))
+              (target-link (write-plan-test-path root "linked-target"))
+              (first-entry (make-write-plan-entry "first.txt" "new")))
+         (write-plan-test-write-text sentinel "unchanged")
+         (sb-posix:symlink (namestring outside) (namestring parent-link))
+         (sb-posix:symlink (namestring sentinel) (namestring target-link))
+         (let* ((missing-condition
+                  (write-plan-test-capture-error
+                   (make-write-plan
+                    (list first-entry
+                          (make-write-plan-delete-entry "missing.txt")))
+                   root))
+                (parent-condition
+                  (write-plan-test-capture-error
+                   (make-write-plan
+                    (list first-entry
+                          (make-write-plan-delete-entry
+                           "linked-parent/sentinel.txt")))
+                   root))
+                (target-condition
+                  (write-plan-test-capture-error
+                   (make-write-plan
+                    (list first-entry
+                          (make-write-plan-delete-entry "linked-target")))
+                   root)))
+           (with-soft-assertions
+             (expect (typep missing-condition
+                            (find-class (quote org-write-plan-error)))
+                     :to-be t)
+             (when (typep missing-condition
+                          (find-class (quote org-write-plan-error)))
+               (expect (org-write-plan-error-reason missing-condition)
+                       :to-be :missing-target))
+             (expect (typep parent-condition
+                            (find-class (quote org-write-plan-error)))
+                     :to-be t)
+             (when (typep parent-condition
+                          (find-class (quote org-write-plan-error)))
+               (expect (org-write-plan-error-reason parent-condition)
+                       :to-be :symlink-component))
+             (expect (typep target-condition
+                            (find-class (quote org-write-plan-error)))
+                     :to-be t)
+             (when (typep target-condition
+                          (find-class (quote org-write-plan-error)))
+               (expect (org-write-plan-error-reason target-condition)
+                       :to-be :symlink-component))
+             (expect (probe-file first-target) :to-be nil)
+             (expect (write-plan-test-read-text sentinel) :to-equal "unchanged")
+             (expect (probe-file parent-link) :to-be-truthy)
+             (expect (probe-file target-link) :to-be-truthy)))))))
+  (it "counts delete paths and entries against write-plan limits before writing"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((path-condition
+                (write-plan-test-capture-error
+                 (make-write-plan
+                  (list (make-write-plan-entry "a" "new")
+                        (make-write-plan-delete-entry "long")))
+                 root :limits (make-limits :max-write-plan-path-bytes 3)))
+              (entry-condition
+                (write-plan-test-capture-error
+                 (make-write-plan
+                  (list (make-write-plan-entry "counted" "new")
+                        (make-write-plan-delete-entry "other")))
+                 root :limits (make-limits :max-write-plan-entries 1))))
+         (with-soft-assertions
+           (expect (typep path-condition
+                          (find-class (quote org-resource-limit-error)))
+                   :to-be t)
+           (when (typep path-condition
+                        (find-class (quote org-resource-limit-error)))
+             (expect (org-resource-limit-error-limit-name path-condition)
+                     :to-be :max-write-plan-path-bytes))
+           (expect (typep entry-condition
+                          (find-class (quote org-resource-limit-error)))
+                   :to-be t)
+           (when (typep entry-condition
+                        (find-class (quote org-resource-limit-error)))
+             (expect (org-resource-limit-error-limit-name entry-condition)
+                     :to-be :max-write-plan-entries))
+           (expect (probe-file (write-plan-test-path root "a")) :to-be nil)
+           (expect (probe-file (write-plan-test-path root "counted")) :to-be nil)))))))
+
 (describe "write plans"
   (it "writes exact UTF-8 content with the requested mode and creates parents"
     (write-plan-test-call-with-directory
