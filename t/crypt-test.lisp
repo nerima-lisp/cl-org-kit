@@ -753,7 +753,7 @@
           (expect calls :to-be 0)
           (expect (edit-result-spans result) :to-equal nil)
           (expect (document-text (edit-result-updated-document result))
-                  :to-equal source))))
+                  :to-equal source)))))
 
   (it "rejects non-boolean bulk tag inheritance"
     (let* ((document (parse-org (format nil "* Entry :vault:~%secret~%")))
@@ -768,4 +768,4 @@
       (with-soft-assertions
         (expect (typep caught (find-class (quote type-error))) :to-be t)
         (expect (document-text document)
-                :to-equal (format nil "* Entry :vault:~%secret~%")))))))
+                :to-equal (format nil "* Entry :vault:~%secret~%"))))))
