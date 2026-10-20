@@ -460,6 +460,8 @@
   (let ((name (%diary-sexp-source-function-name source))
         (arguments (cdr (%diary-sexp-source-form source))))
     (cond
+      ((string= name "diary-anniversary")
+       (diary-sexp-anniversary-match-p arguments date))
       ((string= name "diary-date")
        (diary-sexp-date-match-p arguments date))
       ((string= name "diary-block")
@@ -467,9 +469,7 @@
       ((string= name "diary-cyclic")
        (diary-sexp-cyclic-match-p arguments date))
       ((string= name "diary-float")
-       (diary-sexp-float-match-p arguments date))
-      ((string= name "diary-anniversary")
-       (diary-sexp-anniversary-match-p arguments date)))))
+       (diary-sexp-float-match-p arguments date)))))
 
 (defun diary-sexp-source-match-p (source date callback-registry)
   (if (%diary-sexp-source-function-name source)
