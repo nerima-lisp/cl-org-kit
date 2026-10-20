@@ -468,8 +468,7 @@
        (diary-sexp-block-match-p arguments date))
       ((string= name "diary-cyclic")
        (diary-sexp-cyclic-match-p arguments date))
-      ((string= name "diary-float")
-       (diary-sexp-float-match-p arguments date)))))
+      (t (diary-sexp-float-match-p arguments date)))))
 
 (defun diary-sexp-source-match-p (source date callback-registry)
   (if (%diary-sexp-source-function-name source)
