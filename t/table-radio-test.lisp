@@ -430,4 +430,69 @@
       (with-soft-assertions
         (expect (table-radio-test-error (lambda () (table-radio-test-send no-send)))
                 :to-equal (list (quote org-table-error) :missing-send-directive))
-        (expect (not (null (search (format nil "BEGIN RECEIVE ORGTBL radio~%A~%1~%END RECEIVE ORGTBL radio") updated))) :to-be t)))))
+        (expect (not (null (search (format nil "BEGIN RECEIVE ORGTBL radio~%A~%1~%END RECEIVE ORGTBL radio") updated))) :to-be t))))
+  (it "covers radio token, marker, and CSV formatting branches"
+    (let* ((source (table-radio-test-source "orgtbl-to-csv" ":fmt \"%s!\""))
+           (result (table-radio-test-send source))
+           (document (second result))
+           (table (table-radio-test-find-table (document-root document)))
+           (updated
+             (document-text (edit-result-updated-document (first result))))
+           (crlf-line (format nil "x~C~%" #\Return))
+           (empty-line (format nil "~%"))
+           (parameter-error
+             (table-radio-test-error
+              (lambda ()
+                (org-kit::table-radio-parameter-key
+                 (list :string "sep") table))))
+           (atom-error
+             (table-radio-test-error
+              (lambda ()
+                (org-kit::table-radio-parse-safe-atom "word" table))))
+           (expected
+             (table-radio-test-expected-source
+              source (format nil "Name,Value~%Ada!,one!~%Bob!,two!~%"))))
+      (with-soft-assertions
+        (expect (org-kit::table-radio-line-content-end crlf-line 0)
+                :to-be 1)
+        (expect (org-kit::table-radio-line-content-end empty-line 0)
+                :to-be 0)
+        (expect (org-kit::table-radio-next-word
+                 (format nil " ~Cvalue" #\Tab) 0)
+                :to-be 2)
+        (expect (org-kit::table-radio-next-word "value" 0) :to-be 0)
+        (progn
+          (expect (org-kit::table-radio-read-words "" table) :to-be nil)
+          (expect (org-kit::table-radio-read-words (format nil " ~C" #\Tab) table)
+                  :to-be nil))
+        (expect (org-kit::table-radio-read-words "word" table)
+                :to-equal (list (list :atom "word")))
+        (expect (org-kit::table-radio-parse-safe-atom "-3" table) :to-be -3)
+        (progn
+          (expect parameter-error
+                  :to-equal (list (intern "ORG-TABLE-ERROR" :org-kit)
+                                  :invalid-parameters))
+          (expect (table-radio-test-error
+                   (lambda ()
+                     (org-kit::table-radio-parameter-key (list :atom ":") table)))
+                  :to-equal (list (intern "ORG-TABLE-ERROR" :org-kit)
+                                  :invalid-parameters)))
+        (progn
+          (expect atom-error
+                  :to-equal (list (intern "ORG-TABLE-ERROR" :org-kit)
+                                  :invalid-parameters))
+          (expect (table-radio-test-error
+                   (lambda ()
+                     (org-kit::table-radio-parse-safe-atom "" table)))
+                  :to-equal (list (intern "ORG-TABLE-ERROR" :org-kit)
+                                  :invalid-parameters)))
+        (expect (org-kit::table-radio-parse-send-line
+                 (format nil "#+ORGTBL: \"SEND\" radio orgtbl-to-csv") table)
+                :to-be nil)
+        (expect (org-kit::table-radio-marker-name-p
+                 "BEGIN RECEIVE ORGTBL " "BEGIN" "radio")
+                :to-be nil)
+        (expect (org-kit::table-radio-marker-name-p
+                 "BEGIN RECEIVE ORGTBL other" "BEGIN" "radio")
+                :to-be nil)
+        (expect updated :to-equal expected)))))
