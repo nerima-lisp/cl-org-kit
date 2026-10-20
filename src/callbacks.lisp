@@ -60,11 +60,16 @@ unchanged."
                            "No callback is registered")
          arguments))
 
-(defun evaluate-elisp (registry expression)
+(defun evaluate-elisp (registry expression
+                         &optional (context nil context-supplied-p))
   "Pass EXPRESSION unchanged to the registered Emacs Lisp evaluator.
-The callback is registered as KIND :EVALUATOR and NAME :EMACS-LISP. This
-library does not read or evaluate EXPRESSION."
-  (funcall (%lookup-callback registry :evaluator :emacs-lisp
-                             'org-elisp-evaluator-error
-                             "No Emacs Lisp evaluator is registered")
-           expression))
+When CONTEXT is supplied, pass it as a second callback argument; calls that
+omit it retain the one-argument callback contract. This function does not
+parse or execute EXPRESSION."
+  (let ((callback
+          (%lookup-callback registry :evaluator :emacs-lisp
+                            'org-elisp-evaluator-error
+                            "No Emacs Lisp evaluator is registered")))
+    (if context-supplied-p
+        (funcall callback expression context)
+        (funcall callback expression))))

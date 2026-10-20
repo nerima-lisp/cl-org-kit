@@ -336,3 +336,90 @@
         (org-kit::query-list
          document '(:planning :scheduled :>= (:date "<today>"))
          :reference-time "today")))))
+(describe "structured diary list queries"
+  (it "matches standalone and timestamp diary nodes at an explicit reference date"
+    (let* ((document
+             (parse-org
+              (query-list-test-lines
+               "%%(diary-date 1 2 2025)"
+               "* Inline diary"
+               "<%%(diary-date 1 2 2025)>")))
+           (reference-time (cl-date-kit:make-local-date 2025 1 2))
+           (matches
+             (org-kit::query-list document '(:diary-match)
+                                  :scope :nodes
+                                  :reference-time reference-time))
+           (nearby-matches
+             (org-kit::query-list
+              document '(:diary-match) :scope :nodes
+              :reference-time (cl-date-kit:make-local-date 2025 1 3))))
+      (with-soft-assertions
+        (expect (mapcar #'node-type matches)
+                :to-equal '(:diary-sexp :timestamp))
+        (expect nearby-matches :to-equal nil)
+        (signals org-query-error
+          (org-kit::query-list document '(:diary-match)
+                               :scope :headlines
+                               :reference-time reference-time))
+        (signals org-query-error
+          (org-kit::query-list document '(:diary-match)
+                               :scope :nodes)))))
+
+  (it "passes unknown diary forms and the explicit date context to the evaluator"
+    (let* ((document
+             (parse-org "%%(user-check \"raw\") suffix"))
+           (reference-time (cl-date-kit:make-local-date 2025 1 2))
+           (registry (make-callback-registry))
+           (received-expression nil)
+           (received-context nil))
+      (register-callback
+       registry :evaluator :emacs-lisp
+       (lambda (expression context)
+         (setf received-expression expression
+               received-context context)
+         t))
+      (let ((matches
+              (org-kit::query-list
+               document '(:diary-match) :scope :nodes
+               :reference-time reference-time
+               :callback-registry registry)))
+        (with-soft-assertions
+          (expect (length matches) :to-be 1)
+          (expect received-expression :to-equal "(user-check \"raw\")")
+          (expect received-context
+                  :to-equal (list :entry " suffix" :date (list 1 2 2025)))))))
+
+  (it "uses an empty evaluator registry and preflights diary work before callbacks"
+    (let* ((source "%%(user-check)")
+           (unregistered-document (parse-org source))
+           (condition
+             (handler-case
+                 (progn
+                   (org-kit::query-list
+                    unregistered-document '(:diary-match)
+                    :scope :nodes
+                    :reference-time
+                    (cl-date-kit:make-local-date 2025 1 2))
+                   nil)
+               (org-elisp-evaluator-error (condition) condition)))
+           (callback-count 0)
+           (limited-document
+             (parse-org source :limits (make-limits :max-diary-work 0)))
+           (registry (make-callback-registry)))
+      (register-callback registry :evaluator :emacs-lisp
+                         (lambda (expression context)
+                           (declare (ignore expression context))
+                           (incf callback-count)
+                           t))
+      (with-soft-assertions
+        (expect (typep condition 'org-elisp-evaluator-error) :to-be t)
+        (when condition
+          (expect (org-callback-error-kind condition) :to-equal "EVALUATOR")
+          (expect (org-callback-error-name condition) :to-equal "emacs-lisp")
+          (expect (org-callback-error-reason condition) :to-be :unregistered))
+        (signals org-resource-limit-error
+          (org-kit::query-list
+           limited-document '(:diary-match) :scope :nodes
+           :reference-time (cl-date-kit:make-local-date 2025 1 2)
+           :callback-registry registry))
+        (expect callback-count :to-be 0)))))

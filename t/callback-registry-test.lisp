@@ -17,6 +17,24 @@
         (expect (evaluate-elisp registry expression) :to-be :evaluated)
         (expect (eq received expression) :to-be t)
         (expect *callback-registry-test-probe* :to-be nil))))
+  (it "passes supplied evaluator context, including an explicitly supplied NIL"
+    (let* ((registry (make-callback-registry))
+           (expression "(diary-date 12 25 2026)")
+           (context '(:entry "" :date (12 25 2026)))
+           (received-form nil)
+           (received-context :unset))
+      (register-callback registry :evaluator :emacs-lisp
+                         (lambda (form context)
+                           (setf received-form form
+                                 received-context context)
+                           :evaluated))
+      (with-soft-assertions
+        (expect (evaluate-elisp registry expression context) :to-be :evaluated)
+        (expect (eq received-form expression) :to-be t)
+        (expect received-context :to-equal context)
+        (expect (evaluate-elisp registry expression nil) :to-be :evaluated)
+        (expect (eq received-form expression) :to-be t)
+        (expect received-context :to-be nil))))
 
   (it "signals the named evaluator condition without evaluating an expression"
     (let* ((registry (make-callback-registry))

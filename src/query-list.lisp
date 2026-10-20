@@ -168,14 +168,18 @@
                     (node-type-p (second form)))
          (query-list-form-error query "Type predicate requires a known node type"))
        (list :type (second form)))
+      (:diary-match
+       (unless (query-list-exact-length-p form 1)
+         (query-list-form-error query "DIARY-MATCH takes no arguments"))
+       (list :diary-match))
       (:todo-present
        (unless (query-list-exact-length-p form 1)
          (query-list-form-error query "TODO-PRESENT takes no arguments"))
-       '(:todo-present))
+       (list :todo-present))
       (:todo-missing
        (unless (query-list-exact-length-p form 1)
          (query-list-form-error query "TODO-MISSING takes no arguments"))
-       '(:todo-missing))
+       (list :todo-missing))
       (:todo
        (let ((arguments (query-list-match-arguments form context limits query)))
          (cons :todo arguments)))
@@ -230,12 +234,16 @@
   (let ((copy (query-list-copy-form form limits query)))
     (query-list-parse-predicate copy context limits reference-time query)))
 
-(defun query-list (document form &key (scope :headlines) context reference-time)
+(defun query-list (document form
+                    &key (scope :headlines) context reference-time
+                      callback-registry)
   "Evaluate structured FORM against DOCUMENT and return matching nodes.
-FORM is a proper, unevaluated list expression. SCOPE is :HEADLINES or :NODES;
-CONTEXT configures shared property, tag, provider, and regex semantics.
-REFERENCE-TIME may be NIL, a cl-date-kit:LOCAL-DATE, or a
-cl-date-kit:LOCAL-DATE-TIME; relative values require one."
+FORM is a proper, unevaluated list expression. SCOPE is :HEADLINES or
+:NODES. CONTEXT configures property, tag, provider, and regex behavior.
+REFERENCE-TIME may be NIL, a local date, or a local date-time; relative
+values require one. :DIARY-MATCH requires :SCOPE :NODES and an explicit
+REFERENCE-TIME. CALLBACK-REGISTRY supplies unknown diary forms and defaults
+to an empty registry."
   (check-type document document)
   (check-type reference-time (or null cl-date-kit:local-date
                                  cl-date-kit:local-date-time))
@@ -243,10 +251,32 @@ cl-date-kit:LOCAL-DATE-TIME; relative values require one."
     (error 'type-error :datum scope :expected-type '(member :headlines :nodes)))
   (when (and context (not (query-context-p context)))
     (error 'type-error :datum context :expected-type 'query-context))
+  (when (and callback-registry (not (callback-registry-p callback-registry)))
+    (error 'type-error :datum callback-registry
+           :expected-type 'callback-registry))
   (let* ((query (query-list-query-text form))
          (context (or context (make-query-context)))
          (limits (document-limits document))
          (predicate
            (query-list-parse-form form context limits reference-time query))
-         (query-ir (%make-query-ir scope predicate context)))
-    (query-evaluate-ir document query-ir :reference-time reference-time)))
+         (callback-registry (or callback-registry (make-callback-registry))))
+    (labels ((contains-diary-match-p (predicate)
+               (case (first predicate)
+                 (:diary-match t)
+                 ((:and :or)
+                  (some #'contains-diary-match-p (rest predicate)))
+                 (:not
+                  (contains-diary-match-p (second predicate)))
+                 (otherwise nil))))
+      (let ((diary-match-p (contains-diary-match-p predicate)))
+        (when (and diary-match-p (not (eq scope :nodes)))
+          (query-list-form-error query
+                                 "DIARY-MATCH requires :SCOPE :NODES"))
+        (when (and diary-match-p (null reference-time))
+          (query-list-form-error query
+                                 "DIARY-MATCH requires an explicit :REFERENCE-TIME"))
+        (query-evaluate-ir
+         document (%make-query-ir scope predicate context)
+         :reference-time reference-time
+         :callback-registry callback-registry
+         :diary-match-p diary-match-p)))))

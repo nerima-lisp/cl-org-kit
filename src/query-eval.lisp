@@ -9,6 +9,9 @@
   regex-cache
   heading-indices
   tag-groups
+  callback-registry
+  diary-sources
+  diary-match-cache
   depth)
 
 (defun query-signal-error (query position message)
@@ -1002,6 +1005,24 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
          (not (query-evaluate-predicate (second predicate) candidate state)))
         ((eq operator :type)
          (eq (node-type candidate) (second predicate)))
+        ((eq operator :diary-match)
+         (let ((source
+                 (gethash candidate
+                          (query-evaluation-state-diary-sources state))))
+           (when source
+             (multiple-value-bind (matched cached-p)
+                 (gethash candidate
+                          (query-evaluation-state-diary-match-cache state))
+               (if cached-p
+                   matched
+                   (setf
+                    (gethash candidate
+                             (query-evaluation-state-diary-match-cache state))
+                    (diary-sexp-source-match-p
+                     source
+                     (query-reference-date
+                      (query-evaluation-state-reference-time state))
+                     (query-evaluation-state-callback-registry state))))))))
         ((eq operator :path)
          (query-path-matches-p
           (second predicate)
@@ -1028,15 +1049,20 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
         (t
          (and headline (query-evaluate-existence predicate headline state)))))))
 
-(defun query-evaluate-ir (document query-ir &key reference-time)
-  "Evaluate a parser-produced QUERY-IR against DOCUMENT and return matching
-nodes in document order. REFERENCE-TIME is used for typed relative-date values;
-this function never reads the current time."
+(defun query-evaluate-ir (document query-ir
+                           &key reference-time callback-registry diary-match-p)
+  "Evaluate QUERY-IR against DOCUMENT and return matching nodes in document
+order. REFERENCE-TIME supplies relative-date context. DIARY-MATCH checks one
+date and all diary expressions before invoking any evaluator callback."
   (check-type document document)
   (check-type query-ir query-ir)
   (let* ((root (document-root document))
          (context (or (query-ir-context query-ir) (make-query-context)))
          (limits (document-limits document))
+         (callback-registry (or callback-registry (make-callback-registry)))
+         (diary-sources (make-hash-table :test #'eq))
+         (diary-match-cache (make-hash-table :test #'eq))
+         (diary-work 0)
          (state (%make-query-evaluation-state
                  :document document
                  :context context
@@ -1044,6 +1070,9 @@ this function never reads the current time."
                  :limits limits
                  :regex-cache (make-hash-table :test #'equal)
                  :heading-indices nil
+                 :callback-registry callback-registry
+                 :diary-sources diary-sources
+                 :diary-match-cache diary-match-cache
                  :depth 0))
          (scope (query-ir-scope query-ir))
          (predicate (query-ir-predicate query-ir))
@@ -1053,6 +1082,15 @@ this function never reads the current time."
       (when (query-predicate-contains-path-p predicate)
         (setf (query-evaluation-state-heading-indices state)
               (query-heading-sibling-indices root)))
+      (when diary-match-p
+        (map-nodes
+         (lambda (candidate)
+           (let ((source (diary-sexp-source-for-node candidate limits)))
+             (when source
+               (setf (gethash candidate diary-sources) source)
+               (incf diary-work))))
+         root)
+        (check-limit limits :max-diary-work diary-work))
       (map-nodes
        (lambda (candidate)
          (when (and (not (eq (node-type candidate) :org-data))

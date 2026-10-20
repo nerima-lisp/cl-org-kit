@@ -177,6 +177,9 @@ the document and reused by its queries, edits, and exporters.
 | `:max-output-octets` | 256 Mi octets | encoded output |
 | `:max-agenda-range-days` | 3,660 days | inclusive days in one agenda range |
 | `:max-agenda-entries` | 1,000,000 | generated entries in one agenda call |
+| `:max-diary-work` | 1,000,000 | candidate-day and diary-expression pairs checked per agenda call or structured diary query |
+| `:max-diary-expression-length` | 65,536 characters | one diary expression's source length |
+| `:max-diary-expression-depth` | 128 | nested lists in one diary expression |
 | `:max-future-repeats` | 10,000 | generated future timestamp repeats |
 | `:max-export-expansion-depth` | 32 | recursive export expansion depth |
 | `:max-export-expanded-characters` | 64 Mi characters | cumulative expanded text per export |
@@ -209,13 +212,24 @@ table sorting.
 Queries can use a structured list or a slash-separated headline path. The
 list-form query is quoted data so Common Lisp does not evaluate it. Here `:path`
 selects a root-based headline path and `:todo` matches the TODO keyword. Both
-functions return headline nodes by default (`:scope :headlines`).
+functions return headline nodes by default (`:scope :headlines`). The structured
+`:diary-match` predicate selects standalone diary sexps and diary timestamps.
+It requires `:scope :nodes` and an explicit `:reference-time`; the returned
+nodes are the diary nodes that match that date.
 
 ~~~lisp
 (org-kit:query-list
  document '(:and (:path ("Projects")) (:todo := "TODO")))
+(org-kit:query-list
+ document '(:diary-match) :scope :nodes
+ :reference-time (cl-date-kit:make-local-date 2025 1 2))
 (org-kit:query-path document "Projects/*?{todo=\"TODO\"}")
 ~~~
+
+Unknown diary forms use `query-list`'s optional `:callback-registry`, which
+defaults to an empty registry. Register an Emacs Lisp evaluator there to handle
+those forms; without one, a matching unknown form signals
+`org-elisp-evaluator-error` with reason `:unregistered`.
 
 In a path selector, `*` matches exactly one level and `**` matches zero or more
 levels. The optional `?{...}` filter supports boolean `&`, `|`, and `!` operators;

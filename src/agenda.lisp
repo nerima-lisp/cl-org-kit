@@ -87,7 +87,7 @@ are :LATE."
   (%agenda-entry-habit-consistency entry))
 
 (defun agenda-entry-source-node (entry)
-  "Return ENTRY's source timestamp or planning node."
+  "Return ENTRY's source timestamp, planning, or diary node."
   (%agenda-entry-source-node entry))
 
 (defstruct (agenda-result (:constructor %make-agenda-result)
@@ -194,6 +194,12 @@ are :LATE."
      (minimum-limit-value limits :max-agenda-range-days)
      :max-agenda-entries
      (minimum-limit-value limits :max-agenda-entries)
+     :max-diary-work
+     (minimum-limit-value limits :max-diary-work)
+     :max-diary-expression-length
+     (minimum-limit-value limits :max-diary-expression-length)
+     :max-diary-expression-depth
+     (minimum-limit-value limits :max-diary-expression-depth)
      :max-future-repeats
      (minimum-limit-value limits :max-future-repeats))))
 
@@ -265,10 +271,12 @@ are :LATE."
     (funcall *agenda-data-walk-observer* node)))
 
 (defun agenda-document-heading-data (document &key collect-headlines-p
-                                                collect-timestamps-p)
+                                                collect-timestamps-p
+                                                collect-diary-p)
   "Collect selected heading data and sibling indices for DOCUMENT."
   (let* ((root (document-root document))
          (headlines nil)
+         (diary-nodes nil)
          (timestamps (when collect-timestamps-p
                        (make-hash-table :test #'eq)))
          (indices (if root
@@ -277,19 +285,68 @@ are :LATE."
     (labels ((visit (node heading)
                (agenda-data-walk-observe node)
                (let* ((type (node-type node))
-                      (owner (if (eq type :headline) node heading)))
+                      (owner (if (eq type :headline) node heading))
+                      (timestamp (and (eq type :timestamp)
+                                      node))
+                      (view (and collect-diary-p timestamp
+                                 (timestamp-view timestamp))))
                  (when (eq type :headline)
                    (when collect-headlines-p
                      (push node headlines)))
                  (when (and collect-timestamps-p
                             (eq type :timestamp) owner)
                    (push node (gethash owner timestamps)))
+                 (when (and collect-diary-p
+                            (or (eq type :diary-sexp)
+                                (and view
+                                     (eq (org-timestamp-view-kind view)
+                                         :diary))))
+                   (push (list node owner) diary-nodes))
                  (dolist (child (node-children node))
                    (visit child owner)))))
       (when root
         (visit root nil)))
     (values (when collect-headlines-p (nreverse headlines))
-            timestamps indices)))
+            timestamps indices (when collect-diary-p
+                                 (nreverse diary-nodes)))))
+(defun agenda-prepare-diary-items (document indices diary-nodes limits)
+  "Parse DOCUMENT's diary nodes under the operation's LIMITS."
+  (loop for (node owner) in diary-nodes
+        for source = (diary-sexp-source-for-node node limits)
+        when source
+          collect (list source node owner document indices)))
+(defun agenda-preflight-diary-work (limits start-date end-date diary-items)
+  "Check the operation-wide candidate-day and diary-expression work budget."
+  (check-limit limits :max-diary-work
+               (* (agenda-range-size start-date end-date)
+                  (length diary-items))))
+(defun agenda-add-diary-rows (state diary-items start-date end-date
+                                callback-registry)
+  "Add one timestamp row for each candidate date matched by a diary source."
+  (dolist (item diary-items)
+    (destructuring-bind (source node owner document indices) item
+      (let ((heading-data
+              (and owner
+                   (multiple-value-list
+                    (agenda-heading-data document owner indices)))))
+        (agenda-intersect-date-ranges
+         start-date end-date start-date end-date
+         (lambda (date)
+           (when (diary-sexp-source-match-p source date callback-registry)
+             (if heading-data
+                 (agenda-add-heading-entry
+                  state heading-data :timestamp date
+                  (%diary-sexp-source-view source) nil nil node)
+                 (progn
+                   (agenda-build-check-entry-limit state)
+                   (agenda-build-store-entry
+                    state
+                    (make-agenda-entry
+                     :date (agenda-date-value date)
+                     :kind :timestamp
+                     :headline (%diary-sexp-source-entry source)
+                     :timestamp (%diary-sexp-source-view source)
+                     :source-node node)))))))))))
 
 (defun agenda-time-value-date (value)
   "Return VALUE's civil calendar date."
@@ -968,19 +1025,26 @@ after the later of VIEW's date and the reference date."
            (< left-date right-date))))))
 
 (defun agenda (documents start-date end-date
-               &key time-context
+               &key time-context callback-registry
                  (warning-days 14)
                  (scheduled-delay 0)
                  (future-repeats :all))
   "Return agenda rows for inclusive START-DATE through END-DATE.
-TIME-CONTEXT is required and is the only source of reference time."
+TIME-CONTEXT is required and is the only source of reference time. For unknown
+diary forms, CALLBACK-REGISTRY supplies the Emacs Lisp evaluator; an empty
+registry is used when it is omitted."
   (let* ((documents (agenda-normalize-documents documents))
          (time-context (agenda-require-time-context time-context))
          (start-date (agenda-require-date start-date))
          (end-date (agenda-require-date end-date))
          (start-local (agenda-local-date start-date))
          (end-local (agenda-local-date end-date))
-         (limits (agenda-operation-limits documents)))
+         (limits (agenda-operation-limits documents))
+         (callback-registry
+           (if callback-registry
+               (agenda-validate-option #'callback-registry-p callback-registry
+                                       :callback-registry)
+               (make-callback-registry))))
     (agenda-validate-option #'agenda-nonnegative-integer-p warning-days
                             :warning-days)
     (agenda-validate-option #'agenda-nonnegative-integer-p scheduled-delay
@@ -995,11 +1059,27 @@ TIME-CONTEXT is required and is the only source of reference time."
                  (agenda-range-size start-local end-local))
     (let ((state (%make-agenda-build-state :limits limits
                                            :entry-count 0 :repeat-count 0
-                                           :entries nil)))
+                                           :entries nil))
+          (document-data nil)
+          (diary-sources nil))
       (dolist (document documents)
-        (multiple-value-bind (headings timestamps-by-heading indices)
+        (multiple-value-bind (headings timestamps-by-heading indices diary-nodes)
             (agenda-document-heading-data
-             document :collect-headlines-p t :collect-timestamps-p t)
+             document :collect-headlines-p t :collect-timestamps-p t
+                      :collect-diary-p t)
+          (let ((items (agenda-prepare-diary-items document indices diary-nodes
+                                                   limits)))
+            (push (list document headings timestamps-by-heading indices items)
+                  document-data)
+            (dolist (item items)
+              (push item diary-sources)))))
+      (setf document-data (nreverse document-data)
+            diary-sources (nreverse diary-sources))
+      (agenda-preflight-diary-work limits start-local end-local diary-sources)
+      (dolist (document-record document-data)
+        (destructuring-bind (document headings timestamps-by-heading indices
+                             document-diary-sources)
+            document-record
           (dolist (heading headings)
             (let* ((heading-data
                      (multiple-value-list
@@ -1018,7 +1098,9 @@ TIME-CONTEXT is required and is the only source of reference time."
               (agenda-build-timestamp-rows
                state (nreverse (gethash heading timestamps-by-heading))
                heading-data
-               start-local end-local future-repeats time-context)))))
+               start-local end-local future-repeats time-context)))
+          (agenda-add-diary-rows state document-diary-sources
+                                 start-local end-local callback-registry)))
       (make-agenda-result
        :entries (agenda-sort-entries
                  (nreverse (agenda-build-state-entries state)))

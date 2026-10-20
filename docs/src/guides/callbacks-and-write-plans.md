@@ -17,6 +17,16 @@ Create a registry and pass it to the operation that needs a callback. A registry
 
 `evaluate-elisp` passes EXPRESSION unchanged to the registered function; the library does not parse or evaluate it. If the registry has no `:evaluator` callback named `:emacs-lisp`, the call signals `org-elisp-evaluator-error`. Conditions signalled by a registered function propagate unchanged.
 
+`evaluate-elisp` also accepts an optional positional context. When supplied, the
+registered evaluator receives EXPRESSION and CONTEXT as its two arguments;
+without it, the evaluator is still called with one argument. Diary evaluation
+from `agenda` and structured `query-list` calls supplies a plist with `:entry`
+and `:date` keys. `:entry` is the diary entry text (an empty string for a diary
+timestamp), and `:date` is a Gregorian `(month day year)` list. The expression
+is the complete parenthesized Emacs Lisp form, with the Org `%%` marker and any
+trailing diary text removed. When no evaluator is registered, diary evaluation
+signals `org-elisp-evaluator-error` with reason `:unregistered`.
+
 A callback registered as an executor reports a timeout by signalling `org-callback-timeout-error`. The condition provides `org-callback-error-kind`, `org-callback-error-name`, and `org-callback-error-reason`; the reason defaults to `:timeout`. `invoke-callback` propagates the condition unchanged. The executor enforces its own deadline. cl-org-kit does not start a process or thread or interrupt the callback to enforce it.
 
 The same registry can supply named functions to other features. For example, a caller can register a

@@ -15,6 +15,9 @@
   (max-output-octets 0 :read-only t)
   (max-agenda-range-days 0 :read-only t)
   (max-agenda-entries 0 :read-only t)
+  (max-diary-work 0 :read-only t)
+  (max-diary-expression-length 0 :read-only t)
+  (max-diary-expression-depth 0 :read-only t)
   (max-future-repeats 0 :read-only t)
   (max-clock-consistency-issues 0 :read-only t)
   (max-export-expansion-depth 0 :read-only t)
@@ -49,6 +52,9 @@
                          (max-output-octets (* 256 1024 1024))
                          (max-agenda-range-days 3660)
                          (max-agenda-entries 1000000)
+                         (max-diary-work 1000000)
+                         (max-diary-expression-length 65536)
+                         (max-diary-expression-depth 128)
                          (max-future-repeats 10000)
                          (max-clock-consistency-issues 100000)
                          (max-export-expansion-depth 32)
@@ -73,7 +79,9 @@ characters or encoded octets. Node counts and heading, element, and object
 depths are measured per document. Search regex length is measured in characters.
 Regex search work counts candidate text characters cumulatively per searched
 document and link-resolution index. Agenda entries and repeats count generated
-results per agenda call, and agenda ranges use inclusive days. Export character
+results per agenda call, and agenda ranges use inclusive days. Diary work counts
+candidate-day and diary-expression pairs per agenda call. Diary expression
+length and nesting depth are checked before parsing. Export character
 and node budgets count cumulative expansion per export call, with the root at
 depth zero. Babel character budgets count cumulative noweb expansion per call,
 with the root at depth zero. Babel result-element budgets count values traversed
@@ -88,15 +96,21 @@ limits documented for that operation."
   (%make-limits :max-input-length (checked-limit-value max-input-length)
                 :max-heading-depth (checked-limit-value max-heading-depth)
                 :max-element-depth (checked-limit-value max-element-depth)
-                :max-search-regex-length
-                (checked-limit-value max-search-regex-length)
+                :max-search-regex-length (checked-limit-value max-search-regex-length)
                 :max-search-work (checked-limit-value max-search-work)
                 :max-object-depth (checked-limit-value max-object-depth)
                 :max-node-count (checked-limit-value max-node-count)
                 :max-output-length (checked-limit-value max-output-length)
                 :max-output-octets (checked-limit-value max-output-octets)
-                :max-agenda-range-days (checked-limit-value max-agenda-range-days)
-                :max-agenda-entries (checked-limit-value max-agenda-entries)
+                :max-agenda-range-days
+                (checked-limit-value max-agenda-range-days)
+                :max-agenda-entries
+                (checked-limit-value max-agenda-entries)
+                :max-diary-work (checked-limit-value max-diary-work)
+                :max-diary-expression-length
+                (checked-limit-value max-diary-expression-length)
+                :max-diary-expression-depth
+                (checked-limit-value max-diary-expression-depth)
                 :max-future-repeats (checked-limit-value max-future-repeats)
                 :max-clock-consistency-issues
                 (checked-limit-value max-clock-consistency-issues)
@@ -143,6 +157,9 @@ limits documented for that operation."
     (:max-output-octets (%limits-max-output-octets limits))
     (:max-agenda-range-days (%limits-max-agenda-range-days limits))
     (:max-agenda-entries (%limits-max-agenda-entries limits))
+    (:max-diary-work (%limits-max-diary-work limits))
+    (:max-diary-expression-length (%limits-max-diary-expression-length limits))
+    (:max-diary-expression-depth (%limits-max-diary-expression-depth limits))
     (:max-future-repeats (%limits-max-future-repeats limits))
     (:max-clock-consistency-issues
      (%limits-max-clock-consistency-issues limits))

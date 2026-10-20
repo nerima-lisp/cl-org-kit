@@ -400,8 +400,9 @@ unchanged.")
       (expect (documentation 'evaluate-elisp 'function)
               :to-equal
               "Pass EXPRESSION unchanged to the registered Emacs Lisp evaluator.
-The callback is registered as KIND :EVALUATOR and NAME :EMACS-LISP. This
-library does not read or evaluate EXPRESSION.")
+When CONTEXT is supplied, pass it as a second callback argument; calls that
+omit it retain the one-argument callback contract. This function does not
+parse or execute EXPRESSION.")
       (expect (documentation 'make-write-plan-entry 'function)
               :to-equal
               "Return a write-plan entry without touching the filesystem.

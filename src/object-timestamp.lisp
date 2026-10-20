@@ -227,19 +227,71 @@
                                             (setf weekday-seen-p t)))
                                         (setf cursor token-end))))))
 
+(defun %timestamp-diary-character-token-boundary-p (text index)
+  (or (zerop index)
+      (member (char text (1- index))
+              '(#\Space #\Tab #\Newline #\Return
+                #\( #\) #\" #\' #\` #\, #\;))))
+
+(defun %timestamp-diary-character-literal-end (text start end)
+  (when (and (< start end)
+             (char= (char text start) #\?)
+             (%timestamp-diary-character-token-boundary-p text start)
+             (< (1+ start) end))
+    (let ((index (1+ start)))
+      (if (char= (char text index) #\\)
+          (progn
+            (incf index)
+            (loop while (and (< index end)
+                             (member (char text index)
+                                     (quote (#\C #\M #\S #\H #\A #\s #\h)))
+                             (< (1+ index) end)
+                             (char= (char text (1+ index)) #\-))
+                  do (incf index 2)
+                     (when (and (< index end)
+                                (char= (char text index) #\\))
+                       (incf index)))
+            (cond
+              ((and (< (1+ index) end)
+                    (char= (char text index) #\^))
+               (min end (+ index 2)))
+              ((and (< (1+ index) end)
+                    (char= (char text index) #\N)
+                    (char= (char text (1+ index)) #\{))
+               (let ((closing (position #\} text
+                                        :start (+ index 2)
+                                        :end end)))
+                 (if closing (1+ closing) (1+ index))))
+              (t (min end (1+ index)))))
+          (1+ index)))))
+
 (defun %timestamp-diary-expression-end (text start end)
   ;; The caller already checked that START begins with "%%(" within END.
   (let ((cursor (+ start 3))
         (depth 1)
         (in-string-p nil)
-        (escaped-p nil))
+        (escaped-p nil)
+        (comment-p nil))
     (loop while (< cursor end)
           for character = (char text cursor)
+          for character-end =
+            (and (not in-string-p)
+                 (not comment-p)
+                 (char= character #\?)
+                 (%timestamp-diary-character-literal-end text cursor end))
           do (cond
+               (comment-p
+                (when (or (char= character #\Newline)
+                          (char= character #\Return))
+                  (setf comment-p nil)))
+               (character-end
+                (setf cursor (1- character-end)))
                (escaped-p
                 (setf escaped-p nil))
                ((and in-string-p (char= character #\\))
                 (setf escaped-p t))
+               ((and (not in-string-p) (char= character #\;))
+                (setf comment-p t))
                ((char= character #\")
                 (setf in-string-p (not in-string-p)))
                ((not in-string-p)
@@ -249,7 +301,9 @@
                     (decf depth)
                     (when (zerop depth)
                       (return-from %timestamp-diary-expression-end
-                        (1+ cursor))))))) (incf cursor))))
+                        (1+ cursor)))))))
+          (incf cursor))))
+
 
 (defun %timestamp-single-line-p (text start end)
   (not

@@ -112,13 +112,19 @@
   (find name cases :key (lambda (case) (getf case :name)) :test #'eq))
 
 (defun agenda-test-snapshot-result (document snapshot)
-  (agenda (list document)
-          (make-org-time-value (getf snapshot :start-date))
-          (make-org-time-value (getf snapshot :end-date))
-          :time-context (agenda-test-context (getf snapshot :reference-time))
-          :warning-days (getf snapshot :warning-days)
-          :scheduled-delay (getf snapshot :scheduled-delay)
-          :future-repeats (getf snapshot :future-repeats)))
+  (let ((registry (make-callback-registry)))
+    (register-callback registry :evaluator :emacs-lisp
+                       (lambda (expression context)
+                         (declare (ignore expression context))
+                         nil))
+    (agenda (list document)
+            (make-org-time-value (getf snapshot :start-date))
+            (make-org-time-value (getf snapshot :end-date))
+            :time-context (agenda-test-context (getf snapshot :reference-time))
+            :callback-registry registry
+            :warning-days (getf snapshot :warning-days)
+            :scheduled-delay (getf snapshot :scheduled-delay)
+            :future-repeats (getf snapshot :future-repeats))))
 
 (defun agenda-test-snapshot-expected (name snapshots)
   (agenda-test-case-by-name name snapshots))
@@ -1526,3 +1532,114 @@
                   :to-be :max-agenda-entries)
           (expect (org-resource-limit-error-actual todo-error) :to-be 1)))))
 )
+(describe "Agenda diary expressions"
+  (it "includes a matching diary date and excludes adjacent range dates"
+    (let* ((document (parse-org "%%(diary-date 1 2 2025) Personal entry"))
+           (diary-node nil)
+           (context (agenda-test-context "2025-01-01T12:00:00+00:00"))
+           (entries
+             (agenda-result-entries
+              (agenda (list document) (make-org-time-value "2025-01-01")
+                      (make-org-time-value "2025-01-03")
+                      :time-context context))))
+      (map-nodes (lambda (node)
+                   (when (eq (node-type node) :diary-sexp)
+                     (setf diary-node node)))
+                 (document-root document))
+      (with-soft-assertions
+        (expect (mapcar (lambda (entry)
+                          (org-time-value-iso8601 (agenda-entry-date entry)))
+                        entries)
+                :to-equal '("2025-01-02"))
+        (when entries
+          (let ((entry (first entries)))
+            (expect (agenda-entry-kind entry) :to-be :timestamp)
+            (expect (agenda-entry-headline entry) :to-equal " Personal entry")
+            (expect (agenda-entry-heading-path entry) :to-be nil)
+            (expect (agenda-entry-source-node entry) :to-be diary-node))))))
+
+  (it "keeps an inline diary timestamp's owner and source node"
+    (let* ((document (parse-org (format nil "* Work~%<%%(diary-date 1 2 2025)>")))
+           (heading nil)
+           (timestamp-node nil)
+           (entries
+             (agenda-result-entries
+              (agenda (list document) (make-org-time-value "2025-01-02")
+                      (make-org-time-value "2025-01-02")
+                      :time-context
+                      (agenda-test-context "2025-01-02T12:00:00+00:00")))))
+      (map-nodes (lambda (node)
+                   (case (node-type node)
+                     (:headline (setf heading node))
+                     (:timestamp (setf timestamp-node node))))
+                 (document-root document))
+      (with-soft-assertions
+        (expect (length entries) :to-be 1)
+        (when entries
+          (expect (agenda-entry-headline (first entries)) :to-equal "Work")
+          (expect (agenda-entry-heading-path (first entries))
+                  :to-equal '((:title "Work" :index 1)))
+          (expect (agenda-entry-source-node (first entries))
+                  :to-be timestamp-node)
+          (expect (eq (node-type heading) :headline) :to-be t)))))
+
+  (it "passes unknown forms to the evaluator and preflights before callbacks"
+    (let* ((document (parse-org "%%(user-check \"raw\") Entry"))
+           (registry (make-callback-registry))
+           (received-expression nil)
+           (received-context nil)
+           (entries nil))
+      (register-callback registry :evaluator :emacs-lisp
+                         (lambda (expression context)
+                           (setf received-expression expression
+                                 received-context context)
+                           t))
+      (setf entries
+            (agenda-result-entries
+             (agenda (list document) (make-org-time-value "2025-01-02")
+                     (make-org-time-value "2025-01-02")
+                     :time-context
+                     (agenda-test-context "2025-01-02T12:00:00+00:00")
+                     :callback-registry registry)))
+      (with-soft-assertions
+        (expect (length entries) :to-be 1)
+        (expect received-expression :to-equal "(user-check \"raw\")")
+        (expect received-context
+                :to-equal (list :entry " Entry" :date (list 1 2 2025))))
+      (let* ((limited-document
+               (parse-org "%%(user-check)"
+                          :limits (make-limits :max-diary-work 0)))
+             (callback-count 0)
+             (limited-registry (make-callback-registry)))
+        (register-callback limited-registry :evaluator :emacs-lisp
+                           (lambda (expression context)
+                             (declare (ignore expression context))
+                             (incf callback-count)
+                             t))
+        (signals org-resource-limit-error
+          (agenda (list limited-document)
+                  (make-org-time-value "2025-01-02")
+                  (make-org-time-value "2025-01-02")
+                  :time-context
+                  (agenda-test-context "2025-01-02T12:00:00+00:00")
+                  :callback-registry limited-registry))
+        (expect callback-count :to-be 0))))
+
+  (it "reports missing evaluators as unregistered"
+    (let* ((document (parse-org "%%(user-check)"))
+           (condition
+             (handler-case
+                 (progn
+                   (agenda (list document)
+                           (make-org-time-value "2025-01-02")
+                           (make-org-time-value "2025-01-02")
+                           :time-context
+                           (agenda-test-context "2025-01-02T12:00:00+00:00"))
+                   nil)
+               (org-elisp-evaluator-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep condition 'org-elisp-evaluator-error) :to-be t)
+        (when condition
+          (expect (org-callback-error-kind condition) :to-equal "EVALUATOR")
+          (expect (org-callback-error-name condition) :to-equal "emacs-lisp")
+          (expect (org-callback-error-reason condition) :to-be :unregistered))))))

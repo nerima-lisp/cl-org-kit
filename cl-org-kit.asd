@@ -73,6 +73,7 @@
                (:file "emitter-objects")
                (:file "emitter")
                (:file "query-types")
+               (:file "diary-sexp")
                (:file "query-eval")
                (:file "query-list")
                (:file "query-path")

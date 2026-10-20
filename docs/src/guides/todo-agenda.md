@@ -65,8 +65,7 @@ A to C, call
 leaves the heading unmarked. On the updated document and heading, call
 `(org-kit:adjust-heading-priority updated-document updated-heading :up :previous-direction :up)`
 to set `[#C]`. `:previous-direction` tells the second call that the first call
-cleared the marker while moving in the same direction. To wrap from C to A, use
-`:down` for both calls and pass `:previous-direction :down` on the second.
+cleared the marker while moving in the same direction.
 Without a matching
 `:previous-direction`, an unmarked heading starts at the configured default.
 When a directive has at least three values, its first three values must define
@@ -281,8 +280,7 @@ appears on its occurrence date once that date is visible.
 `:delayed` for a reminder or repeat row when the base `SCHEDULED` date is before
 the reference date and the effective delay is positive. The flag follows that
 base date, so a repeat row can be delayed even when its occurrence date is in
-the future. Here, the base date is the date in the source `SCHEDULED` timestamp,
-not the repeat occurrence date.
+the future.
 
 `:future-repeats` can be `:all`, `:next`, or `:none`. For repeating scheduled or
 deadline entries, this setting controls repeat occurrences; the original row
@@ -313,6 +311,37 @@ document outside an agenda call. It requires `:time-context` and evaluates
 relative dates at that context's reference instant in its configured time zone.
 The optional `:context` is a `query-context` for query settings such as a
 `BLOCKED` provider; omit it to use the default context.
+
+### Diary expressions
+
+`agenda` evaluates standalone diary sexps and diary timestamps for each date in
+the requested range. The built-in forms are `diary-anniversary`, `diary-block`,
+`diary-cyclic`, `diary-float`, and `diary-date`. Their date arguments follow
+Emacs's default `calendar-date-style`, `:american`, so direct forms use
+month, day, and year order. Other forms are passed unchanged as complete
+parenthesized Emacs Lisp expressions to the `:evaluator`/`:emacs-lisp` callback
+in the `:callback-registry` supplied to `agenda`. Register it with
+`(register-callback registry :evaluator :emacs-lisp function)`. Here
+`:evaluator` is the callback kind and `:emacs-lisp` is its name. The function
+receives the expression and a context plist. Structured `query-list` uses the
+same callback contract for `(:diary-match)`.
+
+The context's `:entry` value is the diary entry text (empty for a diary
+timestamp), and `:date` is the candidate date as
+a Gregorian `(month day year)` list. If the callback is not registered,
+`agenda` signals `org-elisp-evaluator-error` with reason `:unregistered`.
+The library bounds expression length and nesting, and rejects `#.` and `#S`
+reader forms and package-qualified symbols before invoking the callback.
+
+Structured `query-list` also accepts `(:diary-match)` with `:scope :nodes` and
+an explicit `:reference-time`. It returns matching standalone diary sexp and
+diary timestamp nodes for that date. Its optional `:callback-registry` defaults
+to an empty registry; an unknown diary form signals
+`org-elisp-evaluator-error` with reason `:unregistered` unless an evaluator is
+registered with `(register-callback registry :evaluator :emacs-lisp function)`
+and that registry is passed as `:callback-registry`. `query-match-now` remains
+an Org headline matcher. Relative query dates use its explicit `:time-context`
+reference time rather than the machine clock.
 
 Agenda rows for a scheduled habit also expose `agenda-entry-habit-consistency`.
 Each scheduled row for a habit carries one list spanning the full agenda date
