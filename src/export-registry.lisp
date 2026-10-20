@@ -1061,16 +1061,12 @@
                     (%export-render-context-ancestry context)
                     (%export-backend-descriptor-name parent)))
          (callback-and-owner
-           (multiple-value-list
-            (export-resolved-component ancestry
-                                       #'%export-backend-descriptor-renderer))))
+          (multiple-value-list
+           (export-resolved-component ancestry
+                                      #'%export-backend-descriptor-renderer))))
     (let ((result
-            (if (first callback-and-owner)
-                (funcall (first callback-and-owner)
-                         (export-context-for-owner context (second callback-and-owner)))
-                (export-render-preparation
-                 (%export-render-context-preparation context)
-                 (%export-backend-descriptor-name parent)))))
+           (funcall (first callback-and-owner)
+                    (export-context-for-owner context (second callback-and-owner)))))
       (unless (stringp result)
         (error 'type-error :datum result :expected-type 'string))
       result)))
@@ -1169,32 +1165,28 @@
   (multiple-value-bind (renderer owner)
       (export-resolved-component
        ancestry #'%export-backend-descriptor-native-sink-renderer)
-    (when renderer
-      (multiple-value-bind (make-scratch scratch-owner)
+    (multiple-value-bind (make-scratch)
+        (export-resolved-component
+         ancestry #'%export-backend-descriptor-native-sink-scratch)
+      (multiple-value-bind (get-string)
           (export-resolved-component
-           ancestry #'%export-backend-descriptor-native-sink-scratch)
-        (multiple-value-bind (get-string string-owner)
-            (export-resolved-component
-             ancestry #'%export-backend-descriptor-native-sink-string)
-          (unless (and make-scratch get-string
-                       (eq owner scratch-owner) (eq owner string-owner))
-            (error 'program-error))
-          (let* ((callback-context (export-context-for-owner context owner))
-                 (sink (funcall make-scratch *export-current-native-sink* frame
-                                callback-context)))
-            (let* ((*export-active-node-dispatch*
-                     (list callback-context node view frame ancestry))
-                   (*export-current-native-sink* sink)
-                   (*export-current-output-offset*
-                     (%export-render-frame-output-offset frame))
-                   (result (funcall renderer sink node view frame
-                                    callback-context)))
-              (unless (null result)
-                (error 'type-error :datum result :expected-type 'null)))
-            (let ((text (funcall get-string sink callback-context)))
-              (unless (stringp text)
-                (error 'type-error :datum text :expected-type 'string))
-              text)))))))
+           ancestry #'%export-backend-descriptor-native-sink-string)
+        (let* ((callback-context (export-context-for-owner context owner))
+               (sink (funcall make-scratch *export-current-native-sink* frame
+                              callback-context)))
+          (let* ((*export-active-node-dispatch*
+                  (list callback-context node view frame ancestry))
+                 (*export-current-native-sink* sink)
+                 (*export-current-output-offset*
+                  (%export-render-frame-output-offset frame))
+                 (result (funcall renderer sink node view frame
+                                  callback-context)))
+            (unless (null result)
+              (error 'type-error :datum result :expected-type 'null)))
+          (let ((text (funcall get-string sink callback-context)))
+            (unless (stringp text)
+              (error 'type-error :datum text :expected-type 'string))
+            text))))))
 
 (defun export-render-node-implementation (context node view frame ancestry)
   (let* ((type (node-type node))
@@ -1367,8 +1359,6 @@
                      (error 'type-error :datum text :expected-type 'string))
                    text))
                (sink-write-string (target text)
-                 (unless (stringp text)
-                   (error 'type-error :datum text :expected-type 'string))
                  (let* ((*export-current-output-offset* (sink-offset target))
                         (*export-current-native-sink* target)
                         (result
@@ -1408,26 +1398,16 @@
                            (error 'type-error :datum text
                                   :expected-type 'string))
                          (sink-write-string target text))
-                     (if (first native-renderer-and-owner)
-                         (let ((*export-active-node-dispatch*
-                                 (list callback-context node view selected-frame
-                                       ancestry))
-                               (result
-                                 (funcall
-                                  (first native-renderer-and-owner)
-                                  target node view selected-frame callback-context)))
-                           (unless (null result)
-                             (error 'type-error :datum result
-                                    :expected-type 'null)))
-                       (dolist (child (%export-view-children view))
-                         (export-render-view-to-sink
-                          context target child
-                          :mode (%export-render-frame-mode selected-frame)
-                          :table-cell-p
-                          (%export-render-frame-table-cell-p selected-frame)
-                          :preserve-source-breaks-p
-                          (%export-render-frame-preserve-source-breaks-p
-                           selected-frame)))))))
+                     (let ((*export-active-node-dispatch*
+                             (list callback-context node view selected-frame
+                                   ancestry))
+                           (result
+                             (funcall (first native-renderer-and-owner)
+                                      target node view selected-frame
+                                      callback-context)))
+                       (unless (null result)
+                         (error 'type-error :datum result
+                                :expected-type 'null))))))
                (render-selected (target selected-frame)
                  (if scratch-required-p
                      (let* ((offset (sink-offset target))
