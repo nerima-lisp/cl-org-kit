@@ -1529,4 +1529,78 @@
                         :not :to-be nil)
                 (expect (search "OVERRIDE after." output) :to-be nil))))
         (when registered-p
-          (unregister-export-backend backend))))))
+          (unregister-export-backend backend)))))
+  (it "uses the context-aware renderer when built-in LaTeX has a final-output filter"
+    (let* ((registry org-kit::*export-backend-registry*)
+           (builtin-handlers org-kit::*export-builtin-link-type-handlers*)
+           (old-descriptor nil)
+           (old-builtin-types nil)
+           (had-descriptor-p nil)
+           (had-builtin-types-p nil)
+           (filter-context nil)
+           (output nil))
+      (sb-thread:with-mutex (org-kit::*export-backend-registry-lock*)
+        (multiple-value-setq (old-descriptor had-descriptor-p)
+          (gethash :latex registry))
+        (multiple-value-setq (old-builtin-types had-builtin-types-p)
+          (gethash :latex builtin-handlers)))
+      (unwind-protect
+           (progn
+             (org-kit::%register-builtin-export-backend
+              :latex
+              :renderer #'org-kit::export-latex-render-body
+              :preamble-renderer #'org-kit::export-latex-render-preamble
+              :trailer-renderer #'org-kit::export-latex-render-trailer
+              :make-state #'org-kit::export-latex-make-state
+              :document-class "article"
+              :transcoders (org-kit::export-latex-node-transcoders)
+              :node-wrapper #'org-kit::export-latex-node-wrapper
+              :accepted-keywords
+              (list "LATEX_CLASS" "LATEX_CLASS_OPTIONS" "LATEX_HEADER"
+                    "LATEX_HEADER_EXTRA" "LATEX" "ATTR_LATEX")
+              :retained-keywords (list "LATEX" "ATTR_LATEX")
+              :raw-output-options
+              (list (cons :latex :allow-raw-latex))
+              :export-block-names (list "latex" "tex")
+              :export-snippet-names (list "latex")
+              :filters
+              (append
+               (org-kit::%export-backend-descriptor-filters old-descriptor)
+               (list
+                (cons :final-output
+                      (list
+                       (lambda (text context)
+                         (setf filter-context context)
+                         (format nil "~A|final-output-filter" text)))))))
+             (setf output (export-org (parse-org "Filtered body.") :latex))
+             (with-soft-assertions
+               (expect (search "Filtered body." output) :to-be-truthy)
+               (expect
+                (string=
+                 (subseq output
+                         (- (length output)
+                            (length "|final-output-filter")))
+                 "|final-output-filter")
+                :to-be t)
+               (expect
+                (and filter-context
+                     (eq (export-render-context-backend filter-context) :latex)
+                     (export-render-context-state filter-context))
+                :to-be-truthy)))
+        (sb-thread:with-mutex (org-kit::*export-backend-registry-lock*)
+          (if had-descriptor-p
+              (setf (gethash :latex registry) old-descriptor)
+              (remhash :latex registry))
+          (if had-builtin-types-p
+              (setf (gethash :latex builtin-handlers) old-builtin-types)
+              (remhash :latex builtin-handlers))))
+      (with-soft-assertions
+        (expect (eq (org-kit::export-registry-descriptor :latex)
+                    old-descriptor)
+                :to-be t)
+        (multiple-value-bind (restored-builtin-types present-p)
+            (gethash :latex builtin-handlers)
+          (expect (eq present-p had-builtin-types-p) :to-be t)
+          (when had-builtin-types-p
+            (expect (eq restored-builtin-types old-builtin-types)
+                    :to-be t)))))))

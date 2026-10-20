@@ -3175,4 +3175,332 @@
            (with-soft-assertions
              (expect output :to-equal "derived")
              (expect invalid-view-error :to-be t)
-             (expect invalid-table-cell-error :to-be t))))))))
+             (expect invalid-table-cell-error :to-be t)))))))
+  (it "validates resolved filters and native sink call arguments"
+    (let ((invalid-filter-p nil)
+          (invalid-view-p nil)
+          (invalid-mode-p nil)
+          (invalid-table-cell-p nil)
+          (invalid-source-breaks-p nil)
+          (unsupported-condition nil)
+          (parent-renderer-error-p nil)
+          (parent-node-error-p nil))
+      (export-registry-test-with-root-backend
+       :api-registry-root-native-validation
+       (list :renderer
+             (lambda (context)
+               (let ((view (first (export-view-children (first (export-render-context-root-views context))))))
+                 (setf invalid-filter-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (org-kit::export-apply-filter-stage
+                           :api-registry-root-native-validation :body 42
+                           context)))
+                       invalid-view-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (org-kit::export-render-view-to-sink context nil nil)))
+                       invalid-mode-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (org-kit::export-render-view-to-sink
+                           context nil view :mode :invalid)))
+                       invalid-table-cell-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (org-kit::export-render-view-to-sink
+                           context nil view :table-cell-p :yes)))
+                       invalid-source-breaks-p
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (org-kit::export-render-view-to-sink
+                           context nil view :preserve-source-breaks-p :yes)))
+                       unsupported-condition
+                       (handler-case
+                           (progn
+                             (org-kit::export-render-view-to-sink
+                              context nil view)
+                             nil)
+                         (org-export-unsupported-syntax (condition) condition))
+                       parent-renderer-error-p
+                       (export-registry-test-signals-program-error-p
+                        (lambda ()
+                          (export-render-parent-renderer context)))
+                       parent-node-error-p
+                       (export-registry-test-signals-program-error-p
+                        (lambda ()
+                          (export-render-parent-node
+                           context (make-node :paragraph)))))
+                 "body"))
+             :node-policies
+             (list
+              (cons :paragraph
+                    '(:unsupported :feature :api-registry-paragraph
+                      :message "Paragraphs are unsupported.")))
+             :filters
+             (list
+              (cons :body
+                    (list (lambda (value context)
+                            (declare (ignore context))
+                            value)))))
+       (lambda ()
+         (let ((resolved
+                 (org-kit::export-resolved-filters
+                  :api-registry-root-native-validation :body)))
+           (with-soft-assertions
+             (expect (export-org (parse-org "Native argument checks.")
+                                 :api-registry-root-native-validation)
+                     :to-equal "body")
+             (expect (length resolved) :to-be 1)
+             (expect (caar resolved)
+                     :to-be :api-registry-root-native-validation)
+             (expect (functionp (cdar resolved)) :to-be t)
+             (expect invalid-filter-p :to-be t)
+             (expect invalid-view-p :to-be t)
+             (expect invalid-mode-p :to-be t)
+             (expect invalid-table-cell-p :to-be t)
+             (expect invalid-source-breaks-p :to-be t)
+             (expect (typep unsupported-condition
+                            'org-export-unsupported-syntax)
+                     :to-be t)
+             (when unsupported-condition
+               (expect (org-export-unsupported-syntax-feature
+                        unsupported-condition)
+                       :to-be :api-registry-paragraph))
+             (expect parent-renderer-error-p :to-be t)
+             (expect parent-node-error-p :to-be t)))))))
+  (it "validates built-in backend and link registration failure contracts"
+    (let ((backend :api-registry-builtin-validation)
+          (child :api-registry-builtin-validation-child))
+      (with-soft-assertions
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (org-kit::%register-builtin-export-backend backend))))
+         :to-be :invalid-renderer)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (org-kit::%register-builtin-export-backend
+              :api-registry-partial-native-sink
+              :renderer #'identity
+              :native-sink-renderer #'identity))))
+         :to-be :invalid-native-sink)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (org-kit::%register-builtin-export-link-type
+              :api-registry-unknown-builtin-link "custom" #'identity))))
+         :to-be :unknown-backend)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (unregister-export-link-type
+              :api-registry-unknown-link-backend "custom"))))
+         :to-be :unknown-backend))
+      (export-registry-test-with-root-backend
+       backend
+       (list :renderer #'identity)
+       (lambda ()
+         (with-soft-assertions
+           (expect
+            (org-export-error-reason
+             (export-registry-test-registration-error
+              (lambda ()
+                (org-kit::%register-builtin-export-backend
+                 backend :renderer #'identity))))
+            :to-be :duplicate-backend)
+           (expect
+            (export-registry-test-signals-program-error-p
+             (lambda ()
+               (org-kit::%register-builtin-export-link-type
+                backend "custom" #'identity)))
+            :to-be t))))
+      (export-registry-test-with-builtin-backend
+       backend
+       (list :renderer #'identity)
+       (lambda ()
+         (let ((child-registered-p nil))
+           (unwind-protect
+                (progn
+                  (with-soft-assertions
+                    (expect
+                     (export-registry-test-signals-type-error-p
+                      (lambda ()
+                        (org-kit::%register-builtin-export-link-type
+                         backend 42 #'identity)))
+                     :to-be t)
+                    (expect
+                     (export-registry-test-signals-type-error-p
+                      (lambda ()
+                        (org-kit::%register-builtin-export-link-type
+                         backend "wrong-handler" 42)))
+                     :to-be t)
+                    (expect
+                     (org-export-error-reason
+                      (export-registry-test-registration-error
+                       (lambda ()
+                         (org-kit::%register-builtin-export-link-type
+                          backend "" #'identity))))
+                     :to-be :invalid-link-type-handler)
+                    (register-export-link-type backend "custom" #'identity)
+                    (expect
+                     (org-export-error-reason
+                      (export-registry-test-registration-error
+                       (lambda ()
+                         (org-kit::%register-builtin-export-link-type
+                          backend "CUSTOM" #'identity))))
+                     :to-be :duplicate-link-type-handler)
+                    (org-kit::%register-builtin-export-link-type
+                     backend "reserved" #'identity)
+                    (register-derived-export-backend child backend)
+                    (setf child-registered-p t)
+                    (expect
+                     (org-export-error-reason
+                      (export-registry-test-registration-error
+                       (lambda ()
+                         (unregister-export-link-type child "reserved"))))
+                     :to-be :builtin-link-type-handler))
+             (when child-registered-p
+               (unregister-export-backend child)))))))))
+  (it "checks native sink callback and wrapper contract failures"
+    (let ((sink-mode :valid)
+          (wrapper-mode :normal))
+      (export-registry-test-with-builtin-backend
+       :api-registry-native-contract-errors
+       (list :renderer
+             (lambda (context)
+               (let ((sink (make-export-registry-test-native-sink)))
+                 (dolist (view (export-render-context-root-views context))
+                   (org-kit::export-render-view-to-sink context sink view))
+                 (export-registry-test-native-sink-string sink nil)))
+             :native-sink-renderer
+             #'export-registry-test-native-sink-renderer
+             :native-sink-scratch
+             #'export-registry-test-native-sink-scratch
+             :native-sink-string
+             (lambda (sink context)
+               (if (eq sink-mode :bad-string)
+                   :not-a-string
+                   (export-registry-test-native-sink-string sink context)))
+             :native-sink-write-string
+             (lambda (sink text context)
+               (export-registry-test-native-sink-write-string
+                sink text context)
+               (if (eq sink-mode :bad-write) :unexpected nil))
+             :native-sink-append-node-result
+             (lambda (sink text context)
+               (export-registry-test-native-sink-append-node-result
+                sink text context)
+               (if (eq sink-mode :bad-append) :unexpected nil))
+             :native-sink-output-offset
+             #'export-registry-test-native-sink-output-offset
+             :node-wrapper
+             (lambda (node view frame context render-next)
+               (declare (ignore node view frame context))
+               (case wrapper-mode
+                 (:bad-prefix (funcall render-next :invalid ""))
+                 (:bad-suffix (funcall render-next "" :invalid))
+                 (:non-nil-result
+                  (funcall render-next "" "")
+                  :unexpected)
+                 (:not-called nil)
+                 (otherwise
+                  (funcall render-next "" ""))))
+             :transcoders
+             (list
+              (cons :paragraph
+                    (lambda (node view frame context)
+                      (declare (ignore node view frame context))
+                      (if (eq sink-mode :bad-transcoder)
+                          :not-a-string
+                          "transcoded"))))
+             :filters
+             (list
+              (cons '(:element :paragraph)
+                    (list (lambda (value context)
+                            (declare (ignore context))
+                            value)))))
+       (lambda ()
+         (let ((document (parse-org "Native sink callback contracts.")))
+           (with-soft-assertions
+             (expect
+              (not (null
+                    (search
+                     "transcoded"
+                     (export-org document :api-registry-native-contract-errors))))
+              :to-be t)
+             (setf sink-mode :bad-string)
+             (expect
+              (export-registry-test-signals-type-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)
+             (setf sink-mode :bad-transcoder)
+             (expect
+              (export-registry-test-signals-type-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)
+             (setf sink-mode :bad-write)
+             (expect
+              (export-registry-test-signals-type-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)
+             (setf sink-mode :bad-append)
+             (expect
+              (export-registry-test-signals-type-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)
+             (setf sink-mode :valid
+                   wrapper-mode :bad-prefix)
+             (expect
+              (export-registry-test-signals-type-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)
+             (setf wrapper-mode :bad-suffix)
+             (expect
+              (export-registry-test-signals-type-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)
+             (setf wrapper-mode :non-nil-result)
+             (expect
+              (export-registry-test-signals-type-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)
+             (setf wrapper-mode :not-called)
+             (expect
+              (export-registry-test-signals-program-error-p
+               (lambda ()
+                 (export-org document :api-registry-native-contract-errors)))
+              :to-be t)))))))
+  (it "rejects sink traversal without registered native callbacks"
+    (let ((missing-callbacks-p nil))
+      (export-registry-test-with-root-backend
+       :api-registry-root-missing-native-callbacks
+       (list
+        :renderer
+        (lambda (context)
+          (let ((view (first (export-render-context-root-views context))))
+            (setf missing-callbacks-p
+                  (export-registry-test-signals-program-error-p
+                   (lambda ()
+                     (org-kit::export-render-view-to-sink context nil view))))
+            "body")))
+       (lambda ()
+         (with-soft-assertions
+           (expect
+            (export-org (parse-org "Missing native sink callbacks.")
+                        :api-registry-root-missing-native-callbacks)
+            :to-equal "body"))))
+      (with-soft-assertions
+        (expect missing-callbacks-p :to-be t)))))

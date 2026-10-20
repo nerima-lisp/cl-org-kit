@@ -1370,6 +1370,18 @@ paragraph" table-list) :not :to-be nil))))
            (expect (search "Prepared title" output) :to-be-truthy)
            (expect (search "Body text." output) :to-be-truthy)
            (expect (search "</html>" output) :to-be-truthy)))))
+  (it "suppresses the legacy HTML title when title is disabled"
+      (let* ((document
+               (parse-org
+                (format nil
+                        "#+TITLE: Hidden title~%#+OPTIONS: title:nil~%Body remains.~%")))
+             (output
+               (org-kit::export-render-preparation
+                (org-kit::export-prepare document :html) :html)))
+        (with-soft-assertions
+          (expect (search "<h1 class=\"title\">Hidden title</h1>" output)
+                  :to-be nil)
+          (expect (search "Body remains." output) :to-be-truthy))))
 
 (describe "HTML export budget regressions"
   (it "enforces exact character output limits through export-org"
