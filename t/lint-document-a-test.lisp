@@ -295,14 +295,21 @@ SCHEDULED: <2024-01-01 Mon>
 :PROPERTIES:
 :EFFORT: soon
 :END:" "invalid-effort-property"
-     '(("invalid-effort-property" 18 "Invalid effort duration format: \"soon\""))))
+     '(("invalid-effort-property" 18 "Invalid effort duration format: \"soon\"")))
+    (lint-document-a-expect-finding
+     "* A
+:PROPERTIES:
+:EFFORT: 42
+:END:" "invalid-effort-property"
+     '(("invalid-effort-property" 18 "Invalid effort duration format: \"42\""))))
 
-  (it "accepts a valid EFFORT duration"
+  (it "checks drawer EFFORT and ignores keyword declarations"
     (lint-document-a-expect-none
      "* A
 :PROPERTIES:
 :EFFORT: 1d 2:00
-:END:" "invalid-effort-property"))
+:END:" "invalid-effort-property")
+    (lint-document-a-expect-none "#+PROPERTY: Effort 42" "invalid-effort-property"))
 
   (it "reports an ID property containing a double colon"
     (lint-document-a-expect-finding
@@ -399,15 +406,7 @@ Text" "extraneous-element-in-footnote-section"
     (expect (org-kit::%lint-a-uri-scheme-p "1scheme:path") :to-be nil)
     (expect (org-kit::%lint-a-uri-scheme-p "bad_scheme:path") :to-be nil)
     (expect (org-kit::%lint-a-search-equal-p "Heading  More" "heading more") :to-be t)
-    (expect (org-kit::%lint-a-search-equal-p "Heading" "Other") :to-be nil)
-    (expect (org-kit::%lint-a-duration-components-p "1d 2h") :to-be t)
-    (expect (org-kit::%lint-a-duration-components-p "1.5h") :to-be t)
-    (expect (org-kit::%lint-a-duration-components-p "1q") :to-be nil)
-    (expect (org-kit::%lint-a-duration-components-p "h") :to-be nil)
-    (expect (org-kit::%lint-a-clock-duration-p "12:34") :to-be t)
-    (expect (org-kit::%lint-a-clock-duration-p "12:34:56") :to-be t)
-    (expect (org-kit::%lint-a-clock-duration-p "12:34:56:78") :to-be nil)
-    (expect (org-kit::%lint-a-clock-duration-p "12:3") :to-be nil))
+    (expect (org-kit::%lint-a-search-equal-p "Heading" "Other") :to-be nil))
   (it "covers additional document helper boundaries"
   (expect (multiple-value-list (org-kit::%lint-a-line-bounds "one
 two" 0))
@@ -420,11 +419,6 @@ two" 0))
   (expect (org-kit::%lint-affiliated-keyword-p "ATTR") :to-be nil)
   (expect (org-kit::%lint-outer-bracketed-p "[x") :to-be nil)
   (expect (org-kit::%lint-a-search-equal-p nil "heading") :to-be nil)
-  (expect (org-kit::%lint-a-duration-components-p "1.h") :to-be t)
-  (expect (org-kit::%lint-a-duration-components-p "") :to-be nil)
-  (expect (org-kit::%lint-a-clock-duration-p "abc") :to-be nil)
-  (expect (org-kit::%lint-a-clock-duration-p "x2:34") :to-be nil)
-  (expect (org-kit::%lint-a-clock-duration-p "12:34:5") :to-be nil)
   (let ((document (parse-org (format nil "* Heading~%:PROPERTIES:~%:CUSTOM_ID: here~%:END:"))))
     (expect (org-kit::%lint-a-fuzzy-target-present-p document "here") :to-be t)
     (expect (org-kit::%lint-a-fuzzy-target-present-p document "*here") :to-be nil))
@@ -472,8 +466,7 @@ two" 0))
       (org-kit::append-child headline drawer)
       (expect (mapcar #'org-kit::org-lint-diagnostic-message
                       (org-kit::%lint-obsolete-properties-drawer document nil))
-              :to-equal '("Incorrect contents for PROPERTIES drawer")))
-    (expect (org-kit::%lint-a-duration-components-p "1 d") :to-be t))
+              :to-equal '("Incorrect contents for PROPERTIES drawer"))))
 )
 (describe "document-only Org lint checker uncovered branches"
   (it "covers sibling, source offset, and affiliated-keyword boundaries"
@@ -579,11 +572,6 @@ two" 0))
       (org-kit::append-child headline invalid-offset-drawer)
       (expect (org-kit::%lint-obsolete-properties-drawer document nil)
               :to-equal '()))
-    (expect (org-kit::%lint-a-duration-components-p "1") :to-be nil)
-    (expect (org-kit::%lint-a-duration-components-p "1.5") :to-be nil)
-    (expect (org-kit::%lint-a-duration-components-p "1 ") :to-be nil)
-    (expect (org-kit::%lint-a-duration-p 1) :to-be nil)
-    (expect (org-kit::%lint-a-duration-p "") :to-be nil)
     (let* ((document (parse-org "x"))
            (effort (org-kit::make-node :node-property :begin 0 :end 1
                                        :properties '(:key "EFFORT" :value 1)))
@@ -647,6 +635,16 @@ two" 0))
       (org-kit::append-child root keyword)
       (org-kit::append-child root next)
       (setf (org-kit::%node-begin keyword) nil)
+      (expect (org-kit::%lint-combining-keywords-with-affiliated document nil)
+              :to-equal '()))
+    (let* ((document (parse-org "x"))
+           (root (org-kit::document-root document))
+           (keyword (org-kit::make-node :keyword :begin 0 :end 1
+                                        :post-affiliated 0))
+           (next (org-kit::make-node :paragraph :end 1 :post-affiliated 1)))
+      (setf (org-kit::node-children root) nil)
+      (org-kit::append-child root keyword)
+      (org-kit::append-child root next)
       (expect (org-kit::%lint-combining-keywords-with-affiliated document nil)
               :to-equal '())))
   (it "ignores coderef and custom ID links without source positions"
