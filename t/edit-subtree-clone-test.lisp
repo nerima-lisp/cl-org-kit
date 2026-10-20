@@ -366,19 +366,32 @@
               (format nil
                       "* Task~%unclosed <2026-03-02 and [2026-03-04]~%* Task~%unclosed <2026-03-02 and [2026-03-05 Thu]~%* Peer~%"))))
 
-  (it "removes indented clock lines and whitespace-only drawers from clones"
+  (it "removes clocks and empty drawers while preserving non-empty drawers"
     (let* ((source
              (format nil
                      "* Task~%:LOGBOOK:~%  ~%:END:~%  CLOCK: raw~%* Peer~%"))
            (document (parse-org source))
            (target (edit-subtree-clone-test-headline document "Task"))
-           (result (clone-subtree-with-time-shift document target 1 nil nil)))
+           (result (clone-subtree-with-time-shift document target 1 nil nil))
+           (preserved-source
+             (format nil "* Task~%:LOGBOOK:~%kept note~%:END:~%* Peer~%"))
+           (preserved-document (parse-org preserved-source))
+           (preserved-target
+             (edit-subtree-clone-test-headline preserved-document "Task"))
+           (preserved-result
+             (clone-subtree-with-time-shift
+              preserved-document preserved-target 1 nil nil)))
       (with-soft-assertions
         (expect (document-text (edit-result-updated-document result))
                 :to-equal
                 (format nil
                         "* Task~%:LOGBOOK:~%  ~%:END:~%  CLOCK: raw~%* Task~%* Peer~%"))
-        (expect (document-text document) :to-equal source))))
+        (expect (document-text (edit-result-updated-document preserved-result))
+                :to-equal
+                (format nil
+                        "* Task~%:LOGBOOK:~%kept note~%:END:~%* Task~%:LOGBOOK:~%kept note~%:END:~%* Peer~%"))
+        (expect (document-text document) :to-equal source)
+        (expect (document-text preserved-document) :to-equal preserved-source))))
 
   (it "removes a final clock line without a newline"
     (let* ((source (format nil "* Task~%  CLOCK: raw"))
