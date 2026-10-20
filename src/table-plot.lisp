@@ -156,7 +156,7 @@
                   ((string= name "file") (setf (getf options :file) value))
                   ((string= name "set") (push value (getf options :sets)))
                   ((string= name "labels") (setf (getf options :labels) value))
-                  ((string= name "script") (setf (getf options :script) value)))
+                  (t (setf (getf options :script) value)))
             (setf position value-end)))))))
 
 (defun table-plot-option-string (value)
@@ -284,7 +284,7 @@
       (t
        (loop for column below width
              for column-number = (1+ column)
-             unless (or (and (string= type "2d") ind (= column-number ind))
+             unless (or (and ind (= column-number ind))
                         (and deps (not (member column-number deps))))
                collect (format nil "'~A' using ~A~D with ~A title '~A'"
                                data-path
@@ -492,8 +492,7 @@
       (format nil "~D" value)
       (let* ((text (format nil "~,8F" value))
              (trimmed (string-right-trim "0" text)))
-        (if (and (plusp (length trimmed))
-                 (char= (char trimmed (1- (length trimmed))) #\.))
+        (if (char= (char trimmed (1- (length trimmed))) #\.)
             (concatenate 'string trimmed "0")
             trimmed))))
 (defun table-plot-radar-script (labels options radar-path)

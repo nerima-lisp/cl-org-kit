@@ -404,5 +404,87 @@
             (when (typep condition (quote org-resource-limit-error))
               (expect (org-resource-limit-error-limit-name condition)
                       :to-be (second path-case)))))))
+  (it "covers plot option, path, dependency, and radar branches"
+    (let* ((quote-characters (list (code-char 39) (code-char 39)))
+           (quoted-atom
+             (org-kit::table-plot-parse-option-atom "\"label\"" 0 7))
+           (script-options
+             (org-kit::table-plot-read-options "script:\"custom.gp\"" nil))
+           (rows (list (list "Group" 1 2 3)))
+           (filtered-lines
+             (org-kit::table-plot-plot-lines
+              "2d" rows
+              (list :ind 0 :deps (list 2) :with "lines")
+              "data.tsv" "radar.dat"))
+           (all-lines
+             (org-kit::table-plot-plot-lines
+              "2d" rows
+              (list :ind 0 :deps nil :with "lines")
+              "data.tsv" "radar.dat"))
+           (radar-data
+             (with-output-to-string (stream)
+               (org-kit::table-plot-write-radar-setup
+                (list (list "Flat" "5" "5") (list "Empty"))
+                (list "A" "B") nil (make-limits) 0 stream
+                (org-kit::make-table-plot-budget :limits (make-limits))
+                "radar.dat")))
+           (flat-ticks
+             (org-kit::table-plot-radar-tick-count
+              (list (list "Flat" "5" "5")) (make-limits)))
+           (range-ticks
+             (org-kit::table-plot-radar-tick-count
+              (list (list "Range" "0" "4")) (make-limits)))
+           (zero-ticks-script
+             (org-kit::table-plot-radar-script nil (list :ticks 0) "radar.dat"))
+           (four-ticks-script
+             (org-kit::table-plot-radar-script nil (list :ticks 4) "radar.dat"))
+           (tick-vector (format nil "~%    ~C++~C u" (first quote-characters)
+                                (second quote-characters))))
+      (with-soft-assertions
+        (expect (org-kit::table-plot-option-value-end "((a))" 0 nil)
+                :to-be 5)
+        (expect quoted-atom :to-equal "label")
+        (expect (org-kit::table-plot-parse-option-value "(1 2)" 0 5)
+                :to-equal (list 1 2))
+        (progn
+          (expect (org-kit::table-plot-parse-option-value "value" 0 5)
+                  :to-equal "value")
+          (expect (org-kit::table-plot-parse-option-value "x" 1 1)
+                  :to-equal ""))
+        (expect (getf script-options :script) :to-equal "custom.gp")
+        (progn
+          (expect (org-kit::table-plot-gnuplot-file-path nil "reports")
+                  :to-be nil)
+          (expect (org-kit::table-plot-gnuplot-file-path "" "reports")
+                  :to-equal "reports/")
+          (expect (org-kit::table-plot-gnuplot-file-path "chart" "")
+                  :to-equal "/chart"))
+        (expect (org-kit::table-plot-gnuplot-file-path "/tmp/chart" "reports")
+                :to-equal "/tmp/chart")
+        (expect (org-kit::table-plot-gnuplot-file-path "chart" nil)
+                :to-equal "chart")
+        (expect (org-kit::table-plot-gnuplot-file-path "chart" "reports")
+                :to-equal "reports/chart")
+        (expect (org-kit::table-plot-gnuplot-file-path "chart" "reports/")
+                :to-equal "reports/chart")
+        (expect (org-kit::table-plot-label nil 0) :to-be 1)
+        (progn
+          (expect (org-kit::table-plot-label (list "Sales") 0)
+                  :to-equal "Sales")
+          (expect (org-kit::table-plot-label "Sales" 0) :to-be 1))
+        (expect (length filtered-lines) :to-be 1)
+        (expect (search "using 2" (first filtered-lines)) :to-be-truthy)
+        (expect (length all-lines) :to-be 4)
+        (expect (search "\"Flat\" 5 5" radar-data) :to-be-truthy)
+        (expect (search "\"Empty\" 0.0 0.0" radar-data) :to-be-truthy)
+        (expect flat-ticks :to-be 0)
+        (expect (> range-ticks 0) :to-be t)
+        (expect (org-kit::table-plot-real-string 2) :to-equal "2")
+        (expect (org-kit::table-plot-real-string 3.5d0) :to-equal "3.5")
+        (expect (org-kit::table-plot-real-string 5.0d0) :to-equal "5.0")
+        (expect (search "TicCount = 2" zero-ticks-script) :to-be-truthy)
+        (expect (search tick-vector zero-ticks-script) :to-be nil)
+        (expect (search "TicCount = 4" four-ticks-script) :to-be-truthy)
+        (expect (search tick-vector four-ticks-script) :to-be-truthy))))
 
 )
