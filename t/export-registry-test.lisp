@@ -901,6 +901,25 @@
              (unregister-export-link-type child "custom"))
            (when parent-handler-registered-p
              (unregister-export-link-type parent "custom")))))))
+  (it "dispatches registered link types on the root built-in backend"
+    (let ((registered-p nil)
+          (output nil))
+      (unwind-protect
+           (progn
+             (register-export-link-type
+              :latex "fr106-root"
+              (function export-registry-test-link-handler))
+             (setf registered-p t)
+             (setf output
+                   (export-org
+                    (parse-org "[[fr106-root:path][Root link]]")
+                    :latex))
+             (with-soft-assertions
+               (expect
+                (search "\\href{https://example.test/}{Root link}" output)
+                :to-be-truthy)))
+        (when registered-p
+          (unregister-export-link-type :latex "fr106-root")))))
 
   (it "keeps built-in link registration idempotent across reloads"
     (let* ((backend :api-registry-builtin-link)

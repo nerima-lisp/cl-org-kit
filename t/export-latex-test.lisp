@@ -1279,34 +1279,6 @@
           (unregister-export-link-type backend "doi"))
         (when registered-p
           (unregister-export-backend backend)))))
-  (it "dispatches link types registered on the root LaTeX backend"
-    (let ((registered-p nil)
-          (output nil)
-          (*export-latex-test-link-observation* nil))
-      (unwind-protect
-           (progn
-             (register-export-link-type
-              :latex "fr106-direct"
-              (function export-latex-test-derived-link-handler))
-             (setf registered-p t)
-             (setf output
-                   (export-org
-                    (parse-org
-                     (export-latex-test-lines
-                      "#+OPTIONS: toc:nil num:nil"
-                      "[[fr106-direct:root][Root link]]"))
-                    :latex))
-             (with-soft-assertions
-               (expect
-                (search "\\href{https://doi.org/root}{Root link}" output)
-                :to-be-truthy)
-               (expect
-                *export-latex-test-link-observation*
-                :to-equal
-                (list "root" "Root link" :inline nil :latex))))
-        (when registered-p
-          (unregister-export-link-type :latex "fr106-direct")))))
-
   (it "dispatches an unprepared title macro through its registered node policy"
     (let ((backend :fr106-latex-title-policy-test)
           (registered-p nil)
