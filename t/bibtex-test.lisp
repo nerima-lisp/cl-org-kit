@@ -44,7 +44,7 @@
         (expect (document-text document) :to-equal "")
         (expect (document-text updated)
                 :to-equal
-                (format nil "* Analytical Engine~%:PROPERTIES:~%:TITLE: Analytical Engine~%:BTYPE: article~%:CUSTOM_ID: key42~%:AUTHOR: Ada Lovelace~%:JOURNAL: Notes~%:YEAR: 1843~%:END:~%"))
+                (format nil "* Analytical Engine~%:PROPERTIES:~%:TITLE:    Analytical Engine~%:BTYPE:    article~%:CUSTOM_ID: key42~%:AUTHOR:   Ada Lovelace~%:JOURNAL:  Notes~%:YEAR:     1843~%:END:~%"))
         (expect output
                 :to-equal
                 (format nil "@article{key42,~%  author={Ada Lovelace},~%  title={Analytical Engine},~%  journal={Notes},~%  year={1843}~%}~%")))))
@@ -60,6 +60,46 @@
         (expect output
                 :to-equal
                 (format nil "@article{key42,~%  author={Ada Lovelace},~%  title={Analytical Engine},~%  journal={Notes},~%  year={1843}~%}~%")))))
+  (it "matches Org BibTeX whitespace normalization"
+    (let* ((edges-input
+             (format nil "@misc{edges, title={~CTitle~C}}" #\Tab #\Return))
+           (edges-document (parse-org ""))
+           (edges-updated
+             (edit-result-updated-document
+              (bibtex-import edges-document edges-input)))
+           (edges-heading (first (bibtex-test-headlines edges-updated)))
+           (page-input
+             (format nil "@misc{page, title={~CTitle~C}, note={~Cnote~C}}"
+                     #\Page #\Page #\VT #\VT))
+           (page-document (parse-org ""))
+           (page-updated
+             (edit-result-updated-document
+              (bibtex-import page-document page-input)))
+           (page-heading (first (bibtex-test-headlines page-updated))))
+      (with-soft-assertions
+        (expect (plusp (length edges-input)) :to-be t)
+        (expect (document-text edges-updated)
+                :to-equal
+                (format nil "*  Title ~%:PROPERTIES:~%:TITLE:    Title~%:BTYPE:    misc~%:CUSTOM_ID: edges~%:END:~%"))
+        (expect (bibtex-test-property edges-heading "TITLE") :to-equal "Title")
+        (expect (bibtex-export edges-updated edges-heading)
+                :to-equal
+                (format nil "@misc{edges,~%  title={Title}~%}~%"))
+        (expect (plusp (length page-input)) :to-be t)
+        (expect (document-text page-updated)
+                :to-equal
+                (format nil "* ~CTitle~C~%:PROPERTIES:~%:TITLE:    ~CTitle~C~%:BTYPE:    misc~%:CUSTOM_ID: page~%:NOTE:     ~Cnote~C~%:END:~%"
+                        #\Page #\Page #\Page #\Page #\VT #\VT))
+        (expect (bibtex-test-property page-heading "TITLE")
+                :to-equal
+                (format nil "~CTitle~C" #\Page #\Page))
+        (expect (bibtex-test-property page-heading "NOTE")
+                :to-equal
+                (format nil "~Cnote~C" #\VT #\VT))
+        (expect (bibtex-export page-updated page-heading)
+                :to-equal
+                (format nil "@misc{page,~%  title={~CTitle~C},~%  note={~Cnote~C}~%}~%"
+                        #\Page #\Page #\VT #\VT)))))
 
   (it "parses parenthesized entries and quoted or bare values"
     (let* ((input
@@ -71,7 +111,7 @@
         (expect (plusp (length input)) :to-be t)
         (expect (document-text updated)
                 :to-equal
-                (format nil "* Quoted Title~%:PROPERTIES:~%:TITLE: Quoted Title~%:BTYPE: article~%:CUSTOM_ID: key~%:AUTHOR: Ada Lovelace~%:JOURNAL: Notes~%:YEAR: 1843~%:END:~%")))))
+                (format nil "* Quoted Title~%:PROPERTIES:~%:TITLE:    Quoted Title~%:BTYPE:    article~%:CUSTOM_ID: key~%:AUTHOR:   Ada Lovelace~%:JOURNAL:  Notes~%:YEAR:     1843~%:END:~%")))))
 
   (it "imports multiple entries in their source order"
     (let* ((input
@@ -156,11 +196,16 @@
                 :to-equal
                 (format nil "@inbook{chapter-key,~%  author={Author},~%  editor={Ed},~%  title={Chapter title},~%  chapter={4},~%  pages={20-30},~%  publisher={Press},~%  year={2000}~%}~%")))))
 
-  (it "uses the headline title fallback and matches Org empty misc formatting"
+  (it "matches Org title fallback and empty-value export behavior"
     (let* ((source
              (format nil "* Headline title~%:PROPERTIES:~%:BTYPE: article~%:CUSTOM_ID: fallback~%:AUTHOR: Ada~%:JOURNAL: Notes~%:YEAR: 1843~%:END:~%"))
            (document (parse-org source))
            (heading (first (bibtex-test-headlines document)))
+           (empty-title-source
+             (format nil "* Headline title~%:PROPERTIES:~%:TITLE:~%:BTYPE: article~%:CUSTOM_ID: blank~%:AUTHOR:~%:END:~%"))
+           (empty-title-document (parse-org empty-title-source))
+           (empty-title-heading
+             (first (bibtex-test-headlines empty-title-document)))
            (misc-source
              (format nil "* ~%:PROPERTIES:~%:BTYPE: misc~%:CUSTOM_ID: empty~%:END:~%"))
            (misc-document (parse-org misc-source))
@@ -171,28 +216,45 @@
         (expect (bibtex-export document heading)
                 :to-equal
                 (format nil "@article{fallback,~%  author={Ada},~%  title={Headline title},~%  journal={Notes},~%  year={1843}~%}~%"))
+        (expect (plusp (length empty-title-source)) :to-be t)
+        (expect (bibtex-export empty-title-document empty-title-heading)
+                :to-equal
+                (format nil "@article{blank,~%  author={},~%  title={}~%}~%"))
         (expect (plusp (length misc-source)) :to-be t)
         (expect (bibtex-export misc-document misc-heading)
                 :to-equal
                 (format nil "@misc{empty,~%~%}~%")))))
 
-  (it "signals named errors for missing required fields on import and export"
+  (it "converts incomplete entries with the fields present"
     (let* ((input "@article{missing, author={Ada}, title={No journal or year}}")
-           (condition
-             (bibtex-test-condition
-              (lambda () (bibtex-import (parse-org "") input))))
-           (source
-             (format nil "* Incomplete~%:PROPERTIES:~%:BTYPE: article~%:CUSTOM_ID: incomplete~%:AUTHOR: Ada~%:TITLE: Incomplete~%:YEAR: 1843~%:END:~%"))
-           (document (parse-org source))
-           (heading (first (bibtex-test-headlines document)))
-           (export-condition
-             (bibtex-test-condition (lambda () (bibtex-export document heading)))))
+           (document (parse-org ""))
+           (updated
+             (edit-result-updated-document (bibtex-import document input)))
+           (heading (first (bibtex-test-headlines updated)))
+           (output (bibtex-export updated heading)))
       (with-soft-assertions
         (expect (plusp (length input)) :to-be t)
-        (bibtex-test-expect-error condition :missing-required-fields)
-        (expect (org-bibtex-error-position condition) :to-be 0)
-        (expect (stringp (org-bibtex-error-context condition)) :to-be t)
-        (bibtex-test-expect-error export-condition :missing-required-fields))))
+        (expect (document-text updated)
+                :to-equal
+                (format nil "* No journal or year~%:PROPERTIES:~%:TITLE:    No journal or year~%:BTYPE:    article~%:CUSTOM_ID: missing~%:AUTHOR:   Ada~%:END:~%"))
+        (expect output
+                :to-equal
+                (format nil "@article{missing,~%  author={Ada},~%  title={No journal or year}~%}~%")))))
+  (it "imports and exports an empty title like Org"
+    (let* ((input "@article{empty, title={}}")
+           (document (parse-org ""))
+           (updated
+             (edit-result-updated-document (bibtex-import document input)))
+           (heading (first (bibtex-test-headlines updated)))
+           (output (bibtex-export updated heading)))
+      (with-soft-assertions
+        (expect (plusp (length input)) :to-be t)
+        (expect (document-text updated)
+                :to-equal
+                (format nil "* ~%:PROPERTIES:~%:TITLE:~%:BTYPE:    article~%:CUSTOM_ID: empty~%:END:~%"))
+        (expect output
+                :to-equal
+                (format nil "@article{empty,~%  title={}~%}~%")))))
 
   (it "reports missing types and keys and rejects malformed entry delimiters"
     (let ((cases
@@ -200,7 +262,8 @@
               ("@article{, author={A}}" :missing-key)
               ("@unknown{key, title={T}}" :unknown-type)
               ("@article[key, author={A}]" :malformed-delimiter)
-              ("@article{key, author={A}, title={T}, journal={J}, year={1843}" :unclosed-entry))))
+              ("@article{key, author={A}, title={T}, journal={J}, year={1843}" :unclosed-entry)
+              ("@article{untitled, author={A}}" :missing-title))))
       (with-soft-assertions
         (dolist (case cases)
           (let ((input (first case))
@@ -210,6 +273,13 @@
              (bibtex-test-condition
               (lambda () (bibtex-import (parse-org "") input)))
              reason)))
+        (let* ((input "@misc{untitled, author={Ada}}")
+               (condition
+                 (bibtex-test-condition
+                  (lambda () (bibtex-import (parse-org "") input)))))
+          (bibtex-test-expect-error condition :missing-title)
+          (when (typep condition 'org-bibtex-error)
+            (expect (org-bibtex-error-position condition) :to-be 0)))
         (let* ((document (parse-org (format nil "* No properties~%")))
                (heading (first (bibtex-test-headlines document)))
                (condition
@@ -261,4 +331,4 @@
                 :to-equal
                 (concatenate
                  'string source
-                 (format nil "~%* Added~%:PROPERTIES:~%:TITLE: Added~%:BTYPE: article~%:CUSTOM_ID: added~%:AUTHOR: Ada~%:JOURNAL: Notes~%:YEAR: 1843~%:END:~%")))))))
+                 (format nil "~%* Added~%:PROPERTIES:~%:TITLE:    Added~%:BTYPE:    article~%:CUSTOM_ID: added~%:AUTHOR:   Ada~%:JOURNAL:  Notes~%:YEAR:     1843~%:END:~%")))))))

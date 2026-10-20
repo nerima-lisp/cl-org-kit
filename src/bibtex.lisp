@@ -105,20 +105,18 @@
            :context context)))
 
 (defun bibtex-collapse-whitespace (value)
-  (string-trim
-   '(#\Space)
-   (with-output-to-string (stream)
-     (loop with pending-space-p = nil
-           with emitted-p = nil
-           for character across value
-           do (if (bibtex-whitespace-p character)
-                  (setf pending-space-p t)
-                  (progn
-                    (when (and pending-space-p emitted-p)
-                      (write-char #\Space stream))
-                    (write-char character stream)
-                    (setf pending-space-p nil
-                          emitted-p t)))))))
+  (with-output-to-string (stream)
+    (loop with pending-space-p = nil
+          for character across value
+          do (if (find character '(#\Space #\Tab #\Newline #\Return))
+                 (setf pending-space-p t)
+               (progn
+                 (when pending-space-p
+                   (write-char #\Space stream))
+                 (write-char character stream)
+                 (setf pending-space-p nil)))
+          finally (when pending-space-p
+                    (write-char #\Space stream)))))
 
 (defun bibtex-strip-outer-braces (value)
   (if (and (>= (length value) 2)
@@ -158,8 +156,7 @@
 (defun bibtex-normalize-value (value)
   (bibtex-collapse-whitespace
    (bibtex-strip-outer-quotes
-    (bibtex-strip-outer-braces
-     (string-trim '(#\Space #\Tab #\Newline #\Return #\Page) value)))))
+    (bibtex-strip-outer-braces value))))
 
 (defun bibtex-read-value (input position closing-delimiter)
   (let ((start (bibtex-skip-whitespace input position))
@@ -337,18 +334,6 @@
 (defun bibtex-entry-field-value (entry field)
   (cdr (assoc field (bibtex-entry-fields entry) :test #'string=)))
 
-(defun bibtex-group-label (group)
-  (format nil "~{~A~^/~}" group))
-
-(defun bibtex-missing-entry-fields (entry type-definition)
-  (remove-if
-   (lambda (group)
-     (some (lambda (field)
-             (bibtex-value-present-p
-              (bibtex-entry-field-value entry field)))
-           group))
-   (second type-definition)))
-
 (defun bibtex-prefix-string (prefix input position)
   (unless (or (null prefix)
               (and (stringp prefix)
@@ -377,42 +362,61 @@
 (defun bibtex-first-headline (document)
   (find :headline (node-children (document-root document)) :key #'node-type))
 
-(defun bibtex-build-entry-subtree (document entry prefix input)
-  (let* ((type-definition (bibtex-type-definition (bibtex-entry-type entry)))
-         (missing (bibtex-missing-entry-fields entry type-definition)))
-    (when missing
-      (bibtex-signal-error
-       input (bibtex-entry-position entry) :missing-required-fields
-       (format nil "BibTeX entry is missing required fields: ~{~A~^, ~}"
-               (mapcar #'bibtex-group-label missing))))
-    (let* ((entry-title
-             (or (bibtex-entry-field-value entry "title")
-                 (and (string= (bibtex-entry-type entry) "misc")
-                      (bibtex-entry-key entry))))
-           (newline (edit-properties-line-ending
-                     (document-text document)
-                     (length (document-text document))))
-           (temporary
-             (parse-org (concatenate 'string "* " entry-title newline)
-                        :limits (document-limits document)
-                        :settings (document-settings document))))
-      (setf temporary
-            (set-property temporary (bibtex-first-headline temporary)
-                          (bibtex-property-key prefix "title") entry-title))
-      (setf temporary
-            (set-property temporary (bibtex-first-headline temporary)
-                          (bibtex-property-key prefix "btype")
-                          (bibtex-entry-type entry)))
-      (setf temporary
-            (set-property temporary (bibtex-first-headline temporary)
-                          "CUSTOM_ID" (bibtex-entry-key entry)))
-      (dolist (field (bibtex-entry-fields entry))
-        (unless (string= (car field) "title")
-          (setf temporary
-                (set-property temporary (bibtex-first-headline temporary)
-                              (bibtex-property-key prefix (car field))
-                              (cdr field)))))
-      (document-text temporary))))
+(defun bibtex-align-generated-properties (document headline)
+  (let* ((section (find :section (node-children headline) :key #'node-type))
+         (drawer (and section
+                      (find :property-drawer (node-children section)
+                            :key #'node-type)))
+         (properties (and drawer (node-children drawer))))
+    (if (null properties)
+        document
+      (let* ((patches
+              (loop for property in properties
+                    for label-length =
+                    (+ 2 (length (node-property property :key)))
+                    for value-start = (+ (node-begin property) label-length)
+                    for value = (node-property property :value)
+                    for padding = (max 0 (- 11 label-length 1))
+                    when (and (stringp value) (zerop (length value)))
+                    collect (edit-make-patch value-start (1+ value-start) "")
+                    else when (plusp padding)
+                    collect (edit-make-patch
+                             (1+ value-start) (1+ value-start)
+                             (make-string padding #\Space))))
+             (expected (edit-canonical-document document)))
+        (if patches
+            (edit-apply-patches document patches
+                                :target headline :expected expected)
+          document)))))
+
+(defun bibtex-build-entry-subtree (document entry prefix)
+  (let* ((entry-title (bibtex-entry-field-value entry "title"))
+         (newline (edit-properties-line-ending
+                   (document-text document)
+                   (length (document-text document))))
+         (temporary
+          (parse-org (concatenate 'string "* " entry-title newline)
+                     :limits (document-limits document)
+                     :settings (document-settings document))))
+    (setf temporary
+          (set-property temporary (bibtex-first-headline temporary)
+                        (bibtex-property-key prefix "title") entry-title))
+    (setf temporary
+          (set-property temporary (bibtex-first-headline temporary)
+                        (bibtex-property-key prefix "btype")
+                        (bibtex-entry-type entry)))
+    (setf temporary
+          (set-property temporary (bibtex-first-headline temporary)
+                        "CUSTOM_ID" (bibtex-entry-key entry)))
+    (dolist (field (bibtex-entry-fields entry))
+      (unless (string= (car field) "title")
+        (setf temporary
+              (set-property temporary (bibtex-first-headline temporary)
+                            (bibtex-property-key prefix (car field))
+                            (cdr field)))))
+    (document-text
+     (bibtex-align-generated-properties
+      temporary (bibtex-first-headline temporary)))))
 
 (defun bibtex-import (document input &key prefix)
   "Import BibTeX INPUT as appended Org headings and return an edit result."
@@ -434,7 +438,11 @@
                 (bibtex-signal-error input (bibtex-entry-position entry)
                                      :unknown-type
                                      "Unknown BibTeX entry type"))
-              (bibtex-build-entry-subtree document entry prefix input))
+              (unless (bibtex-entry-field-value entry "title")
+                (bibtex-signal-error input (bibtex-entry-position entry)
+                                     :missing-title
+                                     "BibTeX entry is missing its title"))
+              (bibtex-build-entry-subtree document entry prefix))
             entries))
          (source (document-text document))
          (offset (length source))
@@ -465,19 +473,13 @@
      :expected expected)))
 
 (defun bibtex-resolve-field-groups (groups value-function)
-  (let ((fields nil)
-        (missing nil))
+  (let ((fields nil))
     (dolist (group groups)
-      (let ((present-fields
-              (remove-if-not
-               (lambda (field)
-                 (bibtex-value-present-p (funcall value-function field)))
-               group)))
-        (unless present-fields
-          (push group missing))
-        (dolist (field present-fields)
-          (push (cons field (funcall value-function field)) fields))))
-    (values (nreverse fields) (nreverse missing))))
+      (dolist (field group)
+        (let ((value (funcall value-function field)))
+          (when (stringp value)
+            (push (cons field value) fields)))))
+    (nreverse fields)))
 
 (defun bibtex-export-error (reason message &optional context)
   (error 'org-bibtex-error
@@ -521,38 +523,32 @@
                (bibtex-headline-property
                 headline (bibtex-property-key prefix "title")))
              (heading-title (node-property headline :raw-value))
-             (title (if (bibtex-value-present-p property-title)
-                        property-title
-                        heading-title))
+             (title (if property-title property-title heading-title))
              (value-function
                (lambda (field)
-                 (if (string= field "title")
-                     title
-                     (bibtex-headline-property
-                      headline (bibtex-property-key prefix field)))))
-             (required-fields nil)
-             (missing-required nil))
-        (multiple-value-setq (required-fields missing-required)
-          (bibtex-resolve-field-groups
-           (second type-definition) value-function))
-        (when missing-required
-          (bibtex-export-error
-           :missing-required-fields
-           (format nil "Org heading is missing required BibTeX fields: ~{~A~^, ~}"
-                   (mapcar #'bibtex-group-label missing-required))))
-        (let* ((optional-fields
-                 (nth-value 0
-                   (bibtex-resolve-field-groups
-                    (third type-definition) value-function)))
-               (fields (append required-fields optional-fields)))
-          (bibtex-export-check-output
-           document
-           (with-output-to-string (stream)
-             (format stream "@~A{~A,~%" type-name key)
-             (loop for (field . value) in fields
-                   for first-p = t then nil
-                   do (unless first-p
-                        (format stream ",~%"))
-                      (format stream "  ~A={~A}" field value))
-             (terpri stream)
-             (format stream "}~%"))))))))
+                 (let ((value
+                         (if (string= field "title")
+                             title
+                             (bibtex-headline-property
+                              headline (bibtex-property-key prefix field)))))
+                   (if (stringp value)
+                       (string-trim '(#\Space #\Tab #\Newline #\Return) value)
+                       value)))
+             (required-fields
+               (bibtex-resolve-field-groups
+                (second type-definition) value-function))
+             (optional-fields
+               (bibtex-resolve-field-groups
+                (third type-definition) value-function))
+             (fields (append required-fields optional-fields)))
+        (bibtex-export-check-output
+         document
+         (with-output-to-string (stream)
+           (format stream "@~A{~A,~%" type-name key)
+           (loop for (field . value) in fields
+                 for first-p = t then nil
+                 do (unless first-p
+                      (format stream ",~%"))
+                    (format stream "  ~A={~A}" field value))
+           (terpri stream)
+           (format stream "}~%"))))))))
