@@ -1955,10 +1955,25 @@
                        (lambda ()
                          (org-kit::export-check-output-stage
                           "" (make-limits) backend :body :actual-offset -1)))))
-                 (dolist (condition (list invalid-document invalid-backend
-                                          invalid-resolver invalid-stage-text
-                                          invalid-stage-offset))
-                   (expect (typep condition 'type-error) :to-be t))))
+                 (progn
+                   (dolist (condition (list invalid-document invalid-backend
+                                             invalid-resolver invalid-stage-text
+                                             invalid-stage-offset))
+                     (expect (typep condition 'type-error) :to-be t))
+                   (let ((unknown-backend-error
+                           (export-core-test-catch-error
+                            (lambda ()
+                              (export-org
+                               (parse-org "Body")
+                               :api-export-core-unregistered-with-invalid-resolver
+                               :include-resolver :not-a-function)))))
+                     (expect (typep unknown-backend-error 'org-export-error)
+                             :to-be t)
+                     (when (typep unknown-backend-error 'org-export-error)
+                       (expect (org-export-error-backend unknown-backend-error)
+                               :to-be :api-export-core-unregistered-with-invalid-resolver)
+                       (expect (org-export-error-reason unknown-backend-error)
+                               :to-be :unknown-backend))))))
             (when registered-p
               (unregister-export-backend backend)))))
       ))

@@ -1411,26 +1411,24 @@
               (error 'type-error :datum document :expected-type 'document))
             (unless (keywordp backend)
               (error 'type-error :datum backend :expected-type 'keyword))
-            (unless (export-backend-p backend)
-              (export-error backend :unknown-backend nil "Unknown export backend"))
-            (unless (or (null include-resolver) (functionp include-resolver))
-              (error 'type-error :datum include-resolver :expected-type '(or null function)))
-            (multiple-value-list (export-registry-snapshot backend))))
+            (multiple-value-bind (descriptor ancestry)
+                (export-registry-snapshot backend)
+              (unless descriptor
+                (export-error backend :unknown-backend nil "Unknown export backend"))
+              (unless (or (null include-resolver) (functionp include-resolver))
+                (error 'type-error :datum include-resolver
+                       :expected-type '(or null function)))
+              (list descriptor ancestry))))
          (descriptor (first registry-snapshot))
          (ancestry (second registry-snapshot))
          (root-descriptor (first ancestry))
          (preparation-backend
-          (cond
-           ((null descriptor) backend)
-           ((and root-descriptor
-                 (%export-backend-descriptor-builtin-p root-descriptor))
-            (%export-backend-descriptor-name root-descriptor))
-           ((eq backend :html) backend)
-           (t :html)))
+          (if (%export-backend-descriptor-builtin-p root-descriptor)
+              (%export-backend-descriptor-name root-descriptor)
+            :html))
          (caller-context (or context (make-export-context)))
          (render-context
-          (and descriptor
-               (%make-export-render-context
+          (%make-export-render-context
                 :backend backend :document document
                 :metadata nil :options nil :limits nil
                 :root-views nil :toc nil :footnotes nil
@@ -1441,7 +1439,7 @@
                 :raw-output-options
                 (%export-backend-descriptor-raw-output-options descriptor)
                 :extensions nil :ancestry ancestry
-                :owner-backend backend :state nil :states nil)))
+                :owner-backend backend :state nil :states nil))
          (preparation
           (let ((*export-requested-backend* backend))
             (export-prepare document preparation-backend
@@ -1470,13 +1468,7 @@
             render-context))
          (text
           (let ((*export-requested-backend* backend))
-            (if (and (%export-backend-descriptor-builtin-p descriptor)
-                     (null (%export-backend-descriptor-renderer descriptor))
-                     (null (%export-backend-descriptor-preamble-renderer descriptor))
-                     (null (%export-backend-descriptor-trailer-renderer descriptor))
-                     (null (%export-backend-descriptor-template descriptor)))
-                (export-render-preparation preparation backend)
-              (let* ((renderer-and-owner
+            (let* ((renderer-and-owner
                       (multiple-value-list
                        (export-render-context-renderer
                         initialized-render-context)))
@@ -1500,20 +1492,16 @@
                        :preamble
                        :kind :native-write))
                      (body-context
-                      (and (first renderer-and-owner)
-                           (export-context-for-owner
+                      (export-context-for-owner
                             initialized-render-context
-                            (second renderer-and-owner))))
+                            (second renderer-and-owner)))
                      (body
                       (let ((*export-current-export-phase* :body)
                             (*export-current-output-offset*
                              (length preamble)))
                         (export-check-output-stage
                          (export-check-render-string
-                          (if (first renderer-and-owner)
-                              (funcall (first renderer-and-owner) body-context)
-                            (export-render-preparation
-                             preparation preparation-backend)))
+                          (funcall (first renderer-and-owner) body-context))
                          (document-limits document) backend :body
                          :base-offset (length preamble)
                          :kind :native-write)))
@@ -1555,6 +1543,6 @@
                        (document-limits document) backend :template)))
                 (export-run-filter-stage
                  backend :final-output output initialized-render-context
-                 (document-limits document) :final-output))))))
+                 (document-limits document) :final-output)))))
     (export-write-output text (document-limits document) output-type
                          :stream stream :backend backend)))
