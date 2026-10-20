@@ -467,3 +467,34 @@
             (edit-subtree-clone-test-condition
              (lambda () (clone-subtree-with-time-shift nil "Task" 1 nil nil)))))
       (expect (typep condition 'type-error) :to-be t))))
+(describe "subtree clone timestamp token branches"
+  (it "preserves timestamps byte-for-byte when the shift is NIL"
+    (let* ((source
+             (format nil
+                     "* Task~%SCHEDULED: <2026-03-02 Mon 09:30>~%DEADLINE: [2026-03-04 Wed]~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 nil nil)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil
+                        "* Task~%SCHEDULED: <2026-03-02 Mon 09:30>~%DEADLINE: [2026-03-04 Wed]~%* Task~%SCHEDULED: <2026-03-02 Mon 09:30>~%DEADLINE: [2026-03-04 Wed]~%* Peer~%"))
+        (expect (document-text document) :to-equal source))))
+
+  (it "replaces only the weekday before space and tab separators"
+    (dolist (separator (list " " (string #\Tab)))
+      (let* ((source
+               (format nil
+                       "* Task~%SCHEDULED: <2026-03-02 Mon~A09:30>~%* Peer~%"
+                       separator))
+             (document (parse-org source))
+             (target (edit-subtree-clone-test-headline document "Task"))
+             (result (clone-subtree-with-time-shift document target 1 1 :day)))
+        (with-soft-assertions
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal
+                  (format nil
+                          "* Task~%SCHEDULED: <2026-03-02 Mon~A09:30>~%* Task~%SCHEDULED: <2026-03-03 Tue~A09:30>~%* Peer~%"
+                          separator separator))
+          (expect (document-text document) :to-equal source))))))
