@@ -171,6 +171,8 @@
    #:org-timestamp-view-repeater-mode #:org-timestamp-view-warning-amount
    #:org-timestamp-view-warning-unit #:org-timestamp-view-warning-mode
    #:timestamp-view
+   #:adjust-timestamp
+   #:toggle-timestamp-active
    #:org-time-interval-kind #:org-time-interval-amount #:org-time-interval-unit
    ;; F agenda
    #:org-agenda-error #:org-agenda-error-reason #:org-agenda-error-context

@@ -98,3 +98,24 @@ closing `:END:` marker. `remove-drawer` deletes the unique matching drawer.
 Missing or duplicate drawer names, unclosed drawers, and invalid names or
 bodies signal `org-edit-error` with a reason. Output and encoding limits apply
 to all structural edits.
+
+## Timestamps
+
+`adjust-timestamp` changes one date, clock, repeater, or warning component by
+one step. Its `delta` is `1` or `-1`; `:endpoint` selects `:start` or, for a
+range, `:end`. Date changes use Org's calendar overflow behavior and update the
+weekday. A clock change shifts both clock values in one endpoint's time range.
+Repeater and warning components are `:repeater-amount`, `:repeater-unit`,
+`:warning-amount`, and `:warning-unit`; calendar components are `:year`,
+`:month`, `:day`, `:hour`, and `:minute`.
+
+`toggle-timestamp-active` switches the delimiters around a complete timestamp
+or date range. Both operations return an `edit-result` and preserve text outside
+the timestamp.
+
+```lisp
+(let* ((document (org-kit:parse-org "<2024-02-28 Wed>"))
+       (timestamp (first-node-of-type document :timestamp))
+       (edit (org-kit:adjust-timestamp document timestamp :day 1)))
+  (org-kit:write-org (org-kit:edit-result-updated-document edit)))
+```
