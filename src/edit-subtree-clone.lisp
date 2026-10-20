@@ -20,10 +20,7 @@
         (unless (<= 0 (cl-date-kit:local-date-year shifted) 9999)
           (edit-signal-error target :invalid-value
                              "Timestamp year is outside Org range"))
-        shifted)
-    (cl-date-kit:invalid-date ()
-      (edit-signal-error target :invalid-value
-                         "Timestamp date cannot be shifted by this amount"))))
+        shifted)))
 
 (defun edit-subtree-clone-time-at (text position end)
   (multiple-value-bind (hour minute after)
