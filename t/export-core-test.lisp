@@ -1905,9 +1905,50 @@
                                     (org-kit::export-view-node view) :key))
                                  keywords)
                          :to-equal '("TITLE")))
-               (expect (typep :not-an-export-view
-                              'org-kit::acyclic-export-view)
-                       :to-be nil)
+               (progn
+                 (expect (typep :not-an-export-view
+                                'org-kit::acyclic-export-view)
+                         :to-be nil)
+                 (expect
+                  (typep
+                   (export-core-test-catch-error
+                    (lambda ()
+                      (org-kit::export-check-output-stage
+                       "" (make-limits) backend :body :actual-offset "not-an-integer")))
+                   'type-error)
+                  :to-be t)
+                 (expect (org-kit::export-global-keyword-p "TITLE") :to-be-truthy)
+                 (expect (org-kit::export-global-keyword-p "CAPTION") :to-be nil)
+                 (expect (org-kit::export-explicit-options-alist-p '(:toc)) :to-be nil)
+                 (expect
+                  (org-kit::export-explicit-options-alist-p '(("toc" . t)))
+                  :to-be nil)
+                 (expect
+                  (org-kit::export-explicit-options-alist-p '(:toc . :invalid))
+                  :to-be nil)
+                 (multiple-value-bind (descriptor ancestry)
+                     (org-kit::export-registry-snapshot :html)
+                   (declare (ignore descriptor))
+                   (expect
+                    (org-kit::export-valid-explicit-options-alist-p
+                     '(:toc . :invalid) ancestry)
+                    :to-be nil)
+                   (expect
+                    (org-kit::export-valid-explicit-options-alist-p
+                     '((:not-a-registered-option . t)) ancestry)
+                    :to-be nil)
+                   (let* ((document (parse-org "Body"))
+                          (context
+                            (org-kit::%make-export-render-context
+                             :backend :html :document document :ancestry ancestry
+                             :owner-backend :html))
+                          (preparation
+                            (org-kit::export-prepare
+                             document :html :filter-context context)))
+                     (expect (typep preparation 'org-kit::export-preparation) :to-be t)
+                     (expect (eq (org-kit::%export-render-context-preparation context)
+                                 preparation)
+                             :to-be t))))
                (dolist (invalid-mode '(:invalid-root :invalid-view :invalid-node
                                                      :invalid-children :invalid-child
                                                      :invalid-source :cycle))

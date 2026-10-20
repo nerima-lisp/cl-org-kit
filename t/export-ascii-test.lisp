@@ -2427,20 +2427,30 @@
         (when registered-p
           (unregister-export-backend backend)))))
   (it "removes post-blank indentation from captured ASCII blocks"
-    (let* ((preparation
-             (export-ascii-test-preparation (parse-org "") nil))
-           (output (export-ascii-test-output-state preparation))
-           (paragraph (make-node :paragraph :post-blank 2))
-           (rendered (format nil "body~%  ~%~%")))
-      (org-kit::export-ascii-output-write-range
-       output rendered 0 (length rendered) :raw-output-p t)
-      (org-kit::export-ascii-output-remove-node-post-blank
-       output paragraph 2)
+    (labels ((remove-post-blank (rendered post-blank-indent)
+               (let* ((preparation
+                        (export-ascii-test-preparation (parse-org "") nil))
+                      (output (export-ascii-test-output-state preparation))
+                      (paragraph (make-node :paragraph :post-blank 2)))
+                 (org-kit::export-ascii-output-write-range
+                  output rendered 0 (length rendered) :raw-output-p t)
+                 (org-kit::export-ascii-output-remove-node-post-blank
+                  output paragraph post-blank-indent)
+                 output)))
+      (let* ((output
+               (remove-post-blank (format nil "body~%  ~%~%") 2)))
+        (with-soft-assertions
+          (expect (org-kit::export-ascii-output-string output)
+                  :to-equal (format nil "body~%"))
+          (expect (org-kit::export-ascii-output-count output) :to-be 5)
+          (expect (org-kit::export-ascii-output-line-start-p output) :to-be t)))
       (with-soft-assertions
-        (expect (org-kit::export-ascii-output-string output)
-                :to-equal (format nil "body~%"))
-        (expect (org-kit::export-ascii-output-count output) :to-be 5)
-        (expect (org-kit::export-ascii-output-line-start-p output) :to-be t))))
+        (expect (org-kit::export-ascii-output-string
+                 (remove-post-blank (format nil "  ~%~%") 3))
+                :to-equal "  ")
+        (expect (org-kit::export-ascii-output-string
+                 (remove-post-blank (format nil "xy~%~%") 2))
+                :to-equal "xy"))))
   (it "rebuilds recursive ASCII views with their original source documents"
     (let* ((document (parse-org "paragraph *bold*"))
            (root (document-root document))

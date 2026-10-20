@@ -1030,11 +1030,10 @@
                 (and (stringp path)
                      (export-safe-url-p path destination)
                      (or (eq kind :link)
-                         (and (eq kind :image)
-                              (or (null scheme-end)
-                                  (member (subseq destination 0 scheme-end)
-                                          '("http" "https")
-                                          :test #'string-equal)))))))
+                         (or (null scheme-end)
+                             (member (subseq destination 0 scheme-end)
+                                      '("http" "https")
+                                      :test #'string-equal))))))
           (if safe-p
               (progn
                 (export-html-check-escaped-parts

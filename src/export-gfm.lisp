@@ -995,11 +995,10 @@
                       (export-gfm-link-destination-safe-p
                        type nil raw-parts destination-parts)
                       (or (eq kind :link)
-                          (and (eq kind :image)
-                               (or (null scheme-end)
-                                   (member (subseq destination 0 scheme-end)
-                                           '("http" "https")
-                                           :test #'string-equal)))))))
+                          (or (null scheme-end)
+                              (member (subseq destination 0 scheme-end)
+                                       '("http" "https")
+                                       :test #'string-equal))))))
           (if safe-p
               (let* ((serialized
                        (export-gfm-serialize-destination-parts

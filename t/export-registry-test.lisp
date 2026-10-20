@@ -2515,7 +2515,212 @@
            (expect invalid-explicit-option-key-p :to-be t)
            (expect invalid-option-value-key-p :to-be t)
            (expect invalid-context-p :to-be t)
-           (expect invalid-frame-p :to-be t)))))))
+           (expect invalid-frame-p :to-be t))))))
+  (it "validates public registry shapes and raw policy fallback"
+    (let ((raw-output-enabled :unset))
+      (with-soft-assertions
+        (expect
+         (export-registry-test-signals-type-error-p
+          (lambda ()
+            (register-export-backend "not-a-keyword" :renderer #'identity)))
+         :to-be t)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (register-export-backend
+              :api-registry-invalid-unsupported-policy
+              :renderer #'identity
+              :node-policies
+              (list (cons :paragraph
+                          '(:unsupported :feature :api-feature :message)))))))
+         :to-be :invalid-node-policy)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (register-export-backend
+              :api-registry-invalid-unsupported-policy-keys
+              :renderer #'identity
+              :node-policies
+              (list (cons :paragraph
+                          '(:unsupported :feature :api-feature
+                            :other "unsupported")))))))
+         :to-be :invalid-node-policy)
+      (export-registry-test-with-root-backend
+       :api-registry-unknown-raw-output-policy
+       (list :renderer
+             (lambda (context)
+               (setf raw-output-enabled
+                     (export-render-context-raw-output-p context :html))
+               "body")
+             :raw-output-options
+             '((:html . :api-registry-unknown-policy)))
+       (lambda ()
+         (with-soft-assertions
+           (expect (export-org (parse-org "Raw output policy fallback.")
+                               :api-registry-unknown-raw-output-policy)
+                   :to-equal "body")
+           (expect raw-output-enabled :to-be nil)))))))
+  (it "checks public node wrapper continuation and parent helper arguments"
+    (let ((continuation-error nil)
+          (mode-error nil)
+          (table-cell-error nil)
+          (source-breaks-error nil)
+          (active-context-error nil)
+          (view-error nil)
+          (wrong-view (make-export-view (make-node :plain-text)))
+          (document (parse-org "Public wrapper arguments.")))
+      (export-registry-test-with-root-backend
+       :api-registry-invalid-render-next
+       (list :renderer #'export-registry-test-render-views
+             :node-wrapper
+             (lambda (node view frame context render-next)
+               (declare (ignore view frame context))
+               (if (eq (node-type node) :paragraph)
+                   (funcall render-next "" :invalid)
+                   (funcall render-next "" ""))))
+       (lambda ()
+         (setf continuation-error
+               (export-registry-test-signals-type-error-p
+                (lambda ()
+                  (export-org document :api-registry-invalid-render-next))))))
+      (export-registry-test-with-backend-pair
+       :api-registry-parent-option-root
+       :api-registry-parent-option-child
+       (list :renderer #'export-registry-test-render-views
+             :transcoders
+             (list (cons :paragraph
+                         (lambda (node view frame context)
+                           (declare (ignore node view frame context))
+                           "parent"))))
+       (list :node-wrapper
+             (lambda (node view frame context render-next)
+               (declare (ignore view frame))
+               (when (eq (node-type node) :paragraph)
+                 (setf mode-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-parent-node context node :mode :invalid)))
+                       table-cell-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-parent-node
+                           context node :table-cell-p :yes)))
+                       source-breaks-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-parent-node
+                           context node :preserve-source-breaks-p :yes)))
+                       active-context-error
+                       (export-registry-test-signals-program-error-p
+                        (lambda ()
+                          (export-render-parent-node
+                           (org-kit::%make-export-render-context) node)))
+                       view-error
+                       (export-registry-test-signals-type-error-p
+                        (lambda ()
+                          (export-render-parent-node
+                           context node :view wrong-view)))))
+               (funcall render-next "" "")))
+       (lambda ()
+         (with-soft-assertions
+           (expect continuation-error :to-be t)
+           (expect (export-org document :api-registry-parent-option-child)
+                   :to-equal "parent")
+           (expect mode-error :to-be t)
+           (expect table-cell-error :to-be t)
+           (expect source-breaks-error :to-be t)
+           (expect active-context-error :to-be t)
+           (expect view-error :to-be t))))))
+  (it "falls back to the GFM label when a handler clears the node path"
+    (let* ((document
+             (parse-org
+              "[[fr106-gfm-cleared-path:target][Original label]]"))
+           (link-node nil)
+           (registered-p nil)
+           (handler-input nil)
+           (output nil))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :link)
+           (setf link-node node)))
+       (document-root document))
+      (unwind-protect
+           (progn
+             (register-export-link-type
+              :gfm "fr106-gfm-cleared-path"
+              (lambda (path description frame context)
+                (declare (ignore frame context))
+                (setf handler-input (list path description)
+                      (node-property link-node :path) nil)
+                (make-export-link-result
+                 :kind :link
+                 :destination "https://example.test/target"
+                 :description "Changed label")))
+             (setf registered-p t)
+             (setf output (export-org document :gfm))
+             (with-soft-assertions
+               (expect link-node :to-be-truthy)
+               (expect handler-input :to-equal '("target" "Original label"))
+               (expect (search "Original label" output) :to-be-truthy)
+               (expect (search "Changed label" output) :to-be nil)
+               (expect (search "https://example.test/target" output)
+                       :to-be nil)))
+        (when registered-p
+          (unregister-export-link-type :gfm "fr106-gfm-cleared-path")))))
+  (it "checks public node policies and transcoders through the ASCII sink"
+    (let ((policy-backend :api-registry-ascii-sink-policy)
+          (transcoder-backend :api-registry-ascii-sink-transcoder)
+          (policy-registered-p nil)
+          (transcoder-registered-p nil)
+          (unsupported-condition nil)
+          (transcoder-error nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              policy-backend :ascii
+              :node-policies
+              (list (cons :paragraph
+                          '(:unsupported :feature :api-registry-paragraph
+                            :message "Paragraphs are unsupported."))))
+             (setf policy-registered-p t)
+             (setf unsupported-condition
+                   (handler-case
+                       (progn
+                         (export-org (parse-org "Native policy target.")
+                                     policy-backend)
+                         nil)
+                     (org-export-unsupported-syntax (condition) condition)))
+             (register-derived-export-backend
+              transcoder-backend :ascii
+              :transcoders
+              (list (cons :paragraph
+                          (lambda (node view frame context)
+                            (declare (ignore node view frame context))
+                            :not-a-string))))
+             (setf transcoder-registered-p t)
+             (setf transcoder-error
+                   (export-registry-test-signals-type-error-p
+                    (lambda ()
+                      (export-org (parse-org "Native transcoder target.")
+                                  transcoder-backend))))
+             (with-soft-assertions
+               (expect (typep unsupported-condition
+                              'org-export-unsupported-syntax)
+                       :to-be t)
+               (when unsupported-condition
+                 (expect (org-export-unsupported-syntax-backend
+                          unsupported-condition)
+                         :to-be policy-backend)
+                 (expect (org-export-unsupported-syntax-feature
+                          unsupported-condition)
+                         :to-be :api-registry-paragraph))
+               (expect transcoder-error :to-be t)))
+        (when transcoder-registered-p
+          (unregister-export-backend transcoder-backend))
+        (when policy-registered-p
+          (unregister-export-backend policy-backend))))))
 
 (defun export-registry-test-with-builtin-backend (name arguments function)
   (let* ((registry org-kit::*export-backend-registry*)
