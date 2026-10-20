@@ -1177,7 +1177,8 @@
 (defun table-calc-evaluate-assignment
     (assignment reference-position-function cell-value-function
      &key (limits (make-limits)) work-budget functions
-       reference-value-function remote-function current-row current-column)
+       reference-value-function remote-function current-row current-column
+       (callbacks (make-callback-registry)) elisp-reference-function)
   "Evaluate one assignment using absolute-position and cell-string callbacks.
 REFERENCE-POSITION-FUNCTION maps a reference to absolute 1-based row and column
 values. CELL-VALUE-FUNCTION maps those indices to the raw cell string. Reuse
@@ -1185,15 +1186,28 @@ WORK-BUDGET across assignments in one table recalculation."
   (let* ((budget (or work-budget (make-table-calc-work-budget)))
          (target (table-calc-assignment-target-description assignment)))
     (table-calc-validate-assignment-target assignment target)
-    (let ((value (table-calc-evaluate-expression
-                  (table-calc-assignment-expression assignment)
-                  reference-position-function cell-value-function
+    (let* ((expression (table-calc-assignment-expression assignment))
+           (value
+             (if (eq (table-calc-expression-kind expression) :quoted-lisp)
+                 (let* ((source (table-calc-expression-value expression))
+                        (expanded (if elisp-reference-function
+                                      (funcall elisp-reference-function
+                                               source expression assignment)
+                                      source))
+                        (result (evaluate-elisp callbacks expanded)))
+                   (unless (or (stringp result) (realp result))
+                     (table-calc-evaluation-error :invalid-function-result target))
+                   (when (stringp result)
+                     (check-limit limits :max-output-length (length result)))
+                   result)
+                 (table-calc-evaluate-expression
+                  expression reference-position-function cell-value-function
                   (table-calc-assignment-mode assignment) limits budget target
                   :flags (table-calc-assignment-flags assignment)
                   :functions functions
                   :reference-value-function reference-value-function
                   :remote-function remote-function
-                  :current-row current-row :current-column current-column)))
+                  :current-row current-row :current-column current-column))))
       (table-calc-format-result
        value (table-calc-assignment-format-precision assignment)
        (table-calc-assignment-flags assignment) limits target))))

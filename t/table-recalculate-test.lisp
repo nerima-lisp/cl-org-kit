@@ -72,6 +72,147 @@
              "expected/recalculate/field-column-overlap.org")))
       (expect (length (edit-result-spans result)) :to-be 1)))
 
+  (it "passes the Org-expanded quoted Lisp form to the evaluator callback"
+    (let* ((source
+             (format nil "| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2='(identity $1)~%"))
+           (expected
+             (format nil "| value | result |~%|-------+--------|~%| alpha | done |~%#+TBLFM: @2$2='(identity $1)~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (callbacks (make-callback-registry))
+           (received nil))
+      (register-callback callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (setf received expression)
+                           "done"))
+      (let ((result (table-recalculate document table :callbacks callbacks)))
+        (with-soft-assertions
+          (expect (edit-result-p result) :to-be t)
+          (expect received :to-equal "'(identity \"alpha\")")
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal expected)
+          (expect (document-text document) :to-equal source)))))
+
+  (it "passes Lisp references through unchanged for the Org literal mode"
+    (let* ((source
+             (format nil "| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2='(identity $1);L~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (callbacks (make-callback-registry))
+           (received nil))
+      (register-callback callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (setf received expression)
+                           "literal"))
+      (table-recalculate document table :callbacks callbacks)
+      (with-soft-assertions
+        (expect received :to-equal "'(identity $1)"))))
+
+  (it "reports a named unregistered evaluator condition"
+    (let* ((source
+             (format nil "| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2='(identity $1)~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (condition
+             (handler-case
+                 (progn (table-recalculate document table) nil)
+               (org-elisp-evaluator-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep condition 'org-elisp-evaluator-error) :to-be t)
+        (when condition
+          (expect (org-callback-error-kind condition) :to-equal "EVALUATOR")
+          (expect (org-callback-error-name condition) :to-equal "emacs-lisp")
+          (expect (org-callback-error-reason condition) :to-be :unregistered)))))
+
+  (it "rejects reader dispatch before invoking the evaluator callback"
+    (let* ((source
+             (format nil "| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2='(progn #.(error \"blocked\"))~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (callbacks (make-callback-registry))
+           (calls 0)
+           (condition nil))
+      (register-callback callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (declare (ignore expression))
+                           (incf calls)))
+      (setf condition
+            (handler-case
+                (progn (table-recalculate document table :callbacks callbacks) nil)
+              (org-table-unsupported-syntax (condition) condition)))
+      (with-soft-assertions
+        (expect (org-table-unsupported-syntax-feature condition) :to-be :reader-eval)
+        (expect calls :to-be 0))))
+
+  (it "accepts real callback values and rejects other callback results"
+    (let* ((source
+             (format nil "| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2='(identity $1)~%"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (number-callbacks (make-callback-registry))
+           (invalid-callbacks (make-callback-registry)))
+      (register-callback number-callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (declare (ignore expression))
+                           42))
+      (register-callback invalid-callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (declare (ignore expression))
+                           :invalid))
+      (with-soft-assertions
+        (expect
+         (not (null
+               (search "| alpha | 42 |"
+                       (document-text
+                        (edit-result-updated-document
+                         (table-recalculate document table
+                                            :callbacks number-callbacks))))))
+         :to-be t)
+        (expect (table-recalculate-test-condition
+                 (lambda ()
+                   (table-recalculate document table :callbacks invalid-callbacks)))
+                :to-equal '(:table :invalid-function-result)))))
+
+  (it "applies output and formula-work limits to quoted Lisp evaluation"
+    (let* ((source
+             (format nil "| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2='(identity $1)~%"))
+           (limited-output-document
+             (parse-org source :limits (make-limits :max-output-length 3)))
+           (table (table-recalculate-test-find-node
+                   (document-root limited-output-document) :table))
+           (callbacks (make-callback-registry))
+           (assignment
+             (table-recalculate-test-assignment "@2$2='(identity $1)"))
+           (expression (org-kit::table-calc-assignment-expression assignment))
+           (work-condition
+             (handler-case
+                 (progn
+                   (org-kit::table-recalculate-expand-elisp-expression
+                    (org-kit::table-calc-expression-value expression)
+                    expression assignment 2 2 2 2 (make-hash-table) nil nil
+                    (lambda (row column)
+                      (declare (ignore row column))
+                      "alpha")
+                    nil (make-limits :max-formula-work 1)
+                    (org-kit::make-table-calc-work-budget))
+                   nil)
+               (org-resource-limit-error (condition) condition))))
+      (register-callback callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (declare (ignore expression))
+                           "long"))
+      (with-soft-assertions
+        (expect (table-recalculate-test-condition
+                 (lambda ()
+                   (table-recalculate limited-output-document table
+                                      :callbacks callbacks)))
+                :to-equal '(:limit :max-output-length 3 4))
+        (expect (typep work-condition 'org-resource-limit-error) :to-be t)
+        (when (typep work-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name work-condition)
+                  :to-be :max-formula-work)
+          (expect (org-resource-limit-error-limit work-condition) :to-be 1)))))
+
   (it "does not let a field formula hide a column formula error"
     (let* ((source
              (format nil "| value | result |~%|-------+--------|~%| 0 | old |~%| 2 | old |~%#+TBLFM: $2=$1/$1::@2$2=42~%"))

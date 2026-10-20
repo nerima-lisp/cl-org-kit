@@ -1,8 +1,9 @@
 # Tables
 
 Formatting and structural edits apply to Org pipe tables. Table.el tables are
-not supported by these editing functions. Each successful operation returns an
-`edit-result`; read its updated document with `edit-result-updated-document`.
+not supported by these editing functions. Each operation that edits source
+returns an `edit-result`; read its updated document with
+`edit-result-updated-document`.
 The examples require the runtime dependencies listed in
 [Getting Started](../getting-started.md#asdf) to be available through ASDF.
 
@@ -38,7 +39,13 @@ The examples require the runtime dependencies listed in
            (org-kit:edit-result-updated-document
             (org-kit:table-sort-rows
              inserted (first-table inserted) 1 :type :lexical))))
-    (org-kit:write-org sorted)))
+    (write-string (org-kit:write-org sorted))))
+~~~
+
+~~~text
+| Alpha | 1 |
+| Beta  | 2 |
+| Gamma | 3 |
 ~~~
 
 In this call, `1` selects the first table column as the sort key.
@@ -60,7 +67,8 @@ hlines, all rows are in the same section.
 
 `table-insert-row :values` supplies cells in column order, and
 `table-insert-column :values` supplies them in standard-row order. Missing
-entries create blank cells. All values are single-line strings.
+entries create blank cells. Supplying more entries than the table has columns
+or standard rows signals `org-table-error`. All values are single-line strings.
 `table-sort-rows` accepts `:order` as `:ascending` or `:descending`, `:type`
 as `:lexical` or `:numeric`, and optional one-based `:start` and `:end` row
 positions. The bounds are inclusive and count standard rows; hline rows do not
@@ -87,9 +95,9 @@ recalculation, which follows Org's first-directive rule below.
 ## Recalculate formulas
 
 `table-recalculate` has the signature
-`(table-recalculate document target &key functions)`. `target` must resolve to
-an Org pipe-table node in `document`. It evaluates formulas for that table and
-returns an `edit-result`; use
+`(table-recalculate document target &key functions callbacks)`. `target` must
+resolve to an Org pipe-table node in `document`. It evaluates formulas for that
+table and returns an `edit-result`; use
 `edit-result-updated-document` to read the result. The input document remains
 unchanged. With no `TBLFM`, the result contains the input document and no edit
 spans. If several `#+TBLFM` directives follow a table, recalculation applies
@@ -107,7 +115,8 @@ selects the first standard row after the third hline, and `@III+2` selects the
 second standard row after the third hline. Other supported references include
 absolute rows such as `@3$2`, the current row such as `@0$2`, a relative row
 such as `@+1$2`, the first and last rows (`@<`, `@>`), and named columns such
-as `@>$Price`. Named columns use the table's header row.
+as `@>$Price`. The first standard row before the first hline is the header
+row for named columns. Without an hline, the table has no header row.
 
 Assignments can target a field, a row or rectangular range, or a whole column.
 A row formula such as `@3=...` assigns across the selected standard row. A
@@ -117,8 +126,8 @@ hlines, rows before its first hline are treated as the header section and are
 skipped by column formulas. A field, row, or range formula takes precedence
 over a column formula for any field both formulas target, but the column formula
 still runs and can signal an error. If two field, row, or range formulas target
-the same field, recalculation signals `org-table-unsupported-syntax` with
-feature `:duplicate-target`.
+the same field, recalculation signals `org-table-error` with reason
+`:duplicate-target`.
 
 An expression can read a field or range from another named table in the same
 document with `remote(name, ref)`. Give the source table a `#+NAME:` immediately
@@ -132,8 +141,9 @@ not supported.
 
 `#+CONSTANTS:` defines document-level formula constants, for example
 `#+CONSTANTS: pi=3.14`; reference that constant as `$pi` in a formula. A
-property can be referenced as `$PROP_name`; lookup starts at the table's
-containing heading and continues through its ancestors.
+property can be referenced as `$PROP_name`, where `name` is the property name;
+lookup starts at the table's containing heading and continues through its
+ancestors.
 
 ### Built-in Calc functions
 
@@ -152,22 +162,23 @@ the current row contains `2`, `4`, and `6` in columns 1 through 3.
 | `string` | `string(42)` | The text `42` |
 | `typeof` | `typeof("a")` | Type code `101` |
 
-The current `taylor` implementation accepts `taylor(exp(x),x=point,2)`, where
-`point` is a numeric expression, and returns a second-order expansion around
-that value.
+The `taylor` built-in accepts `taylor(exp(x),x=point,2)`, where `point` is a
+numeric expression, and returns a formatted second-order polynomial around
+that value. It is a specific supported case; general symbolic algebra is not
+implemented.
 
 The existing vector helpers `vmin`, `vmax`, and `vcount` are also available.
 
 `if` accepts boolean expressions and numeric conditions; zero is false and any
-nonzero number is true. For example, `if(0,2,1)` returns `1`. Calc type code `1`
-denotes an integer, while `101` denotes a string.
+nonzero number is true. Calc type code `1` denotes an integer, while `101`
+denotes a string.
 
 Other function names can be supplied for one recalculation call. Built-in names
 take precedence and cannot be overridden. `:functions` is an alist from
-function-name strings to Common Lisp function designators.
-Callbacks receive evaluated positional arguments as numbers or strings and
-must return a real number or string. An unregistered function signals
-`org-table-unsupported-syntax` with feature `:unknown-function`.
+function-name strings to Common Lisp function designators. These callbacks
+receive evaluated positional arguments as numbers or strings and must return a
+real number or string. An unregistered function signals `org-table-error` with
+reason `:unknown-function`.
 
 ~~~lisp
 (require :asdf)
@@ -193,14 +204,22 @@ must return a real number or string. An unregistered function signals
          (edit
            (org-kit:table-recalculate
             document table :functions '(("triple" . triple-value)))))
-    (org-kit:write-org
-     (org-kit:edit-result-updated-document edit))))
+    (write-string
+     (org-kit:write-org
+      (org-kit:edit-result-updated-document edit)))))
+~~~
+
+~~~text
+| Input | Triple |
+|-------+--------|
+| 3 | 9 |
+#+TBLFM: @2$2=triple($1)
 ~~~
 
 ### Formula mode flags and durations
 
 Add flags after a semicolon in a formula. Supported flags are `pN`,
-`nN`/`sN`/`eN`/`fN`, `D`/`R`, `F`/`S`, `u`, `T`/`t`/`U`, and `E`/`N`.
+`nN`/`sN`/`eN`/`fN`, `D`/`R`, `F`/`S`, `u`, `T`/`t`/`U`, `E`/`N`, and `L`.
 `pN` sets calculation precision, bounded by the document's
 `max-formula-precision` limit; this is separate from the default result display
 precision, so `exp(1);p20` still displays `2.7182818`. `nN`, `sN`, and `eN`
@@ -219,9 +238,9 @@ numeric output for exact values supported by decimal arithmetic; symbolic
 algebra is not implemented. `u` leaves unit-free numeric results unchanged;
 unit literals and conversion are not implemented. Unsupported symbolic or
 unit-bearing operations signal `org-table-error` with reason
-`:unsupported-mode`. `T`, `t`, and `U` enable duration handling as described
-below. `L` selects Lisp formula mode, which this implementation does not
-support.
+`:unsupported-mode`. `T`, `t`, and `U` enable duration handling. `L` selects Lisp
+reference insertion for quoted Lisp expressions; the evaluator callback
+behavior is described below.
 
 Formula literals accept `HH:MM` or `HH:MM:SS` and represent seconds. Referenced
 table cells are read as durations when the assignment has `T`, `t`, or `U`;
@@ -245,9 +264,23 @@ Recalculation supports Org pipe tables only. A Table.el table signals
 `org-table-error`. Formula syntax the parser cannot read signals
 `org-table-unsupported-syntax`. Semantic errors, including invalid or
 out-of-range targets or references, unresolved or ambiguous named columns, and
-formula dependency cycles, signal `org-table-error`. An invalid, foreign, or
-wrong-type API target can signal `org-edit-error`. Applicable document or
-formula ceilings signal `org-resource-limit-error`.
+formula dependency cycles, signal `org-table-error`. An invalid API target, a
+target from another document, or a target of the wrong type can signal
+`org-edit-error`. Applicable document or formula ceilings signal
+`org-resource-limit-error`.
+
+### Lisp formula callbacks
+
+The `;L` flag selects Lisp reference insertion. A formula expression beginning
+with a quoted list, such as `'(identity $1)`, is sent to the evaluator callback
+registered in a caller-owned `callback-registry` passed as `:callbacks`.
+See [Callbacks and Write Plans](callbacks-and-write-plans.md#register-callbacks-explicitly)
+for a registration example.
+Without `;L`, Org-style cell references are expanded and quoted as strings
+before the expression is passed to the callback. With `;L`, references remain
+literal, so the callback receives `'(identity $1)`. The library never evaluates
+Emacs Lisp. A missing evaluator signals `org-elisp-evaluator-error` with reason
+`:unregistered`; evaluator results must be strings or real numbers.
 
 ## Errors and limits
 

@@ -140,7 +140,7 @@
     "STATISTICS-COOKIE-UPDATE-OLD-VALUE" "STATISTICS-COOKIE-UPDATE-NEW-VALUE"
     "UPDATE-STATISTICS-COOKIES"
     "TABLE-RECALCULATE"
-    ;; Format-preserving subtree edits
+ ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
     ;; Unit E subtree relocation and sort
@@ -344,7 +344,8 @@ docs/src/reference/node-model.md.")
       (expect (documentation 'table-recalculate 'function)
               :to-equal
               "Recalculate a pipe table's TBLFM formulas and return its validated edit result.
-FUNCTIONS is an alist of string names and call-scoped function designators.")
+FUNCTIONS is an alist of string names and call-scoped function designators.
+CALLBACKS is a caller-owned callback registry used for quoted Lisp formulas.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.

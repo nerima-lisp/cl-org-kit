@@ -380,15 +380,14 @@
         (expect (mapcar #'org-kit::table-calc-assignment-format-precision modes)
                 :to-equal '(nil nil nil 2 12)))))
 
-  (it "rejects Lisp and reader syntax, unlisted functions, malformed references, and extra features"
+  (it "rejects unsupported reader syntax, unlisted functions, malformed references, and extra features"
     (let ((cases
-            (list (list "'(+ 1 2)" 0 :quoted-lisp)
-                  (list "`(+ 1 2)" 0 :quoted-lisp)
+            (list (list "`(+ 1 2)" 0 :quoted-lisp)
                   (list "#" 0 :reader-dispatch)
                   (list "#.(error \"run\")" 0 :reader-eval)
                   (list "#x" 0 :reader-dispatch)
                   (list "#1=(x)" 0 :reader-dispatch)
-                  (list "@2$1=1;L" 7 :lisp-mode)
+                  (list "@2$1=1;L" 5 :lisp-mode)
                   (list "$1=unknown($1..$2)" 3 :unknown-function)
                   (list "$1=VSUM($1..$2)" 3 :unknown-function)
                   (list "$1=vsum(1)" 8 :unsupported-function-argument)
@@ -436,14 +435,51 @@
           (expect (length (org-kit::table-calc-program-assignments program))
                   :to-be (if (string= formula "$1=1::") 1 2))))))
 
-  (it "does not evaluate quoted forms or reader dispatch payloads"
-    (let ((quoted (table-calc-test-condition "'(progn (error \"executed\"))"))
-          (dispatch (table-calc-test-condition "#.(error \"executed\")")))
+  (it "parses quoted Lisp and suppresses literal-reference interpolation"
+    (let* ((expanded
+             (table-calc-test-assignment-expression
+              "$2='(+ $1 1)"))
+           (literal
+             (table-calc-test-assignment-expression
+              "$2='(+ $1 1);L")))
       (with-soft-assertions
-        (expect (typep quoted 'org-table-unsupported-syntax) :to-be t)
-        (expect (typep dispatch 'org-table-unsupported-syntax) :to-be t)
-        (expect (org-table-unsupported-syntax-feature quoted) :to-be :quoted-lisp)
-        (expect (org-table-unsupported-syntax-feature dispatch) :to-be :reader-eval))))
+        (expect (org-kit::table-calc-expression-kind expanded) :to-be :quoted-lisp)
+        (expect (length (org-kit::table-calc-expression-children expanded)) :to-be 1)
+        (expect (org-kit::table-calc-expression-value literal)
+                :to-equal "'(+ $1 1)")
+        (expect (not (null
+                      (member :literal-references
+                              (org-kit::table-calc-assignment-flags
+                               (first (org-kit::table-calc-program-assignments
+                                       (org-kit::table-calc-parse-formula
+                                        "$2='(+ $1 1);L")))))))
+                :to-be t)
+        (expect (org-kit::table-calc-expression-children literal) :to-equal nil))))
+
+  (it "rejects reader dispatch in quoted Lisp without evaluating it"
+    (let ((quoted-dispatch
+            (table-calc-test-condition "'(progn #.(error \"executed\"))"))
+          (top-level-dispatch (table-calc-test-condition "#.(error \"executed\")")))
+      (with-soft-assertions
+        (expect (typep quoted-dispatch 'org-table-unsupported-syntax) :to-be t)
+        (expect (typep top-level-dispatch 'org-table-unsupported-syntax) :to-be t)
+        (expect (org-table-unsupported-syntax-feature quoted-dispatch)
+                :to-be :reader-eval)
+        (expect (org-table-unsupported-syntax-feature top-level-dispatch)
+                :to-be :reader-eval))))
+
+  (it "applies the formula input limit to quoted Lisp source"
+    (let* ((formula "$1='(identity 1)")
+           (exact (make-limits :max-input-length (length formula)))
+           (below (table-calc-test-condition
+                   formula
+                   (make-limits :max-input-length (1- (length formula))))))
+      (with-soft-assertions
+        (expect (table-calc-test-condition formula exact) :to-be nil)
+        (expect (typep below 'org-resource-limit-error) :to-be t)
+        (when (typep below 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name below) :to-be :max-input-length)
+          (expect (org-resource-limit-error-actual below) :to-be (length formula))))))
 
   (it "reports all unsupported-syntax condition readers and bounds the excerpt"
     (let* ((long-formula (concatenate 'string "$1=" (make-string 100 :initial-element #\x)

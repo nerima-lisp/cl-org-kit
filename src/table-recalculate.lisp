@@ -5,7 +5,7 @@
 (defstruct table-recalculate-state
   standard-rows data-rows header-row hline-rows values column-count header-columns)
 (defstruct table-recalculate-context
-  document tables cache active functions constants constants-declared-p
+  document tables cache active functions callbacks constants constants-declared-p
   limits work-budget (remote-cache (make-hash-table :test #'eq)))
 
 (defun table-recalculate-signal-error (target reason message)
@@ -549,10 +549,127 @@
              fallback-work-map standard-rows row column)
             (table-recalculate-cell-value standard-rows row column)))))
 
+(defun table-recalculate-elisp-string (value)
+  (with-output-to-string (stream)
+    (write-char #\" stream)
+    (loop for character across value
+          do (case character
+               (#\" (write-string "\\\"" stream))
+               (#\\ (write-string "\\\\" stream))
+               (#\Newline (write-string "\\n" stream))
+               (#\Return (write-string "\\r" stream))
+               (#\Tab (write-string "\\t" stream))
+               (#\Page (write-string "\\f" stream))
+               (#\Backspace (write-string "\\b" stream))
+               (t (write-char character stream))))
+    (write-char #\" stream)))
+
+(defun table-recalculate-elisp-number-string (value limits)
+  (let ((decimal (parse-safe-decimal value :limits limits)))
+    (if decimal
+        (table-calc-decimal-string decimal)
+        "0")))
+
+(defun table-recalculate-elisp-reference-value
+    (reference current-row current-column row-count column-count header-columns
+     hline-rows target cell-value-function reference-value-function)
+  (multiple-value-bind (value present-p)
+      (if reference-value-function
+          (funcall reference-value-function reference)
+          (values nil nil))
+    (if present-p
+        value
+        (multiple-value-bind (row column)
+            (table-recalculate-reference-position
+             reference current-row current-column row-count column-count
+             header-columns hline-rows target)
+          (funcall cell-value-function row column)))))
+
+(defun table-recalculate-elisp-reference-text
+    (value numbers-p limits)
+  (let ((text (if (stringp value)
+                  value
+                  (if (safe-decimal-p value)
+                      (table-calc-decimal-string value)
+                      (if (realp value)
+                          (table-calc-format-result value nil nil limits "formula")
+                          "")))))
+    (if numbers-p
+        (table-recalculate-elisp-number-string text limits)
+        (table-recalculate-elisp-string text))))
+
+(defun table-recalculate-expand-elisp-expression
+    (source expression assignment current-row current-column row-count
+     column-count header-columns hline-rows target cell-value-function
+     reference-value-function limits work-budget)
+  (let ((references (table-calc-expression-children expression))
+        (numbers-p (member (table-calc-assignment-mode assignment) '(:n :en)))
+        (keep-empty-p (member (table-calc-assignment-mode assignment) '(:e :en)))
+        (flags (table-calc-assignment-flags assignment)))
+    (table-calc-charge-work limits work-budget (length source))
+    (when (member :literal-references flags)
+      (return-from table-recalculate-expand-elisp-expression source))
+    (let ((output (make-string-output-stream))
+          (position 0))
+      (dolist (reference references)
+        (let* ((start (table-calc-expression-start reference))
+               (end (table-calc-expression-end reference)))
+          (write-string source output :start position :end (- start
+                                                           (table-calc-expression-start expression)))
+          (table-calc-charge-work limits work-budget 1)
+          (if (eq (table-calc-expression-kind reference) :range)
+              (let* ((children (table-calc-expression-children reference))
+                     (first-reference (table-calc-expression-value (first children)))
+                     (last-reference (table-calc-expression-value (second children))))
+                (multiple-value-bind (first-row first-column)
+                    (table-recalculate-reference-position
+                     first-reference current-row current-column row-count
+                     column-count header-columns hline-rows target)
+                  (multiple-value-bind (last-row last-column)
+                      (table-recalculate-reference-position
+                       last-reference current-row current-column row-count
+                       column-count header-columns hline-rows target)
+                    (let ((first-value t))
+                      (loop for row from (min first-row last-row)
+                              to (max first-row last-row)
+                            do (loop for column from (min first-column last-column)
+                                       to (max first-column last-column)
+                                     for value =
+                                       (funcall cell-value-function row column)
+                                     for empty-p =
+                                       (and (stringp value) (string= value ""))
+                                     for text =
+                                       (if (and empty-p numbers-p)
+                                           "0"
+                                           (table-recalculate-elisp-reference-text
+                                            value numbers-p limits))
+                                     do (table-calc-charge-work
+                                         limits work-budget 1)
+                                     when (or keep-empty-p (not empty-p))
+                                       do (unless first-value
+                                            (write-char #\Space output))
+                                          (write-string text output)
+                                          (setf first-value nil)))))))
+              (let ((value
+                      (table-recalculate-elisp-reference-value
+                       (table-calc-expression-value reference)
+                       current-row current-column row-count column-count
+                       header-columns hline-rows target cell-value-function
+                       reference-value-function)))
+                (write-string
+                 (table-recalculate-elisp-reference-text value numbers-p limits)
+                 output)))
+          (setf position (- end (table-calc-expression-start expression)))))
+      (write-string source output :start position)
+      (let ((expanded (get-output-stream-string output)))
+        (check-limit limits :max-input-length (length expanded))
+        expanded))))
+
 (defun table-recalculate-evaluate-entries
     (entries row-count column-count header-columns limits work-budget
      work-map cell-value-function target &key hline-rows functions
-       reference-value-function remote-function)
+       reference-value-function remote-function
+       (callbacks (make-callback-registry)))
   (dolist (entry entries)
     (let* ((row (table-recalculate-entry-row entry))
            (column (table-recalculate-entry-column entry))
@@ -571,7 +688,17 @@
               :functions functions
               :reference-value-function reference-value-function
               :remote-function remote-function
-              :current-row row :current-column column)))
+              :current-row row :current-column column
+              :callbacks callbacks
+              :elisp-reference-function
+              (lambda (source expression assignment)
+                (table-recalculate-expand-elisp-expression
+                 source expression assignment row column row-count column-count
+                 header-columns hline-rows target
+                 (lambda (reference-row reference-column)
+                   (funcall cell-value-function work-map
+                            reference-row reference-column))
+                 reference-value-function limits work-budget)))))
       (setf (gethash key work-map) value)))
   work-map)
 
@@ -871,13 +998,14 @@
              row-count column-count header-columns table limits work-budget
              :hline-rows hline-rows
              :reference-value-function reference-value-function)
-            (table-recalculate-evaluate-entries
+             (table-recalculate-evaluate-entries
              column-entries row-count column-count header-columns
              limits work-budget column-values
              (lambda (work-map row column)
                (table-recalculate-work-map-cell-value
                 work-map standard-rows row column))
              table :hline-rows hline-rows :functions functions
+             :callbacks (table-recalculate-context-callbacks context)
              :reference-value-function reference-value-function
              :remote-function
              (table-recalculate-remote-reference-function context table))
@@ -888,6 +1016,7 @@
                (table-recalculate-work-map-cell-value
                 work-map standard-rows row column column-values))
              table :hline-rows hline-rows :functions functions
+             :callbacks (table-recalculate-context-callbacks context)
              :reference-value-function reference-value-function
              :remote-function
              (table-recalculate-remote-reference-function context table))
@@ -940,9 +1069,11 @@
         when (eq (table-recalculate-assignment-kind assignment target) kind)
           collect assignment))
 
-(defun table-recalculate (document target &key functions)
+(defun table-recalculate (document target &key functions
+                                                (callbacks (make-callback-registry)))
   "Recalculate a pipe table's TBLFM formulas and return its validated edit result.
-FUNCTIONS is an alist of string names and call-scoped function designators."
+FUNCTIONS is an alist of string names and call-scoped function designators.
+CALLBACKS is a caller-owned callback registry used for quoted Lisp formulas."
   (let ((table (edit-resolve-node document target '(:table))))
     (let* ((limits (document-limits document))
            (work-budget (make-table-calc-work-budget)))
@@ -955,6 +1086,7 @@ FUNCTIONS is an alist of string names and call-scoped function designators."
                   :cache (make-hash-table :test #'eq)
                   :active nil
                   :functions functions
+                  :callbacks callbacks
                   :constants constants
                   :constants-declared-p constants-declared-p
                   :limits limits

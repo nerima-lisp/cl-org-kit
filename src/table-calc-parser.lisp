@@ -157,6 +157,54 @@
             (%make-table-calc-token :kind :suffix :start start :end position
                                     :value (subseq formula (1+ start) position)))))
 
+(defun table-calc-lisp-form-end (formula start)
+  (let ((length (length formula))
+        (position (+ start 2))
+        (depth 1)
+        (string-p nil)
+        (escaped-p nil)
+        (comment-p nil))
+    (unless (and (< (1+ start) length)
+                 (char= (char formula start) #\')
+                 (char= (char formula (1+ start)) #\())
+      (table-calc-fail formula start :quoted-lisp))
+    (loop while (< position length)
+          for character = (char formula position)
+          do (progn
+               (cond
+                 (comment-p
+                  (when (char= character #\Newline)
+                    (setf comment-p nil)))
+                 (string-p
+                  (cond (escaped-p (setf escaped-p nil))
+                        ((char= character #\\) (setf escaped-p t))
+                        ((char= character #\") (setf string-p nil))))
+                 ((char= character #\") (setf string-p t))
+                 ((char= character #\;) (setf comment-p t))
+                 ((char= character #\#)
+                  (table-calc-fail formula position
+                                   (if (and (< (1+ position) length)
+                                            (char= (char formula (1+ position)) #\.))
+                                       :reader-eval
+                                       :reader-dispatch)))
+                 ((char= character #\?)
+                  (setf position
+                        (min length
+                             (+ position
+                                (if (and (< (1+ position) length)
+                                         (char= (char formula (1+ position)) #\\))
+                                    2
+                                    1)))))
+                 ((char= character #\\)
+                  (incf position))
+                 ((char= character #\() (incf depth))
+                 ((char= character #\))
+                  (decf depth)
+                  (when (zerop depth)
+                    (return-from table-calc-lisp-form-end (1+ position)))))
+               (incf position)))
+    (table-calc-fail formula start :quoted-lisp)))
+
 (defun table-calc-tokenize (formula limits)
   (let ((length (length formula))
         (position 0)
@@ -185,7 +233,14 @@
                                          :reader-eval
                                          :reader-dispatch)))
                    ((or (char= character #\') (= (char-code character) 96))
-                    (table-calc-fail formula position :quoted-lisp))
+                    (if (char= character #\')
+                        (let ((end (table-calc-lisp-form-end formula position)))
+                          (check-next-token)
+                          (emit (%make-table-calc-token
+                                 :kind :quoted-lisp :start position :end end
+                                 :value (subseq formula position end))
+                                end))
+                        (table-calc-fail formula position :quoted-lisp)))
                    ((table-calc-digit-p character)
                     (check-next-token)
                     (multiple-value-bind (duration-end duration-token)
@@ -492,6 +547,105 @@
     (%make-table-calc-expression :kind kind :start start :end end
                                  :value value :children children :depth depth)))
 
+(defun table-calc-lisp-reference-candidate-character-p (character)
+  (or (table-calc-name-character-p character)
+      (find character "@$+-<>.")))
+
+(defun table-calc-lisp-shift-reference (reference offset)
+  (flet ((shift (position)
+           (and position (+ offset position))))
+    (%make-table-calc-reference
+     :row-kind (table-calc-reference-row-kind reference)
+     :row-value (table-calc-reference-row-value reference)
+     :row-offset (table-calc-reference-row-offset reference)
+     :column-kind (table-calc-reference-column-kind reference)
+     :column-value (table-calc-reference-column-value reference)
+     :row-start (shift (table-calc-reference-row-start reference))
+     :row-end (shift (table-calc-reference-row-end reference))
+     :column-start (shift (table-calc-reference-column-start reference))
+     :column-end (shift (table-calc-reference-column-end reference))
+     :start (shift (table-calc-reference-start reference))
+     :end (shift (table-calc-reference-end reference)))))
+
+(defun table-calc-lisp-reference-at (parser formula start end limits)
+  (let* ((candidate-end
+           (loop for position from start below end
+                 while (table-calc-lisp-reference-candidate-character-p
+                        (char formula position))
+                 finally (return position)))
+         (candidate (subseq formula start candidate-end))
+         (tokens (handler-case (table-calc-tokenize candidate limits)
+                   (org-table-unsupported-syntax () nil))))
+    (when (and tokens
+               (member (table-calc-token-kind (svref tokens 0)) '(:at :dollar)))
+      (let ((reference-parser
+              (%make-table-calc-parser :formula candidate :tokens tokens
+                                       :cursor 0 :limits limits :nesting 0
+                                       :functions nil :symbol-context nil)))
+        (handler-case
+            (let* ((first-reference
+                     (table-calc-lisp-shift-reference
+                      (table-calc-parse-reference reference-parser) start))
+                   (first-node
+                     (table-calc-node parser :reference
+                                      (table-calc-reference-start first-reference)
+                                      (table-calc-reference-end first-reference)
+                                      first-reference '())))
+              (if (eql (table-calc-current-kind reference-parser) :range)
+                  (progn
+                    (table-calc-advance reference-parser)
+                    (let* ((end-reference
+                             (if (eql (table-calc-current-kind reference-parser)
+                                      :identifier)
+                                 (let* ((token (table-calc-advance reference-parser))
+                                        (ordinal
+                                          (table-calc-roman-ordinal
+                                           (table-calc-token-value token))))
+                                   (unless ordinal
+                                     (table-calc-fail candidate
+                                                      (table-calc-token-start token)
+                                                      :invalid-range))
+                                   (%make-table-calc-reference
+                                    :row-kind :hline-anchor :row-value ordinal
+                                    :column-kind :current
+                                    :start (table-calc-token-start token)
+                                    :end (table-calc-token-end token)))
+                                 (table-calc-parse-reference reference-parser)))
+                           (shifted-end
+                             (table-calc-lisp-shift-reference
+                              end-reference start))
+                           (end-node
+                             (table-calc-node
+                              parser :reference
+                              (table-calc-reference-start shifted-end)
+                              (table-calc-reference-end shifted-end)
+                              shifted-end '())))
+                      (values (table-calc-node
+                               parser :range
+                               (table-calc-reference-start first-reference)
+                               (table-calc-reference-end shifted-end)
+                               nil (list first-node end-node))
+                              (table-calc-reference-end shifted-end))))
+                  (values first-node
+                          (table-calc-reference-end first-reference))))
+          (org-table-unsupported-syntax () (values nil (1+ start))))))))
+
+(defun table-calc-lisp-reference-expressions (parser formula start end limits)
+  (let ((position start)
+        (references nil))
+    (loop while (< position end)
+          do (if (find (char formula position) "@$")
+                 (multiple-value-bind (expression next-position)
+                     (table-calc-lisp-reference-at
+                      parser formula position end limits)
+                   (if expression
+                       (progn
+                         (push expression references)
+                         (setf position next-position))
+                       (incf position)))
+                 (incf position)))
+    (nreverse references)))
+
 (defun table-calc-enter-nesting (parser)
   (let ((depth (1+ (table-calc-parser-nesting parser))))
     (check-limit (table-calc-parser-limits parser) :max-formula-ast-depth depth)
@@ -562,6 +716,15 @@
        (table-calc-node parser :string (table-calc-token-start token)
                         (table-calc-token-end token)
                         (table-calc-token-value token) '()))
+      ((eql kind :quoted-lisp)
+       (table-calc-advance parser)
+       (table-calc-node
+        parser :quoted-lisp (table-calc-token-start token)
+        (table-calc-token-end token) (table-calc-token-value token)
+        (table-calc-lisp-reference-expressions
+         parser formula (+ (table-calc-token-start token) 2)
+         (1- (table-calc-token-end token))
+         (table-calc-parser-limits parser))))
       ((member kind '(:plus :minus))
        (let* ((operator (table-calc-advance parser))
               (start (table-calc-token-start operator)))
@@ -850,6 +1013,7 @@
          (flags nil)
          (e-p nil)
          (n-p nil)
+         (literal-references-p nil)
          (format-precision (when format-text
                              (table-calc-format-precision format-text))))
     (loop with position = 0
@@ -862,9 +1026,8 @@
                     (start position))
                (cond
                  ((char= character #\L)
-                  (table-calc-fail formula
-                                   (+ (table-calc-token-start token) 1 position)
-                                   :lisp-mode))
+                  (setf literal-references-p t)
+                  (incf position))
                  ((char= character #\E) (setf e-p t) (incf position))
                  ((char= character #\N) (setf n-p t) (incf position))
                  ((and (char= character #\f)
@@ -924,6 +1087,8 @@
                    :max-formula-precision
                    (if (consp format-precision) (cdr format-precision)
                        format-precision)))
+    (when literal-references-p
+      (push :literal-references flags))
     (let ((mode (cond ((and e-p n-p) :en)
                       (e-p :e)
                       (n-p :n)
@@ -938,7 +1103,7 @@
                   (parent-kind (cdr entry))
                   (kind (table-calc-expression-kind node)))
              (when (and (eql kind :range)
-                        (not (eql parent-kind :function)))
+                        (not (member parent-kind '(:function :quoted-lisp))))
                (table-calc-fail formula
                                 (table-calc-expression-start node)
                                 :range-outside-vector-function))
@@ -981,6 +1146,11 @@
         (when (eql (table-calc-current-kind parser) :suffix)
           (multiple-value-setq (mode format-precision flags)
             (table-calc-parse-suffix parser (table-calc-advance parser))))
+        (when (member :literal-references flags)
+          (unless (eq (table-calc-expression-kind expression) :quoted-lisp)
+            (table-calc-fail formula (table-calc-expression-start expression)
+                             :lisp-mode))
+          (setf (table-calc-expression-children expression) nil))
         (%make-table-calc-assignment
          :kind kind :target target :target-end target-end :expression expression
          :mode mode :flags flags :format-precision format-precision
@@ -990,6 +1160,7 @@
                       (1- (table-calc-parser-cursor parser)))))))))
 
 (defun table-calc-parse-formula (formula &optional (limits (make-limits)) functions)
+  (check-limit limits :max-input-length (length formula))
   (let* ((tokens (table-calc-tokenize formula limits))
          (parser (%make-table-calc-parser :formula formula :tokens tokens
                                           :cursor 0 :limits limits :nesting 0
