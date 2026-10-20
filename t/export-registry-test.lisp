@@ -1074,6 +1074,27 @@
                               "final"))))))
         3)
        :final-output :filter-commit 2 5))))
+  (it "reports the built-in LaTeX trailer check at its stage boundary"
+    (let* ((source "Trailer boundary.")
+           (output (export-org (parse-org source) :latex))
+           (document
+             (parse-org source
+                        :limits (make-limits
+                                 :max-output-length (1- (length output)))))
+           (condition nil)
+           (events nil))
+      (multiple-value-setq (condition events)
+        (export-registry-test-capture-output-check
+         (lambda ()
+           (export-org document :latex))))
+      (let ((event (first events)))
+        (with-soft-assertions
+          (expect (typep condition 'org-resource-limit-error) :to-be t)
+          (expect (not (null event)) :to-be t)
+          (expect (getf event :phase) :to-be :trailer)
+          (expect (getf event :kind) :to-be :native-write)
+          (expect (getf event :index) :to-be 3)
+          (expect (getf event :actual) :to-be (length output))))))
   (it "checks the template aggregate once without recounting its components"
   (let ((template-result "OUT")
         (template-components nil)

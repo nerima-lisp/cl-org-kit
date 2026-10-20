@@ -1419,16 +1419,6 @@
          (descriptor (first registry-snapshot))
          (ancestry (second registry-snapshot))
          (root-descriptor (first ancestry))
-         (builtin-preamble-body-phase-p
-          (and (member backend (quote (:html :latex)) :test (function eq))
-               descriptor
-               (%export-backend-descriptor-builtin-p descriptor)))
-         (builtin-html-p
-          (and (eq backend :html)
-               descriptor
-               (%export-backend-descriptor-builtin-p descriptor)))
-         (renderer-result-check-p
-          (member backend '(:html :gfm :ascii :latex) :test #'eq))
          (preparation-backend
           (cond
            ((null descriptor) backend)
@@ -1507,9 +1497,8 @@
                       (export-run-renderer-stage
                        (first preamble-and-owner) preamble-context ""
                        (document-limits document) backend
-                       (if builtin-preamble-body-phase-p :body :preamble)
-                       :kind (if renderer-result-check-p :renderer-result
-                               :native-write)))
+                       :preamble
+                       :kind :native-write))
                      (body-context
                       (and (first renderer-and-owner)
                            (export-context-for-owner
@@ -1527,7 +1516,7 @@
                              preparation preparation-backend)))
                          (document-limits document) backend :body
                          :base-offset (length preamble)
-                         :kind (if (or builtin-html-p (eq backend :latex)) :renderer-result :native-write))))
+                         :kind :native-write)))
                      (body
                       (export-run-filter-stage
                        backend :body body initialized-render-context
@@ -1542,10 +1531,9 @@
                       (export-run-renderer-stage
                        (first trailer-and-owner) trailer-context ""
                        (document-limits document) backend
-                       (if builtin-preamble-body-phase-p :body :trailer)
+                       :trailer
                        :base-offset (+ (length preamble) (length body))
-                       :kind (if renderer-result-check-p :renderer-result
-                               :native-write)))
+                       :kind :native-write))
                      (template-and-owner
                       (multiple-value-list
                        (export-render-context-template
