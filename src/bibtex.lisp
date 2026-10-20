@@ -382,7 +382,7 @@
                     else when (plusp padding)
                     collect (edit-make-patch
                              (1+ value-start) (1+ value-start)
-                             (make-string padding #\Space))))
+                             (make-string padding :initial-element #\Space))))
              (expected (edit-canonical-document document)))
         (if patches
             (edit-apply-patches document patches
