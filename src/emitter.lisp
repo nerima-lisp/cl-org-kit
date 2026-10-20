@@ -650,13 +650,8 @@
                       (not (find #\) call)))
            (emitter-fail node "Babel call name cannot be reparsed exactly"))
          (when inside-header
-           (unless (and (stringp inside-header)
-                        (plusp (length inside-header))
-                        (not (find #\Newline inside-header))
-                        (not (find #\Return inside-header))
-                        (string= inside-header
-                                 (string-trim '(#\Space #\Tab)
-                                              inside-header)))
+           (unless (string= inside-header
+                           (string-trim '(#\Space #\Tab) inside-header))
              (emitter-fail node "Babel call inside header cannot be reparsed exactly"))
            (let* ((source (format nil "[~A]" inside-header))
                   (limit (length source)))
