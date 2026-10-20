@@ -218,8 +218,8 @@ FORMAT may be :AUTO, :CSV, or :TSV. Return the validated edit result."
                                    (if (and (eq format :csv)
                                             (table-import-export-csv-quoted-p value))
                                        (+ 2 (table-import-export-quoted-count value))
-                                       0)))))
-      1)))
+                                       0))))))
+      0))
 
 (defun table-import-export-output-octets (rows format encoding)
   (let ((separator (if (eq format :csv) "," (string #\Tab)))
@@ -239,7 +239,7 @@ FORMAT may be :AUTO, :CSV, or :TSV. Return the validated edit result."
                                          (* (+ 2 (table-import-export-quoted-count value))
                                             (edit-encoded-range-octets "\"" 0 1 encoding))
                                          0))))))
-        (edit-encoded-range-octets line-feed 0 1 encoding))))
+        0)))
 
 (defun table-import-export-write-rows (rows format &key (final-newline-p t))
   (with-output-to-string (stream)
