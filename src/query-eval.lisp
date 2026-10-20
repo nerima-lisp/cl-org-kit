@@ -739,21 +739,15 @@ When SILENT-P is true, invalid values return NIL for document-property coercion.
         (write-char #\: stream))
       ""))
 
-(defun query-category-from-source-name (document)
-  (let ((source-name (document-source-name document)))
-    (when (and source-name (plusp (length source-name)))
-      (let* ((name (pathname-name (pathname source-name)))
-             (type (pathname-type (pathname source-name))))
-        (if type name (or name (file-namestring (pathname source-name))))))))
-
 (defun query-category-value (document headline context)
-  (or (query-context-category context)
-      (loop for current in (query-heading-chain headline)
-            thereis (multiple-value-bind (value present)
-                        (query-local-property current "CATEGORY")
-                      (and present value)))
-      (getf (document-settings document) :category)
-      (query-category-from-source-name document)))
+  (let ((source-name (document-source-name document)))
+    (org-effective-category
+     document headline
+     :category-override (query-context-category context)
+     :fallback (and (or (pathnamep source-name)
+                        (and (stringp source-name)
+                             (plusp (length source-name))))
+                    ""))))
 
 (defun query-entry-timestamp (headline timestamp-type)
   (labels ((search-node (node)

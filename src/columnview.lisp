@@ -244,16 +244,7 @@
       ""))
 
 (defun column-view-category (document heading)
-  (multiple-value-bind (property source)
-      (effective-property document heading "CATEGORY" :inherit t)
-    (declare (ignore source))
-    (or property
-        (getf (document-settings document) :category)
-        (let ((source-name (document-source-name document)))
-          (when source-name
-            (or (pathname-name (pathname source-name))
-                (file-namestring (pathname source-name)))))
-        "")))
+  (org-effective-category document heading :fallback ""))
 
 (defun column-view-timestamp-property (heading key)
   (let ((timestamp (node-property heading key)))

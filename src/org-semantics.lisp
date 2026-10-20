@@ -437,3 +437,61 @@ contributes, :DOCUMENT for a #+PROPERTY fallback, or NIL when absent."
               (values (format nil "~{~A~^~%~}" values) sources)
               (values (car values) (car (last sources))))))
       (values nil nil))))
+
+(defun org-effective-category (document heading &key category-override (fallback nil))
+  (labels ((node-category-value (current)
+             (let ((entry
+                     (loop for (key value) on (node-properties current)
+                           by (function cddr)
+                           when (and (symbolp key)
+                                     (string-equal (symbol-name key) "CATEGORY"))
+                             return (cons value t))))
+               (if entry
+                   (values (car entry) (cdr entry))
+                   (values nil nil))))
+           (local-category-value (current)
+             (multiple-value-bind (value present)
+                 (node-category-value current)
+               (if present
+                   (values value present)
+                   (effective-heading-property-value current "CATEGORY"))))
+           (inherited-category-value ()
+             (loop for current in (cons heading
+                                        (effective-heading-ancestors heading))
+                   do (multiple-value-bind (value present)
+                          (local-category-value current)
+                        (when present
+                          (return (values value t))))
+                   finally (return (values nil nil))))
+           (programmatic-category-p ()
+             (some (lambda (current)
+                     (multiple-value-bind (value present)
+                         (node-category-value current)
+                       (declare (ignore value))
+                       present))
+                   (cons heading (effective-heading-ancestors heading))))
+           (effective-category-property ()
+             (multiple-value-bind (property source)
+                 (effective-property document heading "CATEGORY" :inherit t)
+               (declare (ignore source))
+               property)))
+    (or category-override
+        (if (programmatic-category-p)
+            (multiple-value-bind (category present)
+                (inherited-category-value)
+              (if present
+                  category
+                  (effective-category-property)))
+            (effective-category-property))
+        (getf (document-settings document) :category)
+        (let ((source-name (document-source-name document)))
+          (when source-name
+            (let* ((source-path (pathname source-name))
+                   (name (pathname-name source-path))
+                   (type (pathname-type source-path)))
+              (if type
+                  name
+                  (or name
+                      (let ((file-name (file-namestring source-path)))
+                        (and (plusp (length file-name)) file-name)))))))
+        fallback)))
