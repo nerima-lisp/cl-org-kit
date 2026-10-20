@@ -364,3 +364,8 @@
       (expect
        (org-kit::%timestamp-diary-character-literal-end "x" 0 1)
        :to-be nil))))
+(describe "diary character literal modifier EOF"
+  (it "ends a control modifier at the scanner boundary"
+    (expect
+     (org-kit::%timestamp-diary-character-literal-end "?\\C-" 0 4)
+     :to-be 4)))

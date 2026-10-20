@@ -439,10 +439,7 @@
                 (+ first-match-ordinal
                    (* distance (if (plusp count) -1 1)))
               for boundary =
-                (handler-case
-                    (cl-date-kit:local-date-from-epoch-day boundary-ordinal)
-                  (cl-date-kit:invalid-date ()
-                    nil))
+                (cl-date-kit:local-date-from-epoch-day boundary-ordinal)
               thereis
                 (when boundary
                   (let* ((boundary-year (cl-date-kit:local-date-year boundary))

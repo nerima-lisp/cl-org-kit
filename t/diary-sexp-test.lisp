@@ -474,3 +474,42 @@
          (org-kit::diary-sexp-float-match-p
           (list 5 1 "count") (cl-date-kit:make-local-date 2026 5 4))
          :to-be nil)))))
+(describe "diary parser conditional branch boundaries"
+  (it "covers EOF tokens, trailing comments, and empty timestamp sources"
+    (let ((date (cl-date-kit:make-local-date 2026 12 25))
+          (eof-comment "; trailing comment"))
+      (flet ((make-parser (text)
+               (org-kit::%make-diary-sexp-parser
+                :text text :limits (make-limits))))
+        (with-soft-assertions
+          (multiple-value-bind (expression entry found-p)
+              (org-kit::diary-sexp-source-parts nil :timestamp-p t)
+            (expect (list expression entry found-p)
+                    :to-equal '(nil nil nil)))
+          (expect (org-kit::diary-sexp-scan-expression
+                   "#x" 0 2 (make-limits))
+                  :to-be t)
+          (expect (org-kit::diary-sexp-source-skip-trivia eof-comment 0)
+                  :to-be (length eof-comment))
+          (expect
+           (org-kit::diary-sexp-read-built-in-form
+            (concatenate 'string
+                         "(diary-date 12 25 2026)"
+                         " "
+                         eof-comment)
+            (make-limits))
+           :to-equal '("diary-date" 12 25 2026))
+          (expect
+           (org-kit::diary-sexp-parse-integer (make-parser "1"))
+           :to-be 1)
+          (expect
+           (typep (diary-sexp-test-condition
+                   (lambda ()
+                     (org-kit::diary-sexp-parse-symbol (make-parser ""))))
+                  'org-agenda-error)
+           :to-be t)
+          (expect
+           (diary-sexp-test-match
+            "%%(diary-anniversary 12 25 2026)"
+            date)
+           :to-be nil))))))
