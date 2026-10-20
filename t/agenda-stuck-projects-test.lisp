@@ -123,6 +123,12 @@
               (lambda ()
                 (agenda-stuck-projects
                  (list document) '("LEVEL=1" nil)
+                 :time-context (agenda-stuck-projects-test-context)))))
+           (invalid-value
+             (agenda-stuck-projects-test-error
+              (lambda ()
+                (agenda-stuck-projects
+                 (list document) '("LEVEL=1" ("TODO" 7) nil nil)
                  :time-context (agenda-stuck-projects-test-context))))))
       (with-soft-assertions
         (expect (agenda-stuck-projects-test-titles entries)
@@ -134,4 +140,8 @@
         (expect (typep invalid-options 'org-agenda-error) :to-be t)
         (when (typep invalid-options 'org-agenda-error)
           (expect (org-agenda-error-reason invalid-options)
+                  :to-be :invalid-option))
+        (expect (typep invalid-value 'org-agenda-error) :to-be t)
+        (when (typep invalid-value 'org-agenda-error)
+          (expect (org-agenda-error-reason invalid-value)
                   :to-be :invalid-option))))))
