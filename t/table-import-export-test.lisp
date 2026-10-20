@@ -246,4 +246,38 @@
                      (lambda ()
                        (table-import document 0 "a,b" :format :csv))))
               (expect condition :to-equal (list 'org-table-error :invalid-value)))
-          (setf (symbol-function symbol) original)))))
+          (setf (symbol-function symbol) original))))
+  (it "covers doubled CSV quotes, newline selection, and automatic export"
+    (let* ((crlf (format nil "a~C~%b" #\Return))
+           (lf (format nil "a~%b"))
+           (leading-lf (format nil "~%b"))
+           (source (format nil "\"A\"\"da\",one"))
+           (table-source (format nil "| A | B |~%|---+---|~%| 1 | 2 |~%"))
+           (document (parse-org table-source))
+           (table
+             (table-import-export-test-find-table (document-root document))))
+      (with-soft-assertions
+        (progn
+          (expect (org-kit::table-import-export-parse-records
+                   source :csv (make-limits))
+                  :to-equal (list (list "A\"da" "one")))
+          (expect (org-kit::table-import-export-parse-records
+                   "\"tail\"" :csv (make-limits))
+                  :to-equal (list (list "tail"))))
+        (expect (org-kit::table-import-export-newline crlf 3)
+                :to-equal (format nil "~C~%" #\Return))
+        (expect (org-kit::table-import-export-newline lf 2)
+                :to-equal (string #\Newline))
+        (progn
+          (expect (org-kit::table-import-export-newline leading-lf 1)
+                  :to-equal (string #\Newline))
+          (expect (org-kit::table-import-export-newline leading-lf 0)
+                  :to-equal (string #\Newline)))
+        (expect (org-kit::table-import-export-newline crlf 0)
+                :to-equal (format nil "~C~%" #\Return))
+        (expect (org-kit::table-import-export-newline lf 0)
+                :to-equal (string #\Newline))
+        (expect (org-kit::table-import-export-newline "plain" 0)
+                :to-equal (string #\Newline))
+        (expect (table-export document table :format :auto)
+                :to-equal (table-export document table :format :tsv))))))
