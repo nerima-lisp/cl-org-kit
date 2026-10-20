@@ -444,82 +444,49 @@
          (type (node-property node :type))
          (path (node-property node :path))
          (label (export-latex-link-label state view base-count))
-         (scheme-end (and (stringp type) (string-equal type "fuzzy")
-                          (stringp path)
-                          (export-explicit-url-scheme-end path)))
-         (handler-type (if scheme-end (subseq path 0 scheme-end) type))
-         (handler-path (if scheme-end (subseq path (1+ scheme-end)) path))
          (context (export-latex-state-render-context state))
          (link-result
-           (and context frame (stringp type) (stringp path)
-                (export-call-link-type-handler
-                 context handler-type handler-path
-                 (export-latex-view-plain-text-description view) frame))))
+           (and context frame
+                (export-call-link-type-handler-for-view
+                 context node view frame))))
     (if link-result
         (export-latex-render-link-result state link-result path label base-count)
       (cond
-      ((and (stringp type) (stringp path)
-            (member type '("fuzzy" "custom-id" "radio") :test #'string-equal))
-       (let ((id (export-latex-internal-link-id state path)))
-         (if id (format nil "\\hyperref[~A]{~A}" id label) label)))
-      ((and (stringp path)
-            (string-equal (or type "") "file"))
-       (let ((expanded (export-latex-expand-link-abbreviation
-                        path (export-preparation-document
-                              (export-latex-state-preparation state)))))
-         (cond
-           ((export-latex-image-path-p expanded)
-            (if (export-safe-relative-file-path-p expanded)
-                (format nil "\\includegraphics{~A}" expanded)
-                label))
-           ((export-safe-url-p path expanded)
-            (format nil "\\href{~A}{~A}"
-                    (export-latex-escape-text state expanded base-count)
-                    label))
-           (t label))))
-      ((and (stringp type) (stringp path))
-       (let* ((raw (export-latex-link-source node))
-              (expanded (export-latex-expand-link-abbreviation
-                         raw (export-preparation-document
-                              (export-latex-state-preparation state)))))
-         (if (and (export-safe-url-p raw expanded)
-                  (member type '("http" "https" "mailto") :test #'string-equal))
-             (format nil "\\href{~A}{~A}"
-                     (export-latex-escape-text state expanded base-count)
-                     label)
-             label)))
-      (t label)))))
-
-(defun export-latex-view-plain-text-description (view)
-  (let* ((node (export-view-node view))
-         (type (node-type node))
-         (children (export-view-children view)))
-    (case type
-      ((:plain-text :text) (or (node-text node)
-                               (node-property node :value) ""))
-      (:entity (or (node-property node :utf-8)
-                   (node-property node :unicode)
-                   (node-text node) ""))
-      (:line-break (string #\Newline))
-      (:link (if children
-                 (export-latex-views-plain-text-description children)
-                 (or (node-property node :raw-link)
-                     (node-property node :path) "")))
-      ((:code :verbatim :inline-src-block)
-       (export-latex-source-text node))
-      (:latex-fragment (export-latex-source-text node))
-      (:macro (if children
-                  (export-latex-views-plain-text-description children)
-                  ""))
-      (otherwise
-       (if children
-           (export-latex-views-plain-text-description children)
-           (or (node-text node) ""))))))
-
-(defun export-latex-views-plain-text-description (views)
-  (with-output-to-string (output)
-    (dolist (view views)
-      (write-string (export-latex-view-plain-text-description view) output))))
+        ((and (stringp type) (stringp path)
+              (member type '("fuzzy" "custom-id" "radio")
+                      :test #'string-equal))
+         (let ((id (export-latex-internal-link-id state path)))
+           (if id (format nil "\\hyperref[~A]{~A}" id label) label)))
+        ((and (stringp path)
+              (string-equal (or type "") "file"))
+         (let ((expanded
+                 (export-latex-expand-link-abbreviation
+                  path (export-preparation-document
+                        (export-latex-state-preparation state)))))
+           (cond
+             ((export-latex-image-path-p expanded)
+              (if (export-safe-relative-file-path-p expanded)
+                  (format nil "\\includegraphics{~A}" expanded)
+                  label))
+             ((export-safe-url-p path expanded)
+              (format nil "\\href{~A}{~A}"
+                      (export-latex-escape-text state expanded base-count)
+                      label))
+             (t label))))
+        ((and (stringp type) (stringp path))
+         (let* ((raw (export-latex-link-source node))
+                (expanded
+                  (export-latex-expand-link-abbreviation
+                   raw (export-preparation-document
+                        (export-latex-state-preparation state)))))
+           (if (and (export-safe-url-p raw expanded)
+                    (member type '("http" "https" "mailto")
+                            :test #'string-equal))
+               (format nil "\\href{~A}{~A}"
+                       (export-latex-escape-text state expanded base-count)
+                       label)
+               label)))
+        (t label)))))
 
 (defun export-latex-render-link-result (state result path label base-count)
   (let ((destination (export-link-result-destination result))

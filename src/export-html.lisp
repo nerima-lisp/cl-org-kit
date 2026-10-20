@@ -990,10 +990,13 @@
              path
              "")))))
 
-(defun export-html-render-image (state node attributes)
+(defun export-html-render-image
+    (state node attributes &optional handler-destination handler-description)
   (let* ((path (node-property node :path))
-         (destination (export-html-link-destination state node))
-         (alt (or (cdr (assoc "alt" attributes :test #'string=)) path "")))
+         (destination (or handler-destination
+                          (export-html-link-destination state node)))
+         (alt (or (cdr (assoc "alt" attributes :test #'string=))
+                  handler-description path "")))
     (when destination
       (export-html-write state "<img src=\"")
       (export-html-escape-to-output state :attribute destination)
@@ -1006,17 +1009,62 @@
       (export-html-write state " />"))))
 
 (defun export-html-render-link (state node child-views view &optional attributes)
-  (if (export-html-image-link-p node)
-      (export-html-render-image state node attributes)
-      (let ((destination (export-html-link-destination state node)))
-        (if destination
-            (progn
-              (export-html-write state "<a href=\"")
-              (export-html-escape-to-output state :attribute destination)
-              (export-html-write state "\">")
-              (export-html-link-label state node child-views view)
-              (export-html-write state "</a>"))
-            (export-html-link-label state node child-views view)))))
+  (let* ((context (export-html-state-render-context state))
+         (frame (export-html-state-render-frame state))
+         (result (and context frame
+                      (export-call-link-type-handler-for-view
+                       context node view frame))))
+    (if result
+        (let* ((path (node-property node :path))
+               (destination (export-link-result-destination result))
+               (description (export-link-result-description result))
+               (kind (export-link-result-kind result))
+               (image-alt
+                (and (eq kind :image)
+                     (or (cdr (assoc "alt" attributes :test #'string=))
+                         description path "")))
+               (output-description
+                (if (eq kind :image) image-alt description))
+               (scheme-end (export-explicit-url-scheme-end destination))
+               (safe-p
+                (and (stringp path)
+                     (export-safe-url-p path destination)
+                     (or (eq kind :link)
+                         (and (eq kind :image)
+                              (or (null scheme-end)
+                                  (member (subseq destination 0 scheme-end)
+                                          '("http" "https")
+                                          :test #'string-equal)))))))
+          (if safe-p
+              (progn
+                (export-html-check-escaped-parts
+                 state :attribute (list (list destination 0 (length destination))))
+                (export-html-check-escaped-parts
+                 state (if (eq kind :image) :attribute :text)
+                 (list (list output-description 0 (length output-description))))
+                (case kind
+                  (:image
+                   (export-html-render-image
+                    state node attributes destination output-description))
+                  (:link
+                   (export-html-write state "<a href=\"")
+                   (export-html-escape-to-output state :attribute destination)
+                   (export-html-write state "\">")
+                   (export-html-escape-to-output state :text description)
+                   (export-html-write state "</a>"))))
+            (export-html-link-label state node child-views view)))
+      (if (export-html-image-link-p node)
+          (export-html-render-image state node attributes)
+        (let ((destination (export-html-link-destination state node)))
+          (if destination
+              (progn
+                (export-html-write state "<a href=\"")
+                (export-html-escape-to-output state :attribute destination)
+                (export-html-write state "\">")
+                (export-html-link-label state node child-views view)
+                (export-html-write state "</a>"))
+            (export-html-link-label state node child-views view))))))
+  )
 
 (defun export-html-footnote-reference (state node child-views view)
   (let* ((label (node-property node :label))

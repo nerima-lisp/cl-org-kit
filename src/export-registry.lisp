@@ -9,7 +9,8 @@
                           export-render-view
                           export-render-node
                           export-render-native-sink-implementation
-                          export-check-output-stage))
+                          export-check-output-stage
+                          export-explicit-url-scheme-end))
 
 (defstruct (%export-backend-descriptor
             (:constructor %make-export-backend-descriptor)
@@ -1841,6 +1842,51 @@
          :kind (%export-link-result-kind result)
          :destination (%export-link-result-destination result)
          :description (%export-link-result-description result))))))
+(defun export-view-plain-text-description (view)
+  (let* ((node (export-view-node view))
+         (type (node-type node))
+         (children (export-view-children view)))
+    (labels ((views-description (views)
+                                (with-output-to-string (output)
+                                  (dolist (child views)
+                                    (write-string (export-view-plain-text-description child)
+                                                  output)))))
+      (case type
+        ((:plain-text :text)
+         (or (node-text node) (node-property node :value) ""))
+        (:entity
+         (or (node-property node :utf-8) (node-property node :unicode)
+             (node-text node) ""))
+        (:line-break (string #\Newline))
+        (:link (if children
+                   (views-description children)
+                 (or (node-property node :raw-link)
+                     (node-property node :path) "")))
+        ((:code :verbatim :inline-src-block :latex-fragment)
+         (or (node-text node) (node-property node :value) ""))
+        (:macro (if children (views-description children) ""))
+        (otherwise
+         (if children
+             (views-description children)
+           (or (node-text node) ""))))))
+  )
+(defun export-call-link-type-handler-for-view (context node view frame)
+  (let* ((type (node-property node :type))
+         (path (node-property node :path))
+         (scheme-end (and (stringp type)
+                          (string-equal type "fuzzy")
+                          (stringp path)
+                          (export-explicit-url-scheme-end path)))
+         (handler-type (if scheme-end (subseq path 0 scheme-end) type)))
+    (when (and context frame (stringp type) (stringp path))
+      (multiple-value-bind (handler)
+          (export-resolved-link-handler
+           (%export-render-context-ancestry context) handler-type)
+        (when handler
+          (export-call-link-type-handler
+           context handler-type
+           (if scheme-end (subseq path (1+ scheme-end)) path)
+           (export-view-plain-text-description view) frame))))))
 
 (defun unregister-export-link-type (backend type)
   "Remove the handler registered for TYPE on BACKEND."

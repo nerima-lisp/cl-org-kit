@@ -901,25 +901,259 @@
              (unregister-export-link-type child "custom"))
            (when parent-handler-registered-p
              (unregister-export-link-type parent "custom")))))))
-  (it "dispatches registered link types on the root built-in backend"
+  (it "dispatches registered link handlers on the built-in LaTeX backend"
     (let ((registered-p nil)
+          (handler-call nil)
           (output nil))
+      (unwind-protect
+          (progn
+            (register-export-link-type
+             :latex "fr106-root"
+             (lambda (path description frame context)
+               (setf handler-call
+                     (list path description
+                           (export-render-frame-mode frame)
+                           (export-render-context-backend context)))
+               (make-export-link-result
+                :kind :link
+                :destination "https://example.test/"
+                :description description)))
+            (setf registered-p t)
+            (setf output
+                  (export-org
+                   (parse-org "[[fr106-root:path][Root link]]")
+                   :latex))
+            (with-soft-assertions
+             (expect handler-call
+                     :to-equal '("path" "Root link" :inline :latex))
+             (expect
+              (search "\\href{https://example.test/}{Root link}" output)
+              :to-be-truthy)))
+        (when registered-p
+          (unregister-export-link-type :latex "fr106-root")))))
+  (it "dispatches registered link handlers on HTML and GFM"
+    (let ((html-registered-p nil)
+          (gfm-registered-p nil)
+          (html-call nil)
+          (gfm-call nil)
+          (html-output nil)
+          (gfm-output nil))
       (unwind-protect
            (progn
              (register-export-link-type
-              :latex "fr106-root"
-              (function export-registry-test-link-handler))
-             (setf registered-p t)
-             (setf output
+              :html "fr106-html-issue"
+              (lambda (path description frame context)
+                (setf html-call
+                      (list path description
+                            (export-render-frame-mode frame)
+                            (export-render-context-backend context)))
+                (make-export-link-result
+                 :kind :link
+                 :destination
+                 (concatenate 'string
+                              "https://issues.example.test/" path)
+                 :description description)))
+             (setf html-registered-p t)
+             (register-export-link-type
+              :gfm "fr106-gfm-issue"
+              (lambda (path description frame context)
+                (setf gfm-call
+                      (list path description
+                            (export-render-frame-mode frame)
+                            (export-render-context-backend context)))
+                (make-export-link-result
+                 :kind :link
+                 :destination
+                 (concatenate 'string
+                              "https://issues.example.test/" path)
+                 :description description)))
+             (setf gfm-registered-p t)
+             (setf html-output
                    (export-org
-                    (parse-org "[[fr106-root:path][Root link]]")
-                    :latex))
+                    (parse-org "[[fr106-html-issue:123][Fix the bug]]")
+                    :html))
+             (setf gfm-output
+                   (export-org
+                    (parse-org "[[fr106-gfm-issue:123][Fix the bug]]")
+                    :gfm))
              (with-soft-assertions
+               (expect html-call :to-equal '("123" "Fix the bug" :inline :html))
+               (expect gfm-call :to-equal '("123" "Fix the bug" :inline :gfm))
                (expect
-                (search "\\href{https://example.test/}{Root link}" output)
+                (search
+                 "<a href=\"https://issues.example.test/123\">Fix the bug</a>"
+                 html-output)
+                :to-be-truthy)
+               (expect
+                (search
+                 "[Fix the bug](<https://issues.example.test/123>)"
+                 gfm-output)
                 :to-be-truthy)))
+        (when gfm-registered-p
+          (unregister-export-link-type :gfm "fr106-gfm-issue"))
+        (when html-registered-p
+          (unregister-export-link-type :html "fr106-html-issue")))))
+  (it "renders safe registered images and preserves original labels for unsafe handler results"
+    (let ((registered-types nil)
+          (html-image-output nil)
+          (gfm-image-output nil)
+          (html-unsafe-link-output nil)
+          (gfm-unsafe-link-output nil)
+          (html-unsafe-image-output nil)
+          (gfm-unsafe-image-output nil))
+      (labels ((register-result-handler
+                   (backend type kind destination description)
+                 (register-export-link-type
+                  backend type
+                  (lambda (path original-description frame context)
+                    (declare (ignore path frame context))
+                    (make-export-link-result
+                     :kind kind :destination destination
+                     :description (or description original-description))))
+                 (push (list backend type) registered-types)))
+        (unwind-protect
+             (progn
+               (register-result-handler
+                :html "fr106-html-image" :image
+                "https://cdn.example.test/release.png" "Cover & details")
+               (register-result-handler
+                :gfm "fr106-gfm-image" :image
+                "assets/release.png" "Cover [image]")
+               (register-result-handler
+                :html "fr106-html-unsafe-link" :link
+                "javascript:alert(1)" "Changed HTML label")
+               (register-result-handler
+                :gfm "fr106-gfm-unsafe-link" :link
+                "javascript:alert(1)" "Changed GFM label")
+               (register-result-handler
+                :html "fr106-html-unsafe-image" :image
+                "data:image/svg+xml,unsafe" "Changed HTML image")
+               (register-result-handler
+                :gfm "fr106-gfm-unsafe-image" :image
+                "data:image/svg+xml,unsafe" "Changed GFM image")
+               (setf html-image-output
+                     (export-org
+                      (parse-org "[[fr106-html-image:asset][Original label]]")
+                      :html)
+                     gfm-image-output
+                     (export-org
+                      (parse-org "[[fr106-gfm-image:asset][Original label]]")
+                      :gfm)
+                     html-unsafe-link-output
+                     (export-org
+                      (parse-org
+                       "[[fr106-html-unsafe-link:target][HTML fallback]]")
+                      :html)
+                     gfm-unsafe-link-output
+                     (export-org
+                      (parse-org
+                       "[[fr106-gfm-unsafe-link:target][GFM fallback]]")
+                      :gfm)
+                     html-unsafe-image-output
+                     (export-org
+                      (parse-org
+                       "[[fr106-html-unsafe-image:target][HTML image fallback]]")
+                      :html)
+                     gfm-unsafe-image-output
+                     (export-org
+                      (parse-org
+                       "[[fr106-gfm-unsafe-image:target][GFM image fallback]]")
+                      :gfm))
+               (with-soft-assertions
+                 (expect
+                  (search
+                   "<img src=\"https://cdn.example.test/release.png\" alt=\"Cover &amp; details\" />"
+                   html-image-output)
+                  :to-be-truthy)
+                 (expect
+                  (search
+                   "![Cover \\[image\\]](<assets/release.png>)"
+                   gfm-image-output)
+                  :to-be-truthy)
+                 (expect (search "HTML fallback" html-unsafe-link-output)
+                         :to-be-truthy)
+                 (expect (search "Changed HTML label" html-unsafe-link-output)
+                         :to-be nil)
+                 (expect (search "javascript:" html-unsafe-link-output)
+                         :to-be nil)
+                 (expect (search "GFM fallback" gfm-unsafe-link-output)
+                         :to-be-truthy)
+                 (expect (search "Changed GFM label" gfm-unsafe-link-output)
+                         :to-be nil)
+                 (expect (search "javascript:" gfm-unsafe-link-output)
+                         :to-be nil)
+                 (expect (search "HTML image fallback" html-unsafe-image-output)
+                         :to-be-truthy)
+                 (expect (search "Changed HTML image" html-unsafe-image-output)
+                         :to-be nil)
+                 (expect (search "data:image" html-unsafe-image-output)
+                         :to-be nil)
+                 (expect (search "GFM image fallback" gfm-unsafe-image-output)
+                         :to-be-truthy)
+                 (expect (search "Changed GFM image" gfm-unsafe-image-output)
+                         :to-be nil)
+                 (expect (search "data:image" gfm-unsafe-image-output)
+                         :to-be nil)))
+          (dolist (entry registered-types)
+            (unregister-export-link-type (first entry) (second entry)))))))
+  (it "uses the explicit HTML image alt when checking the output-length limit"
+    (let* ((registered-p nil)
+           (description (make-string (* 2 1024 1024) :initial-element #\x))
+           (source
+             (format nil
+                     "#+OPTIONS: toc:nil~%#+ATTR_HTML: :alt short~%[[file:asset.png]]~%"))
+           (output nil))
+      (unwind-protect
+          (progn
+            (register-export-link-type
+             :html "file"
+             (lambda (path original-description frame context)
+               (declare (ignore path original-description frame context))
+               (make-export-link-result
+                :kind :image
+                :destination "https://cdn.example.test/asset.png"
+                :description description)))
+            (setf registered-p t)
+            (setf output
+                  (export-org
+                   (parse-org
+                    source :limits
+                    (make-limits :max-output-length (* 1024 1024)))
+                   :html))
+            (with-soft-assertions
+              (expect
+               (search
+                "<img src=\"https://cdn.example.test/asset.png\" alt=\"short\" />"
+                output)
+               :to-be-truthy)
+              (expect (< (length output) (length description)) :to-be t)))
         (when registered-p
-          (unregister-export-link-type :latex "fr106-root")))))
+          (unregister-export-link-type :html "file")))))
+  (it "rejects entity-obfuscated schemes from GFM link handlers"
+    (let ((registered-p nil)
+          (output nil))
+      (unwind-protect
+          (progn
+            (register-export-link-type
+             :gfm "fr106-gfm-entity-scheme"
+             (lambda (path description frame context)
+               (declare (ignore path description frame context))
+               (make-export-link-result
+                :kind :link
+                :destination "javascript&colon;alert(1)"
+                :description "Changed label")))
+            (setf registered-p t)
+            (setf output
+                  (export-org
+                   (parse-org
+                    "[[fr106-gfm-entity-scheme:target][Entity fallback]]")
+                   :gfm))
+            (with-soft-assertions
+             (expect (search "Entity fallback" output) :to-be-truthy)
+             (expect (search "Changed label" output) :to-be nil)
+             (expect (search "javascript" output) :to-be nil)))
+        (when registered-p
+          (unregister-export-link-type :gfm "fr106-gfm-entity-scheme")))))
 
   (it "keeps built-in link registration idempotent across reloads"
     (let* ((backend :api-registry-builtin-link)

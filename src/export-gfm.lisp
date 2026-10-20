@@ -973,24 +973,73 @@
 
 (defun export-gfm-render-link (state view &key table-cell-p)
   (let* ((node (export-view-node view))
-         (destination (export-gfm-link-destination
-                       state node :table-cell-p table-cell-p))
-         (image-p (and destination
-                        (export-gfm-image-path-p
-                         (node-property node :path))))
-         (label-reserve (if destination
-                            (+ (length destination) 4 (if image-p 1 0))
-                            0))
-         (label (export-gfm-render-with-prefix
-                 label-reserve
-                 (lambda ()
-                   (export-gfm-link-label view :table-cell-p table-cell-p)))))
-    (if destination
-        (progn
-          (export-gfm-check-total-output-length
-           (+ label-reserve (length label)))
-          (format nil "~A[~A](~A)" (if image-p "!" "") label destination))
-        label)))
+         (context (export-gfm-state-render-context state))
+         (frame (export-gfm-state-render-frame state))
+         (result (and context frame
+                      (export-call-link-type-handler-for-view
+                       context node view frame))))
+    (if result
+        (let* ((type (node-property node :type))
+               (path (node-property node :path))
+               (destination (export-link-result-destination result))
+               (description (export-link-result-description result))
+               (kind (export-link-result-kind result))
+               (scheme-end (export-explicit-url-scheme-end destination))
+               (raw-parts (and (stringp path) (list path)))
+               (destination-parts (list destination))
+               (safe-p
+                 (and raw-parts
+                      (export-safe-url-p path destination)
+                      ;; Markdown decodes character references in destinations, so reject values such as
+                      ;; "javascript&colon;..." that hide the scheme separator.
+                      (export-gfm-link-destination-safe-p
+                       type nil raw-parts destination-parts)
+                      (or (eq kind :link)
+                          (and (eq kind :image)
+                               (or (null scheme-end)
+                                   (member (subseq destination 0 scheme-end)
+                                           '("http" "https")
+                                           :test #'string-equal)))))))
+          (if safe-p
+              (let* ((serialized
+                       (export-gfm-serialize-destination-parts
+                        destination-parts :table-cell-p table-cell-p))
+                     (image-p (eq kind :image))
+                     (label-reserve
+                       (+ (length serialized) 4 (if image-p 1 0)))
+                     (label
+                       (export-gfm-render-with-prefix
+                        label-reserve
+                        (lambda ()
+                          (export-gfm-escape-literal
+                           description :table-cell-p table-cell-p
+                           :soft-newline-p (not table-cell-p)))))
+                     (output-length (+ label-reserve (length label))))
+                (export-gfm-check-total-output-length output-length)
+                (format nil "~A[~A](~A)"
+                        (if image-p "!" "") label serialized))
+              (export-gfm-link-label view :table-cell-p table-cell-p)))
+        (let* ((destination (export-gfm-link-destination
+                             state node :table-cell-p table-cell-p))
+               (image-p (and destination
+                             (export-gfm-image-path-p
+                              (node-property node :path))))
+               (label-reserve (if destination
+                                  (+ (length destination) 4
+                                     (if image-p 1 0))
+                                  0))
+               (label (export-gfm-render-with-prefix
+                       label-reserve
+                       (lambda ()
+                         (export-gfm-link-label
+                          view :table-cell-p table-cell-p)))))
+          (if destination
+              (progn
+                (export-gfm-check-total-output-length
+                 (+ label-reserve (length label)))
+                (format nil "~A[~A](~A)"
+                        (if image-p "!" "") label destination))
+              label)))))
 
 (defun export-gfm-render-target (state view)
   (let* ((node (export-view-node view))
