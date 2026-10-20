@@ -433,3 +433,57 @@ is a bounded, escaped excerpt."))
 (defun org-bibtex-error-context (condition)
   "Return a bounded, escaped excerpt associated with the BibTeX error, or NIL."
   (slot-value condition 'context))
+
+(define-condition org-capture-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A (~(~A~))~@[ for ~A~]"
+                     (org-kit-error-message condition)
+                     (org-capture-error-reason condition)
+                     (bounded-text (org-capture-error-context condition)))))
+  (:documentation "Signalled when a capture template or target is invalid."))
+
+(defun org-capture-error-reason (condition)
+  "Return the keyword that classifies the capture failure."
+  (slot-value condition 'reason))
+
+(defun org-capture-error-context (condition)
+  "Return the bounded context for the capture failure, or NIL."
+  (slot-value condition 'context))
+
+(define-condition org-archive-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A (~(~A~))~@[ for ~A~]"
+                     (org-kit-error-message condition)
+                     (org-archive-error-reason condition)
+                     (org-archive-error-context condition))))
+  (:documentation "Signalled when archive resolution or an archive edit fails."))
+
+(defun org-archive-error-reason (condition)
+  "Return the reason that an archive operation failed."
+  (slot-value condition 'reason))
+
+(defun org-archive-error-context (condition)
+  "Return the bounded context associated with an archive failure."
+  (slot-value condition 'context))
+
+(define-condition org-attachment-error (org-kit-error)
+  ((reason :initarg :reason :initform nil)
+   (context :initarg :context :initform nil))
+  (:report (lambda (condition stream)
+             (format stream "~A (~(~A~))~@[ for ~A~]"
+                     (org-kit-error-message condition)
+                     (org-attachment-error-reason condition)
+                     (org-attachment-error-context condition))))
+  (:documentation "Signalled when an attachment path or plan is invalid."))
+
+(defun org-attachment-error-reason (condition)
+  "Return the reason that an attachment operation failed."
+  (slot-value condition 'reason))
+
+(defun org-attachment-error-context (condition)
+  "Return the bounded context associated with an attachment failure."
+  (slot-value condition 'context))

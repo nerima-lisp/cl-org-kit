@@ -107,7 +107,12 @@
                (:file "agenda")
                (:file "table-radio")
                (:file "crypt")
-)
+               (:file "refile-targets")
+               (:file "capture-template")
+               (:file "capture-target")
+               (:file "archive")
+               (:file "attachment")
+               )
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -183,6 +188,11 @@
                ;; Unit E subtree relocation and sort
                (:file "edit-relocate-test")
                (:file "edit-sort-test")
+               (:file "refile-targets-test")
+               (:file "capture-template-test")
+               (:file "capture-target-test")
+               (:file "archive-test")
+               (:file "attachment-test")
                (:file "emitter-test")
                (:file "emitter-objects-test")
                (:file "emitter-property-test")

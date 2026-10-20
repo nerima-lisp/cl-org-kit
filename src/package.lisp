@@ -231,4 +231,17 @@
    #:org-crypt-error #:org-crypt-error-reason #:org-crypt-error-cause
    #:crypt-encrypt-entry #:crypt-decrypt-entry
    #:crypt-encrypt-entries #:crypt-decrypt-entries
+   #:make-write-plan-delete-entry #:write-plan-entry-operation
+   #:refile-target-candidates
+   #:org-archive-error #:org-archive-error-reason #:org-archive-error-context
+   #:resolve-archive-location #:archive-to-sibling
+   #:org-attachment-error #:org-attachment-error-reason #:org-attachment-error-context
+   #:resolve-attachment-directory #:add-attachment #:delete-attachment
+   #:org-capture-error #:org-capture-error-reason #:org-capture-error-context
+   #:capture-template-result #:make-capture-template-result
+   #:capture-template-result-p #:capture-template-result-expanded-text
+   #:capture-template-result-cursor-offset #:expand-capture-template
+   #:capture-target-result #:make-capture-target-result #:capture-target-result-p
+   #:capture-target-result-edit-result #:capture-target-result-target-document
+   #:capture-target-result-cursor-offset #:capture-into-target
 ))

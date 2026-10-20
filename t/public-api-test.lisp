@@ -242,6 +242,14 @@
     "ORG-CRYPT-ERROR" "ORG-CRYPT-ERROR-REASON" "ORG-CRYPT-ERROR-CAUSE"
     "CRYPT-ENCRYPT-ENTRY" "CRYPT-DECRYPT-ENTRY"
     "CRYPT-ENCRYPT-ENTRIES" "CRYPT-DECRYPT-ENTRIES"
+    "ORG-CAPTURE-ERROR" "ORG-CAPTURE-ERROR-REASON" "ORG-CAPTURE-ERROR-CONTEXT"
+    "CAPTURE-TEMPLATE-RESULT" "MAKE-CAPTURE-TEMPLATE-RESULT"
+    "CAPTURE-TEMPLATE-RESULT-P" "CAPTURE-TEMPLATE-RESULT-EXPANDED-TEXT"
+    "CAPTURE-TEMPLATE-RESULT-CURSOR-OFFSET" "EXPAND-CAPTURE-TEMPLATE"
+    "CAPTURE-TARGET-RESULT" "MAKE-CAPTURE-TARGET-RESULT"
+    "CAPTURE-TARGET-RESULT-P" "CAPTURE-TARGET-RESULT-EDIT-RESULT"
+    "CAPTURE-TARGET-RESULT-TARGET-DOCUMENT"
+    "CAPTURE-TARGET-RESULT-CURSOR-OFFSET" "CAPTURE-INTO-TARGET" "MAKE-WRITE-PLAN-DELETE-ENTRY" "WRITE-PLAN-ENTRY-OPERATION" "REFILE-TARGET-CANDIDATES" "ORG-ARCHIVE-ERROR" "ORG-ARCHIVE-ERROR-REASON" "ORG-ARCHIVE-ERROR-CONTEXT" "RESOLVE-ARCHIVE-LOCATION" "ARCHIVE-TO-SIBLING" "ORG-ATTACHMENT-ERROR" "ORG-ATTACHMENT-ERROR-REASON" "ORG-ATTACHMENT-ERROR-CONTEXT" "RESOLVE-ATTACHMENT-DIRECTORY" "ADD-ATTACHMENT" "DELETE-ATTACHMENT"
 )
   "Every symbol the ORG-KIT package exports. The node contract is documented in
 docs/src/reference/node-model.md.")
@@ -301,7 +309,11 @@ docs/src/reference/node-model.md.")
     (org-timestamp-view-repeater-mode . org-timestamp-view)
     (org-timestamp-view-warning-amount . org-timestamp-view)
     (org-timestamp-view-warning-unit . org-timestamp-view)
-    (org-timestamp-view-warning-mode . org-timestamp-view)))
+    (org-timestamp-view-warning-mode . org-timestamp-view)
+    (make-capture-template-result . capture-template-result)
+    (capture-template-result-p . capture-template-result)
+    (make-capture-target-result . capture-target-result)
+    (capture-target-result-p . capture-target-result)))
 
 (defun public-function-documentation (symbol)
   (or (documentation symbol 'function)
@@ -455,21 +467,31 @@ preserved and a new file uses 0644. An explicit MODE is applied exactly,
 regardless of the process umask. CREATE-DIRECTORIES-P controls creation of
 missing parent directories.")
       (expect (documentation 'write-plan-entry-content 'function)
-              :to-equal "Return a copy of ENTRY's text string or octet-vector content.")
+              :to-equal "Return a copy of ENTRY's content, or NIL for a delete entry.")
+      (expect (documentation 'write-plan-entry-mode 'function)
+              :to-equal
+              "Return the permission bits for ENTRY, or NIL for a delete entry.")
+      (expect (documentation (quote make-write-plan-delete-entry) (quote function))
+              :to-equal
+              "Return a write-plan entry that removes one relative path when applied.")
+      (expect (documentation (quote write-plan-entry-operation) (quote function))
+              :to-equal
+              "Return ENTRY operation, either :WRITE or :DELETE.")
       (expect (documentation 'apply-write-plan 'function)
               :to-equal
-              "Validate PLAN in full, then replace each target below ROOT through a
-same-directory temporary file and rename. ROOT must name an existing
-directory; a symlink used as ROOT resolves to its target. All paths are relative
-POSIX paths. Every entry and limit is checked before directory or file creation.
-Returns normalized relative paths in plan order; a multi-file plan is not
-transactional. The caller must prevent other actors from renaming or replacing
-path components during application. The library rejects absolute paths, `..`,
-NUL, and symlink components below the resolved root. After each write, it
-compares the opened parent's device and inode with a root-relative re-open. That
-check reports a missing or different parent. A path restored before the check
-is not detected. The check cannot prevent a rename during a write or after the
-check.")))
+              "Validate PLAN in full. Write entries replace targets through same-directory
+temporary files and rename; delete entries remove existing regular files.
+ROOT must name an existing directory; a symlink used as ROOT resolves to its
+target. All paths are relative POSIX paths. Every entry and limit is checked
+before directory or file creation. Delete targets must exist as regular files
+during preflight. Returns normalized relative paths in plan order; a multi-file
+plan is not transactional. The caller must prevent other actors from renaming
+or replacing path components during application. The library rejects absolute
+paths, `..`, NUL, and symlink components below the resolved root. After each
+operation, it compares the opened parent device and inode with a root-relative
+re-open. This detects a missing or different parent after the operation, but a
+path restored before the check or a rename during or after the operation is not
+detected.")))
 
   (it "pins the E public API documentation"
     (with-soft-assertions
