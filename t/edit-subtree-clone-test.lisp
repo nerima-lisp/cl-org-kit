@@ -255,3 +255,202 @@
                   :to-be t))
         (expect (document-text document) :to-equal source)
         (expect (document-text node-limited-document) :to-equal source)))))
+(describe "subtree clone edge behavior"
+  (it "shifts month and year dates through the public API"
+    (dolist (case '((1 :month "<2026-04-02 Thu>")
+                   (1 :year "<2027-03-02 Tue>")))
+      (destructuring-bind (amount unit expected-timestamp) case
+        (let* ((source (format nil "* Task~%<2026-03-02>~%* Peer~%"))
+               (document (parse-org source))
+               (target (edit-subtree-clone-test-headline document "Task"))
+               (result
+                 (clone-subtree-with-time-shift
+                  document target 1 amount unit)))
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal
+                  (format nil
+                          "* Task~%<2026-03-02>~%* Task~%~A~%* Peer~%"
+                          expected-timestamp))))))
+
+  (it "shifts timestamp times across midnight and shifts every time"
+    (let* ((source
+             (format nil
+                     "* Task~%<2026-03-02 23:30-22:45>~%[2026-03-04 08:15]~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 1 :hour)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil
+                        "* Task~%<2026-03-02 23:30-22:45>~%[2026-03-04 08:15]~%* Task~%<2026-03-03 Tue 00:30-23:45>~%[2026-03-04 Wed 09:15]~%* Peer~%"))
+        (expect (document-text document) :to-equal source))))
+
+  (it "shifts date-only timestamps by whole days for hour units"
+    (let* ((source (format nil "* Task~%<2026-03-02>~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 24 :hour)))
+      (expect (document-text (edit-result-updated-document result))
+              :to-equal
+              (format nil
+                      "* Task~%<2026-03-02>~%* Task~%<2026-03-03 Tue>~%* Peer~%"))))
+
+  (it "reports invalid calendar dates and out-of-range date shifts"
+    (let* ((invalid-source (format nil "* Task~%<2026-02-30>~%* Peer~%"))
+           (invalid-document (parse-org invalid-source))
+           (invalid-target
+             (edit-subtree-clone-test-headline invalid-document "Task"))
+           (invalid-date
+             (edit-subtree-clone-test-condition
+              (lambda ()
+                (clone-subtree-with-time-shift
+                 invalid-document invalid-target 1 1 :day))))
+           (overflow-source (format nil "* Task~%<9999-12-31>~%* Peer~%"))
+           (overflow-document (parse-org overflow-source))
+           (overflow-target
+             (edit-subtree-clone-test-headline overflow-document "Task"))
+           (overflow
+             (edit-subtree-clone-test-condition
+              (lambda ()
+                (clone-subtree-with-time-shift
+                 overflow-document overflow-target 1 1 :year)))))
+      (with-soft-assertions
+        (dolist (condition (list invalid-date overflow))
+          (expect (typep condition 'org-edit-error) :to-be t)
+          (when (typep condition 'org-edit-error)
+            (expect (org-edit-error-reason condition) :to-be :invalid-value)))
+        (expect (document-text invalid-document) :to-equal invalid-source)
+        (expect (document-text overflow-document) :to-equal overflow-source))))
+
+  (it "keeps malformed token fallbacks and parses both timestamp delimiters"
+    (let* ((document (parse-org (format nil "* Task~%* Peer~%")))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (date (cl-date-kit:make-local-date 2026 3 2))
+           (unsupported
+             (org-kit::edit-subtree-clone-date-shift
+              date 1 :unsupported target))
+           (invalid-token
+             (org-kit::edit-subtree-clone-shift-timestamp-token
+              "<not-a-date>" 1 :day target))
+           (unclosed
+             (org-kit::edit-subtree-clone-shift-timestamp-token
+              "<2026-03-02" 1 :day target))
+           (inactive-repeater
+             (org-kit::edit-subtree-clone-remove-repeater-token
+              "[2026-03-02 +1w]"))
+           (unclosed-repeater
+             (org-kit::edit-subtree-clone-remove-repeater-token
+              "<2026-03-02 +1w"))
+           (trailing-whitespace-layout
+             (org-kit::edit-subtree-clone-adjustment-token-layouts
+              "<2026-03-02 +1w >")))
+      (with-soft-assertions
+        (expect (equalp unsupported date) :to-be t)
+        (expect invalid-token :to-equal "<not-a-date>")
+        (expect unclosed :to-equal "<2026-03-03 Tue")
+        (expect inactive-repeater :to-equal "[2026-03-02]")
+        (expect unclosed-repeater :to-equal "<2026-03-02")
+        (expect (first (first trailing-whitespace-layout))
+                :to-be :repeater))))
+
+  (it "skips an unclosed timestamp and still shifts a later valid one"
+    (let* ((source
+             (format nil
+                     "* Task~%unclosed <2026-03-02 and [2026-03-04]~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 1 :day)))
+      (expect (document-text (edit-result-updated-document result))
+              :to-equal
+              (format nil
+                      "* Task~%unclosed <2026-03-02 and [2026-03-04]~%* Task~%unclosed <2026-03-02 and [2026-03-05 Thu]~%* Peer~%"))))
+
+  (it "removes indented clock lines and whitespace-only drawers from clones"
+    (let* ((source
+             (format nil
+                     "* Task~%:LOGBOOK:~%  ~%:END:~%  CLOCK: raw~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 nil nil)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil
+                        "* Task~%:LOGBOOK:~%  ~%:END:~%  CLOCK: raw~%* Task~%* Peer~%"))
+        (expect (document-text document) :to-equal source))))
+
+  (it "removes a final clock line without a newline"
+    (let* ((source (format nil "* Task~%  CLOCK: raw"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 nil nil)))
+      (expect (document-text (edit-result-updated-document result))
+              :to-equal
+              (format nil "* Task~%  CLOCK: raw~%* Task~%"))))
+
+  (it "generates a root ID without a supplied random source"
+    (let* ((source
+             (format nil
+                     "* Task~%:PROPERTIES:~%:ID: source-id~%:END:~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (result (clone-subtree-with-time-shift document target 1 nil nil))
+           (headlines
+             (remove-if-not
+              (lambda (headline)
+                (string= (node-property headline :raw-value) "Task"))
+              (edit-subtree-clone-test-headlines
+               (edit-result-updated-document result))))
+           (ids (mapcar #'edit-subtree-clone-test-id headlines)))
+      (with-soft-assertions
+        (expect (first ids) :to-equal "source-id")
+        (expect (stringp (second ids)) :to-be t)
+        (expect (not (string= (first ids) (second ids))) :to-be t)
+        (expect (length (second ids)) :to-equal 36))))
+
+  (it "rejects a generated root ID that collides with an existing ID"
+    (let* ((source
+             (format nil
+                     "* Task~%:PROPERTIES:~%:ID: 00010203-0405-4607-8809-0a0b0c0d0e0f~%:END:~%* Peer~%"))
+           (document (parse-org source))
+           (target (edit-subtree-clone-test-headline document "Task"))
+           (condition
+             (edit-subtree-clone-test-condition
+              (lambda ()
+                (clone-subtree-with-time-shift
+                 document target 1 nil nil
+                 :random-source (edit-subtree-clone-test-random-source))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-id-error) :to-be t)
+        (when (typep condition 'org-id-error)
+          (expect (org-id-error-reason condition) :to-be :duplicate-id))
+        (expect (document-text document) :to-equal source))))
+
+  (it "adds and preserves final newlines when cloning at end of file"
+    (dolist (source (list "* Task" (format nil "* Task~%")))
+      (let* ((document (parse-org source))
+             (target (edit-subtree-clone-test-headline document "Task"))
+             (result (clone-subtree-with-time-shift document target 1 nil nil)))
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil "* Task~%* Task~%")))))
+
+  (it "preserves final newline state when expanding repeaters at end of file"
+    (dolist (source
+             (list
+              (format nil "* Repeat~%SCHEDULED: <2026-03-02 +1w>")
+              (format nil "* Repeat~%SCHEDULED: <2026-03-02 +1w>~%")))
+      (let* ((document (parse-org source))
+             (target (edit-subtree-clone-test-headline document "Repeat"))
+             (result (clone-subtree-with-time-shift document target 0 1 :week)))
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil
+                        "* Repeat~%SCHEDULED: <2026-03-02 Mon>~%* Repeat~%SCHEDULED: <2026-03-09 Mon +1w>~%")))))
+
+  (it "signals a type error for non-document inputs"
+    (let ((condition
+            (edit-subtree-clone-test-condition
+             (lambda () (clone-subtree-with-time-shift nil "Task" 1 nil nil)))))
+      (expect (typep condition 'type-error) :to-be t))))

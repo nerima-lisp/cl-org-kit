@@ -10,12 +10,17 @@
 
 (defun edit-subtree-clone-date-shift (date amount unit target)
   (handler-case
-      (case unit
-        (:day (cl-date-kit:local-date-plus-days date amount))
-        (:week (cl-date-kit:local-date-plus-days date (* amount 7)))
-        (:month (cl-date-kit:local-date-plus-months date amount))
-        (:year (cl-date-kit:local-date-plus-years date amount))
-        (otherwise date))
+      (let ((shifted
+              (case unit
+                (:day (cl-date-kit:local-date-plus-days date amount))
+                (:week (cl-date-kit:local-date-plus-days date (* amount 7)))
+                (:month (cl-date-kit:local-date-plus-months date amount))
+                (:year (cl-date-kit:local-date-plus-years date amount))
+                (otherwise date))))
+        (unless (<= 0 (cl-date-kit:local-date-year shifted) 9999)
+          (edit-signal-error target :invalid-value
+                             "Timestamp year is outside Org range"))
+        shifted)
     (cl-date-kit:invalid-date ()
       (edit-signal-error target :invalid-value
                          "Timestamp date cannot be shifted by this amount"))))
@@ -391,7 +396,10 @@
                        target)))
              (combined
               (format nil "~{~A~}"
-                      (mapcar (lambda (copy) (first copy)) copies)))
+                      (mapcar (lambda (copy)
+                                (edit-subtree-clone-final-newline
+                                 (first copy) newline))
+                              copies)))
              (expected
               (let* ((canonical
                        (edit-canonical-copy (edit-canonical-document document)))
