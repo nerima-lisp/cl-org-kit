@@ -96,4 +96,70 @@
            (table (table-transpose-test-find-table (document-root document))))
       (expect (table-transpose-test-condition
                (lambda () (table-transpose document table)))
-              :to-equal '(:limit :max-output-octets)))))
+              :to-equal '(:limit :max-output-octets))))
+
+  (it "rejects tables without standard rows and unsupported row kinds"
+    (let* ((document (parse-org (format nil "|---|~%")))
+           (table (table-transpose-test-find-table (document-root document))))
+      (expect (table-transpose-test-condition
+               (lambda () (table-transpose document table)))
+              :to-equal '(:table :uneditable-structure)))
+    (let* ((document (parse-org (format nil "| a |~%| b |~%")))
+           (table (table-transpose-test-find-table (document-root document))))
+      (setf (node-property (first (node-children table)) :type) :unsupported)
+      (expect (table-transpose-test-condition
+               (lambda () (table-transpose document table)))
+              :to-equal '(:table :uneditable-structure))))
+
+  (it "keeps an unchanged one-cell table without a final newline"
+    (let* ((source "| x |")
+           (document (parse-org source))
+           (table (table-transpose-test-find-table (document-root document)))
+           (result (table-transpose document table)))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal source)
+        (expect (edit-result-spans result) :to-equal nil)
+        (expect (document-text document) :to-equal source))))
+
+  (it "preserves explicit and generic UTF-16 BOMs when transposing"
+    (let* ((source (format nil "| a | b |~%| c | d |~%"))
+           (bom (make-array 2 :element-type '(unsigned-byte 8)
+                            :initial-contents '(#xFE #xFF)))
+           (input-octets
+             (concatenate '(vector (unsigned-byte 8))
+                          bom
+                          (cl-codec-kit:string-to-octets
+                           source :encoding :utf-16be)))
+           (expected-text (format nil "| a | c |~%| b | d |~%"))
+           (expected-octets
+             (concatenate '(vector (unsigned-byte 8))
+                          bom
+                          (cl-codec-kit:string-to-octets
+                           expected-text :encoding :utf-16be)))
+           (document (parse-org input-octets :encoding :utf-16be))
+           (table (table-transpose-test-find-table (document-root document)))
+           (result (table-transpose document table))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-encoding document) :to-be :utf-16be)
+        (expect (document-bom-p document) :to-be t)
+        (expect (document-text updated) :to-equal expected-text)
+        (expect (write-org updated :output-type :octets)
+                :to-equalp expected-octets)))
+    (let* ((source (format nil "| a | b |~%| c | d |~%"))
+           (expected-text (format nil "| a | c |~%| b | d |~%"))
+           (input-octets
+             (cl-codec-kit:string-to-octets source :encoding :utf-16))
+           (expected-octets
+             (cl-codec-kit:string-to-octets expected-text :encoding :utf-16))
+           (document (parse-org input-octets :encoding :utf-16))
+           (table (table-transpose-test-find-table (document-root document)))
+           (result (table-transpose document table))
+           (updated (edit-result-updated-document result)))
+      (with-soft-assertions
+        (expect (document-encoding document) :to-be :utf-16)
+        (expect (document-bom-p document) :to-be t)
+        (expect (document-text updated) :to-equal expected-text)
+        (expect (write-org updated :output-type :octets)
+                :to-equalp expected-octets)))))
