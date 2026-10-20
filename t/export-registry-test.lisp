@@ -1880,8 +1880,8 @@
              (lambda ()
                (org-kit::export-registration-check-option-specifications
                 (list (list :token "invalid" :key :invalid
-                            :parser (first entry) :default (second entry))))))
-           :to-be :invalid-option-specification))
+                            :parser (first entry) :default (second entry)))))))
+           :to-be :invalid-option-specification)
         (expect
          (export-registry-test-signals-type-error-p
           (lambda ()
