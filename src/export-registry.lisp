@@ -258,7 +258,6 @@
   (or (member policy '(:default :prune-children) :test #'eq)
       (and (export-proper-list-p policy)
            (eq (first policy) :unsupported)
-           (export-proper-list-p (rest policy))
            (evenp (length (rest policy)))
            (let ((keys (loop for tail on (rest policy) by #'cddr
                              collect (car tail))))
@@ -354,15 +353,15 @@
         (let ((key (getf specification :key))
               (token (getf specification :token))
               (parser (getf specification :parser)))
-          (unless (and (keywordp key)
+          (unless (and (field-present-p specification :token)
+                       (field-present-p specification :key)
+                       (field-present-p specification :parser)
+                       (keywordp key)
                        (stringp token)
                        (plusp (length token))
                        (parser-p parser)
                        (or (not (field-present-p specification :default))
-                           (default-p parser (getf specification :default)))
-                       (field-present-p specification :token)
-                       (field-present-p specification :key)
-                       (field-present-p specification :parser))
+                           (default-p parser (getf specification :default))))
             (export-registration-error nil :invalid-option-specification
                                        "Invalid export option specification"))
           (when (member key keys :test #'eq)
@@ -1904,7 +1903,7 @@
              descriptor (remove entry local :test #'eq)))))
   backend)
 
-(eval-when (:load-toplevel :execute)
+(defun export-initialize-builtin-backends ()
   (sb-thread:with-mutex (*export-backend-registry-lock*)
     (dolist (name '(:html :gfm :ascii :latex))
       (unless (gethash name *export-backend-registry*)
@@ -1923,3 +1922,6 @@
                (export-merge-string-sets
                 *export-common-retained-keywords*
                 (when (eq name :latex) '("LATEX" "ATTR_LATEX")))))))))
+
+(eval-when (:load-toplevel :execute)
+  (export-initialize-builtin-backends))

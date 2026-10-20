@@ -1224,15 +1224,20 @@ paragraph" table-list) :not :to-be nil))))
                             :properties (list :type "https" :path path)))
            (root (make-node :org-data :children (list link)))
            (attached (setf (document-root document) root))
+           (state (org-kit::%make-export-html-state :limits limits))
            (before
              (progn
                (export-html-test-catch-error
                 (lambda () (export-org document :html)))
+               (export-html-test-catch-error
+                (lambda ()
+                  (org-kit::export-html-link-destination state link)))
                (sb-ext:gc :full t)
                (sb-ext:get-bytes-consed)))
            (condition
              (export-html-test-catch-error
-              (lambda () (export-org document :html))))
+              (lambda ()
+                (org-kit::export-html-link-destination state link))))
            (allocated (- (sb-ext:get-bytes-consed) before)))
       (with-soft-assertions
         (expect attached :to-be root)

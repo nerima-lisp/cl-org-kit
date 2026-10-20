@@ -866,8 +866,83 @@
            (expect (export-org (parse-org "Element filter.")
                                :api-registry-element-post-blank)
                    :to-equal (format nil "item~%~%"))
-           (expect filtered-value :to-equal (format nil "item~%~%")))))))
-
+           (expect filtered-value :to-equal (format nil "item~%~%"))
+           (expect
+            (org-kit::export-node-strip-post-blank
+             (make-node :paragraph :post-blank 2)
+             (format nil "body~%~%"))
+            :to-equal "body")
+           (expect
+            (org-kit::export-node-strip-post-blank
+             (make-node :paragraph :post-blank 2)
+             (format nil "body~%x"))
+            :to-equal (format nil "body~%x"))
+           (expect
+            (org-kit::export-node-strip-post-blank
+             (make-node :paragraph)
+             "body")
+            :to-equal "body")
+           (expect
+            (org-kit::export-node-strip-post-blank
+             (make-node :paragraph :post-blank 5)
+             "x")
+            :to-equal "x"))))))
+  (it "initializes built-in backends idempotently"
+    (let ((org-kit::*export-backend-registry* (make-hash-table :test #'eq)))
+      (org-kit::export-initialize-builtin-backends)
+      (let ((html (gethash :html org-kit::*export-backend-registry*)))
+        (with-soft-assertions
+          (expect
+           (loop for name in '(:html :gfm :ascii :latex)
+                 for backend = (gethash name org-kit::*export-backend-registry*)
+                 always (and backend
+                             (org-kit::%export-backend-descriptor-builtin-p
+                              backend)))
+           :to-be t)
+          (expect
+           (not
+            (null
+             (member
+              "LATEX_CLASS"
+              (org-kit::%export-backend-descriptor-accepted-keywords
+               (gethash :latex org-kit::*export-backend-registry*))
+              :test #'string=)))
+           :to-be t)
+          (org-kit::export-initialize-builtin-backends)
+          (expect (eq html (gethash :html org-kit::*export-backend-registry*))
+                  :to-be t)))))
+  (it "validates registry predicate boundaries"
+    (with-soft-assertions
+      (expect (org-kit::export-backend-name-p :valid-backend) :to-be t)
+      (expect (org-kit::export-backend-name-p "not-a-keyword") :to-be nil)
+      (expect (org-kit::export-backend-name-p (intern "" :keyword))
+              :to-be nil)
+      (expect (org-kit::export-backend-name-p (intern "1invalid" :keyword))
+              :to-be nil)
+      (expect (org-kit::export-plist-key-present-p '(:token "token") :token)
+              :to-be t)
+      (expect (org-kit::export-plist-key-present-p '(:other "value") :token)
+              :to-be nil)
+      (expect (org-kit::export-plist-key-present-p '(:token . "value") :token)
+              :to-be nil)
+      (dolist (policy '(:default :prune-children
+                        (:unsupported :feature :feature :message "unsupported")))
+        (expect (not (null (org-kit::export-registration-valid-node-policy-p policy)))
+                :to-be t))
+      (dolist (policy '(:unknown
+                        (:unsupported . :feature)
+                        (:unsupported :feature)
+                        (:wrong :feature :feature :message "unsupported")
+                        (:unsupported :feature :feature :message "unsupported" :extra t)
+                        (:unsupported :other "value" :message "unsupported")
+                        (:unsupported :feature :feature :other "value")
+                        (:unsupported :feature "not-a-keyword" :message "unsupported")
+                        (:unsupported :feature :feature :message 42)))
+        (expect (null (org-kit::export-registration-valid-node-policy-p policy))
+                :to-be t))
+      (expect (org-kit::export-backend-registered-p :html) :to-be t)
+      (expect (org-kit::export-backend-registered-p :missing-backend) :to-be nil)
+      (expect (org-kit::export-backend-registered-p "html") :to-be nil)))
   (it "enforces transcoder and wrapper return and continuation boundaries"
     (let ((wrapper-calls 0)
           (document (parse-org "Wrapper boundaries.")))
@@ -1054,9 +1129,13 @@
                           (export-render-node
                            context node :preserve-source-breaks-p :yes)))
                        node-view-error
-                       (export-registry-test-signals-type-error-p
-                        (lambda ()
-                          (export-render-node context node :view wrong-view)))))
+                       (and
+                        (export-registry-test-signals-type-error-p
+                         (lambda ()
+                           (export-render-node context node :view wrong-view)))
+                        (export-registry-test-signals-type-error-p
+                         (lambda ()
+                           (export-render-node context node :view "not-a-view"))))))
                "rendered"))
        (lambda ()
          (with-soft-assertions
@@ -1558,7 +1637,9 @@
            (old-builtin-types nil)
            (had-descriptor-p nil)
            (had-builtin-types-p nil)
-           (handler #'export-registry-test-link-handler))
+           (handler #'export-registry-test-link-handler)
+           (replacement-handler #'identity)
+           (secondary-handler #'list))
       (sb-thread:with-mutex (org-kit::*export-backend-registry-lock*)
         (multiple-value-setq (old-descriptor had-descriptor-p)
           (gethash backend registry))
@@ -1570,27 +1651,34 @@
               backend :renderer #'identity)
              (org-kit::%register-builtin-export-link-type
               backend "custom" handler)
+             (org-kit::%register-builtin-export-link-type
+              backend "secondary" secondary-handler)
              (org-kit::%register-builtin-export-backend
               backend :renderer #'identity)
              (org-kit::%register-builtin-export-link-type
-              backend "CUSTOM" handler)
+              backend "CUSTOM" replacement-handler)
              (multiple-value-bind (resolved owner)
                  (org-kit::export-resolved-link-handler
                   (org-kit::export-backend-ancestry backend) "Custom")
-               (with-soft-assertions
-                 (expect (eq resolved handler) :to-be t)
-                 (expect owner :to-be backend)
-                 (expect
-                  (length
-                   (org-kit::%export-backend-descriptor-link-type-handlers
-                    (org-kit::export-registry-descriptor backend)))
-                  :to-be 1)
-                 (expect
-                  (org-export-error-reason
-                   (export-registry-test-registration-error
-                    (lambda ()
-                      (unregister-export-link-type backend "custom"))))
-                  :to-be :builtin-link-type-handler))))
+               (multiple-value-bind (secondary-resolved secondary-owner)
+                   (org-kit::export-resolved-link-handler
+                    (org-kit::export-backend-ancestry backend) "Secondary")
+                 (with-soft-assertions
+                   (expect (eq resolved replacement-handler) :to-be t)
+                   (expect owner :to-be backend)
+                   (expect (eq secondary-resolved secondary-handler) :to-be t)
+                   (expect secondary-owner :to-be backend)
+                   (expect
+                    (length
+                     (org-kit::%export-backend-descriptor-link-type-handlers
+                      (org-kit::export-registry-descriptor backend)))
+                    :to-be 2)
+                   (expect
+                    (org-export-error-reason
+                     (export-registry-test-registration-error
+                      (lambda ()
+                        (unregister-export-link-type backend "custom"))))
+                    :to-be :builtin-link-type-handler)))))
         (sb-thread:with-mutex (org-kit::*export-backend-registry-lock*)
           (if had-descriptor-p
               (setf (gethash backend registry) old-descriptor)
@@ -1942,12 +2030,25 @@
                                    (list (list :key :parser :token "parser"
                                                :parser :unknown)))
               :to-be :invalid-option-specification)
-      (expect (registration-reason :api-registry-missing-option-token
-                                   :renderer #'identity
-                                   :option-specifications
-                                   (list (list :key :missing-token
-                                               :parser #'identity)))
-              :to-be :invalid-option-specification)
+      (progn
+       (expect (registration-reason :api-registry-missing-option-token
+                                    :renderer #'identity
+                                    :option-specifications
+                                    (list (list :key :missing-token
+                                                :parser #'identity)))
+               :to-be :invalid-option-specification)
+       (expect (registration-reason :api-registry-missing-option-key
+                                    :renderer #'identity
+                                    :option-specifications
+                                    (list (list :token "missing-key"
+                                                :parser #'identity)))
+               :to-be :invalid-option-specification)
+       (expect (registration-reason :api-registry-missing-option-parser
+                                    :renderer #'identity
+                                    :option-specifications
+                                    (list (list :key :missing-parser
+                                                :token "missing-parser")))
+               :to-be :invalid-option-specification))
       (expect (registration-reason :api-registry-invalid-selection-default
                                    :renderer #'identity
                                    :option-specifications
@@ -2578,13 +2679,23 @@
              (lambda (node view frame context render-next)
                (declare (ignore view frame context))
                (if (eq (node-type node) :paragraph)
-                   (funcall render-next "" :invalid)
+                   (if continuation-error
+                       (funcall render-next :invalid "")
+                       (progn
+                         (setf continuation-error t)
+                         (funcall render-next "" :invalid)))
                    (funcall render-next "" ""))))
        (lambda ()
-         (setf continuation-error
-               (export-registry-test-signals-type-error-p
-                (lambda ()
-                  (export-org document :api-registry-invalid-render-next))))))
+         (progn
+           (setf continuation-error
+                 (export-registry-test-signals-type-error-p
+                  (lambda ()
+                    (export-org document :api-registry-invalid-render-next))))
+           (setf continuation-error
+                 (and continuation-error
+                      (export-registry-test-signals-type-error-p
+                       (lambda ()
+                         (export-org document :api-registry-invalid-render-next))))))))
       (export-registry-test-with-backend-pair
        :api-registry-parent-option-root
        :api-registry-parent-option-child
@@ -2618,10 +2729,28 @@
                           (export-render-parent-node
                            (org-kit::%make-export-render-context) node)))
                        view-error
-                       (export-registry-test-signals-type-error-p
-                        (lambda ()
-                          (export-render-parent-node
-                           context node :view wrong-view)))))
+                       (and
+                        (export-registry-test-signals-type-error-p
+                         (lambda ()
+                           (export-render-parent-node context node :view wrong-view)))
+                        (export-registry-test-signals-type-error-p
+                         (lambda ()
+                           (export-render-parent-node context node :view "not-a-view")))))
+                 (dolist (mode '(:block :inline :object))
+                   (assert
+                    (string= "parent"
+                             (export-render-parent-node context node :mode mode))))
+                 (dolist (table-cell-p '(nil t))
+                   (assert
+                    (string= "parent"
+                             (export-render-parent-node
+                              context node :table-cell-p table-cell-p))))
+                 (dolist (preserve-source-breaks-p '(nil t))
+                   (assert
+                    (string= "parent"
+                             (export-render-parent-node
+                              context node :preserve-source-breaks-p
+                              preserve-source-breaks-p)))))
                (funcall render-next "" "")))
        (lambda ()
          (with-soft-assertions
@@ -3031,11 +3160,11 @@
                (lambda ()
                  (export-org document :api-registry-native-sink-renderer-result)))
               :to-be t)))))))
-  (it "rejects negative native sink offsets through registered callbacks"
-    (let ((negative-initial-offset-p nil)
+  (it "rejects invalid native sink offsets through registered callbacks"
+    (let ((offset-results nil)
           (offset-calls 0))
       (export-registry-test-with-builtin-backend
-       :api-registry-negative-native-offset
+       :api-registry-invalid-native-offset
        (list :renderer
              (lambda (context)
                (let ((sink (make-export-registry-test-native-sink)))
@@ -3056,34 +3185,27 @@
              (lambda (sink context)
                (declare (ignore sink context))
                (incf offset-calls)
-               (if negative-initial-offset-p
-                   -1
-                   (if (= offset-calls 1) 0 -1))))
+               (pop offset-results)))
        (lambda ()
          (let ((document (parse-org "Native sink offset.")))
-           (with-soft-assertions
-             (let ((condition
-                    (handler-case
-                        (progn
-                          (export-org document :api-registry-negative-native-offset)
-                          nil)
-                      (type-error (caught) caught))))
-               (expect (typep condition (quote type-error)) :to-be t)
-               (when condition
-                 (expect (type-error-datum condition) :to-be -1))
-               (expect (>= offset-calls 2) :to-be t))
-             (setf negative-initial-offset-p t
-                   offset-calls 0)
-             (let ((condition
-                    (handler-case
-                        (progn
-                          (export-org document :api-registry-negative-native-offset)
-                          nil)
-                      (type-error (caught) caught))))
-               (expect (typep condition (quote type-error)) :to-be t)
-               (when condition
-                 (expect (type-error-datum condition) :to-be -1))
-               (expect offset-calls :to-be 1))))))))
+           (labels ((expect-offset-error (values datum expected-calls)
+                      (setf offset-results (copy-list values)
+                            offset-calls 0)
+                      (let ((condition
+                              (handler-case
+                                  (progn
+                                    (export-org document :api-registry-invalid-native-offset)
+                                    nil)
+                                (type-error (caught) caught))))
+                        (expect (typep condition (quote type-error)) :to-be t)
+                        (when condition
+                          (expect (type-error-datum condition) :to-be datum))
+                        (expect offset-calls :to-be expected-calls))))
+             (with-soft-assertions
+               (expect-offset-error (list 0 -1) -1 2)
+               (expect-offset-error (list -1) -1 1)
+               (expect-offset-error (list 0.5) 0.5 1)
+               (expect-offset-error (list 0 0.5) 0.5 2))))))))
   (it "renders derived views through the parent backend"
     (let ((parent-frame-fields nil)
           (parent-result "parent"))
