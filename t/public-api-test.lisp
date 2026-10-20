@@ -479,19 +479,18 @@ missing parent directories.")
               "Return ENTRY operation, either :WRITE or :DELETE.")
       (expect (documentation 'apply-write-plan 'function)
               :to-equal
-              "Validate PLAN in full. Write entries replace targets through same-directory
-temporary files and rename; delete entries remove existing regular files.
-ROOT must name an existing directory; a symlink used as ROOT resolves to its
-target. All paths are relative POSIX paths. Every entry and limit is checked
-before directory or file creation. Delete targets must exist as regular files
-during preflight. Returns normalized relative paths in plan order; a multi-file
-plan is not transactional. The caller must prevent other actors from renaming
-or replacing path components during application. The library rejects absolute
-paths, `..`, NUL, and symlink components below the resolved root. After each
-operation, it compares the opened parent device and inode with a root-relative
-re-open. This detects a missing or different parent after the operation, but a
-path restored before the check or a rename during or after the operation is not
-detected.")))
+              "Validate PLAN in full, then replace each target below ROOT through a
+same-directory temporary file and rename. ROOT must name an existing
+directory; a symlink used as ROOT resolves to its target. All paths are relative
+POSIX paths. Every entry and limit is checked before directory or file creation.
+Returns normalized relative paths in plan order; a multi-file plan is not
+transactional. The caller must prevent other actors from renaming or replacing
+path components during application. The library rejects absolute paths, `..`,
+NUL, and symlink components below the resolved root. After each write, it
+compares the opened parent's device and inode with a root-relative re-open. That
+check reports a missing or different parent. A path restored before the check
+is not detected. The check cannot prevent a rename during a write or after the
+check.")))
 
   (it "pins the E public API documentation"
     (with-soft-assertions
