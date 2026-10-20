@@ -163,5 +163,210 @@
         (when (typep invalid 'org-edit-error)
           (expect (org-edit-error-reason invalid) :to-be :invalid-value)
           (expect (org-edit-error-target invalid) :to-equal "heading"))
-        (expect (document-text invalid-document) :to-equal (format nil "plain~%"))))))
+        (expect (document-text invalid-document) :to-equal (format nil "plain~%")))))
+  (it "validates documents and spans and keeps blank heading and item selections unchanged"
+      (let* ((source (format nil " ~C~%" #\Tab))
+             (document (parse-org source))
+             (wrong-document
+              (handler-case
+                  (progn
+                    (org-kit::toggle-heading nil (make-edit-span 0 0))
+                    nil)
+                (type-error (condition) condition)))
+             (invalid-spans
+              (mapcar (lambda (span)
+                        (edit-toggle-test-error
+                         (lambda () (org-kit::toggle-heading document span))))
+                      (list nil
+                            (make-edit-span 0.5 0)
+                            (make-edit-span 0 0.5)
+                            (make-edit-span 2 1)
+                            (make-edit-span 99 99))))
+             (heading-result
+              (org-kit::toggle-heading document (make-edit-span 0 0)))
+             (item-result
+              (org-kit::toggle-item document (make-edit-span 0 0)))
+             (fixed-result
+              (org-kit::toggle-fixed-width document (make-edit-span 0 0)))
+             (comment-error
+              (edit-toggle-test-error
+               (lambda ()
+                 (org-kit::toggle-heading-comment document (make-edit-span 0 0))))))
+        (with-soft-assertions
+         (expect (typep wrong-document 'type-error) :to-be t)
+         (expect (every (lambda (condition)
+                          (and (typep condition 'org-edit-error)
+                               (eq (org-edit-error-reason condition) :invalid-value)))
+                        invalid-spans)
+                 :to-be t)
+         (expect (document-text (edit-result-updated-document heading-result))
+                 :to-equal source)
+         (expect (document-text (edit-result-updated-document item-result))
+                 :to-equal source)
+         (expect (document-text (edit-result-updated-document fixed-result))
+                 :to-equal (format nil " ~C: ~%" #\Tab))
+         (expect (typep comment-error 'org-edit-error) :to-be t)
+         (when (typep comment-error 'org-edit-error)
+           (expect (org-edit-error-reason comment-error) :to-be :target-not-found)
+           (expect (org-edit-error-target comment-error) :to-equal "headline")))))
+  (it "preserves CRLF spans and skips protected or non-normal lines"
+      (let* ((crlf-source (format nil "first~C~%second" #\Return))
+             (crlf-document (parse-org crlf-source))
+             (crlf-result
+              (org-kit::toggle-heading
+               crlf-document (make-edit-span 1 (length crlf-source))))
+             (mixed-source
+              (format nil "plain~%~%: fixed~%#+NAME: value~%* headline~%"))
+             (mixed-document (parse-org mixed-source))
+             (mixed-result
+              (org-kit::toggle-heading
+               mixed-document (make-edit-span 0 (length mixed-source))))
+             (block-source
+              (format nil "#+BEGIN_SRC text~%body~%#+END_SRC~%"))
+             (block-document (parse-org block-source))
+             (body-point (search "body" block-source))
+             (block-heading-result
+              (org-kit::toggle-heading
+               block-document (make-edit-span body-point body-point)))
+             (block-item-result
+              (org-kit::toggle-item
+               block-document (make-edit-span body-point body-point))))
+        (with-soft-assertions
+         (expect (document-text (edit-result-updated-document crlf-result))
+                 :to-equal (format nil "* first~C~%* second" #\Return))
+         (expect (document-text (edit-result-updated-document mixed-result))
+                 :to-equal
+                 (format nil "* plain~%~%: fixed~%#+NAME: value~%* headline~%"))
+         (expect (document-text (edit-result-updated-document block-heading-result))
+                 :to-equal block-source)
+         (expect (document-text (edit-result-updated-document block-item-result))
+                 :to-equal block-source))))
+  (it "converts ordered and checkbox items by their enclosing heading"
+      (let* ((item-source
+              (format nil
+                      "* Parent~%12. numbered~%13) alternate~%- [ ] open~%- [X] checked~%- [x] lower~%- [-] partial~%- [a] literal~%- [~%"))
+             (item-document (parse-org item-source))
+             (item-start (search "12." item-source))
+             (heading-result
+              (org-kit::toggle-heading
+               item-document (make-edit-span item-start (length item-source))))
+             (nested-source (format nil "* Parent~%** TODO Child~%*** DONE Deep~%"))
+             (nested-document (parse-org nested-source))
+             (item-result
+              (org-kit::toggle-item
+               nested-document (make-edit-span 0 (length nested-source))))
+             (plain-source (format nil "* Top~%** Child~%"))
+             (plain-document (parse-org plain-source))
+             (child-point (search "Child" plain-source))
+             (plain-result
+              (org-kit::toggle-heading
+               plain-document (make-edit-span child-point child-point))))
+        (with-soft-assertions
+         (expect (document-text (edit-result-updated-document heading-result))
+                 :to-equal
+                 (format nil
+                         "* Parent~%** numbered~%** alternate~%** TODO open~%** DONE checked~%** DONE lower~%** TODO partial~%** [a] literal~%** [~%"))
+         (expect (document-text (edit-result-updated-document item-result))
+                 :to-equal
+                 (format nil "- Parent~%  - [ ] Child~%    - [X] Deep~%"))
+         (expect (document-text (edit-result-updated-document plain-result))
+                 :to-equal (format nil "* Top~%Child~%")))))
+  (it "checks COMMENT metadata and resolves headline source positions"
+      (let* ((comment-source (format nil "* COMMENT~%"))
+             (comment-document (parse-org comment-source))
+             (comment-result
+              (org-kit::toggle-heading-comment
+               comment-document (make-edit-span 0 0)))
+             (fallback-source (format nil "* Fallback~%"))
+             (fallback-document (parse-org fallback-source))
+             (fallback-headline
+              (let ((found nil))
+                (map-nodes
+                 (lambda (node)
+                   (when (eq (node-type node) :headline)
+                     (setf found node)))
+                 (document-root fallback-document))
+                found))
+             (mismatch-source (format nil "* Heading~%"))
+             (mismatch-document (parse-org mismatch-source))
+             (mismatch-headline
+              (let ((found nil))
+                (map-nodes
+                 (lambda (node)
+                   (when (eq (node-type node) :headline)
+                     (setf found node)))
+                 (document-root mismatch-document))
+                found)))
+        (setf (org-kit::%node-post-affiliated fallback-headline) nil
+              (node-property mismatch-headline :commentedp) t)
+        (let* ((fallback-result
+                (org-kit::toggle-heading-comment
+                 fallback-document (make-edit-span 0 0)))
+               (mismatch-error
+                (edit-toggle-test-error
+                 (lambda ()
+                   (org-kit::toggle-heading-comment
+                    mismatch-document (make-edit-span 0 0)))))
+               (stale-document (parse-org (format nil "* Stale~%")))
+               (stale-headline
+                (let ((found nil))
+                  (map-nodes
+                   (lambda (node)
+                     (when (eq (node-type node) :headline)
+                       (setf found node)))
+                   (document-root stale-document))
+                  found)))
+          (setf (org-kit::%node-begin stale-headline) 1
+                (org-kit::%node-post-affiliated stale-headline) 1)
+          (let ((stale-error
+                 (edit-toggle-test-error
+                  (lambda ()
+                    (org-kit::toggle-item stale-document (make-edit-span 0 0))))))
+            (with-soft-assertions
+             (expect (document-text (edit-result-updated-document comment-result))
+                     :to-equal (format nil "* ~%"))
+             (expect (document-text (edit-result-updated-document fallback-result))
+                     :to-equal (format nil "* COMMENT Fallback~%"))
+             (expect (typep mismatch-error 'org-edit-error) :to-be t)
+             (when (typep mismatch-error 'org-edit-error)
+               (expect (org-edit-error-reason mismatch-error)
+                       :to-be :uneditable-structure)
+               (expect (org-edit-error-target mismatch-error)
+                       :to-equal "headline"))
+             (expect (typep stale-error 'org-edit-error) :to-be t)
+             (when (typep stale-error 'org-edit-error)
+               (expect (org-edit-error-reason stale-error)
+                       :to-be :uneditable-structure)
+               (expect (org-edit-error-target stale-error)
+                       :to-equal "item")))))))
+  (it "preserves indentation and handles marker-only and blank fixed-width lines"
+      (let* ((tab-source (format nil "~Cplain~%" #\Tab))
+             (tab-document (parse-org tab-source))
+             (tab-point (search "plain" tab-source))
+             (tab-result
+              (org-kit::toggle-fixed-width
+               tab-document (make-edit-span tab-point tab-point)))
+             (tab-updated (edit-result-updated-document tab-result))
+             (tab-remove-result
+              (org-kit::toggle-fixed-width
+               tab-updated (make-edit-span tab-point tab-point)))
+             (marker-source (format nil ":~%"))
+             (marker-document (parse-org marker-source))
+             (marker-result
+              (org-kit::toggle-fixed-width
+               marker-document (make-edit-span 0 0)))
+             (blank-source (format nil " ~C~%" #\Tab))
+             (blank-document (parse-org blank-source))
+             (blank-result
+              (org-kit::toggle-fixed-width
+               blank-document (make-edit-span 0 0))))
+        (with-soft-assertions
+         (expect (document-text tab-updated)
+                 :to-equal (format nil "~C: plain~%" #\Tab))
+         (expect (document-text (edit-result-updated-document tab-remove-result))
+                 :to-equal tab-source)
+         (expect (document-text (edit-result-updated-document marker-result))
+                 :to-equal (format nil "~%"))
+         (expect (document-text (edit-result-updated-document blank-result))
+                 :to-equal (format nil " ~C: ~%" #\Tab))))))
 
