@@ -787,9 +787,9 @@
            (start (org-kit::table-calc-assignment-target assignment))
            (end (org-kit::table-calc-assignment-target-end assignment))
            (relative-start
-             (table-calc-test-condition "@+1$1..@2$2=1"))
+             (table-calc-test-condition "@+1$-1..@2$2=1"))
            (relative-end
-             (table-calc-test-condition "@2$1..@+1$2=1")))
+             (table-calc-test-condition "@2$1..@+1$-1=1")))
       (with-soft-assertions
         (expect (org-kit::table-calc-assignment-kind assignment) :to-be :range)
         (expect (org-kit::table-calc-reference-row-value start) :to-be 1)
@@ -817,4 +817,38 @@
           (when (typep condition 'org-table-unsupported-syntax)
             (expect (org-table-unsupported-syntax-feature condition)
                     :to-be :unsupported-mode))))))
+  (it "covers parser duration boundaries, registered names, and malformed helper inputs"
+    (let* ((too-long
+             (make-string (1+ (length (write-to-string most-positive-fixnum)))
+                          :initial-element #\9))
+           (registered
+             (org-kit::table-calc-parse-formula "$1=custom(1)" (make-limits)
+                                               '("custom")))
+           (relative-row
+             (org-kit::table-calc-expression-value
+              (table-calc-test-assignment-expression
+               (format nil "$1=@-~A$-1" too-long)))))
+      (with-soft-assertions
+        (expect (length (org-kit::table-calc-program-assignments registered))
+                :to-be 1)
+        (expect (null (table-calc-test-condition "$1=1:02+1")) :to-be t)
+        (dolist (formula '("$1=1:" "$1=1:02x"))
+          (let ((condition (table-calc-test-condition formula)))
+            (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+            (when (typep condition 'org-table-unsupported-syntax)
+              (expect (org-table-unsupported-syntax-feature condition)
+                      :to-be :unsupported-character))))
+        (expect (org-kit::table-calc-reference-row-kind relative-row)
+                :to-be :relative)
+        (expect (org-kit::table-calc-reference-row-value relative-row)
+                :to-be :too-large)
+        (expect (org-kit::table-calc-roman-ordinal "") :to-be nil)
+        (dolist (formula '("$1=vsum()" "$1=vsum(vsum($1..$2))"))
+          (let ((condition (table-calc-test-condition formula)))
+            (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+            (when (typep condition 'org-table-unsupported-syntax)
+              (expect (org-table-unsupported-syntax-feature condition)
+                      :to-be :unsupported-function-argument))))
+        (expect (org-kit::table-calc-format-precision "x.2f") :to-be nil)
+        (expect (org-kit::table-calc-format-precision "%.2g") :to-be nil))))
 )
