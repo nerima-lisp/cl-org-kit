@@ -1210,4 +1210,30 @@
            (table (table-recalculate-test-find-node (document-root document) :table))
            (result (table-recalculate document table)))
       (expect (document-text (edit-result-updated-document result)) :to-equal expected)))
+  (it "covers malformed constants and formula normalization fallbacks"
+    (let* ((limits (make-limits))
+           (tables (make-hash-table :test #'equal))
+           (context (org-kit::make-table-recalculate-context :tables tables)))
+      (setf (gethash "duplicate" tables) :ambiguous)
+      (with-soft-assertions
+        (expect (org-kit::table-recalculate-constant-pairs
+                 "ok=1 =no no= tail=")
+                :to-equal '(("ok" . "1")))
+        (expect (org-kit::table-recalculate-constant-value 42 limits)
+                :to-be 42)
+        (dolist (case '(("$1=" :empty-expression)
+                        ("$1=1+" :expected-expression)
+                        ("$1=1..+2" :trailing-syntax)))
+          (expect
+           (table-recalculate-test-condition
+            (lambda ()
+              (org-kit::table-recalculate-parse-formula
+               (first case) limits nil)))
+           :to-equal (list :unsupported (second case))))
+        (table-recalculate-test-expect-table-error
+         (table-recalculate-test-caught-condition
+          (lambda ()
+            (org-kit::table-recalculate-remote-table
+             context "duplicate" "table")))
+         :unknown-remote-table))))
 )
