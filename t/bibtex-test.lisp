@@ -260,6 +260,7 @@
     (let ((cases
             (list
              (list "@{key, author={A}}" :missing-type)
+             (list "@" :missing-type)
              (list "@article{, author={A}}" :missing-key)
              (list "@unknown{key, title={T}}" :unknown-type)
              (list "@article[key, author={A}]" :malformed-delimiter)
