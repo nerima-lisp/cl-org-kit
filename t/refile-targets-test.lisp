@@ -182,4 +182,41 @@
           (expect (org-resource-limit-error-limit-name condition)
                   :to-be :max-node-count)
           (expect (org-resource-limit-error-limit condition) :to-be 0)
-          (expect (org-resource-limit-error-actual condition) :to-be 1))))))
+          (expect (org-resource-limit-error-actual condition) :to-be 1)))))
+
+  (it "rejects malformed refile selector and document inputs"
+    (let ((document (parse-org "* Entry"))
+          (invalid nil))
+      (labels ((reason-for (specifications)
+                 (handler-case
+                     (progn
+                       (refile-target-candidates document specifications)
+                       nil)
+                   (org-edit-error (condition) condition))))
+        (setf invalid
+              (list
+               (reason-for (list (list nil (cons :maxlevel 0))))
+               (reason-for (list (list nil (cons :tag 7))))
+               (reason-for (list (list nil (cons :todo 7))))
+               (reason-for (list (list (cons document :tail) t)))
+               (reason-for (list (list (list document "not-a-document") t)))
+               (reason-for (list (list "entry.org" t)))
+               (reason-for (list (list 7 t)))
+               (reason-for (cons (list nil t) :tail))))
+        (with-soft-assertions
+          (expect (mapcar #'org-edit-error-reason invalid)
+                  :to-equal
+                  (make-list 8 :initial-element :invalid-value))
+          (signals type-error
+            (refile-target-candidates nil nil))))))
+
+  (it "accepts one parsed document as a refile source"
+    (let* ((current (parse-org "* Current"))
+           (target (parse-org "* Target"))
+           (entries
+             (refile-target-candidates
+              current (list (list target t)))))
+      (with-soft-assertions
+        (expect (mapcar #'outline-entry-name entries) :to-equal (list "Target"))
+        (expect (document-text current) :to-equal "* Current")
+        (expect (document-text target) :to-equal "* Target")))))

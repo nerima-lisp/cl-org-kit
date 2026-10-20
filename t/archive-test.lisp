@@ -30,7 +30,7 @@
                                         "fallback-%s.org::Fallback")
               :to-equal '("notes/parent-work.org.org" . "Parent"))))
 
-  (it "uses a local ARCHIVE property and expands %s in both location parts"
+  (it "expands each %s in a local ARCHIVE value to the source basename"
     (let* ((document
              (parse-org
               (format nil "#+ARCHIVE: document-%s.org::Document~%* Document~%")
@@ -225,4 +225,185 @@
                 (archive-to-sibling document
                                     (archive-test-heading document "Task"))))))
       (expect (org-archive-error-reason condition)
-              :to-equal :time-context-required))))
+              :to-equal :time-context-required)))
+  (it "expands escaped archive markers and rejects malformed formats"
+      (let* ((document
+              (parse-org (format nil "* Task~%") :source-name "notes/work.org"))
+             (heading (archive-test-heading document "Task"))
+             (expanded
+              (resolve-archive-location
+               document heading
+               :default-location "archive%%-%s.org::Section%%-%s"))
+             (trailing
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  document heading :default-location "archive%::"))))
+             (unsupported
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  document heading :default-location "archive%q::")))))
+        (with-soft-assertions
+         (expect expanded
+                 :to-equal '("notes/archive%-work.org.org"
+                             . "Section%-work.org"))
+         (expect (org-archive-error-reason trailing)
+                 :to-equal :invalid-location-format)
+         (expect (org-archive-error-reason unsupported)
+                 :to-equal :invalid-location-format))))
+  (it "resolves empty, relative, and absolute archive destinations"
+      (let* ((source-document
+              (parse-org (format nil "* Task~%") :source-name "notes/work.org"))
+             (source-heading (archive-test-heading source-document "Task"))
+             (empty-file
+              (resolve-archive-location
+               source-document source-heading :default-location "::"))
+             (no-source (parse-org (format nil "* Task~%")))
+             (no-source-heading (archive-test-heading no-source "Task"))
+             (empty-without-source
+              (resolve-archive-location
+               no-source no-source-heading :default-location "::"))
+             (relative
+              (resolve-archive-location
+               no-source no-source-heading
+               :default-location "archive.org::Top"))
+             (absolute
+              (resolve-archive-location
+               no-source no-source-heading
+               :default-location "/vault/archive.org::Top"))
+             (without-source-format
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  no-source no-source-heading :default-location "%s::"))))
+             (invalid-source (parse-org (format nil "* Task~%") :source-name 42))
+             (invalid-source-heading (archive-test-heading invalid-source "Task"))
+             (invalid-format-source
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  invalid-source invalid-source-heading :default-location "%s::"))))
+             (invalid-relative-source
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  invalid-source invalid-source-heading
+                  :default-location "archive.org::")))))
+        (with-soft-assertions
+         (expect empty-file :to-equal '("notes/work.org" . ""))
+         (expect empty-without-source :to-equal '(nil . ""))
+         (expect relative :to-equal '("archive.org" . "Top"))
+         (expect absolute :to-equal '("/vault/archive.org" . "Top"))
+         (expect (org-archive-error-reason without-source-format)
+                 :to-equal :source-name-required)
+         (expect (org-archive-error-reason invalid-format-source)
+                 :to-equal :invalid-source-name)
+         (expect (org-archive-error-reason invalid-relative-source)
+                 :to-equal :invalid-source-name))))
+  (it "rejects invalid archive documents, locations, and time contexts"
+      (let* ((document (parse-org (format nil "* Task~%")))
+             (heading (archive-test-heading document "Task"))
+             (invalid-document
+              (archive-test-error
+               (lambda () (resolve-archive-location nil nil))))
+             (invalid-location
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location document heading :default-location 42))))
+             (invalid-time-context
+              (handler-case
+                  (progn
+                    (archive-to-sibling document heading :time-context 42)
+                    nil)
+                (type-error (condition) condition))))
+        (with-soft-assertions
+         (expect (org-archive-error-reason invalid-document)
+                 :to-equal :invalid-document)
+         (expect (org-archive-error-reason invalid-location)
+                 :to-equal :invalid-location)
+         (expect (typep invalid-time-context 'type-error) :to-be t))))
+  (it "rejects invalid edit documents and logical source paths"
+      (let* ((invalid-edit-document
+              (archive-test-error
+               (lambda ()
+                 (archive-to-sibling
+                  nil nil
+                  :time-context (archive-test-time-context "2024-02-19T12:34:00")))))
+             (logical-source
+              (progn
+                (setf (logical-pathname-translations "ORG-KIT-TEST") nil)
+                (make-pathname :host "ORG-KIT-TEST"
+                               :directory (list :absolute "vault")
+                               :name "work" :type "org")))
+             (logical-path-document
+              (parse-org (format nil "* Task~%") :source-name logical-source))
+             (logical-string-document
+              (parse-org (format nil "* Task~%")
+                         :source-name (namestring logical-source)))
+             (logical-heading
+              (archive-test-heading logical-path-document "Task"))
+             (logical-string-heading
+              (archive-test-heading logical-string-document "Task"))
+             (logical-basename-error
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  logical-path-document logical-heading :default-location "%s::"))))
+             (logical-path-error
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  logical-path-document logical-heading
+                  :default-location "archive.org::"))))
+             (logical-string-error
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  logical-string-document logical-string-heading
+                  :default-location "archive.org::")))))
+        (with-soft-assertions
+         (expect (org-archive-error-reason invalid-edit-document)
+                 :to-equal :invalid-document)
+         (expect (org-archive-error-reason logical-basename-error)
+                 :to-equal :invalid-source-name)
+         (expect (org-archive-error-reason logical-path-error)
+                 :to-equal :invalid-source-name)
+         (expect (org-archive-error-reason logical-string-error)
+                 :to-equal :invalid-source-name))))
+  (it "resolves directory and parent-relative source paths"
+      (let* ((directory-source
+              (make-pathname :directory '(:relative "notes")))
+             (directory-document
+              (parse-org (format nil "* Task~%") :source-name directory-source))
+             (directory-heading (archive-test-heading directory-document "Task"))
+             (directory-basename-error
+              (archive-test-error
+               (lambda ()
+                 (resolve-archive-location
+                  directory-document directory-heading :default-location "%s::"))))
+             (directory-location
+              (resolve-archive-location
+               directory-document directory-heading :default-location "archive.org::"))
+             (parent-source
+              (make-pathname :directory '(:relative :up "notes")
+                             :name "work" :type "org"))
+             (parent-document
+              (parse-org (format nil "* Task~%") :source-name parent-source
+                         :limits (make-limits :max-output-length 16)))
+             (parent-path-error
+              (handler-case
+                  (progn
+                    (resolve-archive-location
+                     parent-document (archive-test-heading parent-document "Task")
+                     :default-location "archive.org::")
+                    nil)
+                (org-resource-limit-error (condition) condition))))
+        (with-soft-assertions
+         (expect (org-archive-error-reason directory-basename-error)
+                 :to-equal :source-name-required)
+         (expect directory-location :to-equal '("notes/archive.org" . ""))
+         (expect (typep parent-path-error 'org-resource-limit-error) :to-be t)
+         (when (typep parent-path-error 'org-resource-limit-error)
+           (expect (org-resource-limit-error-actual parent-path-error)
+                   :to-equal 20))))))

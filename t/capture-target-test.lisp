@@ -150,4 +150,220 @@
           document '(:file+headline "cursor.org" "Target")
           (capture-target-test-template "x" 2)
           :time-context time-context))
-       :invalid-template-result))))
+       :invalid-template-result)))
+  (it "uses vector documents and an existing outline path"
+    (let* ((source (format nil "#+TITLE: Keep~%* Area~%** Subarea~%body~%"))
+           (document (parse-org source :source-name "outline.org"))
+           (template (capture-target-test-template "Entry" 5))
+           (result
+             (capture-into-target
+              (vector document)
+              '(:file+olp "outline.org" ("Area" "Subarea"))
+              template
+              :time-context (capture-target-test-time-context)))
+           (updated (capture-target-result-target-document result)))
+      (with-soft-assertions
+        (expect (document-text document) :to-equal source)
+        (expect (document-text updated)
+                :to-equal
+                (format nil
+                        "#+TITLE: Keep~%* Area~%** Subarea~%body~%*** Entry~%"))
+        (expect (edit-result-p (capture-target-result-edit-result result))
+                :to-be t)
+        (expect (capture-target-result-cursor-offset result)
+                :to-be (1- (length (document-text updated)))))))
+  (it "rejects malformed target, document, ID, and template inputs"
+    (let* ((document (parse-org "* Target" :source-name "notes.org"))
+           (duplicate (parse-org "* Other" :source-name "notes.org"))
+           (inline-document
+             (parse-org
+              (format nil
+                      "*************** TODO Inline~%:PROPERTIES:~%:ID: inline-id~%:END:~%*************** END~%")))
+           (template (capture-target-test-template "Entry"))
+           (time-context (capture-target-test-time-context)))
+      (labels ((rejects (reason documents target template-result &rest options)
+                 (capture-target-test-expect-error
+                  (lambda ()
+                    (apply #'capture-into-target
+                           documents target template-result options))
+                  reason)))
+        (with-soft-assertions
+          (rejects :invalid-documents (cons document :tail)
+                   '(:file+headline "notes.org" "Target")
+                   template :time-context time-context)
+          (rejects :invalid-documents (list "not a document")
+                   '(:file+headline "notes.org" "Target")
+                   template :time-context time-context)
+          (rejects :invalid-target (list document) (cons :id :tail)
+                   template :time-context time-context)
+          (rejects :invalid-target (list document) '(:unsupported)
+                   template :time-context time-context)
+          (rejects :invalid-target (list document)
+                   '(:file+headline "notes.org")
+                   template :time-context time-context)
+          (rejects :invalid-target (list document)
+                   '(:file+headline 7 "Target")
+                   template :time-context time-context)
+          (rejects :target-not-found nil
+                   '(:file+headline "missing.org" "Inbox")
+                   template :time-context time-context)
+          (rejects :invalid-target nil
+                   '(:file+headline "missing.org" "Inbox")
+                   template :file-contents '(("missing.org" . 7))
+                   :time-context time-context)
+          (rejects :ambiguous-target (list document duplicate)
+                   '(:file+headline "notes.org" "Target")
+                   template :time-context time-context)
+          (rejects :invalid-target (list document)
+                   '(:file+headline "notes.org" 7)
+                   template :time-context time-context)
+          (rejects :invalid-target (list document)
+                   '(:file+olp "notes.org" nil)
+                   template :time-context time-context)
+          (rejects :invalid-target (list document)
+                   '(:file+olp "notes.org" ("Area" 7))
+                   template :time-context time-context)
+          (rejects :invalid-target (list document)
+                   '(:file+regexp "notes.org" 7)
+                   template :time-context time-context)
+          (rejects :invalid-target (list document)
+                   '(:file+regexp "notes.org" "[")
+                   template :time-context time-context)
+          (rejects :target-not-found (list document)
+                   '(:file+regexp "notes.org" "absent")
+                   template :time-context time-context)
+          (rejects :invalid-target (list document) '(:id "")
+                   template :time-context time-context)
+          (rejects :invalid-target (list document) '(:id 7)
+                   template :time-context time-context)
+          (rejects :invalid-target (list inline-document) '(:id "inline-id")
+                   template :time-context time-context)
+          (rejects :invalid-template-result (list document)
+                   '(:file+headline "notes.org" "Target")
+                   (make-capture-template-result :expanded-text 7
+                                                 :cursor-offset 0)
+                   :time-context time-context)
+          (rejects :invalid-template-result (list document)
+                   '(:file+headline "notes.org" "Target")
+                   (make-capture-template-result :expanded-text "Entry"
+                                                 :cursor-offset "end")
+                   :time-context time-context)
+          (capture-target-test-expect-error
+           (lambda ()
+             (org-kit::capture-target-resolve
+              (list document) '(:file+olp+datetree "notes.org")
+              nil (make-limits) nil))
+           :invalid-time-context)
+          (rejects :invalid-time-context (list document)
+                   '(:file+headline "notes.org" "Target") template)
+          (rejects :invalid-limits (list document)
+                   '(:file+headline "notes.org" "Target")
+                   template :time-context time-context :limits 7)))))
+  (it "rejects a capture outline that would shift below level one"
+    (let* ((document (parse-org "* Target" :source-name "notes.org"))
+           (template
+             (capture-target-test-template
+              (format nil "*** Deep~%* Shallow~%")))
+           (condition
+             (capture-target-test-condition
+              (lambda ()
+                (capture-into-target
+                 document '(:file+headline "notes.org" "Target")
+                 template
+                 :time-context (capture-target-test-time-context))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-capture-error) :to-be t)
+        (when (typep condition 'org-capture-error)
+          (expect (org-capture-error-reason condition) :to-be :invalid-template)))))
+  (it "inserts a space before LF after a regexp match ending in bare CR"
+    (let* ((source (format nil "* Target~%body~C" #\Return))
+           (document (parse-org source :source-name "notes.org"))
+           (template (capture-target-test-template (format nil "Entry~%")))
+           (result
+             (capture-into-target
+              document '(:file+regexp "notes.org" "body")
+              template
+              :time-context (capture-target-test-time-context)))
+           (updated (capture-target-result-target-document result))
+           (regex-limit
+             (capture-target-test-condition
+              (lambda ()
+                (capture-into-target
+                 document '(:file+regexp "notes.org" "body")
+                 template
+                 :time-context (capture-target-test-time-context)
+                 :limits (make-limits :max-search-regex-length 1)))))
+           (work-limit
+             (capture-target-test-condition
+              (lambda ()
+                (capture-into-target
+                 document '(:file+regexp "notes.org" "body")
+                 template
+                 :time-context (capture-target-test-time-context)
+                 :limits (make-limits :max-search-work 1))))))
+      (with-soft-assertions
+        (expect (document-text document) :to-equal source)
+        (expect (document-text updated)
+                :to-equal
+                (format nil "* Target~%body~C ~%* Entry~%" #\Return))
+        (expect (typep regex-limit 'org-resource-limit-error) :to-be t)
+        (when (typep regex-limit 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name regex-limit)
+                  :to-be :max-search-regex-length))
+        (expect (typep work-limit 'org-resource-limit-error) :to-be t)
+        (when (typep work-limit 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name work-limit)
+                  :to-be :max-search-work)))))
+  (it "inserts below a unique ID target"
+    (let* ((source
+             (format nil "* Target~%:PROPERTIES:~%:ID: target-id~%:END:~%"))
+           (document (parse-org source :source-name "id.org"))
+           (result
+             (capture-into-target
+              (list document)
+              '(:id "target-id")
+              (capture-target-test-template "Entry")
+              :time-context (capture-target-test-time-context)))
+           (updated (capture-target-result-target-document result)))
+      (with-soft-assertions
+        (expect (document-text document) :to-equal source)
+        (expect (document-text updated)
+                :to-equal
+                (format nil
+                        "* Target~%:PROPERTIES:~%:ID: target-id~%:END:~%** Entry~%"))
+        (expect (edit-result-p (capture-target-result-edit-result result))
+                :to-be t)
+        (expect (capture-target-result-cursor-offset result)
+                :to-be (+ (length source) 3)))))
+  (it "continues an existing outline path when its child is missing"
+    (let* ((source (format nil "* Area~%body~%"))
+           (document (parse-org source :source-name "outline.org"))
+           (result
+             (capture-into-target
+              document
+              '(:file+olp "outline.org" ("Area" "Subarea"))
+              (capture-target-test-template "Entry")
+              :time-context (capture-target-test-time-context)))
+           (updated (capture-target-result-target-document result)))
+      (with-soft-assertions
+        (expect (document-text document) :to-equal source)
+        (expect (document-text updated)
+                :to-equal
+                (format nil "* Area~%body~%** Subarea~%*** Entry~%"))
+        (expect (edit-result-p (capture-target-result-edit-result result))
+                :to-be t))))
+  (it "rejects a non-template result"
+    (let* ((document (parse-org "* Target" :source-name "notes.org"))
+           (condition
+             (capture-target-test-condition
+              (lambda ()
+                (capture-into-target
+                 document
+                 '(:file+headline "notes.org" "Target")
+                 "Entry"
+                 :time-context (capture-target-test-time-context))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-capture-error) :to-be t)
+        (when (typep condition 'org-capture-error)
+          (expect (org-capture-error-reason condition)
+                  :to-be :invalid-template-result))))))

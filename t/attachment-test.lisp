@@ -200,4 +200,242 @@
         (when (typep content-error 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name content-error)
                   :to-equal :max-write-plan-bytes)))))
-)
+  (it "uses ATTACH_DIR before ID and honors inheritance settings"
+      (let* ((inherited-document
+              (parse-org
+               (format nil
+                       "* Parent~%:PROPERTIES:~%:ATTACH_DIR: parent-files~%:ATTACH_DIR_INHERIT: yes~%:END:~%** Child~%:PROPERTIES:~%:ID: child-id~%:END:~%")))
+             (inherited-child (attachment-test-heading inherited-document "Child"))
+             (local-document
+              (parse-org
+               (format nil
+                       "* Task~%:PROPERTIES:~%:ID: abcdef123~%:ATTACH_DIR: local-files~%:END:~%")))
+             (local-heading (attachment-test-heading local-document "Task"))
+             (disabled-document
+              (parse-org
+               (format nil
+                       "* Parent~%:PROPERTIES:~%:ATTACH_DIR: ignored-files~%:ATTACH_DIR_INHERIT: false~%:END:~%** Child~%:PROPERTIES:~%:ID: child-id~%:END:~%")))
+             (disabled-child (attachment-test-heading disabled-document "Child")))
+        (with-soft-assertions
+         (expect (resolve-attachment-directory inherited-document inherited-child)
+                 :to-equal "parent-files")
+         (expect (resolve-attachment-directory local-document local-heading)
+                 :to-equal "local-files")
+         (expect (resolve-attachment-directory disabled-document disabled-child)
+                 :to-equal "data/ch/ild-id"))))
+  (it "normalizes absolute attachment paths and rejects unsafe roots"
+      (let* ((normalized-document
+              (parse-org
+               (format nil
+                       "* Task~%:PROPERTIES:~%:DIR: /vault/./notes/../attachments/~%:END:~%")
+               :source-name "/vault/notes.org"))
+             (normalized-heading (attachment-test-heading normalized-document "Task"))
+             (root-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: /vault~%:END:~%")
+               :source-name "/vault/notes.org"))
+             (root-heading (attachment-test-heading root-document "Task"))
+             (provided-root-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: /vault/files~%:END:~%")))
+             (provided-root-heading
+              (attachment-test-heading provided-root-document "Task"))
+             (missing-root-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: /vault/files~%:END:~%")))
+             (missing-root
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  missing-root-document
+                  (attachment-test-heading missing-root-document "Task")))))
+             (escape-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: /../outside~%:END:~%")
+               :source-name "/vault/notes.org"))
+             (escape
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  escape-document (attachment-test-heading escape-document "Task")))))
+             (backslash-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: /vault\\files~%:END:~%")
+               :source-name "/vault/notes.org"))
+             (backslash
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  backslash-document
+                  (attachment-test-heading backslash-document "Task")))))
+             (relative-backslash-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: bad\\path~%:END:~%")))
+             (relative-backslash
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  relative-backslash-document
+                  (attachment-test-heading relative-backslash-document "Task"))))))
+        (with-soft-assertions
+         (expect (resolve-attachment-directory normalized-document normalized-heading)
+                 :to-equal "attachments")
+         (expect (resolve-attachment-directory root-document root-heading)
+                 :to-equal "")
+         (expect (resolve-attachment-directory
+                  provided-root-document provided-root-heading
+                  :source-directory #p"/vault")
+                 :to-equal "files")
+         (expect (org-attachment-error-reason missing-root)
+                 :to-equal :absolute-path-requires-source-directory)
+         (expect (org-attachment-error-reason escape)
+                 :to-equal :invalid-path)
+         (expect (org-attachment-error-reason backslash)
+                 :to-equal :invalid-path)
+         (expect (org-attachment-error-reason relative-backslash)
+                 :to-equal :invalid-path))))
+  (it "counts UTF-8 path bytes and validates the source directory"
+      (let* ((limits (make-limits :max-write-plan-path-bytes 15))
+             (unicode-document
+              (parse-org
+               (format nil
+                       "* Task~%:PROPERTIES:~%:DIR: /vault/é☕🧪~%:END:~%")
+               :source-name "/vault/notes.org" :limits limits))
+             (unicode-error
+              (handler-case
+                  (progn
+                    (resolve-attachment-directory
+                     unicode-document
+                     (attachment-test-heading unicode-document "Task"))
+                    nil)
+                (org-resource-limit-error (condition) condition)))
+             (source-document (attachment-test-id-document))
+             (invalid-source-directory
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  source-document (attachment-test-heading source-document "Task")
+                  :source-directory 42)))))
+        (with-soft-assertions
+         (expect (typep unicode-error 'org-resource-limit-error) :to-be t)
+         (when (typep unicode-error 'org-resource-limit-error)
+           (expect (org-resource-limit-error-actual unicode-error) :to-equal 16))
+         (expect (org-attachment-error-reason invalid-source-directory)
+                 :to-equal :invalid-source-directory))))
+  (it "returns binary plans and validates ID-based roots"
+      (let* ((directory-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: .~%:END:~%")))
+             (directory-heading (attachment-test-heading directory-document "Task"))
+             (bytes (make-array 3 :element-type '(unsigned-byte 8)
+                                :initial-contents '(0 127 255)))
+             (write-plan
+              (add-attachment directory-document directory-heading "binary.dat" bytes))
+             (entry (first (coerce (write-plan-entries write-plan) 'list)))
+             (id-document (attachment-test-id-document))
+             (id-heading (attachment-test-heading id-document "Task"))
+             (unsafe-id-document (attachment-test-id-document :id "../escape"))
+             (unsafe-id
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  unsafe-id-document
+                  (attachment-test-heading unsafe-id-document "Task")))))
+             (empty-root
+              (resolve-attachment-directory id-document id-heading :attachment-root ""))
+             (pathname-root
+              (resolve-attachment-directory id-document id-heading
+                                            :attachment-root #p"attachments"))
+             (invalid-root
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory id-document id-heading
+                                               :attachment-root 42))))
+             (empty-directory-document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: ~%:END:~%")))
+             (empty-directory
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  empty-directory-document
+                  (attachment-test-heading empty-directory-document "Task")))))
+             (invalid-document
+              (attachment-test-error
+               (lambda () (resolve-attachment-directory nil nil))))
+             (invalid-add-document
+              (attachment-test-error
+               (lambda () (add-attachment nil nil "file.txt" "content"))))
+             (invalid-delete-document
+              (attachment-test-error
+               (lambda () (delete-attachment nil nil "file.txt"))))
+             (invalid-content
+              (handler-case
+                  (progn (add-attachment directory-document directory-heading
+                                         "bad.dat" 42)
+                    nil)
+                (type-error (condition) condition))))
+        (with-soft-assertions
+         (expect (write-plan-entry-path entry) :to-equal "binary.dat")
+         (expect (coerce (write-plan-entry-content entry) 'list)
+                 :to-equal '(0 127 255))
+         (expect empty-root :to-equal "ab/cdef123")
+         (expect pathname-root :to-equal "attachments/ab/cdef123")
+         (expect (org-attachment-error-reason unsafe-id) :to-equal :invalid-id)
+         (expect (org-attachment-error-reason invalid-root)
+                 :to-equal :invalid-attachment-root)
+         (expect (org-attachment-error-reason empty-directory)
+                 :to-equal :invalid-path)
+         (expect (org-attachment-error-reason invalid-document)
+                 :to-equal :invalid-document)
+         (expect (org-attachment-error-reason invalid-add-document)
+                 :to-equal :invalid-document)
+         (expect (org-attachment-error-reason invalid-delete-document)
+                 :to-equal :invalid-document)
+         (expect (typep invalid-content 'type-error) :to-be t))))
+  (it "rejects invalid source roots, control characters, and empty IDs"
+      (let* ((document
+              (parse-org
+               (format nil "* Task~%:PROPERTIES:~%:DIR: /vault/files~%:END:~%")))
+             (heading (attachment-test-heading document "Task"))
+             (relative-root-error
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  document heading :source-directory "vault"))))
+             (null-root-error
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  document heading
+                  :source-directory (format nil "/vault/bad~Croot" #\Null)))))
+             (newline-root-error
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  document heading
+                  :source-directory (format nil "/vault/bad~Croot" #\Newline)))))
+             (return-root-error
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  document heading
+                  :source-directory (format nil "/vault/bad~Croot" #\Return)))))
+             (empty-id-document (attachment-test-id-document :id ""))
+             (empty-id-error
+              (attachment-test-error
+               (lambda ()
+                 (resolve-attachment-directory
+                  empty-id-document
+                  (attachment-test-heading empty-id-document "Task"))))))
+        (with-soft-assertions
+         (expect (org-attachment-error-reason relative-root-error)
+                 :to-equal :invalid-path)
+         (expect (org-attachment-error-reason null-root-error)
+                 :to-equal :invalid-path)
+         (expect (org-attachment-error-reason newline-root-error)
+                 :to-equal :invalid-path)
+         (expect (org-attachment-error-reason return-root-error)
+                 :to-equal :invalid-path)
+         (expect (org-attachment-error-reason empty-id-error)
+                 :to-equal :invalid-id)))))
