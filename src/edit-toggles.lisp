@@ -46,9 +46,7 @@
                      (subseq source line-start line-end))
                lines)
          (when (= line-start last-line) (return))
-         (let ((newline (position #\Newline source :start line-start)))
-           (unless newline (return))
-           (setf line-start (1+ newline))))
+         (setf line-start (1+ (position #\Newline source :start line-start))))
     (nreverse lines)))
 
 (defun edit-toggle-horizontal-space-p (character)
@@ -163,9 +161,7 @@
                (setf level
                      (loop for position from 0 below heading-end
                            count (char= (char line position) #\*))))
-             (let ((newline (position #\Newline source :start cursor)))
-               (unless newline (return))
-               (setf cursor (1+ newline))))
+             (setf cursor (1+ (position #\Newline source :start cursor))))
     (1+ (or level 0))))
 
 (defun edit-toggle-result (document patches target)
