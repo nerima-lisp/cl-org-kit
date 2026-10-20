@@ -497,4 +497,8 @@
                   (format nil
                           "* Task~%SCHEDULED: <2026-03-02 Mon~A09:30>~%* Task~%SCHEDULED: <2026-03-03 Tue~A09:30>~%* Peer~%"
                           separator separator))
-          (expect (document-text document) :to-equal source))))))
+          (expect (document-text document) :to-equal source)))))
+  (it "completes an empty cloned text with the requested newline"
+    (expect (org-kit::edit-subtree-clone-final-newline
+             "" (string #\Newline))
+            :to-equal (string #\Newline))))
