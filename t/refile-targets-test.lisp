@@ -223,3 +223,20 @@
         (expect (mapcar #'outline-entry-name entries) :to-equal (list "Target"))
         (expect (document-text current) :to-equal "* Current")
         (expect (document-text target) :to-equal "* Target")))))
+
+(describe "refile selector edge coverage"
+  (it "rejects non-cons selectors and handles nodes without integer levels"
+    (let* ((document (parse-org "* Entry"))
+           (condition
+             (handler-case
+                 (progn
+                   (refile-target-candidates document
+                                             (list (list nil :unsupported)))
+                   nil)
+               (org-edit-error (condition) condition)))
+           (node (make-node :headline :properties '(:level nil))))
+      (with-soft-assertions
+        (expect (org-edit-error-reason condition) :to-be :invalid-value)
+        (expect (org-kit::refile-target-selector-matches-p
+                 node :maxlevel 2)
+                :to-be nil)))))

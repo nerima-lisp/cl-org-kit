@@ -5,6 +5,22 @@
   (error 'org-archive-error :reason reason :message message
          :context (and context (bounded-text context))))
 
+(defun archive-path-component-length (component)
+  (typecase component
+    (null 0)
+    (string (length component))
+    (symbol
+     (case component
+       (:wild 1)
+       ((:up :back :wild-inferiors) 2)
+       ((:unspecific :newest) 0)
+       (t
+        (org-archive-signal-error
+         :invalid-source-name "Unsupported source path component"))))
+    (t
+     (org-archive-signal-error
+      :invalid-source-name "Unsupported source path component"))))
+
 (defun archive-document-source-path (document)
   (let ((source-name (document-source-name document)))
     (typecase source-name
@@ -15,28 +31,11 @@
           :invalid-source-name "Document source name must be a path")))))
 
 (defun archive-source-basename (document limits)
-  (labels ((path-component-length (component)
-             (typecase component
-               (null 0)
-               (string (length component))
-               (symbol
-                (case component
-                  (:wild 1)
-                  ((:up :back :wild-inferiors) 2)
-                  ((:unspecific :newest) 0)
-                  (t
-                   (org-archive-signal-error
-                    :invalid-source-name
-                    "Unsupported source path component"))))
-               (t
-                (org-archive-signal-error
-                 :invalid-source-name
-                 "Unsupported source path component"))))
-           (pathname-file-length (path)
-             (+ (path-component-length (pathname-name path))
+  (labels ((pathname-file-length (path)
+             (+ (archive-path-component-length (pathname-name path))
                 (let ((type (pathname-type path)))
                   (if (and type (not (eq type :unspecific)))
-                      (1+ (path-component-length type))
+                      (1+ (archive-path-component-length type))
                       0)))))
     (let ((source-name (document-source-name document)))
       (typecase source-name
@@ -106,37 +105,20 @@
                        (write-character character))))))))
 
 (defun archive-expand-relative-file (document file limits)
-  (labels ((path-component-length (component)
-             (typecase component
-               (null 0)
-               (string (length component))
-               (symbol
-                (case component
-                  (:wild 1)
-                  ((:up :back :wild-inferiors) 2)
-                  ((:unspecific :newest) 0)
-                  (t
-                   (org-archive-signal-error
-                    :invalid-source-name
-                    "Unsupported source path component"))))
-               (t
-                (org-archive-signal-error
-                 :invalid-source-name
-                 "Unsupported source path component"))))
-           (directory-length (directory)
+  (labels ((directory-length (directory)
              (+ (if (eq (first directory) :absolute) 1 0)
                 (loop for component in (rest directory)
-                      sum (1+ (path-component-length component)))))
+                      sum (1+ (archive-path-component-length component)))))
            (pathname-length (path)
              (when (typep path 'logical-pathname)
                (org-archive-signal-error
                 :invalid-source-name
                 "Logical source paths cannot be bounded as archive destinations"))
              (+ (directory-length (pathname-directory path))
-                (path-component-length (pathname-name path))
+                (archive-path-component-length (pathname-name path))
                 (let ((type (pathname-type path)))
                   (if (and type (not (eq type :unspecific)))
-                      (1+ (path-component-length type))
+                      (1+ (archive-path-component-length type))
                       0))))
            (source-directory (source-name file-length)
              (typecase source-name

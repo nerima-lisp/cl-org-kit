@@ -475,3 +475,71 @@
                  :to-equal :invalid-path)
          (expect (org-attachment-error-reason empty-id-error)
                  :to-equal :invalid-id)))))
+
+(describe "attachment validation edge coverage"
+  (it "rejects non-string inheritance flags"
+    (let* ((document (parse-org "* Task"))
+           (heading (attachment-test-heading document "Task"))
+           (symbol 'org-kit::effective-heading-property-value)
+           (original (symbol-function symbol)))
+      (unwind-protect
+           (progn
+             (setf (symbol-function symbol)
+                   (lambda (ignored-heading ignored-key)
+                     (declare (ignore ignored-heading ignored-key))
+                     (values 7 t)))
+             (expect (org-kit::attachment-inheritance-enabled-p heading)
+                     :to-be nil))
+        (setf (symbol-function symbol) original))))
+
+  (it "rejects short roots and empty or non-string directories"
+    (let* ((document (parse-org "* Task"))
+           (limits (make-limits))
+           (short-root
+             (attachment-test-error
+              (lambda ()
+                (org-kit::attachment-absolute-to-relative
+                 "/vault" "/vault/nested"))))
+           (empty-directory
+             (attachment-test-error
+              (lambda ()
+                (org-kit::attachment-resolve-directory
+                 document "" nil limits))))
+           (non-string-directory
+             (attachment-test-error
+              (lambda ()
+                (org-kit::attachment-resolve-directory
+                 document nil nil limits)))))
+      (with-soft-assertions
+        (expect (org-attachment-error-reason short-root)
+                :to-be :path-outside-source-directory)
+        (expect (org-attachment-error-reason empty-directory)
+                :to-be :invalid-path)
+        (expect (org-attachment-error-reason non-string-directory)
+                :to-be :invalid-path))))
+
+  (it "validates every attachment filename component rule"
+    (let ((invalid-names
+            (list nil 7 "" "." ".." "has/slash"
+                  (format nil "has~Cbackslash" #\\)
+                  (format nil "has~Cnull" #\Null)
+                  (format nil "has~Cnewline" #\Newline)
+                  (format nil "has~Creturn" #\Return))))
+      (dolist (filename invalid-names)
+        (let ((condition
+                (attachment-test-error
+                 (lambda ()
+                   (org-kit::attachment-validate-filename filename)))))
+          (expect (org-attachment-error-reason condition) :to-be :invalid-filename)))
+      (expect (org-kit::attachment-validate-filename "safe.txt")
+              :to-equal "safe.txt")))
+
+  (it "rejects invalid path character codes"
+    (dolist (code '(#xd800 #x110000))
+      (let ((condition
+              (attachment-test-error
+               (lambda ()
+                 (org-kit::attachment-check-path-character-code
+                  code "path")))))
+        (expect (org-attachment-error-reason condition)
+                :to-be :invalid-path)))))

@@ -50,13 +50,17 @@
   (and (plusp (length path))
        (char= (char path 0) #\/)))
 
+(defun attachment-check-path-character-code (code path)
+  (when (or (<= #xd800 code #xdfff) (> code #x10ffff))
+    (org-attachment-signal-error :invalid-path
+                                 "Attachment path contains an invalid character"
+                                 path)))
+
 (defun attachment-check-path-byte-limit (path limits)
   (let ((byte-count 0))
     (loop for character across path
           for code = (char-code character)
-          do (when (or (<= #xd800 code #xdfff) (> code #x10ffff))
-               (org-attachment-signal-error
-                :invalid-path "Attachment path contains an invalid character" path))
+          do (attachment-check-path-character-code code path)
              (incf byte-count
                    (cond ((<= code #x7f) 1)
                          ((<= code #x7ff) 2)

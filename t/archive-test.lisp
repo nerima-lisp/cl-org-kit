@@ -482,3 +482,103 @@
          (when (typep parent-path-error 'org-resource-limit-error)
            (expect (org-resource-limit-error-actual parent-path-error)
                    :to-equal 20))))))
+
+(describe "archive path edge coverage"
+  (it "measures pathname components and rejects unsupported components"
+    (with-soft-assertions
+      (expect (org-kit::archive-path-component-length nil) :to-be 0)
+      (expect (org-kit::archive-path-component-length "notes") :to-be 5)
+      (expect (org-kit::archive-path-component-length :wild) :to-be 1)
+      (dolist (component '(:up :back :wild-inferiors))
+        (expect (org-kit::archive-path-component-length component) :to-be 2))
+      (dolist (component '(:unspecific :newest))
+        (expect (org-kit::archive-path-component-length component) :to-be 0))
+      (dolist (component '(:unsupported 42))
+        (let ((condition
+                (archive-test-error
+                 (lambda ()
+                   (org-kit::archive-path-component-length component)))))
+          (expect (org-archive-error-reason condition)
+                  :to-be :invalid-source-name)))))
+
+  (it "handles empty basenames, unspecific pathname types, and absolute files"
+    (let* ((empty-name (parse-org "* Task" :source-name "notes/"))
+           (empty-error
+             (archive-test-error
+              (lambda ()
+                (resolve-archive-location
+                 empty-name (archive-test-heading empty-name "Task")
+                 :default-location "%s::"))))
+           (unspecific-type
+             (parse-org "* Task"
+                        :source-name
+                        (make-pathname :directory '(:relative "notes")
+                                       :name "work" :type :unspecific)))
+           (absolute-document (parse-org "* Task"))
+           (absolute-source-document
+             (parse-org "* Task" :source-name "/vault/work.org")))
+      (with-soft-assertions
+        (expect (org-archive-error-reason empty-error)
+                :to-be :source-name-required)
+        (expect (org-kit::archive-source-basename
+                 unspecific-type (make-limits))
+                :to-equal "work")
+        (expect (org-kit::archive-expand-relative-file
+                 absolute-document "/vault/archive.org" (make-limits))
+                :to-equal "/vault/archive.org")
+        (expect (org-kit::archive-expand-relative-file
+                 absolute-source-document "archive.org" (make-limits))
+                :to-equal "/vault/archive.org"))))
+
+  (it "skips malformed document keyword keys when resolving locations"
+    (let* ((document (parse-org "* Task"))
+           (heading (archive-test-heading document "Task"))
+           (keyword (make-node :keyword :properties '(:key nil :value "bad")))
+           (symbol 'org-kit::edit-properties-document-keywords)
+           (original (symbol-function symbol)))
+      (unwind-protect
+           (progn
+             (setf (symbol-function symbol)
+                   (lambda (ignored-document &optional ignored-key)
+                     (declare (ignore ignored-document ignored-key))
+                     (list keyword)))
+             (expect (org-kit::archive-location-value document heading nil)
+                     :to-equal "%s_archive::"))
+        (setf (symbol-function symbol) original))))
+
+  (it "handles empty source insertion and reports a missing sibling after insertion"
+    (let* ((empty (parse-org ""))
+           (empty-result
+             (org-kit::archive-root-insert-sibling empty nil 1))
+           (non-final-newline (parse-org "* Task"))
+           (non-final-result
+             (org-kit::archive-root-insert-sibling
+              non-final-newline
+              (archive-test-heading non-final-newline "Task")
+              1))
+           (document (parse-org "* Task"))
+           (heading (archive-test-heading document "Task"))
+           (symbol 'org-kit::archive-root-insert-sibling)
+           (original (symbol-function symbol))
+           (condition nil))
+      (setf (symbol-function symbol)
+            (lambda (ignored-document ignored-heading ignored-stars)
+              (declare (ignore ignored-document ignored-heading ignored-stars))
+              (make-edit-result :updated-document document :spans nil)))
+      (unwind-protect
+           (setf condition
+                 (archive-test-error
+                  (lambda ()
+                    (archive-to-sibling
+                     document heading
+                     :time-context
+                     (archive-test-time-context "2024-02-19T12:34:00")))))
+        (setf (symbol-function symbol) original))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document empty-result))
+                :to-equal (format nil "* Archive :ARCHIVE:~%"))
+        (expect (document-text
+                 (edit-result-updated-document non-final-result))
+                :to-equal (format nil "* Task~%* Archive :ARCHIVE:~%"))
+        (expect (org-archive-error-reason condition)
+                :to-be :archive-sibling-not-found)))))

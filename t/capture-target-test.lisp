@@ -384,3 +384,47 @@
                 (format nil "* Target~%** Entry ~%"))
         (expect (capture-target-result-cursor-offset result)
                 :to-be 18)))))
+
+(describe "capture target edge coverage"
+  (it "rejects string document vectors and non-list or short ID targets"
+    (let* ((document (parse-org "* Target" :source-name "notes.org"))
+           (string-documents
+             (capture-target-test-condition
+              (lambda ()
+                (org-kit::capture-target-normalize-documents "documents"))))
+           (non-list-target
+             (capture-target-test-condition
+              (lambda ()
+                (org-kit::capture-target-resolve
+                 (list document) :unsupported nil (make-limits)
+                 (capture-target-test-time-context)))))
+           (short-id
+             (capture-target-test-condition
+              (lambda ()
+                (org-kit::capture-target-resolve
+                 (list document) '(:id) nil (make-limits)
+                 (capture-target-test-time-context))))))
+      (with-soft-assertions
+        (expect (org-capture-error-reason string-documents)
+                :to-be :invalid-documents)
+        (expect (org-capture-error-reason non-list-target)
+                :to-be :invalid-target)
+        (expect (org-capture-error-reason short-id)
+                :to-be :invalid-target))))
+
+  (it "handles unparsed documents and empty capture fragments"
+    (let ((unparsed (make-document "")))
+      (with-soft-assertions
+        (expect (org-kit::capture-target-headlines unparsed) :to-equal nil)
+        (expect (org-kit::capture-target-template-headlines unparsed)
+                :to-equal nil))
+      (multiple-value-bind (joined prefix-length)
+          (org-kit::capture-target-join-fragment unparsed 0 "")
+        (with-soft-assertions
+          (expect joined :to-equal "")
+          (expect prefix-length :to-be 0)))
+      (multiple-value-bind (joined prefix-length)
+          (org-kit::capture-target-join-fragment unparsed 0 "Entry")
+        (with-soft-assertions
+          (expect joined :to-equal (format nil "Entry~%"))
+          (expect prefix-length :to-be 0))))))
