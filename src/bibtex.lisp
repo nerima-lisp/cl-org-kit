@@ -370,19 +370,27 @@
          (properties (and drawer (node-children drawer))))
     (if (null properties)
         document
-      (let* ((patches
+      (let* ((source (document-text document))
+             (patches
               (loop for property in properties
                     for label-length =
                     (+ 2 (length (node-property property :key)))
                     for value-start = (+ (node-begin property) label-length)
+                    for line-end =
+                    (nth-value 0
+                               (edit-properties-line-bounds
+                                source (node-begin property)))
                     for value = (node-property property :value)
-                    for padding = (max 0 (- 11 label-length 1))
-                    when (and (stringp value) (zerop (length value)))
-                    collect (edit-make-patch value-start (1+ value-start) "")
-                    else when (plusp padding)
+                    for padding = (max 1 (- 11 label-length))
+                    when (stringp value)
                     collect (edit-make-patch
-                             (1+ value-start) (1+ value-start)
-                             (make-string padding :initial-element #\Space))))
+                             value-start line-end
+                             (if (zerop (length value))
+                                 ""
+                               (concatenate
+                                'string
+                                (make-string padding :initial-element #\Space)
+                                value)))))
              (expected (edit-canonical-document document)))
         (if patches
             (edit-apply-patches document patches

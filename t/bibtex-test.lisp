@@ -223,7 +223,7 @@
         (expect (plusp (length misc-source)) :to-be t)
         (expect (bibtex-export misc-document misc-heading)
                 :to-equal
-                (format nil "@misc{empty,~%~%}~%")))))
+                (format nil "@misc{empty,~%  title={}~%}~%")))))
 
   (it "converts incomplete entries with the fields present"
     (let* ((input "@article{missing, author={Ada}, title={No journal or year}}")
