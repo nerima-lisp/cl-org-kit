@@ -20,21 +20,26 @@ REASON identifies the failure and CONTEXT is a bounded, escaped input excerpt.")
   "Return the bounded, escaped link or search option that caused the failure."
   (slot-value condition 'context))
 
-(defstruct (link-resolution (:constructor %make-link-resolution
+(defstruct (link-resolution (:constructor %make-link-resolution-raw
                                (status target candidates))
                             (:conc-name %link-resolution-)
                             (:copier nil)
                             (:predicate %link-resolution-p))
   "A link resolution status, target and ordered candidate list."
-  (status :unresolved :type (member :resolved :unresolved :ambiguous)
-          :read-only t)
+  (status :unresolved :read-only t)
   (target nil :read-only t)
   (candidates nil :read-only t))
 
 (defun make-link-resolution (&key (status :unresolved) target candidates)
   "Return a link resolution with STATUS, TARGET and CANDIDATES."
-  (check-type status (member :resolved :unresolved :ambiguous))
   (%make-link-resolution status target (copy-list candidates)))
+
+(defun %make-link-resolution (status target candidates)
+  (unless (member status '(:resolved :unresolved :ambiguous))
+    (error 'type-error
+           :datum status
+           :expected-type '(member :resolved :unresolved :ambiguous)))
+  (%make-link-resolution-raw status target candidates))
 
 (defun link-resolution-p (object)
   "Return true when OBJECT is a link resolution."
