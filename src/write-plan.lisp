@@ -707,18 +707,21 @@ Symlink components below ROOT are rejected."
           (setf parent-fd nil))))))
 
 (defun apply-write-plan (plan root &key (limits (make-limits)))
-  "Validate PLAN in full, then replace each target below ROOT through a
-same-directory temporary file and rename. ROOT must name an existing
-directory; a symlink used as ROOT resolves to its target. All paths are relative
-POSIX paths. Every entry and limit is checked before directory or file creation.
-Returns normalized relative paths in plan order; a multi-file plan is not
-transactional. The caller must prevent other actors from renaming or replacing
-path components during application. The library rejects absolute paths, `..`,
-NUL, and symlink components below the resolved root. After each write, it
-compares the opened parent's device and inode with a root-relative re-open. That
-check reports a missing or different parent. A path restored before the check
-is not detected. The check cannot prevent a rename during a write or after the
-check."
+  "Validate PLAN in full, then apply each write or delete entry below ROOT.
+Writes create or replace targets through a same-directory temporary file and
+rename; deletes unlink their targets and cannot be rolled back. ROOT must name
+an existing directory; a symlink used as ROOT resolves to its target. All paths
+are relative POSIX paths. Every entry and limit is checked before directory or
+file creation. Returns normalized relative paths in plan order; a multi-file
+plan is not transactional. The caller must prevent other actors from renaming
+or replacing path components during application. The library rejects absolute
+paths, `..`, NUL, and symlink components below the resolved root. After each
+operation, it compares the device and inode of the opened parent with a
+root-relative re-open. That check detects a missing or different parent. A
+missing or different parent restored before the check is not detected. For a
+delete entry, a target replaced by a symlink after preflight causes the symlink
+itself to be unlinked; a target replaced by a directory signals :io-failed. The
+check cannot prevent a rename during an operation or after the check."
   (multiple-value-bind (canonical-root records)
       (write-plan-prepare plan root limits)
     (handler-case

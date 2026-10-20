@@ -1926,3 +1926,109 @@
                        (progn (make-write-plan-delete-entry 12) nil)
                      (type-error () t))
                    :to-be t)))))))
+
+(describe "delete write-plan path safety"
+  (it "rejects an absolute delete path without touching its target"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "absolute.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-delete-entry
+                            (namestring target)))))
+              (condition nil))
+         (write-plan-test-write-text target "keep")
+         (setf condition (write-plan-test-capture-error plan root))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when (typep condition 'org-write-plan-error)
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :absolute-path))
+           (expect (write-plan-test-read-text target) :to-equal "keep"))))))
+  (it "rejects a directory as a delete target during preflight"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((directory (write-plan-test-child-directory root "folder"))
+              (marker (write-plan-test-path directory "marker"))
+              (plan (make-write-plan
+                     (list (make-write-plan-delete-entry "folder"))))
+              (condition (write-plan-test-capture-error plan root)))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when (typep condition 'org-write-plan-error)
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :target-not-regular-file))
+           (expect (probe-file marker) :to-be-truthy)))))
+  (it "rejects dot and empty delete paths as root selectors"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (dolist (path '("." ""))
+         (let* ((plan (make-write-plan
+                       (list (make-write-plan-delete-entry path))))
+                (condition (write-plan-test-capture-error plan root)))
+           (with-soft-assertions
+             (expect (typep condition 'org-write-plan-error) :to-be t)
+             (when (typep condition 'org-write-plan-error)
+               (expect (org-write-plan-error-reason condition)
+                       :to-be :invalid-path))))))))
+  (it "rejects a write and delete for the same path before changing it"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "conflict.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-entry "conflict.txt" "new")
+                           (make-write-plan-delete-entry "conflict.txt"))))
+              (condition nil))
+         (write-plan-test-write-text target "keep")
+         (setf condition (write-plan-test-capture-error plan root))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when (typep condition 'org-write-plan-error)
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :duplicate-path))
+           (expect (write-plan-test-read-text target) :to-equal "keep"))))))
+  (it "unlinks a symlink substituted for the target after preflight"
+    (write-plan-test-call-with-directory
+     (lambda (base)
+       (let* ((root (write-plan-test-child-directory base "root"))
+              (outside (write-plan-test-path base "outside.txt"))
+              (target (write-plan-test-path root "target.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-delete-entry "target.txt")))))
+         (write-plan-test-write-text target "before preflight")
+         (write-plan-test-write-text outside "outside")
+         (let ((result
+                 (write-plan-test-call-after-preflight
+                  (lambda (canonical-root)
+                    (declare (ignore canonical-root))
+                    (delete-file target)
+                    (sb-posix:symlink (namestring outside) (namestring target)))
+                  (lambda () (apply-write-plan plan root)))))
+           (with-soft-assertions
+             (expect result :to-equal (list "target.txt"))
+             (expect (probe-file target) :to-be nil)
+             (expect (write-plan-test-read-text outside) :to-equal "outside")))))))
+  (it "reports io-failed when a directory replaces the target after preflight"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "target"))
+              (marker (write-plan-test-path target "marker"))
+              (plan (make-write-plan
+                     (list (make-write-plan-delete-entry "target"))))
+              (condition nil))
+         (write-plan-test-write-text target "before preflight")
+         (setf condition
+               (write-plan-test-call-after-preflight
+                (lambda (canonical-root)
+                  (declare (ignore canonical-root))
+                  (delete-file target)
+                  (write-plan-test-child-directory root "target"))
+                (lambda () (write-plan-test-capture-error plan root))))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when (typep condition 'org-write-plan-error)
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :io-failed)
+             (expect (typep (org-write-plan-error-cause condition)
+                            'sb-posix:syscall-error)
+                     :to-be t))
+           (expect (probe-file marker) :to-be-truthy))))))))
