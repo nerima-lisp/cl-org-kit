@@ -1816,3 +1816,113 @@
          (org-kit::write-plan-symbol-value
           (find-symbol "*FEATURES*" :cl))
          :to-equal *features*)))))
+(describe "delete write-plan failure behavior"
+  (it "reports a delete target removed after preflight"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "disappears.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-delete-entry "disappears.txt"))))
+              (condition nil))
+         (write-plan-test-write-text target "present before preflight")
+         (setf condition
+               (write-plan-test-call-after-preflight
+                (lambda (canonical-root)
+                  (declare (ignore canonical-root))
+                  (delete-file target))
+                (lambda () (write-plan-test-capture-error plan root))))
+         (with-soft-assertions
+           (expect (typep condition 'org-write-plan-error) :to-be t)
+           (when (typep condition 'org-write-plan-error)
+             (expect (org-write-plan-error-reason condition)
+                     :to-be :missing-target)
+             (expect (org-write-plan-error-path condition)
+                     :to-equal "disappears.txt")
+             (expect (typep (org-write-plan-error-cause condition)
+                            'sb-posix:syscall-error)
+                     :to-be t)
+             (when (typep (org-write-plan-error-cause condition)
+                          'sb-posix:syscall-error)
+               (expect (sb-posix:syscall-errno
+                        (org-write-plan-error-cause condition))
+                       :to-be sb-posix:enoent)
+               (expect (princ-to-string condition)
+                       :to-equal "Write plan rejected (missing-target) for disappears.txt")))
+           (expect (probe-file target) :to-be nil))))))
+  (it "wraps unlink failures and closes the opened parent descriptor"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((target (write-plan-test-path root "protected.txt"))
+              (plan (make-write-plan
+                     (list (make-write-plan-delete-entry "protected.txt"))))
+              (unlink-symbol 'org-kit::%write-plan-unlinkat)
+              (original-unlink (symbol-function unlink-symbol))
+              (open-symbol 'org-kit::write-plan-open-parent-directory)
+              (original-open (symbol-function open-symbol))
+              (denied (make-condition 'sb-posix:syscall-error
+                                      :errno sb-posix:eacces
+                                      :name "unlinkat"))
+              (parent-fd nil)
+              (condition nil))
+         (write-plan-test-write-text target "keep")
+         (unwind-protect
+              (progn
+                (setf (symbol-function open-symbol)
+                      (lambda (&rest arguments)
+                        (setf parent-fd (apply original-open arguments))))
+                (setf (symbol-function unlink-symbol)
+                      (lambda (&rest arguments)
+                        (declare (ignore arguments))
+                        (error denied)))
+                (setf condition (write-plan-test-capture-error plan root)))
+           (setf (symbol-function open-symbol) original-open
+                 (symbol-function unlink-symbol) original-unlink))
+         (flet ((fd-closed-p (fd)
+                  (handler-case
+                      (progn (sb-posix:fstat fd) nil)
+                    (sb-posix:syscall-error (condition)
+                      (= (sb-posix:syscall-errno condition) sb-posix:ebadf)))))
+           (with-soft-assertions
+             (expect (typep condition 'org-write-plan-error) :to-be t)
+             (when (typep condition 'org-write-plan-error)
+               (expect (org-write-plan-error-reason condition) :to-be :io-failed)
+               (expect (eq (org-write-plan-error-cause condition) denied)
+                       :to-be t)
+               (expect (princ-to-string condition)
+                       :to-equal "Write plan rejected (io-failed) for protected.txt"))
+             (expect (write-plan-test-read-text target) :to-equal "keep")
+             (expect (integerp parent-fd) :to-be t)
+             (when (integerp parent-fd)
+               (expect (fd-closed-p parent-fd) :to-be t))))))))
+  (it "accepts pathname delete targets and rejects non-path values"
+    (write-plan-test-call-with-directory
+     (lambda (root)
+       (let* ((pathname (make-pathname :directory '(:relative "nested")
+                                       :name "from-pathname" :type "txt"))
+              (pathname-name (sb-ext:native-namestring pathname))
+              (string-path (copy-seq "nested/from-string.txt"))
+              (string-entry (make-write-plan-delete-entry string-path))
+              (pathname-entry (make-write-plan-delete-entry pathname))
+              (plan (make-write-plan (list string-entry pathname-entry)))
+              (string-target (write-plan-test-path root "nested/from-string.txt"))
+              (pathname-target (write-plan-test-path root pathname-name)))
+         (setf (char string-path 0) #\X)
+         (ensure-directories-exist string-target)
+         (write-plan-test-write-text string-target "string")
+         (write-plan-test-write-text pathname-target "pathname")
+         (with-soft-assertions
+           (expect (write-plan-entry-path string-entry)
+                   :to-equal "nested/from-string.txt")
+           (expect (write-plan-entry-content pathname-entry) :to-be nil)
+           (expect (write-plan-entry-create-directories-p pathname-entry)
+                   :to-be nil)
+           (expect (write-plan-entry-path pathname-entry)
+                   :to-equal pathname-name)
+           (expect (apply-write-plan plan root)
+                   :to-equal (list "nested/from-string.txt" pathname-name))
+           (expect (probe-file string-target) :to-be nil)
+           (expect (probe-file pathname-target) :to-be nil)
+           (expect (handler-case
+                       (progn (make-write-plan-delete-entry 12) nil)
+                     (type-error () t))
+                   :to-be t)))))))
