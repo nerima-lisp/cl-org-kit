@@ -144,6 +144,7 @@
     "TABLE-IMPORT"
     "TABLE-EXPORT"
     "TABLE-SEND-RADIO"
+    "TABLE-TRANSPOSE"
  ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
@@ -368,6 +369,10 @@ FORMAT may be :AUTO, :CSV, or :TSV; :AUTO follows Org's default TSV format.")
               :to-equal
               "Transform a radio table and replace matching RECEIVE bodies.
 Return the validated edit result, preserving all source outside those bodies.")
+      (expect (documentation 'table-transpose 'function)
+              :to-equal
+              "Transpose a rectangular Org pipe table, remove hlines, and return an edit result.
+TBLFM text is preserved unchanged.")
       (expect (documentation 'org-table-error 'type)
               :to-equal
               "Signalled when a table edit fails or a table formula cannot be evaluated.

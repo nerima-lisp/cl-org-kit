@@ -330,10 +330,18 @@ rejected. For example,
 skips the first input row. `:fmt` and `:hfmt` set string templates with `%s`
 placeholders for data and header cells.
 
+## Transpose
+
+`table-transpose` transposes a rectangular Org pipe table and returns an
+`edit-result`. Hlines are removed, `TBLFM` text is preserved unchanged, and
+text outside the table remains intact. Ragged tables and Table.el tables signal
+`org-table-error`.
+
 ## Errors and limits
 
 Table-specific failures such as an unsupported table type, invalid index,
-ambiguous sort range, or unsupported plot option signal `org-table-error`.
+ambiguous sort range, ragged transpose, or unsupported plot option signal
+`org-table-error`.
 General edit validation can signal `org-edit-error` for an invalid target, a
 node from another document, or a target of the wrong type. If an edit or
 write-plan exceeds a document's input, output, encoded-output, node-count, or
