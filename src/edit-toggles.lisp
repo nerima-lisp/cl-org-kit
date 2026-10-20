@@ -114,7 +114,7 @@
     ((edit-toggle-heading-prefix-end line) :headline)
     ((nth-value 1 (edit-toggle-item-prefix line)) :item)
     ((edit-toggle-fixed-marker-end line) :fixed-width)
-    ((and (plusp (length line)) (char= (char line 0) #\#)) :directive)
+    ((char= (char line 0) #\#) :directive)
     (t :normal)))
 
 (defun edit-toggle-protected-line-p (document start end allowed-types)
@@ -200,39 +200,38 @@
           (edit-headline-prefix-layout document headline)
         (declare (ignore todo-start priority-start))
         (let* ((prefix-end (max marker-end (or todo-end marker-end)
-                               (or priority-end marker-end)))
+                                (or priority-end marker-end)))
                (position (edit-headline-skip-space source prefix-end line-end))
                (commented-p (node-property headline :commentedp))
                (comment-end (+ position (length "COMMENT")))
                (comment-present-p
-                 (and (<= comment-end line-end)
-                      (string= "COMMENT" source
-                               :start2 position :end2 comment-end)
-                      (or (= comment-end line-end)
-                          (edit-toggle-horizontal-space-p
-                           (char source comment-end))))))
+                (and (<= comment-end line-end)
+                     (string= "COMMENT" source
+                              :start2 position :end2 comment-end)
+                     (or (= comment-end line-end)
+                         (edit-toggle-horizontal-space-p
+                          (char source comment-end))))))
           (unless (eq (not (null commented-p)) (not (null comment-present-p)))
             (edit-signal-error target :uneditable-structure
                                "Headline COMMENT marker does not match its parsed state"))
           (let* ((patch
-                   (if commented-p
-                       (let ((end comment-end))
-                         (loop while (and (< end line-end)
-                                          (edit-toggle-horizontal-space-p
-                                           (char source end)))
-                               do (incf end))
-                         (edit-make-patch position end "" target))
-                       (edit-make-patch
-                        position position
-                        (concatenate
-                         'string
-                         (if (and (> position line-start)
-                                  (not (edit-toggle-horizontal-space-p
-                                        (char source (1- position)))))
-                             " " "")
-                         "COMMENT"
-                         (if (< position line-end) " " ""))
-                        target)))
+                  (if commented-p
+                      (let ((end comment-end))
+                        (loop while (and (< end line-end)
+                                         (edit-toggle-horizontal-space-p
+                                          (char source end)))
+                              do (incf end))
+                        (edit-make-patch position end "" target))
+                    (edit-make-patch
+                     position position
+                     (concatenate
+                      'string
+                      (if (not (edit-toggle-horizontal-space-p
+                                (char source (1- position))))
+                          " " "")
+                      "COMMENT"
+                      (if (< position line-end) " " ""))
+                     target)))
                  (expected (edit-canonical-copy
                             (edit-canonical-document document)))
                  (path (edit-node-path document headline target)))

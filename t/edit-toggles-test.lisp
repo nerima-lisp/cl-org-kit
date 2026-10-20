@@ -422,5 +422,46 @@
                 :to-equal (format nil "* TODO COMMENT~%"))
         (expect (edit-toggle-test-preserves-outside-span-p source result)
                 :to-be t)
-        (expect (document-text document) :to-equal source)))))
+        (expect (document-text document) :to-equal source))))
+  (it "covers empty and digit-only item prefixes"
+    (let* ((empty-prefix (org-kit::edit-toggle-item-prefix ""))
+           (source (format nil "12~%"))
+           (document (parse-org source))
+           (result (org-kit::toggle-item document (make-edit-span 0 0))))
+      (with-soft-assertions
+        (expect empty-prefix :to-equal nil)
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal (format nil "- 12~%"))
+        (expect (document-text document) :to-equal source))))
+  (it "leaves nonmatching selected line kinds unchanged"
+    (dolist (fixture
+             (list
+              (list #'org-kit::toggle-heading
+                    (format nil "* Heading~%plain~%")
+                    (format nil "Heading~%plain~%"))
+              (list #'org-kit::toggle-heading
+                    (format nil "- item~%plain~%")
+                    (format nil "* item~%plain~%"))
+              (list #'org-kit::toggle-heading
+                    (format nil "plain~%* Heading~%")
+                    (format nil "* plain~%* Heading~%"))
+              (list #'org-kit::toggle-item
+                    (format nil "- item~%plain~%")
+                    (format nil "item~%plain~%"))
+              (list #'org-kit::toggle-item
+                    (format nil "* Heading~%plain~%")
+                    (format nil "- Heading~%plain~%"))
+              (list #'org-kit::toggle-item
+                    (format nil "plain~%- item~%")
+                    (format nil "- plain~%- item~%"))))
+      (let* ((operation (first fixture))
+             (source (second fixture))
+             (expected (third fixture))
+             (document (parse-org source))
+             (result (funcall operation document
+                              (make-edit-span 0 (length source)))))
+        (with-soft-assertions
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal expected)
+          (expect (document-text document) :to-equal source))))))
 
