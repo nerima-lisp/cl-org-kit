@@ -140,14 +140,22 @@ CURSOR-OFFSET is zero when the template has no %? marker."
                   (return index)))
                (t (incf index))))))
 
-(defun capture-template-indent-initial (initial prefix)
-  (with-output-to-string (stream)
-    (loop for index from 0 below (length initial)
-          for character = (char initial index)
-          do (write-char character stream)
-             (when (and (char= character #\Newline)
-                       (< index (1- (length initial))))
-               (write-string prefix stream)))))
+(defun capture-template-indent-initial (initial prefix limits output-length)
+  (let* ((indent-count
+           (loop for index from 0 below (length initial)
+                 count (and (char= (char initial index) #\Newline)
+                            (< index (1- (length initial))))))
+         (next-length (+ output-length
+                         (length initial)
+                         (* indent-count (length prefix)))))
+    (check-limit limits :max-output-length next-length)
+    (with-output-to-string (stream)
+      (loop for index from 0 below (length initial)
+            for character = (char initial index)
+            do (write-char character stream)
+               (when (and (char= character #\Newline)
+                          (< index (1- (length initial))))
+                 (write-string prefix stream))))))
 
 (defun expand-capture-template
     (template &key (initial nil initial-p) (annotation nil annotation-p)
@@ -162,7 +170,9 @@ Return a CAPTURE-TEMPLATE-RESULT; no prompts or file reads are performed."
   (let ((effective-limits (or limits (make-limits)))
         (cursor-offset nil)
         (output-length 0)
-        (line-prefix ""))
+        (line-prefix
+         (and (search "%i" template)
+              (make-array 0 :element-type 'character :adjustable t :fill-pointer 0))))
     (unless (limits-p effective-limits)
       (capture-signal :invalid-limits nil "Expected a limits object"))
     (unless (org-time-context-p time-context)
@@ -174,11 +184,11 @@ Return a CAPTURE-TEMPLATE-RESULT; no prompts or file reads are performed."
                  (check-limit effective-limits :max-output-length next-length)
                  (setf output-length next-length)
                  (write-string text stream)
-                 (let ((newline (position #\Newline text :from-end t)))
-                   (setf line-prefix
-                         (if newline
-                             (subseq text (1+ newline))
-                             (concatenate 'string line-prefix text))))))
+                 (when line-prefix
+                   (loop for character across text
+                         do (if (char= character #\Newline)
+                                (setf (fill-pointer line-prefix) 0)
+                                (vector-push-extend character line-prefix))))))
              (missing (kind context)
                (capture-signal :missing-value context
                                (format nil "Missing capture value for ~A" kind)))
@@ -211,7 +221,8 @@ Return a CAPTURE-TEMPLATE-RESULT; no prompts or file reads are performed."
                                         (capture-template-indent-initial
                                          (capture-template-required-string
                                           initial :initial)
-                                         line-prefix))
+                                         line-prefix effective-limits
+                                         output-length))
                                   (incf index 2))
                                  ((char= token #\a)
                                   (unless annotation-p

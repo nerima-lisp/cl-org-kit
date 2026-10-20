@@ -36,6 +36,17 @@
                 (format nil
                         "Intro~%  one~%  two~%https://example.test/ :work:urgent: <2024-02-20 Tue> memo body"))
         (expect (capture-template-result-cursor-offset result) :to-be 0))))
+  (it "preserves non-ASCII current lines when indenting initial text"
+    (let* ((time-context (capture-template-test-time-context))
+           (result
+             (expand-capture-template
+              (format nil "見出し~%かな %i")
+              :initial (format nil "日本語~%語")
+              :time-context time-context)))
+      (with-soft-assertions
+        (expect (capture-template-result-expanded-text result)
+                :to-equal
+                (format nil "見出し~%かな 日本語~%かな 語")))))
   (it "passes an Emacs Lisp expression to the registered evaluator"
     (let ((callbacks (make-callback-registry))
           (received nil))
@@ -286,4 +297,91 @@
                 :to-be t)
         (when (typep input-limit-condition 'org-resource-limit-error)
           (expect (org-resource-limit-error-limit-name input-limit-condition)
-                  :to-be :max-input-length))))))
+                  :to-be :max-input-length)))))
+  (it-sequential "keeps CPU-time growth near linear for long single-line templates"
+    (let* ((time-context (capture-template-test-time-context))
+           (short-template (make-string 4096 :initial-element #\x))
+           (long-template (make-string 8192 :initial-element #\x))
+           (warmup-pairs 2)
+           (sample-pairs 5)
+           (repetitions 8))
+      (labels ((measure (template)
+                 (sb-ext:gc :full t)
+                 (let ((before-bytes (sb-ext:get-bytes-consed))
+                       (start-time (get-internal-run-time))
+                       (result nil))
+                   (loop repeat repetitions
+                         do (setf result
+                                  (expand-capture-template
+                                   template :time-context time-context)))
+                   (let ((elapsed (- (get-internal-run-time) start-time))
+                         (allocated (- (sb-ext:get-bytes-consed)
+                                       before-bytes)))
+                     (values elapsed allocated
+                             (capture-template-result-expanded-text
+                              result)))))
+               (median (numbers)
+                 (nth (floor (length numbers) 2)
+                      (sort (copy-list numbers) #'<))))
+        (with-soft-assertions
+          (let ((samples nil))
+            (loop for pair from 0 below (+ warmup-pairs sample-pairs)
+                  for short-first = (evenp pair)
+                  for first-template = (if short-first
+                                           short-template long-template)
+                  for second-template = (if short-first
+                                            long-template short-template)
+                  do (multiple-value-bind
+                         (first-time first-allocation first-output)
+                         (measure first-template)
+                       (multiple-value-bind
+                           (second-time second-allocation second-output)
+                           (measure second-template)
+                         (expect first-output :to-equal first-template)
+                         (expect second-output :to-equal second-template)
+                         (when (>= pair warmup-pairs)
+                           (push (if short-first
+                                     (list first-time second-time
+                                           first-allocation second-allocation)
+                                     (list second-time first-time
+                                           second-allocation first-allocation))
+                                 samples)))))
+            (let* ((time-ratios
+                     (mapcar (lambda (sample)
+                               (/ (float (second sample))
+                                  (max 1 (first sample))))
+                             samples))
+                   (allocation-ratios
+                     (mapcar (lambda (sample)
+                               (/ (float (fourth sample))
+                                  (max 1 (third sample))))
+                             samples)))
+              (expect (= (length samples) sample-pairs) :to-be t)
+              (expect (every (lambda (sample)
+                               (and (> (first sample) 0)
+                                    (> (second sample) 0)))
+                             samples)
+                      :to-be t)
+              (expect (< (median time-ratios) 3.25) :to-be t)
+              (expect (< (median allocation-ratios) 3) :to-be t)))))))
+  (it-sequential "checks initial expansion limits before copying large text"
+    (let* ((initial (make-string 262144 :initial-element #\x))
+           (time-context (capture-template-test-time-context))
+           (before (progn (sb-ext:gc :full t)
+                          (sb-ext:get-bytes-consed)))
+           (condition
+             (capture-template-test-condition
+              (lambda ()
+                (expand-capture-template
+                 "%i" :initial initial
+                 :time-context time-context
+                 :limits (make-limits :max-output-length 128)))))
+           (allocated (- (sb-ext:get-bytes-consed) before)))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-actual condition)
+                  :to-be (length initial)))
+        (expect (< allocated (floor (length initial) 2)) :to-be t)))))
