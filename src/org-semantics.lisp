@@ -484,13 +484,5 @@ contributes, :DOCUMENT for a #+PROPERTY fallback, or NIL when absent."
               (effective-category-property)))
         (getf (document-settings document) :category)
         (let ((source-name (document-source-name document)))
-          (when source-name
-            (let* ((source-path (pathname source-name))
-                   (name (pathname-name source-path))
-                   (type (pathname-type source-path)))
-              (if type
-                  name
-                  (or name
-                      (let ((file-name (file-namestring source-path)))
-                        (and (plusp (length file-name)) file-name)))))))
+          (when source-name (pathname-name (pathname source-name))))
         fallback)))

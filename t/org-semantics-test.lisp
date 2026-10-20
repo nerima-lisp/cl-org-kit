@@ -430,4 +430,31 @@
                  document heading
                  :category-override "Pinned"
                  :fallback "Uncategorized")
-                :to-equal "Pinned")))))
+                :to-equal "Pinned"))))
+  (it "uses drawer categories with non-symbol node property keys"
+      (let* ((document (parse-org "* Heading"))
+             (drawer-category
+               (make-node :node-property
+                          :properties (list :key "CATEGORY" :value "Drawer")))
+             (property-drawer
+               (make-node :property-drawer :children (list drawer-category)))
+             (section
+               (make-node :section :children (list property-drawer)))
+             (heading
+               (make-node :headline
+                          :properties (list :level 1 :raw-value "Heading"
+                                            "CATEGORY" "Ignored")
+                          :children (list section))))
+        (setf (node-children (document-root document)) (list heading))
+        (with-soft-assertions
+          (expect (org-kit::org-effective-category
+                   document heading :fallback "Uncategorized")
+                  :to-equal "Drawer"))))
+  (it "uses the caller fallback for an empty source name"
+      (let* ((document (parse-org "* Empty" :source-name ""))
+             (heading
+               (first (org-semantics-test-headings document))))
+        (with-soft-assertions
+          (expect (org-kit::org-effective-category
+                   document heading :fallback "Uncategorized")
+                  :to-equal "Uncategorized")))))
