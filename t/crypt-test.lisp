@@ -233,13 +233,13 @@
       (register-callback registry :crypt-decrypt "org-crypt"
                          (lambda (armor)
                            (declare (ignore armor))
-                           (format nil "* Top~%text~%** Child~%inside")))
+                           (format nil "* Top~%text~%** Child~%inside~%*")))
       (let* ((result (crypt-decrypt-entry
                       document (crypt-test-headline document "Entry") registry))
              (updated (edit-result-updated-document result))
              (output (document-text updated)))
         (with-soft-assertions
-          (expect (search (format nil "** Top~%text~%*** Child~%inside") output)
+          (expect (search (format nil "** Top~%text~%*** Child~%inside~%*") output)
                   :to-be-truthy)
           (expect (node-property (crypt-test-headline updated "Top") :level)
                   :to-be 2)
@@ -258,8 +258,10 @@
                         nil)
                (org-crypt-error (condition) condition)))
            (registry (make-callback-registry))
+           (callback-error-registry (make-callback-registry))
            (failure nil)
-           (caught nil))
+           (caught nil)
+           (callback-error-caught nil))
       (register-callback registry :crypt-encrypt "org-crypt"
                          (lambda (text)
                            (setf failure
@@ -271,6 +273,20 @@
       (setf caught
             (handler-case
                 (progn (crypt-encrypt-entry document heading registry) nil)
+              (org-crypt-error (condition) condition)))
+      (register-callback callback-error-registry :crypt-encrypt "org-crypt"
+                         (lambda (text)
+                           (declare (ignore text))
+                           (error (make-condition
+                                   'org-callback-error
+                                   :message "caller callback failed"
+                                   :kind :crypt-encrypt
+                                   :name "org-crypt"
+                                   :reason :callback-failed))))
+      (setf callback-error-caught
+            (handler-case
+                (progn (crypt-encrypt-entry document heading callback-error-registry)
+                       nil)
               (org-crypt-error (condition) condition)))
       (let ((failure-report (princ-to-string failure))
             (outer-report (princ-to-string caught))
@@ -284,6 +300,11 @@
           (when caught
             (expect (org-crypt-error-reason caught) :to-be :callback-failed)
             (expect (org-crypt-error-cause caught) :to-equal nil))
+          (expect (typep callback-error-caught 'org-crypt-error) :to-be t)
+          (when callback-error-caught
+            (expect (org-crypt-error-reason callback-error-caught)
+                    :to-be :callback-failed)
+            (expect (org-crypt-error-cause callback-error-caught) :to-equal nil))
           (expect (search sentinel failure-report) :to-be-truthy)
           (expect (search sentinel outer-report) :to-equal nil)
           (expect (search sentinel cause-report) :to-equal nil)
@@ -299,7 +320,23 @@
         (with-soft-assertions
           (expect (edit-result-spans result) :to-have-length 1)
           (expect (search (crypt-test-armor "secret") output) :to-be-truthy)
-          (expect (document-text document) :to-equal source)))))
+          (expect (document-text document) :to-equal source)))
+      (let* ((armored-source
+               (format nil "* Entry :crypt:~%~A~%" (crypt-test-armor "ciphertext")))
+             (armored-document (parse-org armored-source))
+             (calls 0)
+             (armored-registry (make-callback-registry)))
+        (register-callback armored-registry :crypt-encrypt "org-crypt"
+                           (lambda (text)
+                             (incf calls)
+                             (crypt-test-armor text)))
+        (let* ((result (crypt-encrypt-entries armored-document armored-registry))
+               (output (document-text (edit-result-updated-document result))))
+          (with-soft-assertions
+            (expect calls :to-be 0)
+            (expect (edit-result-spans result) :to-equal nil)
+            (expect output :to-equal armored-source)
+            (expect (document-text armored-document) :to-equal armored-source))))))
 
   (it "processes a tagged parent and child through the parent once"
     (let* ((source (format nil "* Parent :crypt:~%parent body~%** Child :crypt:~%child body~%"))
@@ -621,6 +658,7 @@
   (it "returns an unchanged result for a heading with no body"
     (let* ((source (format nil "* Entry~%"))
            (document (parse-org source))
+           (empty-span (org-kit::crypt-find-armor-span document 0 0))
            (registry (make-callback-registry))
            (calls 0))
       (register-callback registry :crypt-encrypt "org-crypt"
@@ -631,6 +669,7 @@
       (let ((result (crypt-encrypt-entry
                      document (crypt-test-headline document "Entry") registry)))
         (with-soft-assertions
+          (expect empty-span :to-equal nil)
           (expect calls :to-be 0)
           (expect (edit-result-spans result) :to-equal nil)
           (expect (document-text (edit-result-updated-document result))
@@ -753,7 +792,32 @@
           (expect calls :to-be 0)
           (expect (edit-result-spans result) :to-equal nil)
           (expect (document-text (edit-result-updated-document result))
-                  :to-equal source)))))
+                  :to-equal source)))
+      (let* ((empty-source (format nil "* Entry :vault:~%"))
+             (empty-document (parse-org empty-source))
+             (result (crypt-decrypt-entries empty-document registry :tag "vault")))
+        (with-soft-assertions
+          (expect calls :to-be 0)
+          (expect (edit-result-spans result) :to-equal nil)
+          (expect (document-text (edit-result-updated-document result))
+                  :to-equal empty-source)))
+      (let* ((armor-source
+               (format nil "* Entry :vault:~%~A~%" (crypt-test-armor "ciphertext")))
+             (armor-document (parse-org armor-source))
+             (identity-registry (make-callback-registry))
+             (identity-calls 0))
+        (register-callback identity-registry :crypt-decrypt "org-crypt"
+                           (lambda (armor)
+                             (incf identity-calls)
+                             armor))
+        (let* ((result (crypt-decrypt-entries armor-document identity-registry
+                                             :tag "vault"))
+               (output (document-text (edit-result-updated-document result))))
+          (with-soft-assertions
+            (expect identity-calls :to-be 1)
+            (expect (edit-result-spans result) :to-have-length 1)
+            (expect output :to-equal armor-source)
+            (expect (document-text armor-document) :to-equal armor-source))))))
 
   (it "rejects non-boolean bulk tag inheritance"
     (let* ((document (parse-org (format nil "* Entry :vault:~%secret~%")))

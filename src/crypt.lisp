@@ -413,9 +413,9 @@ footer remains in the document. This operation does not require a crypt tag."
                       armor-start))))
            (crypt-headlines-in-subtree root))))
     (if candidate
-        (let ((result (crypt-decrypt-entry document candidate registry)))
-          (values (edit-result-updated-document result)
-                  (not (null (edit-result-spans result)))))
+        (values (edit-result-updated-document
+                 (crypt-decrypt-entry document candidate registry))
+                t)
         (values document nil))))
 
 (defun crypt-bulk-transform (document registry direction tag inherit)
