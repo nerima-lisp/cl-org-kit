@@ -40,12 +40,7 @@
                                             (make-org-time-value "2025-01-01")
                                             :options
                                             '(:sorting-strategy nil))
-                                      (list :key
-                                            :todo
-                                            :type
-                                            :todo
-                                            :options
-                                            '(:user-defined-sorter nil))
+                                      (list :key :todo :type :todo)
                                       (list :key
                                             #\m
                                             :type
@@ -54,14 +49,7 @@
                                             "TODO!=\"DONE\""
                                             :options
                                             '(:sorting-strategy nil))
-                                      (list :key
-                                            "search"
-                                            :type
-                                            :search
-                                            :search
-                                            "+Alpha"
-                                            :options
-                                            '(:user-defined-sorter nil)))
+                                      (list :key "search" :type :search :search "+Alpha"))
                                      :time-context
                                      time-context)))
                 (with-soft-assertions
