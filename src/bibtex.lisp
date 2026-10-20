@@ -533,7 +533,7 @@
                               headline (bibtex-property-key prefix field)))))
                    (if (stringp value)
                        (string-trim '(#\Space #\Tab #\Newline #\Return) value)
-                       value)))
+                       value))))
              (required-fields
                (bibtex-resolve-field-groups
                 (second type-definition) value-function))
@@ -551,4 +551,4 @@
                       (format stream ",~%"))
                     (format stream "  ~A={~A}" field value))
            (terpri stream)
-           (format stream "}~%"))))))))
+           (format stream "}~%")))))))
