@@ -309,7 +309,13 @@
                                      :type
                                      :match
                                      :match
-                                     "/!"))))
+                                     "/!"))
+                         (list :bad-key-type
+                               (list :key 17 :type :todo))
+                         (list :bad-elisp-form
+                               (list :key "x"
+                                     :type :match
+                                     :match (list :elisp "query-source" "extra")))))
                   (failures
                    (mapcar
                     (lambda (case)
