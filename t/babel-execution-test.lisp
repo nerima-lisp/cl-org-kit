@@ -416,4 +416,157 @@
             (babel-execution-test-condition
              (lambda ()
                (org-kit:execute-babel-source-block document block registry))))
-      (expect (eq caught condition) :to-be t))))
+      (expect (eq caught condition) :to-be t)))
+  (it "validates executor options and captures output with reader evaluation disabled"
+    (let* ((*babel-execution-test-sentinel* nil)
+           (runner-error
+             (babel-execution-test-condition
+              (lambda () (org-kit:make-babel-shell-reference-executor nil))))
+           (bad-package-error
+             (babel-execution-test-condition
+              (lambda () (org-kit::babel-execution-package 42))))
+           (missing-package-error
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-execution-package
+                 "ORG-KIT-NO-SUCH-BABEL-EXECUTOR-PACKAGE"))))
+           (package-object (org-kit::babel-execution-package (find-package :cl-user)))
+           (executor (org-kit:make-babel-common-lisp-reference-executor))
+           (captured-output
+             (funcall executor
+                      "(write-string \"captured\") (+ 1 2)"
+                      '(("RESULTS" . "value output"))
+                      nil))
+           (reader-condition
+             (babel-execution-test-condition
+              (lambda ()
+                (funcall executor
+                         "#.(setf cl-org-kit/test::*babel-execution-test-sentinel* t)"
+                         nil nil))))
+           (document
+             (parse-org
+              (babel-execution-test-lines
+               "#+NAME: task"
+               "#+BEGIN_SRC shell"
+               "body"
+               "#+END_SRC")))
+           (block (babel-execution-test-named-source-block document "task"))
+           (lowercase-parameter-error
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-execution-effective-parameters
+                 document block '(("lower" . "value"))))))
+           (non-string-parameter-error
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-execution-effective-parameters
+                 document block '(("UPPER" . 7))))))
+           (unsupported-eval
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-execution-eval-action
+                 '(("EVAL" . "sometimes")) :execute))))
+           (missing-hash
+             (babel-execution-test-condition
+              (lambda () (org-kit::babel-execution-hash nil "body" nil nil))))
+           (invalid-hash-function
+             (babel-execution-test-condition
+              (lambda () (org-kit::babel-execution-hash 7 "body" nil nil))))
+           (non-string-hash
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-execution-hash
+                 (lambda (body parameters variables)
+                   (declare (ignore body parameters variables))
+                   nil)
+                 "body" nil nil))))
+           (invalid-confirmation
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-execution-confirmed-p block nil 7))))
+           (invalid-registry
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::%execute-babel-source-block document block nil))))
+           (invalid-result-node
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::%execute-babel-source-block
+                 document block (org-kit:make-callback-registry)
+                 :result-node 7)))))
+      (with-soft-assertions
+        (expect (typep runner-error 'type-error) :to-be t)
+        (expect (typep bad-package-error 'type-error) :to-be t)
+        (expect (typep missing-package-error 'package-error) :to-be t)
+        (expect (eq package-object (find-package :cl-user)) :to-be t)
+        (expect captured-output :to-equal "captured")
+        (expect (typep reader-condition 'reader-error) :to-be t)
+        (expect *babel-execution-test-sentinel* :to-be nil)
+        (expect (typep lowercase-parameter-error 'type-error) :to-be t)
+        (expect (typep non-string-parameter-error 'type-error) :to-be t)
+        (expect (typep unsupported-eval 'org-kit:org-babel-error) :to-be t)
+        (when (typep unsupported-eval 'org-kit:org-babel-error)
+          (expect (org-kit:org-babel-error-reason unsupported-eval)
+                  :to-be :unsupported-eval-option))
+        (expect (typep missing-hash 'org-kit:org-babel-error) :to-be t)
+        (when (typep missing-hash 'org-kit:org-babel-error)
+          (expect (org-kit:org-babel-error-reason missing-hash)
+                  :to-be :missing-hash-function))
+        (expect (typep invalid-hash-function 'type-error) :to-be t)
+        (expect (typep non-string-hash 'type-error) :to-be t)
+        (expect (typep invalid-confirmation 'type-error) :to-be t)
+        (expect (typep invalid-registry 'type-error) :to-be t)
+        (expect (typep invalid-result-node 'type-error) :to-be t))))
+  (it "validates parameter names and flag values"
+    (let* ((document
+             (parse-org
+              (babel-execution-test-lines
+               "#+NAME: task"
+               "#+BEGIN_SRC shell"
+               "body"
+               "#+END_SRC")))
+           (block (babel-execution-test-named-source-block document "task"))
+           (invalid-name-error
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-execution-effective-parameters
+                 document block '((42 . "value"))))))
+           (flag-parameters
+             (org-kit::babel-execution-effective-parameters
+              document block '(("FLAG")))))
+      (with-soft-assertions
+        (expect (typep invalid-name-error 'type-error) :to-be t)
+        (expect (assoc "FLAG" flag-parameters :test #'string=)
+                :not :to-be nil)
+        (expect (cdr (assoc "FLAG" flag-parameters :test #'string=))
+                :to-be nil))))
+
+)
+(describe "Babel query confirmation"
+  (it "executes a query block when confirmation accepts it"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+BEGIN_SRC emacs-lisp :eval query~%body~%#+END_SRC~%")))
+           (block (babel-execution-test-source-block document))
+           (registry (org-kit:make-callback-registry))
+           (runs 0)
+           (result nil))
+      (org-kit:register-babel-executor
+       registry "emacs-lisp"
+       (lambda (body parameters variables)
+         (declare (ignore body parameters variables))
+         (incf runs)
+         "accepted"))
+      (setf result
+            (org-kit:execute-babel-source-block
+             document block registry
+             :confirmation-function
+             (lambda (source-block parameters)
+               (declare (ignore source-block parameters))
+               t)))
+      (with-soft-assertions
+        (expect (org-kit:babel-execution-result-status result)
+                :to-be
+                :executed)
+        (expect runs :to-be 1)))))
