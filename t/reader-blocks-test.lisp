@@ -498,27 +498,11 @@
                 :to-equal
                 ""))))
 
-  (it "round-trips CALL headers; checks empty fixed-width and example escapes, preserves #+HEADERS spelling"
+  (it "checks empty fixed-width and example escapes, preserves #+HEADERS spelling"
     (let* ((fixed-document (parse-org ":"))
            (fixed-width
             (first
              (reader-blocks-test-elements fixed-document :fixed-width)))
-           (call-document (parse-org "#+CALL: foo(bar)"))
-           (call (first (reader-blocks-test-elements call-document :babel-call)))
-           (header-call-source
-            (format nil "#+CALL: foo[:inside](bar) :outside~%"))
-           (header-call-document
-            (parse-org
-             (cl-codec-kit:string-to-octets header-call-source
-                                            :encoding :utf-8)))
-           (header-call
-            (first
-             (reader-blocks-test-elements header-call-document :babel-call)))
-           (malformed-call
-            (first
-             (reader-blocks-test-elements
-              (parse-org "#+CALL: foo[:inside")
-              :babel-call)))
            (headers-source
             (format nil
                     "#+HEADERS: :var value~%#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%"))
@@ -533,44 +517,37 @@
             (first (reader-blocks-test-elements example-document :example-block))))
       (with-soft-assertions
         (expect (node-property fixed-width :value) :to-equal "")
-        (expect (node-property call :call) :to-equal "foo")
-        (expect (node-property call :arguments) :to-equal "bar")
-        (expect (node-property header-call :call) :to-equal "foo")
-        (expect (node-property header-call :inside-header) :to-equal ":inside")
-        (expect (node-property header-call :arguments) :to-equal "bar")
-        (expect (node-property header-call :end-header) :to-equal ":outside")
-        (expect
-         (cl-codec-kit:string-to-octets
-          (emit-org (document-root header-call-document))
-          :encoding :utf-8)
-         :to-equalp
-         (cl-codec-kit:string-to-octets header-call-source
-                                        :encoding :utf-8))
         (expect (node-property source-block :header) :to-equal ":var value")
         (expect (emit-org (document-root headers-document)) :to-equal headers-source)
-        (expect
-         (list
-          (multiple-value-list
-           (org-kit::reader-blocks-call-fields "foo[:inside](bar) :outside"))
-          (multiple-value-list
-           (org-kit::reader-blocks-call-fields "foo[:inside"))
-          (multiple-value-list
-           (org-kit::reader-blocks-call-fields "foo()  ")))
-         :to-equal
-         (list
-          (list "foo" ":inside" "bar" ":outside")
-          (list "foo" nil nil "[:inside")
-          (list "foo" nil nil nil)))
-        (expect (node-property malformed-call :end-header) :to-equal "[:inside")
         (expect (node-property example :value)
                 :to-equal
                 (format nil ",#~%")))))
 
-  (it "parses standard #+CALL fields, empty end headers, and unclosed delimiters"
+  (it "parses standard #+CALL fields, empty end headers, and malformed delimiters"
     (let* ((source
-             "#+CALL: combine[:var first=1](2, (list 3 4), \"literal (pair)\")[:results output]")
+             "#+CALL: combine[:var first=1](2, (list 3 4), \"literal (pair)\") [:results output]")
            (document (parse-org source))
-           (call (first (reader-blocks-test-elements document :babel-call))))
+           (call (first (reader-blocks-test-elements document :babel-call)))
+           (outside-header-source
+            (format nil "#+CALL: foo[:inside](bar) :outside~%"))
+           (outside-header-document (parse-org outside-header-source))
+           (outside-header-call
+            (first
+             (reader-blocks-test-elements outside-header-document :babel-call)))
+           (spaced-delimiter-source
+            (format nil "#+CALL: combine [:var value] (2)~%"))
+           (spaced-delimiter-emitted-source
+            (format nil "#+CALL: combine[:var value] (2)~%"))
+           (spaced-delimiter-document (parse-org spaced-delimiter-source))
+           (spaced-delimiter-call
+            (first
+             (reader-blocks-test-elements spaced-delimiter-document :babel-call)))
+           (close-delimiter-source
+            (format nil "#+CALL: combine )~%"))
+           (close-delimiter-document (parse-org close-delimiter-source))
+           (close-delimiter-call
+            (first
+             (reader-blocks-test-elements close-delimiter-document :babel-call))))
       (with-soft-assertions
         (expect (node-property call :call) :to-equal "combine")
         (expect (node-property call :inside-header)
@@ -581,16 +558,7 @@
                 "2, (list 3 4), \"literal (pair)\"")
         (expect (node-property call :end-header)
                 :to-equal
-                ":results output")
-        (expect
-         (multiple-value-list
-          (org-kit::reader-blocks-call-fields
-           (subseq source (length "#+CALL: "))))
-         :to-equal
-         (list "combine"
-               ":var first=1"
-               "2, (list 3 4), \"literal (pair)\""
-               ":results output"))
+                "[:results output]")
         (expect
          (multiple-value-list
           (org-kit::reader-blocks-call-fields
@@ -599,23 +567,56 @@
          (list "combine" ":var value=1" "2" nil))
         (expect
          (multiple-value-list
-          (org-kit::reader-blocks-call-fields "broken[inside"))
+          (org-kit::reader-blocks-call-fields "foo[:inside"))
          :to-equal
-         (list "broken" nil nil "[inside"))
+         (list "foo" nil nil "[:inside"))
         (expect
          (multiple-value-list
           (org-kit::reader-blocks-call-fields "broken (2, (list 3 4)"))
          :to-equal
-         (list "broken" nil nil " (2, (list 3 4)"))
+         (list "broken" nil nil "(2, (list 3 4)"))
         (expect
          (multiple-value-list
           (org-kit::reader-blocks-call-fields
            "broken[:var first=1](2)[unfinished"))
          :to-equal
-         (list "broken" nil nil "[:var first=1](2)[unfinished"))
+         (list "broken" ":var first=1" "2" "[unfinished"))
         (expect (emit-org (document-root document))
                 :to-equal
-                source)))))
+                source)
+        (expect (node-property outside-header-call :call) :to-equal "foo")
+        (expect (node-property outside-header-call :inside-header)
+                :to-equal
+                ":inside")
+        (expect (node-property outside-header-call :arguments)
+                :to-equal
+                "bar")
+        (expect (node-property outside-header-call :end-header)
+                :to-equal
+                ":outside")
+        (expect (emit-org (document-root outside-header-document))
+                :to-equal
+                outside-header-source)
+        (expect (node-property spaced-delimiter-call :call) :to-equal "combine")
+        (expect (node-property spaced-delimiter-call :inside-header)
+                :to-equal
+                ":var value")
+        (expect (node-property spaced-delimiter-call :arguments) :to-equal nil)
+        (expect (node-property spaced-delimiter-call :end-header)
+                :to-equal
+                "(2)")
+        (expect (emit-org (document-root spaced-delimiter-document))
+                :to-equal
+                spaced-delimiter-emitted-source)
+        (expect (node-property close-delimiter-call :call) :to-equal "combine")
+        (expect (node-property close-delimiter-call :inside-header) :to-equal nil)
+        (expect (node-property close-delimiter-call :arguments) :to-equal nil)
+        (expect (node-property close-delimiter-call :end-header)
+                :to-equal
+                ")")
+        (expect (emit-org (document-root close-delimiter-document))
+                :to-equal
+                close-delimiter-source)))))
 (describe "Babel CALL field boundaries"
   (it "keeps empty names and appends trailing text to the end header"
     (with-soft-assertions
@@ -623,14 +624,14 @@
        (multiple-value-list
         (org-kit::reader-blocks-call-fields "[]"))
        :to-equal
-       (list "[]" nil nil nil))
+       (list "" nil nil nil))
       (expect
        (multiple-value-list
         (org-kit::reader-blocks-call-fields
          "combine[:var value=1](2)[:results output] trailing-token"))
        :to-equal
        (list "combine" ":var value=1" "2"
-             ":results output trailing-token")))))
+             "[:results output] trailing-token")))))
 (describe "Babel CALL field empty cases"
   (it "distinguishes empty input, bare names, and empty bracketed fields"
     (with-soft-assertions
@@ -664,6 +665,11 @@
         (org-kit::reader-blocks-call-fields "combine( )"))
        :to-equal
        (list "combine" nil nil nil))
+      (expect
+       (multiple-value-list
+        (org-kit::reader-blocks-call-fields "foo()  "))
+       :to-equal
+       (list "foo" nil nil nil))
       (expect
        (multiple-value-list
         (org-kit::reader-blocks-call-fields "combine[:results output]"))
