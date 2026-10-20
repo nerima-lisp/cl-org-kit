@@ -93,6 +93,79 @@
                   :to-equal expected)
           (expect (document-text document) :to-equal source)))))
 
+  (it "expands quoted Lisp references across ranges and Calc modes"
+    (labels ((expand (formula cell-value-function &optional reference-value-function)
+               (let* ((assignment (table-recalculate-test-assignment formula))
+                      (expression (org-kit::table-calc-assignment-expression assignment))
+                      (source (org-kit::table-calc-expression-value expression)))
+                 (org-kit::table-recalculate-expand-elisp-expression
+                  source expression assignment 2 4 3 4 (make-hash-table) nil nil
+                  cell-value-function reference-value-function (make-limits)
+                  (org-kit::make-table-calc-work-budget)))))
+      (let* ((cell-values
+               (lambda (row column)
+                 (declare (ignore row))
+                 (nth (1- column) '("one" "" "three"))))
+             (plain
+               (expand "@2$4='(list $1..$3)" cell-values))
+             (keep-empty
+               (expand "@2$4='(list $1..$3);E" cell-values))
+             (numeric
+               (expand "@2$4='(list $1..$3);N"
+                       (lambda (row column)
+                         (declare (ignore row))
+                         (nth (1- column) '("1" "" "3")))))
+             (keep-empty-numeric
+               (expand "@2$4='(list $1..$3);EN"
+                       (lambda (row column)
+                         (declare (ignore row))
+                         (nth (1- column) '("1" "" "3")))))
+             (rectangle
+               (expand "@2$4='(list @2$1..@3$2)"
+                       (lambda (row column)
+                         (cdr (assoc (list row column)
+                                     '(((2 1) . "a")
+                                       ((2 2) . "b")
+                                       ((3 1) . "c")
+                                       ((3 2) . "d"))
+                                     :test #'equal)))))
+             (property
+               (expand "@2$4='(identity $PROP_rate)"
+                       (lambda (row column)
+                         (declare (ignore row column))
+                         "cell")
+                       (lambda (reference)
+                         (declare (ignore reference))
+                         (values "configured" t)))))
+        (with-soft-assertions
+          (expect plain :to-equal "'(list \"one\" \"three\")")
+          (expect keep-empty :to-equal "'(list \"one\" \"\" \"three\")")
+          (expect numeric :to-equal "'(list 1 3)")
+          (expect keep-empty-numeric :to-equal "'(list 1 0 3)")
+          (expect rectangle :to-equal "'(list \"a\" \"b\" \"c\" \"d\")")
+          (expect property :to-equal "'(identity \"configured\")"))))
+    (let* ((limits (make-limits))
+           (decimal (org-kit::parse-safe-decimal "1.25" :limits limits)))
+      (with-soft-assertions
+        (expect (org-kit::table-recalculate-elisp-string
+                 (format nil "quote: \" slash: \\~C~C~C~C~C ordinary"
+                         #\Newline #\Return #\Tab #\Page #\Backspace))
+                :to-equal
+                (concatenate 'string
+                             "\"" "quote: " "\\\"" " slash: " "\\\\"
+                             "\\n" "\\r" "\\t" "\\f" "\\b"
+                             " ordinary" "\""))
+        (expect (org-kit::table-recalculate-elisp-number-string "3.5" limits)
+                :to-equal "3.5")
+        (expect (org-kit::table-recalculate-elisp-number-string "not-a-number" limits)
+                :to-equal "0")
+        (expect (org-kit::table-recalculate-elisp-reference-text decimal nil limits)
+                :to-equal "\"1.25\"")
+        (expect (org-kit::table-recalculate-elisp-reference-text 2.5 nil limits)
+                :to-equal "\"2.5\"")
+        (expect (org-kit::table-recalculate-elisp-reference-text :unsupported nil limits)
+                :to-equal "\"\""))))
+
   (it "passes Lisp references through unchanged for the Org literal mode"
     (let* ((source
              (format nil "| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2='(identity $1);L~%"))

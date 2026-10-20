@@ -435,7 +435,7 @@
           (expect (length (org-kit::table-calc-program-assignments program))
                   :to-be (if (string= formula "$1=1::") 1 2))))))
 
-  (it "parses quoted Lisp and suppresses literal-reference interpolation"
+  (it "parses quoted Lisp boundaries, reference ranges, and literal mode"
     (let* ((expanded
              (table-calc-test-assignment-expression
               "$2='(+ $1 1)"))
@@ -454,7 +454,46 @@
                                        (org-kit::table-calc-parse-formula
                                         "$2='(+ $1 1);L")))))))
                 :to-be t)
-        (expect (org-kit::table-calc-expression-children literal) :to-equal nil))))
+        (expect (org-kit::table-calc-expression-children literal) :to-equal nil)))
+    (let* ((formula
+             (concatenate 'string
+                          "$2='(list (identity $1..$2) \"a\\\" )\" ; ignored )"
+                          (string #\Newline)
+                          " ?\\) )"))
+           (expression (table-calc-test-assignment-expression formula))
+           (range (first (org-kit::table-calc-expression-children expression)))
+           (range-children (org-kit::table-calc-expression-children range))
+           (first-reference (org-kit::table-calc-expression-value
+                             (first range-children)))
+           (last-reference (org-kit::table-calc-expression-value
+                            (second range-children)))
+           (bad-token
+             (table-calc-test-assignment-expression "$2='(identity @)"))
+           (bad-range
+             (table-calc-test-assignment-expression "$2='(identity @1..1)"))
+           (bad-start (table-calc-test-condition "$2='x"))
+           (unterminated (table-calc-test-condition "$2='(identity")))
+      (with-soft-assertions
+        (expect (org-kit::table-calc-expression-kind expression) :to-be :quoted-lisp)
+        (expect (org-kit::table-calc-expression-end expression) :to-be (length formula))
+        (expect (length (org-kit::table-calc-expression-children expression)) :to-be 1)
+        (expect (org-kit::table-calc-expression-kind range) :to-be :range)
+        (expect (org-kit::table-calc-reference-column-value first-reference) :to-be 1)
+        (expect (org-kit::table-calc-reference-column-value last-reference) :to-be 2)
+        (expect (org-kit::table-calc-expression-children bad-token) :to-equal nil)
+        (expect (org-kit::table-calc-expression-children bad-range) :to-equal nil)
+        (expect (org-table-unsupported-syntax-feature bad-start) :to-be :quoted-lisp)
+        (expect (org-table-unsupported-syntax-feature unterminated) :to-be :quoted-lisp)))
+    (let* ((anchor
+             (table-calc-test-assignment-expression
+              "$2='(list @1$1..III)"))
+           (range (first (org-kit::table-calc-expression-children anchor)))
+           (last-reference
+             (org-kit::table-calc-expression-value
+              (second (org-kit::table-calc-expression-children range)))))
+      (expect (org-kit::table-calc-reference-row-kind last-reference)
+              :to-be :hline-anchor)
+      (expect (org-kit::table-calc-reference-row-value last-reference) :to-be 3)))
 
   (it "rejects reader dispatch in quoted Lisp without evaluating it"
     (let ((quoted-dispatch
