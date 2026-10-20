@@ -125,6 +125,84 @@
           (expect (org-archive-error-reason missing)
                   :to-equal :source-name-required)))))
 
+  (it "handles source-path conversion types and empty-file errors"
+    (let* ((string-document
+             (parse-org (format nil "* Task~%") :source-name "notes/work.org"))
+           (path-document
+             (parse-org (format nil "* Task~%") :source-name #p"notes/work.org"))
+           (missing-document (parse-org (format nil "* Task~%")))
+           (invalid-document
+             (parse-org (format nil "* Task~%") :source-name 42))
+           (string-path (org-kit::archive-document-source-path string-document))
+           (pathname-path (org-kit::archive-document-source-path path-document))
+           (missing-path (org-kit::archive-document-source-path missing-document))
+           (invalid-path
+             (archive-test-error
+              (lambda () (org-kit::archive-document-source-path invalid-document))))
+           (empty-file-error
+             (archive-test-error
+              (lambda ()
+                (resolve-archive-location
+                 invalid-document (archive-test-heading invalid-document "Task")
+                 :default-location "::")))))
+      (with-soft-assertions
+        (expect string-path :to-equal "notes/work.org")
+        (expect pathname-path :to-equal "notes/work.org")
+        (expect missing-path :to-be nil)
+        (expect (org-archive-error-reason invalid-path)
+                :to-equal :invalid-source-name)
+        (expect (org-archive-error-reason empty-file-error)
+                :to-equal :invalid-source-name))))
+
+  (it "bounds wildcard and unspecific pathname components before conversion"
+    (let* ((limits (make-limits :max-output-length 2))
+           (wild-document
+             (parse-org
+              (format nil "* Task~%")
+              :source-name
+              (make-pathname :directory '(:relative :wild)
+                             :name "work" :type "org")
+              :limits limits))
+           (unspecific-document
+             (parse-org
+              (format nil "* Task~%")
+              :source-name (make-pathname :name :unspecific :type "org")
+              :limits limits))
+           (wild-condition
+             (handler-case
+                 (progn
+                   (resolve-archive-location
+                    wild-document (archive-test-heading wild-document "Task")
+                    :default-location "::")
+                   nil)
+               (org-resource-limit-error (condition) condition)))
+           (unspecific-condition
+             (handler-case
+                 (progn
+                   (resolve-archive-location
+                    unspecific-document
+                    (archive-test-heading unspecific-document "Task")
+                    :default-location "::")
+                   nil)
+               (org-resource-limit-error (condition) condition)))
+           (basename-limits (make-limits :max-output-length 0))
+           (basename-document
+             (parse-org
+              (format nil "* Task~%")
+              :source-name (make-pathname :name :unspecific :type "org")
+              :limits basename-limits))
+           (basename-condition
+             (handler-case
+                 (progn
+                   (org-kit::archive-source-basename
+                    basename-document basename-limits)
+                   nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep wild-condition 'org-resource-limit-error) :to-be t)
+        (expect (typep unspecific-condition 'org-resource-limit-error) :to-be t)
+        (expect (typep basename-condition 'org-resource-limit-error) :to-be t))))
+
   (it "enforces the output limit across archive location expansion"
     (let* ((document
              (parse-org (format nil "* Task~%")

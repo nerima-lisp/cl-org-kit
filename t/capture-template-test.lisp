@@ -251,4 +251,39 @@
             (expect (capture-template-result-expanded-text result)
                     :to-equal "done tail")
             (expect (capture-template-result-expanded-text nil-result)
-                    :to-equal "before  after")))))))
+                    :to-equal "before  after"))))))
+  (it "rejects short prompted times and non-list prompt answers"
+    (let* ((time-context (capture-template-test-time-context))
+           (prompt-condition
+             (capture-template-test-condition
+              (lambda ()
+                (expand-capture-template "%^{Title}"
+                                         :time-context time-context
+                                         :prompt-answers #()))))
+           (time-condition
+             (capture-template-test-condition
+              (lambda ()
+                (expand-capture-template "%^t"
+                                         :time-context time-context
+                                         :prompted-time ""))))
+           (input-limit-condition
+             (capture-template-test-condition
+              (lambda ()
+                (expand-capture-template "long"
+                                         :time-context time-context
+                                         :limits (make-limits
+                                                  :max-input-length 3))))))
+      (with-soft-assertions
+        (expect (typep prompt-condition 'org-capture-error) :to-be t)
+        (when (typep prompt-condition 'org-capture-error)
+          (expect (org-capture-error-reason prompt-condition)
+                  :to-be :missing-value))
+        (expect (typep time-condition 'org-capture-error) :to-be t)
+        (when (typep time-condition 'org-capture-error)
+          (expect (org-capture-error-reason time-condition)
+                  :to-be :invalid-time-value))
+        (expect (typep input-limit-condition 'org-resource-limit-error)
+                :to-be t)
+        (when (typep input-limit-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name input-limit-condition)
+                  :to-be :max-input-length))))))

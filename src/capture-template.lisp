@@ -170,9 +170,6 @@ Return a CAPTURE-TEMPLATE-RESULT; no prompts or file reads are performed."
                       "Capture expansion requires an explicit time context"))
     (check-limit effective-limits :max-input-length (length template))
     (labels ((emit (stream text)
-               (unless (stringp text)
-                 (capture-signal :invalid-template-value nil
-                                 "Expanded capture values must be strings"))
                (let ((next-length (+ output-length (length text))))
                  (check-limit effective-limits :max-output-length next-length)
                  (setf output-length next-length)

@@ -132,6 +132,7 @@
 
   (it "returns no candidates for an empty document and preserves input nodes"
     (let* ((empty (parse-org ""))
+           (unparsed (make-document ""))
            (source (format nil "~A~%~A~%~A"
                            "* Parent :local:"
                            "** Child"
@@ -160,6 +161,8 @@
                (nreverse properties))))
       (with-soft-assertions
         (expect (refile-target-candidates empty nil) :to-equal nil)
+        (expect (document-root unparsed) :to-be nil)
+        (expect (refile-target-candidates unparsed nil) :to-equal nil)
         (expect (document-root document) :to-be root)
         (expect (document-text document) :to-equal source)
         (expect before :to-equal after)

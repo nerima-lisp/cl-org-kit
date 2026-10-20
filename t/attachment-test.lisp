@@ -393,6 +393,42 @@
          (expect (org-attachment-error-reason invalid-delete-document)
                  :to-equal :invalid-document)
          (expect (typep invalid-content 'type-error) :to-be t))))
+
+  (it "rejects malformed relative-directory and entry-path inputs"
+      (let* ((limits (make-limits))
+             (non-string
+              (attachment-test-error
+               (lambda ()
+                 (org-kit::attachment-relative-directory nil limits))))
+             (absolute
+              (attachment-test-error
+               (lambda ()
+                 (org-kit::attachment-relative-directory "/vault/files" limits))))
+             (empty
+              (attachment-test-error
+               (lambda ()
+                 (org-kit::attachment-relative-directory "" limits))))
+             (entry-path
+              (attachment-test-error
+               (lambda ()
+                 (org-kit::attachment-entry-path "../escape" "file.txt" limits))))
+             (surrogate (code-char #xd800))
+             (surrogate-error
+              (and surrogate
+                   (attachment-test-error
+                    (lambda ()
+                      (org-kit::attachment-check-path-byte-limit
+                       (string surrogate) limits))))))
+        (with-soft-assertions
+          (expect (org-attachment-error-reason non-string) :to-equal :invalid-path)
+          (expect (org-attachment-error-reason absolute)
+                  :to-equal :absolute-path-requires-source-directory)
+          (expect (org-attachment-error-reason empty) :to-equal :invalid-path)
+          (expect (org-attachment-error-reason entry-path) :to-equal :invalid-path)
+          (when surrogate
+            (expect (org-attachment-error-reason surrogate-error)
+                    :to-equal :invalid-path)))))
+
   (it "rejects invalid source roots, control characters, and empty IDs"
       (let* ((document
               (parse-org

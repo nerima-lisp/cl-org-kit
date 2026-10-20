@@ -366,4 +366,21 @@
         (expect (typep condition 'org-capture-error) :to-be t)
         (when (typep condition 'org-capture-error)
           (expect (org-capture-error-reason condition)
-                  :to-be :invalid-template-result))))))
+                  :to-be :invalid-template-result)))))
+  (it "shifts a root-level template heading into its target"
+    (let* ((source "* Target")
+           (document (parse-org source :source-name "notes.org"))
+           (template (capture-target-test-template "* Entry " 8))
+           (result
+             (capture-into-target
+              document
+              (list :file+headline "notes.org" "Target")
+              template
+              :time-context (capture-target-test-time-context)))
+           (updated (capture-target-result-target-document result)))
+      (with-soft-assertions
+        (expect (document-text updated)
+                :to-equal
+                (format nil "* Target~%** Entry ~%"))
+        (expect (capture-target-result-cursor-offset result)
+                :to-be 18)))))
