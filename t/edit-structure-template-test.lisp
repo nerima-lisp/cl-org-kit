@@ -126,4 +126,153 @@
           (expect (org-edit-error-target invalid-span)
                   :to-equal "structure template"))
         (expect (document-text document) :to-equal source)))))
+(describe "Org structure template validation and source boundaries"
+  (it "requires a document and a valid source span"
+    (let* ((document (parse-org ""))
+           (document-error
+             (handler-case
+                 (progn
+                   (org-kit::insert-structure-template
+                    nil (make-edit-span 0 0) "quote")
+                   nil)
+               (type-error (condition) condition)))
+           (invalid-spans
+             (mapcar (lambda (span)
+                       (edit-structure-template-test-error
+                        (lambda ()
+                          (org-kit::insert-structure-template
+                           document span "quote"))))
+                     (list nil
+                           (make-edit-span "0" 0)
+                           (make-edit-span 0 "0")
+                           (make-edit-span 2 1)
+                           (make-edit-span 0 1)))))
+      (with-soft-assertions
+        (expect (typep document-error 'type-error) :to-be t)
+        (expect
+         (every (lambda (condition)
+                  (and (typep condition 'org-edit-error)
+                       (eq (org-edit-error-reason condition) :invalid-value)
+                       (string= (org-edit-error-target condition)
+                                "structure template")))
+                invalid-spans)
+         :to-be t))))
+
+  (it "rejects invalid template strings while accepting block-name punctuation"
+    (let* ((document (parse-org ""))
+           (invalid-types
+             (mapcar (lambda (type)
+                       (edit-structure-template-test-error
+                        (lambda ()
+                          (org-kit::insert-structure-template
+                           document (make-edit-span 0 0) type))))
+                     (list nil
+                           ""
+                           " "
+                           " quote"
+                           "quote "
+                           (format nil "left~%right")
+                           (format nil "left~Cright" #\Return)
+                           (format nil "left~Cright" #\Tab)
+                           "bad/name")))
+           (valid-result
+             (org-kit::insert-structure-template
+              document (make-edit-span 0 0) "custom-name_2")))
+      (with-soft-assertions
+        (expect
+         (every (lambda (condition)
+                  (and (typep condition 'org-edit-error)
+                       (eq (org-edit-error-reason condition) :invalid-value)
+                       (string= (org-edit-error-target condition)
+                                "structure template")))
+                invalid-types)
+         :to-be t)
+        (expect (document-text (edit-result-updated-document valid-result))
+                :to-equal
+                (format nil "#+begin_custom-name_2~%#+end_custom-name_2~%")))))
+
+  (it "preserves CRLF when inserting before or after a line"
+    (let* ((crlf (format nil "~C~C" #\Return #\Newline))
+           (source (concatenate 'string "before" crlf))
+           (document (parse-org source))
+           (at-start
+             (org-kit::insert-structure-template
+              document (make-edit-span 0 0) "quote"))
+           (at-end
+             (org-kit::insert-structure-template
+              document (make-edit-span (length source) (length source)) "quote")))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document at-start))
+                :to-equal
+                (concatenate 'string "#+begin_quote" crlf "#+end_quote" crlf
+                             source))
+        (expect (document-text (edit-result-updated-document at-end))
+                :to-equal
+                (concatenate 'string source "#+begin_quote" crlf
+                             "#+end_quote" crlf))
+        (expect (document-text document) :to-equal source))))
+
+  (it "inserts at an interior point and preserves horizontal indentation"
+    (let* ((source (format nil "before~%"))
+           (document (parse-org source))
+           (middle
+             (org-kit::insert-structure-template
+              document (make-edit-span 3 3) "quote"))
+           (indented-source (format nil " ~Cbody~%" #\Tab))
+           (indented-document (parse-org indented-source))
+           (indented
+             (org-kit::insert-structure-template
+              indented-document (make-edit-span 2 2) "quote")))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document middle))
+                :to-equal
+                (format nil "bef~%#+begin_quote~%#+end_quote~%ore~%"))
+        (expect (document-text (edit-result-updated-document indented))
+                :to-equal
+                (concatenate 'string "  #+begin_quote" (string #\Newline)
+                             "  #+end_quote" (string #\Newline)
+                             indented-source))
+        (expect (document-text document) :to-equal source)
+        (expect (document-text indented-document) :to-equal indented-source))))
+
+  (it "wraps plain verbatim lines and trims only trailing horizontal space"
+    (let* ((plain-source "ordinary line")
+           (plain-document (parse-org plain-source))
+           (plain-result
+             (org-kit::insert-structure-template
+              plain-document (make-edit-span 0 (length plain-source)) "src"))
+           (spaced-source (format nil "body ~C~%" #\Tab))
+           (body-end (position #\Newline spaced-source))
+           (spaced-document (parse-org spaced-source))
+           (spaced-result
+             (org-kit::insert-structure-template
+              spaced-document (make-edit-span 0 body-end) "quote"))
+           (blank-source (format nil "  ~%"))
+           (blank-document (parse-org blank-source))
+           (blank-result
+             (org-kit::insert-structure-template
+              blank-document
+              (make-edit-span 0 (position #\Newline blank-source)) "quote")))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document plain-result))
+                :to-equal
+                (format nil "#+begin_src ~%ordinary line~%#+end_src~%"))
+        (expect (document-text (edit-result-updated-document spaced-result))
+                :to-equal
+                (format nil "#+begin_quote~%body~%#+end_quote~%"))
+        (expect (document-text (edit-result-updated-document blank-result))
+                :to-equal
+                (format nil "  #+begin_quote~%  #+end_quote~%")))))
+
+  (it "adds an escape comma after any existing marker commas"
+    (let* ((source (format nil " ,* item~% ,#+name: block"))
+           (document (parse-org source))
+           (result
+             (org-kit::insert-structure-template
+              document (make-edit-span 0 (length source)) "example")))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal
+                (format nil " #+begin_example~% ,,* item~% ,,#+name: block~% #+end_example~%"))
+        (expect (document-text document) :to-equal source)))))
 
