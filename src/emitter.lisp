@@ -650,10 +650,11 @@
          (format nil "#+CALL: ~A~A~@[~A~]~A~%"
                  call
                  (if inside-header (format nil "[~A]" inside-header) "")
-                 (and arguments
-                      (format nil "(~A)"
-                              (emitter-line-value node arguments
-                                                  "Babel arguments")))
+                 (format nil "(~A)"
+                         (if arguments
+                             (emitter-line-value node arguments
+                                                 "Babel arguments")
+                             ""))
                  (if end-header (format nil "[~A]" end-header) ""))))
       (:clock
        (let ((timestamp (node-property node :value))

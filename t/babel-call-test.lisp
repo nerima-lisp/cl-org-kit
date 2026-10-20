@@ -62,7 +62,7 @@
     (let* ((document
              (parse-org
               (format nil
-                      "* Target~%:PROPERTIES:~%:header-args:emacs-lisp: :session target-heading :var first=target :var shared=target~%:END:~%#+NAME: target~%#+BEGIN_SRC emacs-lisp :session block :var shared=block~%body~%#+END_SRC~%* Call~%:PROPERTIES:~%:header-args:emacs-lisp: :session caller-property :var caller=caller-property :var shared=caller-property~%:END:~%#+CALL: target[:session inside :var shared=inside :var inner=2](arg-first, named=3) :session end :var shared=end~%")))
+                      "* Target~%:PROPERTIES:~%:header-args:emacs-lisp: :session target-heading :var first=\"target\" :var shared=\"target\"~%:END:~%#+NAME: target~%#+BEGIN_SRC emacs-lisp :session block :var shared=\"block\"~%body~%#+END_SRC~%* Call~%:PROPERTIES:~%:header-args:emacs-lisp: :session caller-property :var caller=\"caller-property\" :var shared=\"caller-property\"~%:END:~%#+CALL: target[:session inside :var shared=\"inside\" :var inner=2](\"arg-first\", named=3) :session end :var shared=\"end\"~%")))
            (library
              (parse-org
               (format nil
@@ -70,7 +70,7 @@
            (call (first (babel-call-test-nodes document :babel-call)))
            (registry (org-kit:make-callback-registry))
            (observed nil)
-           (original-source (emit-org (document-root document))))
+           (original-source (org-kit:document-text document)))
       (org-kit:register-babel-executor
        registry "emacs-lisp"
        (lambda (body parameters variables)
@@ -95,8 +95,8 @@
                   '("no"))
           (expect (babel-call-test-parameter-values (second observed) "VAR")
                   :to-equal
-                  '("first=arg-first" "caller=caller-property"
-                    "inner=2" "named=3" "shared=end"))
+                  '("first=\"arg-first\"" "caller=\"caller-property\""
+                    "inner=2" "named=3" "shared=\"end\""))
           (expect (third observed)
                   :to-equal
                   '(("first" . "arg-first")
@@ -115,7 +115,7 @@
                (org-kit:babel-execution-result-edit-result result)))
              :to-equal
              (format nil "~A#+RESULTS:~%done~%" original-source))
-            (expect (emit-org (document-root document)) :to-equal original-source)))))
+            (expect (org-kit:document-text document) :to-equal original-source)))))
 
   (it "resolves supplied library documents after the local document"
     (let* ((document (parse-org "#+CALL: library-task(9)"))
