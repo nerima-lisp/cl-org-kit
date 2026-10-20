@@ -391,6 +391,31 @@
            (result (table-radio-test-send source))
            (updated (document-text (edit-result-updated-document (first result)))))
       (expect (not (null (search "@tab @@@{@}" updated))) :to-be t)))
+  (it "covers radio rendering failure paths and header line formatting"
+      (let* ((source (table-radio-test-source "orgtbl-to-generic"))
+             (document (parse-org source))
+             (table (table-radio-test-find-table (document-root document)))
+             (rows (table-radio-table-rows table)))
+        (with-soft-assertions
+         (expect (table-radio-parse-send-line "ordinary text" table) :to-be nil)
+         (expect (table-radio-test-error
+                  (lambda () (table-radio-apply-format nil "value" table)))
+                 :to-equal (list 'org-table-error :invalid-parameters))
+         (expect (table-radio-test-error
+                  (lambda () (table-radio-apply-row-format nil '("value") table)))
+                 :to-equal (list 'org-table-error :invalid-parameters))
+         (expect (table-radio-test-error
+                  (lambda ()
+                    (table-radio-generic rows '(:backend :unsupported) table)))
+                 :to-equal (list 'org-table-error :invalid-parameters))
+         (expect (table-radio-test-error
+                  (lambda ()
+                    (table-radio-render
+                     table '(:format :unsupported :parameters nil))))
+                 :to-equal (list 'org-table-error :unsupported-format))
+         (expect (table-radio-generic
+                  rows '(:sep "|" :hllfmt "%s") table)
+                 :to-equal (format nil "Name~%Ada|one~%Bob|two")))))
   (it "stops at a non-SEND ORGTBL directive and handles a marker at EOF"
     (let* ((no-send
              (format nil "#+ORGTBL: TBLFM $1=$1~%| A |~%| 1 |~%<!-- BEGIN RECEIVE ORGTBL radio -->~%old~%<!-- END RECEIVE ORGTBL radio -->~%"))

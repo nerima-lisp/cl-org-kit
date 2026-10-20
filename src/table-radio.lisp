@@ -162,23 +162,6 @@
                            (intern (string-upcase backend) :keyword)))
                         (t (table-radio-parse-safe-atom
                             (second value-word) target)))))
-               (unless (member key
-                               '(:sep :hsep :hline :splice :skip
-                                 :tstart :tend :lstart :lend :llstart :llend
-                                 :hlstart :hlend :hllstart :hllend
-                                 :fmt :hfmt :lfmt :llfmt :hlfmt :hllfmt
-                                 :backend :raw :booktabs :environment :columns)
-                               :test #'eq)
-                 (table-radio-signal-error
-                  target :invalid-parameters
-                  "Unsupported generic table parameter"))
-               (unless (or (stringp value)
-                           (integerp value)
-                           (member value '(nil t))
-                           (and (eq key :backend) (keywordp value)))
-                 (table-radio-signal-error
-                  target :invalid-parameters
-                  "Generic parameters accept only safe scalar literals"))
                (when (and (not (eq key :backend))
                           (not (member key
                                        (table-radio-format-parameter-keys format)
@@ -246,10 +229,6 @@
                       (second (second words)) target))
              (parameters (table-radio-safe-parameters
                           (nthcdr 2 words) format target)))
-        (when (or (zerop (length name))
-                  (some #'table-radio-horizontal-space-p name))
-          (table-radio-signal-error
-           target :invalid-send-directive "SEND table name is invalid"))
         (list :name name :format format :parameters parameters)))))
 
 (defun table-radio-previous-send-directives (document table)

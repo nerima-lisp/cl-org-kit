@@ -219,4 +219,31 @@
       (expect (table-import-export-test-error
                (lambda () (table-export document table :format :tsv)))
               :to-equal
-              (list 'org-resource-limit-error :max-output-octets)))))
+              (list 'org-resource-limit-error :max-output-octets))))
+  (it "handles quoted CSV fields, empty exports, and imports without a table"
+      (expect (org-kit::table-import-export-parse-records
+               "\"Ada\",one" :csv (make-limits))
+              :to-equal '(("Ada" "one")))
+      (let* ((empty-document (parse-org (format nil "| x |~%")))
+             (empty-table
+              (table-import-export-test-find-table
+               (document-root empty-document))))
+        (setf (node-children empty-table) nil)
+        (expect (table-export empty-document empty-table :format :csv)
+                :to-equal ""))
+      (let* ((document (parse-org ""))
+             (symbol 'org-kit::parse-org)
+             (original (symbol-function symbol))
+             (condition nil))
+        (unwind-protect
+            (progn
+              (setf (symbol-function symbol)
+                    (lambda (&rest arguments)
+                      (declare (ignore arguments))
+                      document))
+              (setf condition
+                    (table-import-export-test-error
+                     (lambda ()
+                       (table-import document 0 "a,b" :format :csv))))
+              (expect condition :to-equal (list 'org-table-error :invalid-value)))
+          (setf (symbol-function symbol) original)))))

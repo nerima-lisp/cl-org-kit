@@ -304,6 +304,54 @@
           (expect (typep condition 'org-table-error) :to-be t)
           (when (typep condition 'org-table-error)
             (expect (org-table-error-reason condition) :to-be :missing-plot-labels))))))
+  (it "covers plot parser and text writer boundaries"
+      (let* ((text "(\"line\\n\\t\")")
+             (end (org-kit::table-plot-option-value-end text 0 nil))
+             (values (org-kit::table-plot-parse-option-list text 0 end))
+             (unterminated
+              (table-plot-test-capture-error
+               (lambda ()
+                 (org-kit::table-plot-option-value-end "\"unfinished" 0 nil))))
+             (grid-output
+              (with-output-to-string (stream)
+                (org-kit::table-plot-grid-data
+                 '(nil) nil (make-limits) stream
+                 (org-kit::make-table-plot-budget :limits (make-limits))
+                 "data.tsv")))
+             (frequency
+              (org-kit::table-plot-nice-frequency-pick
+               '((2 . 1d0) (3 . 0.2d0) (5 . 0.04d0))))
+             (symbol 'cl-codec-kit:string-size-in-octets)
+             (original (symbol-function symbol))
+             (write-condition nil))
+        (unwind-protect
+            (progn
+              (setf (symbol-function symbol)
+                    (lambda (&rest arguments)
+                      (declare (ignore arguments))
+                      (error "encoder failed")))
+              (setf write-condition
+                    (table-plot-test-capture-error
+                     (lambda ()
+                       (with-output-to-string (stream)
+                         (org-kit::table-plot-write-text
+                          stream "value"
+                          (org-kit::make-table-plot-budget :limits (make-limits))
+                          "data.tsv")))))
+              (with-soft-assertions
+               (expect end :to-be (length text))
+               (expect values :to-equal (list (format nil "line~%~C" #\Tab)))
+               (expect (typep unterminated 'org-table-error) :to-be t)
+               (when (typep unterminated 'org-table-error)
+                 (expect (org-table-error-reason unterminated)
+                         :to-be :invalid-plot-option))
+               (expect grid-output :to-equal "")
+               (expect frequency :to-equal '(2 2))
+               (expect (typep write-condition 'org-write-plan-error) :to-be t)
+               (when (typep write-condition 'org-write-plan-error)
+                 (expect (org-write-plan-error-reason write-condition)
+                         :to-be :invalid-utf-8))))
+          (setf (symbol-function symbol) original))))
 
   (it "enforces document, output, entry, byte, and path limits"
       (let ((source (format nil "| x | y |~%|---+---|~%| 1 | 2 |~%")))

@@ -459,7 +459,7 @@
              (concatenate 'string
                           "$2='(list (identity $1..$2) \"a\\\" )\" ; ignored )"
                           (string #\Newline)
-                          " ?\\) )"))
+                          " foo\\) ?\\) )"))
            (expression (table-calc-test-assignment-expression formula))
            (range (first (org-kit::table-calc-expression-children expression)))
            (range-children (org-kit::table-calc-expression-children range))
@@ -468,9 +468,9 @@
            (last-reference (org-kit::table-calc-expression-value
                             (second range-children)))
            (bad-token
-             (table-calc-test-assignment-expression "$2='(identity @)"))
+             (table-calc-test-assignment-expression "$2='(identity @1.)"))
            (bad-range
-             (table-calc-test-assignment-expression "$2='(identity @1..1)"))
+             (table-calc-test-assignment-expression "$2='(identity @1$1..Q)"))
            (bad-start (table-calc-test-condition "$2='x"))
            (unterminated (table-calc-test-condition "$2='(identity")))
       (with-soft-assertions

@@ -180,6 +180,19 @@
       (table-recalculate document table :callbacks callbacks)
       (with-soft-assertions
         (expect received :to-equal "'(identity $1)"))))
+  (it "uses cell lookup when no property callback is registered"
+      (let* ((formula "@2$4='(identity $1)")
+             (assignment (table-recalculate-test-assignment formula))
+             (expression (org-kit::table-calc-assignment-expression assignment))
+             (result
+              (org-kit::table-recalculate-expand-elisp-expression
+               (org-kit::table-calc-expression-value expression)
+               expression assignment 2 4 3 4 (make-hash-table) nil nil
+               (lambda (row column)
+                 (declare (ignore row column))
+                 "one")
+               nil (make-limits) (org-kit::make-table-calc-work-budget))))
+        (expect result :to-equal "'(identity \"one\")")))
 
   (it "reports a named unregistered evaluator condition"
     (let* ((source
