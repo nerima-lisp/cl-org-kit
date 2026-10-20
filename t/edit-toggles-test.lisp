@@ -411,5 +411,16 @@
                 :to-equal (format nil ": plain~%: fixed~%"))
         (expect (document-text (edit-result-updated-document following-result))
                 :to-equal
-                (format nil "#+BEGIN_SRC text~%body~%#+END_SRC~%* following~%"))))))
+                (format nil "#+BEGIN_SRC text~%body~%#+END_SRC~%* following~%")))))
+  (it "separates COMMENT from a titleless TODO headline"
+    (let* ((source (format nil "* TODO~%"))
+           (document (parse-org source))
+           (result (org-kit::toggle-heading-comment
+                    document (make-edit-span 0 0))))
+      (with-soft-assertions
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal (format nil "* TODO COMMENT~%"))
+        (expect (edit-toggle-test-preserves-outside-span-p source result)
+                :to-be t)
+        (expect (document-text document) :to-equal source)))))
 
