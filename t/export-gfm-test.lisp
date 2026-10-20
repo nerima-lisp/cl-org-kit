@@ -1783,9 +1783,11 @@
              :renderer
              (lambda (context)
                (format nil "~{~A~^~%~%~}"
-                       (mapcar (lambda (view)
-                                 (export-render-view context view))
-                               (export-render-context-root-views context)))))
+                       (remove ""
+                               (mapcar (lambda (view)
+                                         (export-render-view context view))
+                                       (export-render-context-root-views context))
+                               :test (function string=)))))
             (setf registered-p t)
             (let ((actual (export-org document backend)))
               (with-soft-assertions

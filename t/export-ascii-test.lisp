@@ -2510,6 +2510,8 @@
                 context
                 (document-root (export-render-context-document context)))))
             (setf registered-p t)
-            (expect (export-org document backend) :to-equal expected))
+            (with-soft-assertions
+              (expect expected :to-equal (format nil "body~%"))
+              (expect (export-org document backend) :to-equal "body")))
         (when registered-p
           (unregister-export-backend backend))))))
