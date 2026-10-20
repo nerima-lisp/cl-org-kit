@@ -2285,7 +2285,7 @@
                           (export-link-result-destination valid-result)
                           (export-link-result-description valid-result))
                     :to-equal '(:link "/target" "label")))))))
-  (it "validates parser defaults and link result snapshots"
+  (it "validates backend registration fields, parser defaults, and link result snapshots"
     (let* ((specifications
              (list (list :token "boolean" :key :boolean :parser :boolean :default t)
                    (list :token "integer" :key :integer :parser :integer :default 3)
