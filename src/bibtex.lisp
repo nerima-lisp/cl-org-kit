@@ -347,17 +347,7 @@
 (defun bibtex-property-key (prefix field)
   (string-upcase (concatenate 'string prefix field)))
 
-(defun bibtex-headline-property (headline key)
-  (let* ((section (find :section (node-children headline) :key #'node-type))
-         (drawer (and section
-                      (find :property-drawer (node-children section)
-                            :key #'node-type))))
-    (when drawer
-      (loop for property in (node-children drawer)
-            when (and (eq (node-type property) :node-property)
-                      (stringp (node-property property :key))
-                      (string-equal key (node-property property :key)))
-              return (node-property property :value)))))
+(defun bibtex-headline-property (headline key) (nth-value 0 (effective-heading-property-value headline key)))
 
 (defun bibtex-first-headline (document)
   (find :headline (node-children (document-root document)) :key #'node-type))
