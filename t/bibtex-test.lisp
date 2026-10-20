@@ -284,7 +284,7 @@
            (bibtex-test-condition
             (lambda () (bibtex-import (parse-org "") (first case))))
            (second case)))
-        (let* ((input "@misc{empty}")
+        (let* ((input "@misc{empty-fields,}")
                (condition
                  (bibtex-test-condition
                   (lambda () (bibtex-import (parse-org "") input)))))
@@ -446,21 +446,19 @@
                    (lambda ()
                      (bibtex-import (parse-org "") input :prefix prefix)))))
             (bibtex-test-expect-error condition :invalid-prefix))))))
-  (it "normalizes escaped, nested, and concatenated BibTeX values"
-    (let* ((escape (string #\\))
-           (input
-             (concatenate 'string
-                          "@misc{values, title=\"A "
-                          escape
-                          "\"quoted"
-                          escape
-                          "\" title\", note={{Nested} text}, year=1, howpublished={Wrapped} # {tail}, url=\"Quoted\" # \" tail\"}"))
-           (expected-title
-             (concatenate 'string "A " escape "\"quoted" escape "\" title"))
+  (it "normalizes escaped, nested, and concatenated BibTeX values like Org"
+    (let* ((input "@misc{values, title=\"A \\\"quoted\\\" title\", note={{Nested} text}, year=1, howpublished={Wrapped} # {tail}, url=\"Quoted\" # \" tail\"}")
+           (expected-title "A \\\"quoted\\\" title")
            (updated
              (edit-result-updated-document
               (bibtex-import (parse-org "") input)))
-           (heading (first (bibtex-test-headlines updated))))
+           (heading (first (bibtex-test-headlines updated)))
+           (trailing-input "@misc{trailing, title={T},}")
+           (trailing-updated
+             (edit-result-updated-document
+              (bibtex-import (parse-org "") trailing-input)))
+           (trailing-heading
+             (first (bibtex-test-headlines trailing-updated))))
       (with-soft-assertions
         (expect (bibtex-test-property heading "TITLE")
                 :to-equal expected-title)
@@ -470,4 +468,6 @@
         (expect (bibtex-test-property heading "HOWPUBLISHED")
                 :to-equal "Wrapped} # {tail")
         (expect (bibtex-test-property heading "URL")
-                :to-equal "Quoted\" # \" tail")))))
+                :to-equal "Quoted\" # \" tail")
+        (expect (bibtex-test-property trailing-heading "TITLE")
+                :to-equal "T")))))
