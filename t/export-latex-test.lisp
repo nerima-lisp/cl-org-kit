@@ -1508,7 +1508,7 @@
            (setf inline-node node)))
        (document-root document))
       (when inline-node
-        (setf (node-post-blank inline-node) 2))
+        (setf (org-kit::%node-post-blank inline-node) 2))
       (unwind-protect
           (progn
             (register-derived-export-backend
