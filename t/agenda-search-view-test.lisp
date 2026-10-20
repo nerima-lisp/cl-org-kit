@@ -45,6 +45,22 @@
                 :to-equal (list "Phrase" "Noncontiguous" "Reversed"))
         (expect (agenda-search-view-test-titles regex-entries)
                 :to-equal (list "Beta")))))
+  (it "matches nested delimiter and escaped interval regexes"
+    (let* ((document
+             (parse-org
+              (format nil "* Curly~%literal a{b}~%* Repeated~%aa~%* Other~%literal ab~%")))
+           (nested-entries
+             (agenda-search-view (list document) "+{a{b}}"))
+           (backslash (string (code-char 92)))
+           (interval-query
+             (concatenate 'string "+{a" backslash "{2" backslash "}}"))
+           (interval-entries
+             (agenda-search-view (list document) interval-query)))
+      (with-soft-assertions
+        (expect (agenda-search-view-test-titles nested-entries)
+                :to-equal (list "Curly"))
+        (expect (agenda-search-view-test-titles interval-entries)
+                :to-equal (list "Repeated")))))
   (it "treats quotes as literal text outside Boolean mode"
     (let* ((document
              (parse-org
@@ -64,22 +80,55 @@
                 :to-equal (list "Root" "Child"))
         (expect (agenda-search-view-test-titles veto-only-entries)
                 :to-equal (list "Root" "Child" "Other")))))
-  (it "signals query and agenda errors with their reasons"
+  (it "signals malformed query positions, regex limits, and agenda errors"
     (let* ((document (parse-org ""))
+           (control (string (code-char 1)))
+           (backslash (string (code-char 92)))
+           (invalid-queries
+             (list (list "" 0)
+                   (list (concatenate 'string "+amber" control) 6)
+                   (list (concatenate 'string "+amber" backslash) 6)
+                   (list (concatenate 'string "+{amber" control "}") 7)
+                   (list (concatenate 'string "+{amber" backslash) 7)
+                   (list "+{amber" 1)
+                   (list "+{amber}cobalt" 8)))
+           (invalid-errors
+             (mapcar (lambda (case)
+                       (agenda-search-view-test-error
+                        (lambda ()
+                          (agenda-search-view (list document) (first case)))))
+                     invalid-queries))
            (bad-query
              (agenda-search-view-test-error
               (lambda () (agenda-search-view (list document) "+ "))))
            (bad-document
              (agenda-search-view-test-error
-              (lambda () (agenda-search-view '("not a document") "term")))))
+              (lambda () (agenda-search-view '("not a document") "term"))))
+           (depth-limited-document
+             (parse-org "" :limits (make-limits :max-element-depth 2)))
+           (depth-error
+             (agenda-search-view-test-error
+              (lambda ()
+                (agenda-search-view (list depth-limited-document) "+{a{b{c}}}")))))
       (with-soft-assertions
+        (expect
+         (every (lambda (case condition)
+                  (and (typep condition 'org-query-error)
+                       (= (org-query-error-position condition) (second case))))
+                invalid-queries invalid-errors)
+         :to-be
+         t)
         (expect (typep bad-query 'org-query-error) :to-be t)
         (when (typep bad-query 'org-query-error)
           (expect (org-query-error-position bad-query) :to-be 0))
         (expect (typep bad-document 'org-agenda-error) :to-be t)
         (when (typep bad-document 'org-agenda-error)
-          (expect (org-agenda-error-reason bad-document)
-                  :to-be :unsupported-entry)))))
+          (expect (org-agenda-error-reason bad-document) :to-be :unsupported-entry))
+        (expect (typep depth-error 'org-resource-limit-error) :to-be t)
+        (when (typep depth-error 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name depth-error)
+                  :to-be
+                  :max-element-depth)))))
   (it "enforces search input, regex-length, and regex-work limits"
     (let* ((input-limited
              (parse-org "" :limits (make-limits :max-input-length 3)))
