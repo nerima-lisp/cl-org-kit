@@ -19,6 +19,8 @@
                                           repeater-type
                                           repeater-value
                                           repeater-unit
+                                          repeater-window-value
+                                          repeater-window-unit
                                           warning-type
                                           warning-value
                                           warning-unit)))
@@ -34,6 +36,8 @@
   repeater-type
   repeater-value
   repeater-unit
+  repeater-window-value
+  repeater-window-unit
   warning-type
   warning-value
   warning-unit)
@@ -107,18 +111,37 @@
       (when adjustment-type
         (let* ((digits-start (+ start prefix-length))
                (digits-end
-                (loop for position from digits-start below
-                      end
-                      while (%timestamp-digit-p (char text position))
-                      finally (return position))))
-          (when (and (> digits-end digits-start) (= (+ digits-end 1) end))
-            (let ((unit (%timestamp-unit (char text digits-end))))
+                 (loop for position from digits-start below end
+                       while (%timestamp-digit-p (char text position))
+                       finally (return position)))
+               (value (and (> digits-end digits-start)
+                           (%timestamp-number text digits-start digits-end))))
+          (when (and value (< digits-end end))
+            (let* ((unit (%timestamp-unit (char text digits-end)))
+                   (unit-end (1+ digits-end)))
               (when unit
-                (values adjustment-type
-                        mode
-                        (%timestamp-number text digits-start digits-end)
-                        unit
-                        t)))))))))
+                (if (= unit-end end)
+                    (values adjustment-type mode value unit nil nil t)
+                    (when (and (eq adjustment-type :repeater)
+                               (char= (char text unit-end) #\/))
+                      (let* ((window-start (1+ unit-end))
+                             (window-digits-end
+                               (loop for position from window-start below end
+                                     while (%timestamp-digit-p (char text position))
+                                     finally (return position)))
+                             (window-unit
+                               (and (< window-digits-end end)
+                                    (%timestamp-unit
+                                     (char text window-digits-end)))))
+                        (when (and (> window-digits-end window-start)
+                                   (= (1+ window-digits-end) end)
+                                   (member window-unit
+                                           '(:day :week :month :year)
+                                           :test #'eq))
+                          (values adjustment-type mode value unit
+                                  (%timestamp-number text window-start
+                                                     window-digits-end)
+                                  window-unit t)))))))))))))
 
 (defun %timestamp-whitespace-p (character)
   (member character '(#\Space #\Tab)))
@@ -139,93 +162,66 @@
   (let ((cursor start)
         (weekday-seen-p nil)
         (time-seen-p nil))
-    (loop (let ((before-whitespace cursor))
-            (setf cursor (%timestamp-skip-whitespace text cursor close-position))
-            (when (= cursor close-position)
-              (return-from %timestamp-parse-suffix
-                (values fields t)))
-            (unless (> cursor before-whitespace)
-              (return-from %timestamp-parse-suffix
-                (values nil nil)))) (let* ((token-start cursor)
-                                           (token-end
-                                            (%timestamp-token-end text
-                                                                  cursor
-                                                                  close-position)))
-                                      (multiple-value-bind (hour minute
-                                                                 end-hour
-                                                                 end-minute
-                                                                 range-p
-                                                                 valid-p)
-                                          (%timestamp-time-token text
-                                                                 token-start
-                                                                 token-end)
-                                        (cond
-                                          (valid-p
-                                            (when time-seen-p
-                                              (return-from
-                                                  %timestamp-parse-suffix
-                                                (values nil nil)))
-                                            (setf time-seen-p t
-                                                  (%timestamp-fields-hour
-                                                   fields) hour
-                                                  (%timestamp-fields-minute
-                                                   fields) minute
-                                                  (%timestamp-fields-end-hour
-                                                   fields) (or end-hour hour)
-                                                  (%timestamp-fields-end-minute
-                                                   fields) (or end-minute
-                                                               minute)
-                                                  (%timestamp-fields-time-range-p
-                                                   fields) range-p))
-                                          ((or
-                                            (char= (char text token-start) #\+)
-                                            (char= (char text token-start) #\-)
-                                            (char= (char text token-start) #\.))
-                                           (multiple-value-bind (kind mode
-                                                                      value
-                                                                      unit
-                                                                      valid-adjustment-p)
-                                               (%timestamp-adjustment-token text
-                                                                            token-start
-                                                                            token-end)
-                                             (unless valid-adjustment-p
-                                               (return-from
-                                                   %timestamp-parse-suffix
-                                                 (values nil nil)))
-                                             (case kind
-                                               (:repeater
-                                                 (when
-                                                     (%timestamp-fields-repeater-type
-                                                      fields)
-                                                   (return-from
-                                                       %timestamp-parse-suffix
-                                                     (values nil nil)))
-                                                 (setf (%timestamp-fields-repeater-type
-                                                        fields) mode
-                                                       (%timestamp-fields-repeater-value
-                                                        fields) value
-                                                       (%timestamp-fields-repeater-unit
-                                                        fields) unit))
-                                               (:warning
-                                                 (when
-                                                     (%timestamp-fields-warning-type
-                                                      fields)
-                                                   (return-from
-                                                       %timestamp-parse-suffix
-                                                     (values nil nil)))
-                                                 (setf (%timestamp-fields-warning-type
-                                                        fields) mode
-                                                       (%timestamp-fields-warning-value
-                                                        fields) value
-                                                       (%timestamp-fields-warning-unit
-                                                        fields) unit)))))
-                                          (t
-                                            (when weekday-seen-p
-                                              (return-from
-                                                  %timestamp-parse-suffix
-                                                (values nil nil)))
-                                            (setf weekday-seen-p t)))
-                                        (setf cursor token-end))))))
+    (loop
+      (let ((before-whitespace cursor))
+        (setf cursor (%timestamp-skip-whitespace text cursor close-position))
+        (when (= cursor close-position)
+          (return-from %timestamp-parse-suffix
+            (values fields t)))
+        (unless (> cursor before-whitespace)
+          (return-from %timestamp-parse-suffix
+            (values nil nil))))
+      (let* ((token-start cursor)
+             (token-end
+               (%timestamp-token-end text cursor close-position)))
+        (multiple-value-bind (hour minute end-hour end-minute range-p valid-p)
+            (%timestamp-time-token text token-start token-end)
+          (cond
+            (valid-p
+             (when time-seen-p
+               (return-from %timestamp-parse-suffix
+                 (values nil nil)))
+             (setf time-seen-p t
+                   (%timestamp-fields-hour fields) hour
+                   (%timestamp-fields-minute fields) minute
+                   (%timestamp-fields-end-hour fields) (or end-hour hour)
+                   (%timestamp-fields-end-minute fields) (or end-minute minute)
+                   (%timestamp-fields-time-range-p fields) range-p))
+            ((or (char= (char text token-start) #\+)
+                 (char= (char text token-start) #\-)
+                 (char= (char text token-start) #\.))
+             (multiple-value-bind (kind mode value unit
+                                   window-value window-unit
+                                   valid-adjustment-p)
+                 (%timestamp-adjustment-token text token-start token-end)
+               (unless valid-adjustment-p
+                 (return-from %timestamp-parse-suffix
+                   (values nil nil)))
+               (case kind
+                 (:repeater
+                  (when (%timestamp-fields-repeater-type fields)
+                    (return-from %timestamp-parse-suffix
+                      (values nil nil)))
+                  (setf (%timestamp-fields-repeater-type fields) mode
+                        (%timestamp-fields-repeater-value fields) value
+                        (%timestamp-fields-repeater-unit fields) unit
+                        (%timestamp-fields-repeater-window-value fields)
+                        window-value
+                        (%timestamp-fields-repeater-window-unit fields)
+                        window-unit))
+                 (:warning
+                  (when (%timestamp-fields-warning-type fields)
+                    (return-from %timestamp-parse-suffix
+                      (values nil nil)))
+                  (setf (%timestamp-fields-warning-type fields) mode
+                        (%timestamp-fields-warning-value fields) value
+                        (%timestamp-fields-warning-unit fields) unit)))))
+            (t
+             (when weekday-seen-p
+               (return-from %timestamp-parse-suffix
+                 (values nil nil)))
+             (setf weekday-seen-p t)))
+          (setf cursor token-end))))))
 
 (defun %timestamp-diary-character-token-boundary-p (text index)
   (or (zerop index)
@@ -388,74 +384,59 @@
       (%timestamp-fields-end-minute fields)
       (%timestamp-fields-minute fields)))
 
-(defun %timestamp-properties (start-fields &optional
-                                           end-fields
-                                           external-range-p)
+(defun %timestamp-properties (start-fields &optional end-fields external-range-p)
   (let* ((base-type (%timestamp-fields-type start-fields))
          (range-p
-          (or external-range-p (%timestamp-fields-time-range-p start-fields)))
+           (or external-range-p (%timestamp-fields-time-range-p start-fields)))
          (type
-          (if (eq base-type :diary)
-              :diary
-              (if range-p
-                  (if (eq base-type :active)
-                      :active-range
-                      :inactive-range)
-                  base-type)))
+           (if (eq base-type :diary)
+               :diary
+               (if range-p
+                   (if (eq base-type :active) :active-range :inactive-range)
+                   base-type)))
          (end-year
-          (if end-fields
-              (%timestamp-fields-year end-fields)
-              (%timestamp-fields-year start-fields)))
+           (if end-fields
+               (%timestamp-fields-year end-fields)
+               (%timestamp-fields-year start-fields)))
          (end-month
-          (if end-fields
-              (%timestamp-fields-month end-fields)
-              (%timestamp-fields-month start-fields)))
+           (if end-fields
+               (%timestamp-fields-month end-fields)
+               (%timestamp-fields-month start-fields)))
          (end-day
-          (if end-fields
-              (%timestamp-fields-day end-fields)
-              (%timestamp-fields-day start-fields)))
+           (if end-fields
+               (%timestamp-fields-day end-fields)
+               (%timestamp-fields-day start-fields)))
          (end-hour
-          (if end-fields
-              (%timestamp-end-hour end-fields)
-              (%timestamp-end-hour start-fields)))
+           (if end-fields
+               (%timestamp-end-hour end-fields)
+               (%timestamp-end-hour start-fields)))
          (end-minute
-          (if end-fields
-              (%timestamp-end-minute end-fields)
-              (%timestamp-end-minute start-fields))))
-    (list :type
-          type
-          :year-start
-          (%timestamp-fields-year start-fields)
-          :month-start
-          (%timestamp-fields-month start-fields)
-          :day-start
-          (%timestamp-fields-day start-fields)
-          :hour-start
-          (%timestamp-fields-hour start-fields)
-          :minute-start
-          (%timestamp-fields-minute start-fields)
-          :year-end
-          end-year
-          :month-end
-          end-month
-          :day-end
-          end-day
-          :hour-end
-          end-hour
-          :minute-end
-          end-minute
-          :repeater-type
-          (%timestamp-fields-repeater-type start-fields)
-          :repeater-value
-          (%timestamp-fields-repeater-value start-fields)
-          :repeater-unit
-          (%timestamp-fields-repeater-unit start-fields)
-          :warning-type
-          (%timestamp-fields-warning-type start-fields)
-          :warning-value
-          (%timestamp-fields-warning-value start-fields)
-          :warning-unit
-          (%timestamp-fields-warning-unit start-fields))))
+           (if end-fields
+               (%timestamp-end-minute end-fields)
+               (%timestamp-end-minute start-fields))))
+    (append
+     (list :type type
+           :year-start (%timestamp-fields-year start-fields)
+           :month-start (%timestamp-fields-month start-fields)
+           :day-start (%timestamp-fields-day start-fields)
+           :hour-start (%timestamp-fields-hour start-fields)
+           :minute-start (%timestamp-fields-minute start-fields)
+           :year-end end-year
+           :month-end end-month
+           :day-end end-day
+           :hour-end end-hour
+           :minute-end end-minute
+           :repeater-type (%timestamp-fields-repeater-type start-fields)
+           :repeater-value (%timestamp-fields-repeater-value start-fields)
+           :repeater-unit (%timestamp-fields-repeater-unit start-fields)
+           :warning-type (%timestamp-fields-warning-type start-fields)
+           :warning-value (%timestamp-fields-warning-value start-fields)
+           :warning-unit (%timestamp-fields-warning-unit start-fields))
+     (when (%timestamp-fields-repeater-window-value start-fields)
+       (list :repeater-window-value
+             (%timestamp-fields-repeater-window-value start-fields)
+             :repeater-window-unit
+             (%timestamp-fields-repeater-window-unit start-fields))))))
 
 (defun try-parse-timestamp-object (document start end container-type)
   "Recognize one Org timestamp starting at START within [START, END)."

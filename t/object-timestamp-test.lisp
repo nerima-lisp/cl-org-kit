@@ -284,6 +284,39 @@
         (expect (timestamp-object-match "<2026-10-12Mon>") :to-be nil)
         (expect (timestamp-object-match "<2026-10-12 09:00-10:00>")
                 :to-be-truthy))))
+  (it "retains Org habit repeater windows on timestamp nodes"
+    (let ((week-window (timestamp-object-match "<2026-10-12 +1w/2w>"))
+          (month-window (timestamp-object-match "<2026-10-12 .+1m/2m>"))
+          (zero-window (timestamp-object-match "<2026-10-12 +1d/0d>"))
+          (without-window (timestamp-object-match "<2026-10-12 +1w>")))
+      (with-soft-assertions
+        (expect (list (timestamp-object-property week-window :repeater-type)
+                      (timestamp-object-property week-window :repeater-value)
+                      (timestamp-object-property week-window :repeater-unit)
+                      (timestamp-object-property week-window
+                                                 :repeater-window-value)
+                      (timestamp-object-property week-window
+                                                 :repeater-window-unit))
+                :to-equal
+                '(:cumulate 1 :week 2 :week))
+        (expect (list (timestamp-object-property month-window :repeater-type)
+                      (timestamp-object-property month-window :repeater-window-value)
+                      (timestamp-object-property month-window
+                                                 :repeater-window-unit))
+                :to-equal
+                '(:restart 2 :month))
+        (expect (list (timestamp-object-property zero-window
+                                                 :repeater-window-value)
+                      (timestamp-object-property zero-window
+                                                 :repeater-window-unit))
+                :to-equal
+                '(0 :day))
+        (expect (timestamp-object-property without-window
+                                           :repeater-window-value)
+                :to-be
+                nil)
+        (expect (timestamp-object-match "<2026-10-12 +1d/2h>") :to-be nil)
+        (expect (timestamp-object-match "<2026-10-12 +1d/2q>") :to-be nil))))
   (it "parses diary Org text with escapes and nested expressions"
     (let* ((diary
              (concatenate 'string
