@@ -133,6 +133,10 @@
    ;; Format-preserving subtree edits
    #:insert-subtree #:delete-subtree #:replace-subtree
    #:promote-subtree
+   #:toggle-heading-comment
+   #:toggle-heading
+   #:toggle-item
+   #:toggle-fixed-width
    #:clone-subtree-with-time-shift #:demote-subtree
    ;; Unit E subtree relocation and sort
    #:relocation-result #:make-relocation-result #:relocation-result-p

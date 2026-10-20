@@ -86,6 +86,7 @@
                (:file "edit-todo-state")
                (:file "edit-timestamp")
                (:file "edit-subtree-clone")
+               (:file "edit-toggles")
                (:file "clocktable")
                (:file "dynamic-blocks")
                (:file "columnview")
@@ -174,6 +175,7 @@
                (:file "bibtex-test")
                (:file "edit-elements-test")
                (:file "edit-subtree-test")
+               (:file "edit-toggles-test")
                (:file "edit-subtree-clone-test")
                (:file "statistics-cookies-test")
                ;; Unit E subtree relocation and sort
