@@ -289,6 +289,11 @@
                  (bibtex-test-condition
                   (lambda () (bibtex-import (parse-org "") input)))))
           (bibtex-test-expect-error condition :missing-title))
+        (let* ((input "@misc{empty}")
+               (condition
+                 (bibtex-test-condition
+                  (lambda () (bibtex-import (parse-org "") input)))))
+          (bibtex-test-expect-error condition :missing-title))
         (let* ((input "@misc{untitled, author={Ada}}")
                (condition
                  (bibtex-test-condition
