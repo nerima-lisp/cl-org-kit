@@ -103,7 +103,16 @@
                  for name = (case key
                               (:name "NAME")
                               (:caption "CAPTION")
-                              (:header "HEADER")
+                              (:header
+                               (let ((source-keyword
+                                       (node-property
+                                        node :header-keyword-source)))
+                                 (if (and (stringp source-keyword)
+                                          (member (string-upcase source-keyword)
+                                                  '("HEADER" "HEADERS")
+                                                  :test #'string=))
+                                     source-keyword
+                                     "HEADER")))
                               (:plot "PLOT")
                               (:results "RESULTS")
                               (otherwise
@@ -633,12 +642,29 @@
                (emitter-object-header-value
                 node (node-property node :inside-header) :inside-header))
              (arguments (node-property node :arguments))
-             (end-header
-               (emitter-object-header-value
-                node (node-property node :end-header) :end-header)))
+             (end-header (node-property node :end-header)))
          (unless (and (string= call (string-trim '(#\Space #\Tab) call))
-                      (not (find #\( call)) (not (find #\) call)))
+                      (not (find #\[ call))
+                      (not (find #\] call))
+                      (not (find #\( call))
+                      (not (find #\) call)))
            (emitter-fail node "Babel call name cannot be reparsed exactly"))
+         (when inside-header
+           (unless (and (stringp inside-header)
+                        (plusp (length inside-header))
+                        (not (find #\Newline inside-header))
+                        (not (find #\Return inside-header))
+                        (string= inside-header
+                                 (string-trim '(#\Space #\Tab)
+                                              inside-header)))
+             (emitter-fail node "Babel call inside header cannot be reparsed exactly"))
+           (let* ((source (format nil "[~A]" inside-header))
+                  (limit (length source)))
+             (multiple-value-bind (contents-begin contents-end after)
+                 (other-object-paired-span source 0 limit #\[ #\])
+               (declare (ignore contents-begin contents-end))
+               (unless (and after (= after limit))
+                 (emitter-fail node "Babel call inside header cannot be reparsed exactly")))))
          (when (and arguments
                     (not (and (stringp arguments)
                               (plusp (length arguments))
@@ -647,15 +673,25 @@
                               (emitter-babel-call-arguments-balanced-p
                                arguments #\( #\)))))
            (emitter-fail node "Babel call arguments cannot be reparsed exactly"))
-         (format nil "#+CALL: ~A~A~@[~A~]~A~%"
+         (when end-header
+           (unless (and (stringp end-header)
+                        (plusp (length end-header))
+                        (not (find #\Newline end-header))
+                        (not (find #\Return end-header))
+                        (string= end-header
+                                 (string-trim '(#\Space #\Tab)
+                                              end-header)))
+             (emitter-fail node "Babel call end header cannot be reparsed exactly")))
+         (format nil "#+CALL: ~A~@[~A~]~@[~A~]~@[ ~A~]~%"
                  call
-                 (if inside-header (format nil "[~A]" inside-header) "")
-                 (format nil "(~A)"
-                         (if arguments
-                             (emitter-line-value node arguments
-                                                 "Babel arguments")
-                             ""))
-                 (if end-header (format nil "[~A]" end-header) ""))))
+                 (and inside-header (format nil "[~A]" inside-header))
+                 (and arguments
+                      (format nil "(~A)"
+                              (emitter-line-value node arguments
+                                                  "Babel arguments")))
+                 (and end-header
+                      (emitter-line-value node end-header
+                                          "Babel end header")))))
       (:clock
        (let ((timestamp (node-property node :value))
              (status (node-property node :status)))

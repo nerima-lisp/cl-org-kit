@@ -1,4 +1,3 @@
-;;;; t/reader-blocks-test.lisp
 (in-package #:cl-org-kit/test)
 
 (defun reader-blocks-test-elements (document type)
@@ -138,7 +137,7 @@
                          :to-be
                          :paragraph))))
           (it
-           "keeps empty container spans absent and sends unknown blocks to special-block"
+           "keeps empty spans absent and routes NOTE blocks to special-block"
            (let* ((source
                    (reader-blocks-test-lines "* Empty"
                                              "#+begin_quote"
@@ -184,7 +183,7 @@
               (expect (node-property (second footnotes) :label)
                       :to-equal
                       "next"))))
-          (it "distinguishes property drawers from ordinary PROPERTIES drawers"
+          (it "parses heading property drawers and treats drawers after CLOSED as ordinary"
               (let* ((source
                       (reader-blocks-test-lines "* Has properties"
                                                 ":PROPERTIES:"
@@ -237,7 +236,7 @@
                          :to-equal
                          (format nil ":ID: ordinary-id~%:EMPTY:~%")))))
           (it
-           "parses lesser line forms and preserves affiliated source boundaries"
+           "parses line elements and preserves affiliated paragraph boundaries"
            (let* ((source
                    (reader-blocks-test-lines "#+author: Org parser fixture"
                                              "#+name: attached-name"
@@ -325,7 +324,7 @@
                       :to-be-truthy)
               (expect (search "#+MISSING-COLON" (node-text (third paragraphs)))
                       :to-be-truthy))))
-  (it "parses LaTeX environments and leaves unclosed blocks at EOF"
+  (it "parses LaTeX environments and preserves an unclosed Org quote at EOF"
     (let* ((latex-source
             (reader-blocks-test-lines "\\begin{align}" "x" "\\end{align}"))
            (latex-document (parse-org latex-source))
@@ -403,7 +402,7 @@
                 :to-equal
                 (reader-blocks-test-lines "#+BEGIN_" ":A:B:" ":END:")))))
 
-  (it "checks property drawer contents and planning-line placement"
+  (it "parses drawers after planning metadata and preserves their contents"
     (let* ((planned-source
             (reader-blocks-test-lines "* Planned"
                                       "SCHEDULED: <2026-10-12 Mon>"
@@ -499,19 +498,31 @@
                 :to-equal
                 ""))))
 
-  (it "parses empty fixed-width content and Babel-call headers"
+  (it "round-trips CALL headers; checks empty fixed-width and example escapes, preserves #+HEADERS spelling"
     (let* ((fixed-document (parse-org ":"))
            (fixed-width
             (first
              (reader-blocks-test-elements fixed-document :fixed-width)))
            (call-document (parse-org "#+CALL: foo(bar)"))
            (call (first (reader-blocks-test-elements call-document :babel-call)))
-           (header-call-document
-            (parse-org "#+CALL: foo[:inside](bar) :outside"))
+           (header-call-source
+            (format nil "#+CALL: foo[:inside](bar) :outside~%"))
+           (header-call-document (parse-org header-call-source))
            (header-call
             (first
              (reader-blocks-test-elements header-call-document :babel-call)))
-           (malformed-call (first (reader-blocks-test-elements (parse-org "#+CALL: foo[:inside") :babel-call)))
+           (malformed-call
+            (first
+             (reader-blocks-test-elements
+              (parse-org "#+CALL: foo[:inside")
+              :babel-call)))
+           (headers-source
+            (format nil
+                    "#+HEADERS: :var value~%#+BEGIN_SRC emacs-lisp~%body~%#+END_SRC~%"))
+           (headers-document (parse-org headers-source))
+           (source-block
+            (first
+             (reader-blocks-test-elements headers-document :src-block)))
            (example-document
             (parse-org
              (reader-blocks-test-lines "#+BEGIN_EXAMPLE" ",#" "#+END_EXAMPLE")))
@@ -525,6 +536,22 @@
         (expect (node-property header-call :inside-header) :to-equal ":inside")
         (expect (node-property header-call :arguments) :to-equal "bar")
         (expect (node-property header-call :end-header) :to-equal ":outside")
+        (expect (emit-org (document-root header-call-document)) :to-equal header-call-source)
+        (expect (node-property source-block :header) :to-equal ":var value")
+        (expect (emit-org (document-root headers-document)) :to-equal headers-source)
+        (expect
+         (list
+          (multiple-value-list
+           (org-kit::reader-blocks-call-fields "foo[:inside](bar) :outside"))
+          (multiple-value-list
+           (org-kit::reader-blocks-call-fields "foo[:inside"))
+          (multiple-value-list
+           (org-kit::reader-blocks-call-fields "foo()  ")))
+         :to-equal
+         (list
+          (list "foo" ":inside" "bar" ":outside")
+          (list "foo" nil nil "[:inside")
+          (list "foo" nil nil nil)))
         (expect (node-property malformed-call :end-header) :to-equal "[:inside")
         (expect (node-property example :value)
                 :to-equal
