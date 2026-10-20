@@ -132,7 +132,8 @@
    #:table-recalculate #:table-plot-write-plan #:table-import #:table-export #:table-send-radio #:table-transpose
    ;; Format-preserving subtree edits
    #:insert-subtree #:delete-subtree #:replace-subtree
-   #:promote-subtree #:demote-subtree
+   #:promote-subtree
+   #:clone-subtree-with-time-shift #:demote-subtree
    ;; Unit E subtree relocation and sort
    #:relocation-result #:make-relocation-result #:relocation-result-p
    #:relocation-result-source-edit #:relocation-result-target-edit

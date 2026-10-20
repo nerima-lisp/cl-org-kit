@@ -19,6 +19,7 @@
   (max-diary-expression-length 0 :read-only t)
   (max-diary-expression-depth 0 :read-only t)
   (max-future-repeats 0 :read-only t)
+  (max-subtree-clones 0 :read-only t)
   (max-clock-consistency-issues 0 :read-only t)
   (max-export-expansion-depth 0 :read-only t)
   (max-export-expanded-characters 0 :read-only t)
@@ -56,6 +57,7 @@
                          (max-diary-expression-length 65536)
                          (max-diary-expression-depth 128)
                          (max-future-repeats 10000)
+                         (max-subtree-clones 1000)
                          (max-clock-consistency-issues 100000)
                          (max-export-expansion-depth 32)
                          (max-export-expanded-characters (* 64 1024 1024))
@@ -112,6 +114,7 @@ limits documented for that operation."
                 :max-diary-expression-depth
                 (checked-limit-value max-diary-expression-depth)
                 :max-future-repeats (checked-limit-value max-future-repeats)
+                :max-subtree-clones (checked-limit-value max-subtree-clones)
                 :max-clock-consistency-issues
                 (checked-limit-value max-clock-consistency-issues)
                 :max-export-expansion-depth
@@ -161,6 +164,7 @@ limits documented for that operation."
     (:max-diary-expression-length (%limits-max-diary-expression-length limits))
     (:max-diary-expression-depth (%limits-max-diary-expression-depth limits))
     (:max-future-repeats (%limits-max-future-repeats limits))
+    (:max-subtree-clones (%limits-max-subtree-clones limits))
     (:max-clock-consistency-issues
      (%limits-max-clock-consistency-issues limits))
     (:max-export-expansion-depth (%limits-max-export-expansion-depth limits))

@@ -145,8 +145,9 @@
     "TABLE-EXPORT"
     "TABLE-SEND-RADIO"
     "TABLE-TRANSPOSE"
- ;; Format-preserving subtree edits
+    ;; Format-preserving subtree edits
     "INSERT-SUBTREE" "DELETE-SUBTREE" "REPLACE-SUBTREE"
+    "CLONE-SUBTREE-WITH-TIME-SHIFT"
     "PROMOTE-SUBTREE" "DEMOTE-SUBTREE"
     ;; Unit E subtree relocation and sort
     "RELOCATION-RESULT" "MAKE-RELOCATION-RESULT" "RELOCATION-RESULT-P"
