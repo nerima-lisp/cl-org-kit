@@ -325,6 +325,7 @@ sub source_exclusion_lines {
   my %allowed = map { $_->{head} => 1 }
     grep { $_->{kind} eq 'top-level-form' } @$rules;
   my @excluded;
+  my @progn_body_depths;
   my $depth = 0;
   my $start;
   for my $index (0 .. $#lines) {
@@ -332,10 +333,14 @@ sub source_exclusion_lines {
     my $countable = $clean;
     my $opens = () = $countable =~ /\(/g;
     my $closes = () = $countable =~ /\)/g;
-    if ($depth == 0 && $clean =~ /\(\s*([A-Za-z0-9*+!?_-]+)/) {
+    my $top_level = $depth == 0
+      || grep { $_ == $depth } @progn_body_depths;
+    if ($top_level && $clean =~ /\(\s*([A-Za-z0-9*+!?_-]+)/) {
       $start = $index + 1;
       my $head = $1;
-      if ($allowed{$head}) {
+      if ($head eq 'progn') {
+        push @progn_body_depths, $depth + 1;
+      } elsif ($allowed{$head}) {
         my $balance = 0;
         my $end = $index;
         for my $j ($index .. $#lines) {
@@ -357,6 +362,7 @@ sub source_exclusion_lines {
       }
     }
     $depth += $opens - $closes;
+    @progn_body_depths = grep { $_ <= $depth } @progn_body_depths;
   }
   return \@excluded;
 }
