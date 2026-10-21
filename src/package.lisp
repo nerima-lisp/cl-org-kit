@@ -225,9 +225,10 @@
    ;; Unit E1 export context and conditions
    #:export-context #:make-export-context #:export-context-p
    #:export-context-title #:export-context-author #:export-context-date
-   #:export-context-language #:export-context-time-context
+   #:export-context-language #:export-context-time-context #:export-context-extensions
    #:org-export-error #:org-export-error-backend #:org-export-error-reason
    #:org-export-error-source
+   #:org-export-registration-error
    #:org-export-unsupported-syntax
    #:org-export-unsupported-syntax-backend
    #:org-export-unsupported-syntax-source
