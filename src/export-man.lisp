@@ -78,16 +78,110 @@
 
 (defun export-man-plain-text (text context base-offset)
   (let* ((*export-current-output-offset* base-offset)
-         (output (export-man-make-output context)))
-    (loop for position below (length text)
-          for character = (char text position)
-          do (when (and (char= character #\\)
-                        (or (zerop position)
-                            (not (char= (char text (1- position)) #\\)))
-                        (or (= (1+ position) (length text))
-                            (not (find (char text (1+ position)) "%$#&{}~^_\\"))))
-               (export-man-write-char output #\$))
-             (export-man-write-char output character))
+         (output (export-man-make-output context))
+         (language (getf (export-render-context-metadata context) :language))
+         (quote-marks
+           (and (export-option-value context :smart-quotes)
+                (assoc (string-downcase (or language ""))
+                            '(("ar" "«" "»" "‹" "›" "’")
+                              ("da" "»" "«" "›" "‹" "’")
+                              ("de" "„" "“" "‚" "‘" "’")
+                              ("el" "«" "»" "“" "”" "’")
+                              ("en" "“" "”" "‘" "’" "’")
+                              ("es" "«" "»" "“" "”" "’")
+                              ("fa" "«" "»" "‹" "›" "’")
+                              ("fr" "« " " »" "“" "”" "’")
+                              ("is" "„" "“" "‚" "‘" "’")
+                              ("it" "“" "”" "‘" "’" "’")
+                              ("nb" "«" "»" "‘" "’" "’")
+                              ("nn" "«" "»" "‘" "’" "’")
+                              ("no" "«" "»" "‘" "’" "’")
+                              ("ro" "„" "”" "«" "»" "’")
+                              ("ru" "«" "»" "„" "“" "’")
+                              ("sl" "«" "»" "„" "“" "’")
+                              ("sv" "”" "”" "’" "’" "’"))
+                            :test #'string=)))
+         (text
+           (if quote-marks
+               (let* ((replacements (make-array (length text)
+                                                :initial-element nil))
+                      (double-open nil)
+                      (single-open nil)
+                      (double-left (second quote-marks))
+                      (double-right (third quote-marks))
+                      (single-left (fourth quote-marks))
+                      (single-right (fifth quote-marks))
+                      (apostrophe (sixth quote-marks))
+                      (single-quote (code-char 39)))
+                 (loop for position below (length text)
+                       for character = (char text position)
+                       for previous = (and (plusp position)
+                                           (char text (1- position)))
+                       for next = (and (< (1+ position) (length text))
+                                       (char text (1+ position)))
+                       do (cond
+                            ((char= character #\")
+                             (if double-open
+                                 (setf (aref replacements double-open) double-left
+                                       (aref replacements position) double-right
+                                       double-open nil)
+                               (setf double-open position)))
+                            ((char= character single-quote)
+                             (cond
+                               ((and previous next
+                                     (alphanumericp previous)
+                                     (alphanumericp next))
+                                (setf (aref replacements position) apostrophe))
+                               (single-open
+                                (setf (aref replacements single-open) single-left
+                                      (aref replacements position) single-right
+                                      single-open nil))
+                               ((and previous (alphanumericp previous))
+                                (setf (aref replacements position) apostrophe))
+                               (t
+                                (setf single-open position))))))
+                 (with-output-to-string (stream)
+                   (loop for position below (length text)
+                         for replacement = (aref replacements position)
+                         do (if replacement
+                                (write-string replacement stream)
+                              (write-char (char text position) stream)))))
+               text))
+         (preserve-breaks-p (export-option-value context :preserve-breaks))
+         (length (length text)))
+    (labels ((write-protected-range (start end)
+               (loop for position from start below end
+                     for character = (char text position)
+                     do (when (and (char= character #\\)
+                                   (or (zerop position)
+                                       (not (char= (char text (1- position)) #\\)))
+                                   (or (= (1+ position) length)
+                                       (not (find (char text (1+ position))
+                                                  "%$#&{}~^_\\"))))
+                          (export-man-write-char output #\$))
+                        (export-man-write-char output character)))
+             (write-preserved-line (start end break-p)
+               (let ((content-end end))
+                 (loop while (and (> content-end start)
+                                  (find (char text (1- content-end))
+                                        '(#\Space #\Tab)))
+                       do (decf content-end))
+                 (when (and (>= (- content-end start) 2)
+                            (char= (char text (- content-end 1)) #\\)
+                            (char= (char text (- content-end 2)) #\\))
+                   (decf content-end 2))
+                 (write-protected-range start content-end)
+                 (when break-p
+                   (export-man-write-string output (format nil ".br~%"))))))
+      (if preserve-breaks-p
+          (loop with start = 0
+                for newline = (position #\Newline text :start start)
+                for end = (or newline length)
+                do (write-preserved-line start end (not (null newline)))
+                   (if newline
+                       (setf start (1+ newline))
+                     (return)))
+        (write-protected-range 0 length)))
     (export-man-output-string output)))
 
 (defun export-man-render-child (context view offset &optional (mode :block))
@@ -121,8 +215,14 @@
     (export-man-output-string output)))
 
 (defun export-man-render-inline-node (context node offset)
-  (let ((*export-current-output-offset* offset))
-    (export-render-node context node :mode :inline)))
+  (let ((*export-current-output-offset* offset)
+        (source-document (node-document node)))
+    (labels ((make-view (current)
+               (make-export-view
+                current
+                :children (mapcar (function make-view) (node-children current))
+                :source-document source-document)))
+      (export-render-view context (make-view node) :mode :inline))))
 
 (defun export-man-render-title (context node view)
   (let* ((output (export-man-make-output context))
@@ -130,7 +230,7 @@
          (macros (and view (getf (export-view-payload view) :title-macros))))
     (dolist (segment segments)
       (let* ((macro-entry (and (node-p segment)
-                               (assoc segment macros :test #'eq)))
+                               (assoc segment macros :test (function eq))))
              (rendered
                (cond
                  ((stringp segment)
@@ -146,10 +246,7 @@
                    context segment (+ (export-man-output-base-offset output)
                                       (export-man-output-length output))))
                  (t ""))))
-        (export-man-write-string output rendered)
-        (when (and (node-p segment) (not macro-entry))
-          (dotimes (_ (node-post-blank segment))
-            (export-man-write-char output #\Space)))))
+        (export-man-write-string output rendered)))
     (export-man-output-string output)))
 
 (defun export-man-minimum-indentation (text)
@@ -190,19 +287,35 @@
 (defun export-man-render-headline (node view contents context)
   (let* ((level (or (node-property node :level) 1))
          (title (export-man-render-title context node view))
-         (base-offset *export-current-output-offset*))
+         (base-offset *export-current-output-offset*)
+         (siblings
+           (and (node-parent node)
+                (remove-if-not
+                 (lambda (sibling)
+                   (and (eq (node-type sibling) :headline)
+                        (eql (node-property sibling :level) level)))
+                 (node-children (node-parent node)))))
+         (first-sibling-p (eq node (first siblings)))
+         (last-sibling-p (eq node (car (last siblings)))))
     (cond
       ((<= level 3)
        (export-man-append context base-offset
                           (if (= level 1) ".SH \"" ".SS \"")
                           title "\"" (string #\Newline) contents))
       (t
-       (export-man-append context base-offset
-                          ".TP" (string #\Newline)
-                          ".ft I" (string #\Newline)
-                          title (string #\Newline)
-                          ".ft" (string #\Newline)
-                          contents ".RE")))))
+       (let ((body
+               (export-man-append context base-offset
+                                  (if first-sibling-p
+                                      (format nil ".RS~%")
+                                    "")
+                                  ".TP" (string #\Newline)
+                                  ".ft I" (string #\Newline)
+                                  title (string #\Newline)
+                                  ".ft" (string #\Newline)
+                                  contents ".RE")))
+         (if last-sibling-p
+             (string-right-trim (list #\Space #\Tab #\Newline) body)
+           body))))))
 
 (defun export-man-keyword-value (document key)
   (let ((value nil))
@@ -304,7 +417,11 @@
       (export-man-write-char output #\"))
     (export-man-write-char output #\Space)
     (export-man-write-char output #\Newline)
-    (export-man-write-string output body)
+    (progn
+      (export-man-write-string output body)
+      (when (and (plusp (length body))
+                 (not (char= (char body (1- (length body))) #\Newline)))
+        (export-man-write-char output #\Newline)))
     (export-man-output-string output)))
 
 (defun export-man-render-document (context)
@@ -397,10 +514,19 @@
                           (format nil "~%\\fP~%")))
       (:headline (export-man-render-headline node view contents context))
       (:inline-src-block
-       (export-man-append context offset (format nil ".RS~%.nf~%\\fC~%")
-                          (export-man-protect-example
-                           (or (node-property node :value) "") context offset)
-                          (format nil "~%\\fP~%.fi~%.RE~%")))
+       (let* ((header-args (babel-parse-header-arguments
+                            (node-property node :parameters)))
+              (exports (cdr (assoc "EXPORTS" header-args :test (function string-equal)))))
+         (if (and exports
+                  (or (string-equal exports "code")
+                      (string-equal exports "both")))
+             (export-man-append context offset
+                                (format nil ".RS~%.nf~%\\fC~%")
+                                (export-man-protect-example
+                                 (or (node-property node :value) "")
+                                 context offset)
+                                (format nil "~%\\fP~%.fi~%.RE~%"))
+           "")))
       (:item (export-man-transcode-item node contents context offset))
       (:keyword
        (if (string-equal (or (node-property node :key) "") "MAN")
@@ -413,10 +539,46 @@
       (:paragraph (if (and (eq (%export-render-frame-mode frame) :block) (node-parent node) (eq (node-type (node-parent node)) :section)) (export-man-append context offset (format nil ".PP~%") contents) contents))
       ((:plain-list :footnote-reference :footnote-definition) (if (eq type :plain-list) contents ""))
       ((:plain-text :text) (let* ((document (export-view-source-document view)) (begin (node-begin node)) (end (node-end node)) (text (and document begin end (subseq (document-text document) begin end)))) (export-man-plain-text (or text (node-text node) "") context offset)))
-      (:property-drawer (if (export-option-value context :properties) (if (plusp (length (string-trim '(#\Space #\Tab #\Newline) contents)))
-                                                                          (export-man-append context offset (format nil ".RS~%.nf~%") contents
-                                                                                             (format nil "~%.fi~%.RE"))
-                                                                        "") ""))
+      (:property-drawer
+       (if (export-option-value context :properties)
+           (let* ((source-document (export-view-source-document view))
+                  (source-begin (node-begin node))
+                  (source-end (node-end node))
+                  (source-node
+                    (when (and source-document source-begin source-end)
+                      (let ((match nil))
+                        (map-nodes
+                         (lambda (candidate)
+                           (when (and (null match)
+                                      (eq (node-type candidate) :property-drawer)
+                                      (eql (node-begin candidate) source-begin)
+                                      (eql (node-end candidate) source-end))
+                             (setf match candidate)))
+                         (document-root source-document))
+                        match)))
+                  (*export-current-output-offset* offset)
+                  (property-output (export-man-make-output context)))
+             (dolist (property (node-children (or source-node node)))
+               (when (eq (node-type property) :node-property)
+                 (when (plusp (export-man-output-length property-output))
+                   (export-man-write-char property-output #\Newline))
+                 (export-man-write-string
+                  property-output (or (node-property property :key) ""))
+                 (export-man-write-char property-output #\Colon)
+                 (let ((value (node-property property :value)))
+                   (when value
+                     (export-man-write-char property-output #\Space)
+                     (export-man-write-string property-output value)))
+                 (export-man-write-char property-output #\Newline)))
+             (let ((property-contents
+                     (export-man-output-string property-output)))
+               (if (plusp (length property-contents))
+                   (export-man-append context offset
+                                      (format nil ".RS~%.nf~%")
+                                      property-contents
+                                      (format nil "~%.fi~%.RE~%"))
+                 "")))
+         ""))
       (:quote-block
        (export-man-append context offset (format nil ".RS~%") contents
                           (format nil "~%.RE")))
@@ -460,7 +622,14 @@
                           (or (node-property node :key) "") ":"
                           (let ((value (node-property node :value)))
                             (if value (concatenate 'string " " value) ""))))
-      (:target (format nil "\\fI~A\\fP" (or (node-property node :value) "")))
+      (:target
+       (let* ((number (mod (node-begin node) #x10000000))
+              (digits (make-string 7 :initial-element #\0)))
+         (loop for position downfrom 6 to 0
+               do (setf (char digits position)
+                        (char "0123456789abcdef" (mod number 16))
+                        number (floor number 16)))
+         (export-man-append context offset "\\fIorg" digits "\\fP")))
       (:timestamp "")
       (:verse-block (export-man-append context offset
                                        (format nil ".RS~%.ft I~%")
@@ -485,19 +654,50 @@
                               (or (node-property node :bullet) "-")))
          (parent (node-parent node))
          (list-type (and parent (node-property parent :type)))
+         (tag (node-property node :tag))
          (marker (cond ((string= bullet "-") "\\(em")
                        ((string= bullet "*") "\\(bu")
                        ((eq list-type :ordered) (format nil "~A " bullet))
                        (t "\\(dg"))))
-    (export-man-append context offset ".IP " marker (format nil " 4~%")
-                       (string-trim (list #\Space #\Tab #\Newline) contents)
-                       (string #\Newline))))
+    (if tag
+        (let ((tag-output (export-man-make-output context)))
+          (dolist (segment tag)
+            (let* ((segment-offset (+ (export-man-output-base-offset tag-output)
+                                      (export-man-output-length tag-output)))
+                   (rendered
+                     (cond
+                       ((stringp segment)
+                        (export-man-plain-text segment context segment-offset))
+                       ((node-p segment)
+                        (export-man-render-inline-node context segment segment-offset))
+                       (t ""))))
+              (export-man-write-string tag-output rendered)))
+          (export-man-append context offset ".TP" (string #\Newline)
+                             "\\fB" (export-man-output-string tag-output)
+                             "\\fP" (string #\Newline)
+                             (string-trim (list #\Space #\Tab #\Newline)
+                                          contents)
+                             (string #\Newline)))
+      (export-man-append context offset ".IP " marker (format nil " 4~%")
+                         (string-trim (list #\Space #\Tab #\Newline) contents)
+                         (string #\Newline)))))
 
 (defun export-man-transcode-link (node description context offset)
   (let* ((type (node-property node :type))
          (path (node-property node :path))
-         (destination (and type path
-                           (concatenate 'string type ":" path))))
+         (destination
+           (and type path
+                (if (string= type "file")
+                    (cond
+                      ((and (>= (length path) 2)
+                            (char= (char path 0) #\/)
+                            (char= (char path 1) #\/))
+                       (concatenate (quote string) "file:" path))
+                      ((and (plusp (length path))
+                            (char= (char path 0) #\/))
+                       (concatenate (quote string) "file://" path))
+                      (t path))
+                  (concatenate (quote string) type ":" path)))))
     (cond
       ((and destination (plusp (length description)))
        (export-man-append context offset destination " \\fBat\\fP \\fI"

@@ -4,7 +4,10 @@
 (defstruct (export-texinfo-state (:constructor %make-export-texinfo-state))
   preparation
   headlines
-  node-names)
+  headline-views
+  headline-titles
+  node-names
+  node-names-ready-p)
 
 (defun export-texinfo-title-source (node)
   (or (node-property node :raw-value)
@@ -12,40 +15,112 @@
       ""))
 
 (defun export-texinfo-node-name-base (text)
-  (let ((text (with-output-to-string (output)
-                (loop with space-p = nil
-                      for character across text
-                      do (cond
-                           ((find character (list #\Space #\Tab #\Return #\Newline))
-                            (unless space-p (write-char #\Space output))
-                            (setf space-p t))
-                           ((find character ",:.")
-                            (setf space-p nil))
-                           (t
-                            (write-char character output)
-                            (setf space-p nil)))))))
-    (string-trim '(#\Space) text)))
+  (let* ((text
+           (if (and (plusp (length text))
+                    (char= (char text 0) (code-char 40)))
+               (let ((end (position (code-char 41) text :start 1)))
+                 (if end
+                     (concatenate 'string "[" (subseq text 1 end)
+                                  (subseq text end))
+                     text))
+               text))
+         (normalized
+           (with-output-to-string (output)
+             (loop with index = 0
+                   with space-p = nil
+                   while (< index (length text))
+                   do (let ((character (char text index)))
+                        (cond
+                          ((and (char= character (code-char 64))
+                                (<= (+ index 6) (length text))
+                                (string= text "@comma" :start1 index
+                                         :end1 (+ index 6)))
+                           (incf index
+                                 (if (and (<= (+ index 8) (length text))
+                                          (string= text "{}"
+                                                   :start1 (+ index 6)
+                                                   :end1 (+ index 8)))
+                                     8
+                                     6)))
+                          ((find character
+                                 (list (code-char 32) (code-char 9)
+                                       (code-char 13) (code-char 10)))
+                           (unless space-p
+                             (write-char (code-char 32) output))
+                           (setf space-p t)
+                           (incf index))
+                          ((find character ",:.")
+                           (incf index))
+                          (t
+                           (write-char character output)
+                           (setf space-p nil)
+                           (incf index))))))))
+    (string-trim (list (code-char 32) (code-char 9)
+                       (code-char 13) (code-char 10))
+                 normalized)))
+(defun export-texinfo-view-for-node (node)
+  (%make-export-view
+   :node node
+   :children (mapcar #'export-texinfo-view-for-node (node-children node))
+   :source-document (node-document node)))
+(defun export-texinfo-transcode-title (context node view offset)
+  (let ((segments (node-property node :title))
+        (title-macros (and view
+                           (getf (export-view-payload view) :title-macros))))
+    (if segments
+        (with-output-to-string (output)
+          (loop with length = 0
+                for segment in segments
+                for segment-offset = (+ offset length)
+                for rendered =
+                  (if (node-p segment)
+                      (let ((macro-entry (assoc segment title-macros :test #'eq)))
+                        (if macro-entry
+                            (export-texinfo-render-inline-views
+                             context (cdr macro-entry) segment-offset)
+                            (let* ((*export-current-output-offset* segment-offset)
+                                   (segment-view
+                                     (export-texinfo-view-for-node segment))
+                                   (text (export-render-view
+                                          context segment-view :mode :inline)))
+                              (export-node-strip-post-blank segment text))))
+                      (export-texinfo-escape-text
+                       context segment segment-offset))
+                for post-blank = (if (node-p segment)
+                                     (export-node-post-blank-string segment)
+                                     "")
+                for text = (export-texinfo-concat
+                            context segment-offset
+                            *export-current-export-phase*
+                            rendered post-blank)
+                do (write-string text output)
+                   (incf length (length text))))
+        (export-texinfo-escape-text
+         context (export-texinfo-title-source node) offset))))
+(defun export-texinfo-render-inline-views (context views offset)
+  (with-output-to-string (output)
+    (loop with length = 0
+          for view in views
+          for node = (export-view-node view)
+          for raw = (let ((*export-current-output-offset* (+ offset length)))
+                      (export-render-view context view :mode :inline))
+          for rendered = (export-node-strip-post-blank node raw)
+          for post-blank = (export-node-post-blank-string node)
+          for text = (export-texinfo-concat
+                      context (+ offset length)
+                      *export-current-export-phase* rendered post-blank)
+          do (write-string text output)
+             (incf length (length text)))))
 
 (defun export-texinfo-index-headlines (context)
   (let ((headlines nil)
-        (node-names (make-hash-table :test #'eq))
-        (used-names (make-hash-table :test #'equal)))
+        (headline-views (make-hash-table :test #'eq)))
     (labels ((visit (view)
                (let* ((node (export-view-node view))
                       (type (node-type node)))
                  (when (eq type :headline)
                    (push node headlines)
-                   (let* ((base (export-texinfo-node-name-base
-                                 (export-texinfo-title-source node)))
-                          (base (if (plusp (length base)) base "Untitled"))
-                          (name base)
-                          (suffix 0))
-                     (loop while (or (string-equal name "Top")
-                                     (gethash name used-names))
-                           do (incf suffix)
-                              (setf name (format nil "~A (~D)" base suffix)))
-                     (setf (gethash name used-names) t
-                           (gethash node node-names) name)))
+                   (setf (gethash node headline-views) view))
                  (dolist (child (export-view-children view))
                    (visit child)))))
       (dolist (view (export-render-context-root-views context))
@@ -53,10 +128,48 @@
     (%make-export-texinfo-state
      :preparation (org-kit::%export-render-context-preparation context)
      :headlines (nreverse headlines)
-     :node-names node-names)))
+     :headline-views headline-views
+     :headline-titles (make-hash-table :test #'eq)
+     :node-names (make-hash-table :test #'eq))))
 
+(defun export-texinfo-index-node-names (context)
+  (let ((state (export-render-context-state context)))
+    (unless (or (eq (export-texinfo-state-node-names-ready-p state) t)
+                (eq (export-texinfo-state-node-names-ready-p state) :building))
+      (setf (export-texinfo-state-node-names-ready-p state) :building)
+      (let ((used-names (make-hash-table :test #'equal)))
+        (dolist (headline (export-texinfo-state-headlines state))
+          (let* ((view (gethash headline
+                               (export-texinfo-state-headline-views state)))
+                 (title (export-texinfo-transcode-title
+                         context headline view 0))
+                 (base (export-texinfo-node-name-base title))
+                 (base (if (plusp (length base)) base "Untitled"))
+                 (name base)
+                 (suffix 0))
+            (setf (gethash headline
+                           (export-texinfo-state-headline-titles state))
+                  title)
+            (loop while (or (string-equal name "Top")
+                            (gethash name used-names))
+                  do (incf suffix)
+                     (setf name (format nil "~A (~D)" base suffix)))
+            (setf (gethash name used-names) t
+                  (gethash headline
+                           (export-texinfo-state-node-names state))
+                  name)))
+      (setf (export-texinfo-state-node-names-ready-p state) t)))))
 (defun export-texinfo-make-state (context)
   (export-texinfo-index-headlines context))
+(defun export-texinfo-headline-title (context node offset)
+  (let* ((state (export-render-context-state context))
+         (view (gethash node (export-texinfo-state-headline-views state))))
+    (export-texinfo-index-node-names context)
+    (multiple-value-bind (title present-p)
+        (gethash node (export-texinfo-state-headline-titles state))
+      (if present-p
+          title
+          (export-texinfo-transcode-title context node view offset)))))
 
 (defun export-texinfo-check-length (context offset length phase)
   (export-check-output-actual (+ offset length)
@@ -247,6 +360,8 @@
                          ("copy" . "@copyright{}") ("deg" . "@textdegree{}")
                          ("dots" . "@dots{}") ("hellip" . "@dots{}")
                          ("equiv" . "@equiv{}") ("euro" . "@euro{}")
+                         ("EUR" . "@euro{}") ("pound" . "@pound{}")
+                         ("reg" . "@registeredsymbol{}")
                          ("ge" . "@geq{}") ("geq" . "@geq{}")
                          ("laquo" . "@guillemetleft{}")
                          ("iexcl" . "@exclamdown{}") ("iquest" . "@questiondown{}")
@@ -262,33 +377,34 @@
         (export-texinfo-node-value node))))
 
 (defun export-texinfo-headline-node-name (context node)
-  (or (gethash node (export-texinfo-state-node-names
-                     (export-render-context-state context)))
-      (export-texinfo-node-name-base (export-texinfo-title-source node))))
+  (let ((state (export-render-context-state context)))
+    (export-texinfo-index-node-names context)
+    (or (gethash node (export-texinfo-state-node-names state))
+        (export-texinfo-node-name-base
+         (export-texinfo-title-source node)))))
 
 (defun export-texinfo-node-headlines (context parent)
   (remove-if-not
    (lambda (node) (eq (node-parent node) parent))
    (export-texinfo-state-headlines (export-render-context-state context))))
 
-(defun export-texinfo-menu-entry (context node)
+(defun export-texinfo-menu-entry (context node offset)
   (let* ((title (string-trim
-                 '(#\Space #\Tab)
-                 (remove #\: (export-texinfo-title-source node))))
+                 (list (code-char 32) (code-char 9))
+                 (remove (code-char 58)
+                         (export-texinfo-headline-title context node offset))))
          (node-name (export-texinfo-headline-node-name context node)))
     (if (string= title node-name)
-        (format nil "* ~A::~%" title)
-        (format nil "* ~A: ~A. ~%" title node-name))))
+        (format nil "* ~A::" title)
+        (format nil "* ~A: ~A. " title node-name))))
 
 (defun export-texinfo-menu (context nodes offset &optional master)
   (when nodes
     (labels ((menu-entries (headlines)
-               (format nil "~{~A~^~%~}" (mapcar
-                        (lambda (node)
-                          (string-right-trim
-                           '(#\Newline #\Return #\Space)
-                           (export-texinfo-menu-entry context node)))
-                        headlines)))
+               (format nil "~{~A~^~%~}"
+                       (mapcar (lambda (node)
+                                 (export-texinfo-menu-entry context node offset))
+                               headlines)))
              (detail-entries (headlines depth)
                (if (zerop depth)
                    ""
@@ -298,7 +414,8 @@
                                (export-texinfo-node-headlines context node)))
                          (when children
                            (format output "~A~%~%~A~%~%"
-                                   (export-texinfo-title-source node)
+                                   (export-texinfo-headline-title
+                                    context node offset)
                                    (menu-entries children))
                            (write-string
                             (detail-entries children (1- depth))
@@ -311,17 +428,16 @@
         (if detail-p
             (export-texinfo-concat
              context offset *export-current-export-phase*
-             "@menu" (string #\Newline)
+             "@menu" (string (code-char 10))
              (menu-entries nodes)
              (format nil "~%~%@detailmenu~%--- The Detailed Node Listing ---~%~%")
              detail-text
              (format nil "@end detailmenu~%@end menu~%"))
             (export-texinfo-concat
              context offset *export-current-export-phase*
-             "@menu" (string #\Newline)
+             "@menu" (string (code-char 10))
              (menu-entries nodes)
-             (format nil "~%@end menu~%")))))
-))
+             (format nil "~%@end menu~%")))))))
 
 (defun export-texinfo-section-command (level numbered-p)
   (let ((commands
@@ -337,13 +453,16 @@
          (numbering
            (let ((entry (assoc :num (export-render-context-options context))))
              (if entry (cdr entry) t)))
-         (source-title (export-texinfo-title-source node))
          (tags (node-property node :tags))
-         (title (if (and tags (export-texinfo-option context :tags t))
-                    (format nil "~A :~{~A~^:~}:"
-                            source-title tags)
-                    source-title))
-         (title (export-texinfo-escape-text context title offset))
+         (title (export-texinfo-headline-title context node offset))
+         (tag-text
+           (when (and tags (export-texinfo-option context :tags t))
+             (format nil " :~{~A~^:~}:"
+                     (mapcar (lambda (tag)
+                               (export-texinfo-escape-text
+                                context tag (+ offset (length title))))
+                             tags))))
+         (title (concatenate 'string title (or tag-text "")))
          (name (export-texinfo-headline-node-name context node))
          (command (export-texinfo-section-command level numbering))
          (contents (export-texinfo-render-children context view frame :block))
@@ -353,12 +472,11 @@
                                       *export-current-export-phase*
                                       prefix contents)))
     (if (and (plusp (length text))
-             (not (char= (char text (1- (length text))) #\Newline)))
+             (not (char= (char text (1- (length text))) (code-char 10))))
         (export-texinfo-concat context (+ offset (length text))
                                *export-current-export-phase*
-                               text (string #\Newline))
-        text))
-)
+                               text (string (code-char 10)))
+        text)))
 
 (defun export-texinfo-render-plain-list (context node view frame)
   (let* ((offset (export-render-frame-output-offset frame))
@@ -367,48 +485,86 @@
                       (:ordered "enumerate")
                       (:unordered "itemize")
                       (otherwise "table")))
+         (opening (if (eq type :descriptive)
+                      "@table @asis"
+                      (format nil "@~A" list-type)))
          (contents (export-texinfo-render-children context view frame :block)))
     (export-texinfo-concat context offset *export-current-export-phase*
-                           (format nil "@~A~%" list-type)
+                           opening (string #\Newline)
                            contents (format nil "@end ~A" list-type))))
 
 (defun export-texinfo-render-item (context node view frame)
   (let* ((offset (export-render-frame-output-offset frame))
          (tag (node-property node :tag))
-         (contents (export-texinfo-render-children context view frame :block))
-         (tag-text (if (stringp tag) (export-texinfo-escape-text context tag offset) "")))
+         (tag-text
+           (cond
+             ((stringp tag) tag)
+             ((listp tag)
+              (with-output-to-string (output)
+                (dolist (segment tag)
+                  (write-string (if (node-p segment)
+                                    (node-text segment)
+                                    (princ-to-string segment))
+                                output))))
+             (t "")))
+         (tag-text (export-texinfo-escape-text context tag-text offset))
+         (contents (export-texinfo-render-children context view frame :block)))
     (export-texinfo-concat context offset *export-current-export-phase*
-                           (if (zerop (length tag-text)) "@item" (format nil "@item ~A" tag-text))
+                           (if (plusp (length tag-text))
+                               (format nil "@item ~A" tag-text)
+                               "@item")
                            (string #\Newline) contents (string #\Newline))))
 
 (defun export-texinfo-render-link (context node view frame)
   (let* ((offset (export-render-frame-output-offset frame))
          (type (or (node-property node :type) ""))
          (path (or (node-property node :path) ""))
-         (target (and (member type '("fuzzy" "custom-id") :test #'string=)
+         (target (and (member type '("fuzzy" "custom-id" "id") :test #'string=)
                       (find-if
                        (lambda (headline)
                          (or (and (string= type "fuzzy")
                                   (string-equal
                                    path (export-texinfo-title-source headline)))
-                             (multiple-value-bind (custom-id sources)
-                                 (effective-property
-                                  (node-document headline) headline "CUSTOM_ID")
-                               (declare (ignore sources))
-                               (and custom-id
-                                    (string-equal path custom-id)))))
+                             (and (member type '("id" "custom-id") :test #'string=)
+                                  (or (multiple-value-bind (id sources)
+                                          (effective-property
+                                           (node-document headline) headline "ID")
+                                        (declare (ignore sources))
+                                        (and id (string= path id)))
+                                      (multiple-value-bind (custom-id sources)
+                                          (effective-property
+                                           (node-document headline) headline "CUSTOM_ID")
+                                        (declare (ignore sources))
+                                        (and custom-id
+                                             (string= path custom-id)))))
+                             (and (string= type "fuzzy")
+                                  (multiple-value-bind (custom-id sources)
+                                      (effective-property
+                                       (node-document headline) headline "CUSTOM_ID")
+                                    (declare (ignore sources))
+                                    (and custom-id
+                                         (string-equal path custom-id))))))
                        (export-texinfo-state-headlines
                         (export-render-context-state context)))))
          (description (export-texinfo-render-inline context view frame))
+         (file-uri (when (string= type "file")
+                     (cond
+                       ((and (> (length path) 1)
+                             (char= (char path 0) (code-char 47))
+                             (char= (char path 1) (code-char 47)))
+                        (concatenate 'string "file:" path))
+                       ((and (plusp (length path))
+                             (char= (char path 0) (code-char 47)))
+                        (concatenate 'string "file://" path))
+                       (t path))))
          (destination (export-texinfo-escape-text
-                       context (if (string= type "file")
-                                   (concatenate 'string "file://" path)
+                       context (if file-uri file-uri
                                    (concatenate 'string type ":" path))
                        offset)))
     (cond
       ((string= type "mailto")
        (export-texinfo-concat context offset *export-current-export-phase*
-                              (format nil "@email{~A~A}" path
+                              (format nil "@email{~A~A}" destination
                                       (if (plusp (length description))
                                           (concatenate 'string ", " description) ""))))
       ((member type '("fuzzy" "custom-id" "id" "radio") :test #'string=)
@@ -543,10 +699,20 @@
                                   "@center " contents))))
       (:special-block
        (let* ((name (or (node-property node :type) "quotation"))
-              (contents (export-texinfo-render-children context view frame :block)))
-         (export-texinfo-concat context offset *export-current-export-phase*
-                                (format nil "@~A~%" name) contents
-                                (format nil "@end ~A" name))))
+              (contents (export-texinfo-render-children
+                         context view frame :block))
+              (contents
+                (if (and (plusp (length contents))
+                         (not (char= (char contents (1- (length contents)))
+                                     #\Newline)))
+                    (export-texinfo-concat
+                     context offset *export-current-export-phase*
+                     contents (string #\Newline))
+                    contents)))
+         (export-texinfo-concat
+          context offset *export-current-export-phase*
+          (format nil "@~A~%" name) contents
+          (format nil "@end ~A" name))))
       (:export-block
        (if (string-equal (or (node-property node :type) "") "TEXINFO")
            (or (node-property node :value) "")
@@ -604,12 +770,116 @@
            "")))
       (:drawer (export-texinfo-render-children context view frame :block))
       (:dynamic-block (export-texinfo-render-children context view frame :block))
-      (:planning "")
-      (:clock "")
-      (:latex-environment "")
-      (:latex-fragment "")
+      (:planning
+       (let* ((entries
+                (loop for entry
+                        in '((:closed "CLOSED:")
+                             (:deadline "DEADLINE:")
+                             (:scheduled "SCHEDULED:"))
+                      for property = (first entry)
+                      for label = (second entry)
+                      for timestamp = (node-property node property)
+                      when timestamp
+                        collect
+                        (format nil "@strong{~A} @emph{~A}"
+                                label (node-text timestamp)))))
+         (if entries
+             (export-texinfo-concat
+              context offset *export-current-export-phase*
+              "@noindent"
+              (format nil "~{~A~^ ~}" entries)
+              "@*" (string #\Newline))
+             "")))
+      (:clock
+       (let* ((timestamp (node-property node :value))
+              (text (and timestamp
+                          (string-right-trim
+                           '(#\Space #\Tab #\Return #\Newline)
+                           (node-text timestamp))))
+              (source (or (node-text node) ""))
+              (arrow (search "=>" source))
+              (duration
+                (and arrow
+                     (string-trim '(#\Space #\Tab #\Return #\Newline)
+                                  (subseq source (+ arrow 2))))))
+         (if text
+             (export-texinfo-concat
+              context offset *export-current-export-phase*
+              "@noindent@strong{CLOCK:} @emph{" text
+              (if (and duration (plusp (length duration)))
+                  (format nil "  (~A)" duration)
+                  "")
+              "}@*" (string #\Newline))
+             "")))
+      (:latex-environment
+       (let* ((value (string-trim '(#\Space #\Tab #\Newline #\Return)
+                                  (export-texinfo-node-value node))))
+         (if (plusp (length value))
+             (export-texinfo-concat
+              context offset *export-current-export-phase*
+              "@displaymath" (string #\Newline)
+              value (string #\Newline) "@end displaymath")
+             "")))
+      (:latex-fragment
+       (let* ((value (export-texinfo-node-value node))
+              (size (length value))
+              (math
+                (cond
+                  ((and (>= size 4)
+                        (string= "\\(" value :end2 2)
+                        (string= "\\)" value :start2 (- size 2)))
+                   (subseq value 2 (- size 2)))
+                  ((and (>= size 4)
+                        (string= "\\[" value :end2 2)
+                        (string= "\\]" value :start2 (- size 2)))
+                   (subseq value 2 (- size 2)))
+                  ((and (>= size 4)
+                        (string= "$$" value :end2 2)
+                        (string= "$$" value :start2 (- size 2)))
+                   (subseq value 2 (- size 2)))
+                  ((and (>= size 2)
+                        (string= "$" value :end2 1)
+                        (string= "$" value :start2 (1- size)))
+                   (subseq value 1 (1- size))))))
+         (if math
+             (export-texinfo-concat
+              context offset *export-current-export-phase*
+              "@math{" math "}")
+             "")))
       (:inlinetask
-       (export-texinfo-render-children context view frame :block))
+       (let* ((todo (and (export-texinfo-option context :todo t)
+                         (node-property node :todo-keyword)))
+              (priority (and (export-texinfo-option context :priority nil)
+                             (node-property node :priority)))
+              (tags (and (export-texinfo-option context :tags t)
+                         (node-property node :tags)))
+              (title
+                (with-output-to-string (output)
+                  (when todo
+                    (format output "@strong{~A} "
+                            (export-texinfo-escape-text context todo offset)))
+                  (when priority
+                    (format output "@strong{[~A]} "
+                            (code-char priority)))
+                  (write-string
+                   (export-texinfo-escape-text
+                    context (export-texinfo-title-source node) offset)
+                   output)
+                  (when tags
+                    (write-string
+                     (format nil " :~{~A~^:~}:"
+                             (mapcar
+                              (lambda (tag)
+                                (export-texinfo-escape-text
+                                 context tag offset))
+                              tags))
+                     output))))
+              (contents
+                (export-texinfo-render-children context view frame :block)))
+         (export-texinfo-concat
+          context offset *export-current-export-phase*
+          (format nil "@center ~A~%~%nil~%" title)
+          contents)))
       (:template "")
       (otherwise
        (if (eq type :table)
