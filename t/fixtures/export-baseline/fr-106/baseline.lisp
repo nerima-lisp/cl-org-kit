@@ -2,6 +2,22 @@
 
 (defparameter *export-baseline-revision*
   "ce017bca425b50eff000d1a6986be7084acfd9c3")
+(defparameter *export-baseline-source-sha256*
+  '(("cl-org-kit.asd" . "4a992fb371ef5b1dc5ad716e7c8188e00240c20e8575b303eabe1ab81dc79a4c")
+    ("src/package.lisp" . "f5152125a9fae854f3968cac21d6063b121d153eb52a13369272c4e966dc552e")
+    ("src/export-types.lisp" . "05289e6ad693a997bb98b92ad19366d7ade2414ca0dbde1e5fdab3903f5d3f5f")
+    ("src/export-core.lisp" . "02fa101fefa192bcef763ab9a8bd4abb2195f626b88985800afbbd505266fade")
+    ("src/export-html.lisp" . "24ab7b41d8c71e60dac3383efccca45f355d2af7f88f6f3f2185bd10b4340e12")
+    ("src/export-gfm.lisp" . "c378646bda5f41d2082dee75a4efe88df778605e3def694dd44dbea939a5e44b")
+    ("src/export-ascii.lisp" . "991b4dfafc295d7ef7a61317287a0161f04ee955d4eab964a308889407914d55")
+    ("src/export-latex.lisp" . "64b7ee84602303279a5c60d734ff05738bac278d7a452f6235a0f53bda37e543")
+    ("t/export-core-test.lisp" . "a0db28e125f4c156b37d034fe0720a5ad5bd80bd3815fe71f5b9f30d97ee2979")
+    ("t/export-html-test.lisp" . "25cc675d004c07abfab7940117ac806c158cc3a9127070d2972288c5504fd5a9")
+    ("t/export-gfm-test.lisp" . "663a78ffad4775521dcb23ea088e071414fa1323107119e629da785643ede9ac")
+    ("t/export-ascii-test.lisp" . "c672632a0f7da1556e3f7c80739732284f214ae23b61f12a3601b634c9fe0032")
+    ("t/export-latex-test.lisp" . "af9600e002ca35951bed2178418c1ffd6f6dfc8fa17d3c29d9e954be01735a5a")))
+(defparameter *export-baseline-source-absent*
+  '("src/export-registry.lisp"))
 (defparameter *export-baseline-target-files*
   '("t/export-core-test.lisp" "t/export-html-test.lisp"
     "t/export-gfm-test.lisp" "t/export-ascii-test.lisp"
@@ -91,9 +107,6 @@
    (lambda ()
      (write-sequence sequence (export-baseline-output-proxy-target stream)
                      :start (or start 0) :end (or end (length sequence))))))
-
-(defun export-baseline-capture-mode-p ()
-  (equal (uiop:getenv "CL_ORG_EXPORT_BASELINE_CAPTURE") "1"))
 
 (defun export-baseline-utf8-encodable-p (string)
   (loop for character across string
@@ -893,40 +906,6 @@
         (when (third entry)
           (setf (documentation (first entry) 'function) (third entry)))))))
 
-(defun export-baseline-manifest-form (captured fixtures)
-  (let ((ordered (sort (copy-list captured) #'export-baseline-entry-less-p))
-        (ordered-fixtures
-          (sort (copy-list fixtures) #'export-baseline-fixture-less-p)))
-    (dolist (pair ordered)
-      (let* ((entry (car pair))
-             (bytes (cdr pair))
-             (relative (getf (rest (getf entry :expected)) :bytes-file)))
-        (when bytes
-          (let ((path (merge-pathnames relative *export-baseline-directory*)))
-            (ensure-directories-exist path)
-            (with-open-file (stream path :direction :output :if-exists :supersede
-                                    :if-does-not-exist :create
-                                    :element-type '(unsigned-byte 8))
-              (write-sequence bytes stream))))))
-    (list :baseline-revision *export-baseline-revision*
-          :schema-extensions
-          '((:unencodable-string :representation :character-codes
-             :applies-to (:input :expected :expected-output)))
-          :fixtures ordered-fixtures
-          :entries (mapcar #'car ordered))))
-
-(defun export-baseline-write-manifest (form)
-  (ensure-directories-exist *export-baseline-manifest-path*)
-  (with-open-file (stream *export-baseline-manifest-path*
-                          :direction :output :if-exists :supersede
-                          :if-does-not-exist :create :external-format :utf-8)
-    (let ((*print-readably* t)
-          (*print-circle* t)
-          (*print-case* :upcase)
-          (*package* (find-package :cl-user)))
-      (write form :stream stream :pretty t)
-      (terpri stream))))
-
 (defun export-baseline-read-manifest ()
   (with-open-file (stream *export-baseline-manifest-path*
                           :direction :input :external-format :utf-8)
@@ -1036,6 +1015,16 @@
     (export-baseline-check
      (equal (getf manifest :baseline-revision) *export-baseline-revision*)
      "FR-106 baseline revision mismatch")
+    (export-baseline-check
+     (equal (getf manifest :baseline-source-sha256)
+            *export-baseline-source-sha256*)
+     "FR-106 baseline source hashes do not match revision ~A"
+     *export-baseline-revision*)
+    (export-baseline-check
+     (equal (getf manifest :baseline-source-absent)
+            *export-baseline-source-absent*)
+     "FR-106 baseline source absence does not match revision ~A"
+     *export-baseline-revision*)
     (export-baseline-check frozen "FR-106 frozen manifest has no entries")
     (export-baseline-check live "FR-106 capture selected no export-org invocations")
     (export-baseline-check fixtures "FR-106 frozen manifest has no fixtures")
@@ -1087,8 +1076,7 @@
     (length frozen)))
 
 (defun export-baseline-run-all (arguments)
-  (let* ((capture-p (export-baseline-capture-mode-p))
-         (frozen-manifest (unless capture-p (export-baseline-read-manifest)))
+  (let* ((frozen-manifest (export-baseline-read-manifest))
          (root (cl-weave::root-suite))
          (target-only-p
            (equal (uiop:getenv "CL_ORG_EXPORT_BASELINE_TARGET_ONLY") "1"))
@@ -1115,44 +1103,9 @@
        (plusp suite-assertion-count)
        "FR-106 baseline suite ran no harness assertions"))
     (export-baseline-check run-result "FR-106 baseline suite did not pass")
-    (if capture-p
-        (let* ((invocation-count (length *export-baseline-captured*))
-               (fixture-count (length *export-baseline-fixtures*))
-               (form nil))
-          (export-baseline-check
-           (plusp invocation-count)
-           "FR-106 baseline capture selected no export-org invocations")
-          (export-baseline-check
-           (plusp fixture-count)
-           "FR-106 baseline capture recorded no test-defined fixtures")
-          (export-baseline-check
-           (export-baseline-entry-files-cover-targets-p
-            (mapcar #'car *export-baseline-captured*))
-           "FR-106 capture does not cover all five export suites")
-          (export-baseline-check
-           (export-baseline-unique-plist-ids-p
-            (mapcar #'car *export-baseline-captured*))
-           "FR-106 capture generated duplicate entry IDs")
-          (export-baseline-check
-           (every #'export-baseline-entry-shape-p
-                  (mapcar #'car *export-baseline-captured*))
-           "FR-106 capture generated an invalid entry")
-          (export-baseline-check
-           (export-baseline-unique-plist-ids-p *export-baseline-fixtures*)
-           "FR-106 capture generated duplicate fixture IDs")
-          (export-baseline-check
-           (every #'export-baseline-fixture-shape-p *export-baseline-fixtures*)
-           "FR-106 capture generated an invalid fixture")
-          (setf form (export-baseline-manifest-form
-                      *export-baseline-captured* *export-baseline-fixtures*))
-          (export-baseline-check
-           (= invocation-count (length (getf form :entries)))
-           "FR-106 baseline entry count does not match capture count")
-          (export-baseline-write-manifest form)
-          (setf comparison-count 0))
-        (setf comparison-count
-              (export-baseline-compare *export-baseline-captured*
-                                       *export-baseline-fixtures*)))
+    (setf comparison-count
+          (export-baseline-compare *export-baseline-captured*
+                                   *export-baseline-fixtures*))
     (setf *export-baseline-last-run-summary*
           (list :invocation-count (length *export-baseline-captured*)
                 :fixture-count (length *export-baseline-fixtures*)
@@ -1176,12 +1129,21 @@
         (export-baseline-run-all arguments)))
 
 (it "checks the frozen FR-106 export baseline manifest"
-  (unless (export-baseline-capture-mode-p)
-    (let* ((manifest (export-baseline-read-manifest))
-           (entries (getf manifest :entries))
-           (fixtures (getf manifest :fixtures)))
-      (export-baseline-check entries "FR-106 frozen manifest has no entries")
-      (export-baseline-check
-       (equal (getf manifest :baseline-revision) *export-baseline-revision*)
-       "FR-106 frozen manifest revision mismatch")
-      (export-baseline-check fixtures "FR-106 frozen manifest has no fixtures"))))
+  (let* ((manifest (export-baseline-read-manifest))
+         (entries (getf manifest :entries))
+         (fixtures (getf manifest :fixtures)))
+    (export-baseline-check entries "FR-106 frozen manifest has no entries")
+    (export-baseline-check
+     (equal (getf manifest :baseline-revision) *export-baseline-revision*)
+     "FR-106 frozen manifest revision mismatch")
+    (export-baseline-check
+     (equal (getf manifest :baseline-source-sha256)
+            *export-baseline-source-sha256*)
+     "FR-106 baseline source hashes do not match revision ~A"
+     *export-baseline-revision*)
+    (export-baseline-check
+     (equal (getf manifest :baseline-source-absent)
+            *export-baseline-source-absent*)
+     "FR-106 baseline source absence does not match revision ~A"
+     *export-baseline-revision*)
+    (export-baseline-check fixtures "FR-106 frozen manifest has no fixtures")))

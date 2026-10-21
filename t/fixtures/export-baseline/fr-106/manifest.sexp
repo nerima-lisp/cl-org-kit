@@ -1,4 +1,19 @@
 (:BASELINE-REVISION "ce017bca425b50eff000d1a6986be7084acfd9c3"
+ :BASELINE-SOURCE-SHA256
+ (("cl-org-kit.asd" . "4a992fb371ef5b1dc5ad716e7c8188e00240c20e8575b303eabe1ab81dc79a4c")
+  ("src/package.lisp" . "f5152125a9fae854f3968cac21d6063b121d153eb52a13369272c4e966dc552e")
+  ("src/export-types.lisp" . "05289e6ad693a997bb98b92ad19366d7ade2414ca0dbde1e5fdab3903f5d3f5f")
+  ("src/export-core.lisp" . "02fa101fefa192bcef763ab9a8bd4abb2195f626b88985800afbbd505266fade")
+  ("src/export-html.lisp" . "24ab7b41d8c71e60dac3383efccca45f355d2af7f88f6f3f2185bd10b4340e12")
+  ("src/export-gfm.lisp" . "c378646bda5f41d2082dee75a4efe88df778605e3def694dd44dbea939a5e44b")
+  ("src/export-ascii.lisp" . "991b4dfafc295d7ef7a61317287a0161f04ee955d4eab964a308889407914d55")
+  ("src/export-latex.lisp" . "64b7ee84602303279a5c60d734ff05738bac278d7a452f6235a0f53bda37e543")
+  ("t/export-core-test.lisp" . "a0db28e125f4c156b37d034fe0720a5ad5bd80bd3815fe71f5b9f30d97ee2979")
+  ("t/export-html-test.lisp" . "25cc675d004c07abfab7940117ac806c158cc3a9127070d2972288c5504fd5a9")
+  ("t/export-gfm-test.lisp" . "663a78ffad4775521dcb23ea088e071414fa1323107119e629da785643ede9ac")
+  ("t/export-ascii-test.lisp" . "c672632a0f7da1556e3f7c80739732284f214ae23b61f12a3601b634c9fe0032")
+  ("t/export-latex-test.lisp" . "af9600e002ca35951bed2178418c1ffd6f6dfc8fa17d3c29d9e954be01735a5a"))
+ :BASELINE-SOURCE-ABSENT ("src/export-registry.lisp")
  :SCHEMA-EXTENSIONS
  ((:UNENCODABLE-STRING :REPRESENTATION :CHARACTER-CODES :APPLIES-TO
    (:INPUT :EXPECTED :EXPECTED-OUTPUT)))
