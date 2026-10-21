@@ -252,4 +252,289 @@
         (expect (document-text second-document) :to-equal source-text)
         (expect (document-bom-p first-document) :to-be t)
         (expect (document-bom-p second-document) :to-be t))))
+  (it "validates action options, agenda sources, and staged heading paths"
+    (let* ((document (parse-org (format nil "* Task~%")))
+           (entry (first (agenda-bulk-test-entries document '("Task"))))
+           (heading (agenda-bulk-test-headline document "Task"))
+           (at (make-org-time-value "2024-02-19T12:34:00+00:00"))
+           (time-context (agenda-bulk-test-time-context))
+           (invalid-action
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :unknown))))
+           (missing-todo-state
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :todo :at at))))
+           (missing-todo-at
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :todo :state "DONE"))))
+           (invalid-todo-state
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :todo :state 7 :at at))))
+           (missing-tag
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :add-tag))))
+           (invalid-tag
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :add-tag :tag 7))))
+           (missing-schedule-date
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :schedule))))
+           (invalid-schedule-date
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list entry) :schedule
+                                    :schedule-date "not-a-date"))))
+           (time-schedule-date
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action
+                 (list entry) :schedule
+                 :schedule-date (make-org-time-value
+                                 "2024-02-20T09:00:00+00:00")))))
+           (integer-schedule-date
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list entry) :schedule :schedule-date 42))))
+           (missing-refile-target
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :refile))))
+           (missing-archive-context
+             (agenda-bulk-test-error
+              (lambda () (agenda-bulk-action nil :archive))))
+           (invalid-archive-target
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action nil :archive :target-document 7
+                                    :time-context time-context))))
+           (missing-heading-document
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list entry) :add-tag :tag "bulk"
+                                    :target-heading heading))))
+           (invalid-entry
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list (make-agenda-entry))
+                                    :add-tag :tag "bulk"))))
+           (stale-path
+             (let ((path (copy-tree (org-kit::node-heading-path heading))))
+               (setf (getf (first path) :title) "Missing")
+               (agenda-bulk-test-error
+                (lambda ()
+                  (org-kit::agenda-bulk-resolve-heading-path document path)))))
+           (missing-current-document
+             (agenda-bulk-test-error
+              (lambda ()
+                (org-kit::agenda-bulk-current-document nil document))))
+           (missing-stage-document
+             (agenda-bulk-test-error
+              (lambda ()
+                (org-kit::agenda-bulk-stage-document nil document document))))
+           (invalid-source-document (parse-org "Body text"))
+           (invalid-source-entry
+             (make-agenda-entry
+              :source-node (first (node-children
+                                   (document-root invalid-source-document)))))
+           (missing-source-headline
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list invalid-source-entry) :add-tag
+                                    :tag "bulk"))))
+           (invalid-index-path
+             (let ((path (copy-tree (org-kit::node-heading-path heading))))
+               (setf (getf (first path) :index) "first")
+               (agenda-bulk-test-error
+                (lambda ()
+                  (org-kit::agenda-bulk-resolve-heading-path document path)))))
+           (unrecognized-entry-heading
+             (org-kit::agenda-bulk-entry-heading nil)))
+      (with-soft-assertions
+        (dolist (condition
+                 (list invalid-action missing-todo-state missing-todo-at
+                       invalid-todo-state missing-tag invalid-tag
+                       missing-schedule-date invalid-schedule-date
+                       time-schedule-date integer-schedule-date
+                       missing-refile-target missing-archive-context
+                       invalid-archive-target missing-heading-document
+                       invalid-entry missing-source-headline))
+          (expect (typep condition 'org-agenda-error) :to-be t)
+          (when (typep condition 'org-agenda-error)
+            (expect (org-agenda-error-reason condition) :to-be :invalid-option)))
+        (dolist (condition
+                 (list stale-path missing-current-document missing-stage-document
+                       invalid-index-path))
+          (expect (typep condition 'org-agenda-error) :to-be t)
+          (when (typep condition 'org-agenda-error)
+            (expect (org-agenda-error-reason condition) :to-be :target-not-found)))
+        (expect (agenda-bulk-action nil :add-tag :tag "bulk") :to-be nil)
+        (expect unrecognized-entry-heading :to-be nil))))
+  (it "accepts agenda results whose source nodes are planning entries"
+    (let* ((source-text
+             (format nil "* TODO Task~%SCHEDULED: <2024-02-20 Tue>~%"))
+           (document (parse-org source-text))
+           (date (make-org-time-value "2024-02-20"))
+           (view (agenda (list document) date date
+                         :time-context (agenda-bulk-test-time-context)))
+           (results (agenda-bulk-action view :add-tag :tag "bulk"))
+           (updated (edit-result-updated-document
+                     (cdr (assoc document results :test #'eq)))))
+      (with-soft-assertions
+        (expect (plusp (length (agenda-result-entries view))) :to-be t)
+        (expect (not (null (search ":bulk:" (document-text updated))))
+               :to-be t))))
+  (it "schedules date variants and handles unscheduled entries"
+    (flet ((scheduled-text (date)
+             (let* ((document (parse-org (format nil "* Task~%")))
+                    (results
+                      (agenda-bulk-action
+                       (agenda-bulk-test-entries document '("Task"))
+                       :schedule :schedule-date date)))
+               (document-text
+                (edit-result-updated-document
+                 (cdr (assoc document results :test #'eq)))))))
+      (with-soft-assertions
+        (dolist (date
+                 (list (cl-date-kit:make-local-date 2024 2 20)
+                       (make-org-time-value "2024-02-20")
+                       "2024-02-20"))
+          (expect (not (null (search "SCHEDULED: <2024-02-20 Tue>"
+                                     (scheduled-text date))))
+                  :to-be t))
+        (let* ((source-text
+                 (format nil
+                         "* Task~%:PROPERTIES:~%:ID: range-task~%:END:~%SCHEDULED: <2025-03-01 Sat +1w>--<2025-03-08 Sat>~%"))
+               (document (parse-org source-text))
+               (entries (agenda-bulk-test-entries document '("Task")))
+               (results
+                 (agenda-bulk-action entries :schedule
+                                     :schedule-date "2025-03-02"))
+               (updated
+                 (document-text
+                  (edit-result-updated-document
+                   (cdr (assoc document results :test #'eq))))))
+          (expect updated
+                  :to-equal
+                  (format nil
+                          "* Task~%:PROPERTIES:~%:ID: range-task~%:END:~%SCHEDULED: <2025-03-02 Sun +1w>--<2025-03-09 Sun>~%")))
+        (let* ((source-text
+                 (format nil
+                         "* Task~%SCHEDULED: <2025-03-01 Sat +1w>--<2025-03-08 Sat>~%"))
+               (document (parse-org source-text))
+               (entries (agenda-bulk-test-entries document '("Task")))
+               (results
+                 (agenda-bulk-action entries :schedule :schedule-date nil))
+               (updated
+                 (document-text
+                  (edit-result-updated-document
+                   (cdr (assoc document results :test #'eq))))))
+          (expect updated :to-equal (format nil "* Task~%")))
+        (let* ((source-text (format nil "* Task~%"))
+               (document (parse-org source-text))
+               (results
+                 (agenda-bulk-action
+                  (agenda-bulk-test-entries document '("Task"))
+                  :schedule :schedule-date nil))
+               (edit (cdr (assoc document results :test #'eq))))
+          (expect (document-text (edit-result-updated-document edit))
+                  :to-equal source-text)
+          (expect (edit-result-spans edit) :to-be nil)))))
+  (it "checks archive headers, local archive targets, and refile cycles"
+    (let* ((source (parse-org (format nil "* Task~%")
+                              :source-name "source.org"))
+           (entry (first (agenda-bulk-test-entries source '("Task"))))
+           (context (agenda-bulk-test-time-context))
+           (archive-target (parse-org "* Existing"))
+           (archive-results
+             (agenda-bulk-action (list entry) :archive
+                                 :target-document archive-target
+                                 :time-context context))
+           (updated-target
+             (document-text
+              (edit-result-updated-document
+               (cdr (assoc archive-target archive-results :test #'eq)))))
+           (local-source (parse-org (format nil "* Task~%")))
+           (local-results
+             (agenda-bulk-action
+              (agenda-bulk-test-entries local-source '("Task"))
+              :archive :time-context context))
+           (local-updated
+             (document-text
+              (edit-result-updated-document
+               (cdr (assoc local-source local-results :test #'eq)))))
+           (same-document-results
+             (agenda-bulk-action
+              (agenda-bulk-test-entries local-source '("Task")) :archive
+              :target-document local-source :time-context context))
+           (same-document-updated
+             (document-text
+              (edit-result-updated-document
+               (cdr (assoc local-source same-document-results :test #'eq)))))
+           (source-with-name (parse-org "* Task" :source-name "source.org"))
+           (unnamed-source (parse-org "* Task"))
+           (existing-target (parse-org "* Existing"))
+           (cycle-document
+             (parse-org (format nil "* Parent~%** Child~%* Elsewhere~%")))
+           (parent (agenda-bulk-test-headline cycle-document "Parent"))
+           (child (agenda-bulk-test-headline cycle-document "Child"))
+           (cycle-entry (make-agenda-entry :source-node parent))
+           (self-cycle
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list cycle-entry) :refile
+                                    :target-document cycle-document
+                                    :target-heading parent))))
+           (descendant-cycle
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list cycle-entry) :refile
+                                    :target-document cycle-document
+                                    :target-heading child))))
+           (tabbed-document
+             (parse-org (format nil "* TODO Tab~CTitle :old:~%" #\Tab)))
+           (tabbed-results
+             (agenda-bulk-action
+              (agenda-bulk-test-entries
+               tabbed-document (list (format nil "Tab~CTitle" #\Tab)))
+              :add-tag :tag "bulk")))
+      (with-soft-assertions
+        (expect (not (null (search "Archived entries from file source.org"
+                                   updated-target)))
+                :to-be t)
+        (expect (not (null (search "Archive" local-updated))) :to-be t)
+        (expect (not (null (search "ARCHIVE_TIME" same-document-updated)))
+                :to-be t)
+        (expect (org-kit::agenda-bulk-archive-target-document
+                 source-with-name source-with-name)
+                :to-be source-with-name)
+        (expect (org-kit::agenda-bulk-archive-target-document
+                 unnamed-source existing-target)
+                :to-be existing-target)
+        (dolist (condition (list self-cycle descendant-cycle))
+          (expect (typep condition 'org-agenda-error) :to-be t)
+          (when (typep condition 'org-agenda-error)
+            (expect (org-agenda-error-reason condition) :to-be :invalid-option)))
+        (expect (not
+                 (null
+                  (search ":bulk:"
+                          (document-text
+                           (edit-result-updated-document
+                            (cdr (assoc tabbed-document tabbed-results
+                                        :test #'eq)))))))
+                :to-be t))))
+  (it "rejects non-boolean TODO blocker inhibition"
+    (let* ((document
+             (parse-org (format nil "#+TODO: TODO | DONE~%* TODO Task~%")))
+           (heading (agenda-bulk-test-headline document "Task"))
+           (condition
+             (agenda-bulk-test-error
+              (lambda ()
+                (transition-heading-todo
+                 document heading "DONE"
+                 :at (make-org-time-value "2024-02-19T12:34:00+00:00")
+                 :time-context (agenda-bulk-test-time-context)
+                 :inhibit-blocking :yes)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-edit-error) :to-be t)
+        (when (typep condition 'org-edit-error)
+          (expect (org-edit-error-reason condition) :to-be :invalid-value)))))
 )

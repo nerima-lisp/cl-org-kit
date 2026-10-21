@@ -211,12 +211,11 @@
           (let* ((source (document-text document))
                  (line-start (node-begin heading))
                  (blank-start
-                   (1+ (or (position-if-not
-                            (lambda (character)
-                              (or (char= character #\Space)
-                                  (char= character #\Tab)))
-                            source :start line-start :end tag-start :from-end t)
-                           (1- line-start))))
+                   (1+ (position-if-not
+                        (lambda (character)
+                          (or (char= character #\Space)
+                              (char= character #\Tab)))
+                        source :start line-start :end tag-start :from-end t)))
                  (prefix (subseq source line-start blank-start))
                  (tag-string (subseq source tag-start tag-end))
                  (prefix-width
@@ -292,14 +291,51 @@
    (node-property timestamp (if (eq endpoint :start) :month-start :month-end))
    (node-property timestamp (if (eq endpoint :start) :day-start :day-end))))
 
+(defun agenda-bulk-unparsed-scheduled-paragraph (document heading)
+  (let* ((source (document-text document))
+         (section (edit-properties-headline-section heading)))
+    (find-if
+     (lambda (paragraph)
+       (and (eq (node-type paragraph) :paragraph)
+            (find-if
+             (lambda (timestamp)
+               (and (eq (node-type timestamp) :timestamp)
+                    (string= "SCHEDULED: "
+                             (subseq source (node-begin paragraph)
+                                     (node-begin timestamp)))))
+             (node-children paragraph))))
+     (and section (node-children section)))))
+
+(defun agenda-bulk-remove-scheduled-paragraph (document heading paragraph)
+  (let* ((source (document-text document))
+         (patch (edit-make-patch (node-begin paragraph) (node-end paragraph)
+                                 "" heading))
+         (updated-source (edit-splice-source source (list patch)))
+         (expected
+           (edit-canonical-document
+            (edit-reparse-source document updated-source heading))))
+    (edit-apply-patches-result document (list patch) :target heading
+                               :expected expected)))
+
 (defun agenda-bulk-schedule-edit (document heading date)
   (let* ((section (edit-properties-headline-section heading))
          (planning (edit-properties-section-planning section))
-         (timestamp (and planning (node-property planning :scheduled))))
+         (unparsed-scheduled-paragraph
+           (and (null planning)
+                (agenda-bulk-unparsed-scheduled-paragraph document heading)))
+         (unparsed-scheduled-timestamp
+           (and unparsed-scheduled-paragraph
+                (find :timestamp (node-children unparsed-scheduled-paragraph)
+                      :key #'node-type)))
+         (timestamp (or (and planning (node-property planning :scheduled))
+                        unparsed-scheduled-timestamp)))
     (cond
       ((null date)
        (if timestamp
-           (remove-planning document heading :scheduled)
+           (if unparsed-scheduled-paragraph
+               (agenda-bulk-remove-scheduled-paragraph
+                document heading unparsed-scheduled-paragraph)
+               (remove-planning document heading :scheduled))
            (make-edit-result :updated-document document :spans nil)))
       ((null timestamp)
        (let* ((value (agenda-bulk-time-value date))
@@ -334,8 +370,16 @@
               (timestamp-text
                 (edit-splice-source
                  (subseq source timestamp-start (node-end timestamp))
-                 timestamp-patches)))
-         (set-planning document heading :scheduled timestamp-text))))))
+                 timestamp-patches))
+              (updated-source (and unparsed-scheduled-paragraph
+                                   (edit-splice-source source patches))))
+         (if unparsed-scheduled-paragraph
+             (edit-apply-patches-result
+              document patches :target heading
+              :expected
+              (edit-canonical-document
+               (edit-reparse-source document updated-source heading)))
+             (set-planning document heading :scheduled timestamp-text)))))))
 
 (defun agenda-bulk-target-path (target-document target-heading)
   (when target-heading
