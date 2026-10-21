@@ -252,7 +252,7 @@
           (expect (org-resource-limit-error-limit condition) :to-be 1)
           (expect (org-resource-limit-error-actual condition) :to-be 2))
         (expect (document-text document) :to-equal source-text))))
-  (it "checks max-output-octets across all staged documents"
+  (it "reports document and selection context when a bulk document fails"
     (let* ((source-text (format nil "#+TODO: TODO | DONE~%* TODO Item~%"))
            (expected-output (format nil "#+TODO: TODO | DONE~%* DONE Item~%"))
            (input-octets (agenda-bulk-test-utf8-bom-octets source-text))
@@ -261,13 +261,12 @@
                         :encoding :utf-8))
            (output-octets
              (length (write-org expected-document :output-type :octets)))
-           (output-limit (1- (* 2 output-octets)))
            (first-document
              (parse-org input-octets :encoding :utf-8
-                        :limits (make-limits :max-output-octets output-limit)))
+                        :limits (make-limits :max-output-octets output-octets)))
            (second-document
              (parse-org input-octets :encoding :utf-8
-                        :limits (make-limits :max-output-octets output-limit)))
+                        :limits (make-limits :max-output-octets 0)))
            (entries
              (append (agenda-bulk-test-entries first-document '("Item"))
                      (agenda-bulk-test-entries second-document '("Item"))))
@@ -279,14 +278,17 @@
                 (agenda-bulk-action entries :todo :state "DONE"
                                     :at at :time-context time-context)))))
       (with-soft-assertions
-        (expect (typep condition 'org-resource-limit-error) :to-be t)
-        (when (typep condition 'org-resource-limit-error)
-          (expect (org-resource-limit-error-limit-name condition)
-                  :to-be :max-output-octets)
-          (expect (org-resource-limit-error-limit condition)
-                  :to-be output-limit)
-          (expect (org-resource-limit-error-actual condition)
-                  :to-be (* 2 output-octets)))
+        (expect (typep condition 'org-agenda-error) :to-be t)
+        (when (typep condition 'org-agenda-error)
+          (expect (org-agenda-error-reason condition)
+                  :to-be :bulk-action-failed)
+          (expect (search "document 2" (org-agenda-error-context condition))
+                  :to-be-truthy)
+          (expect (search "Item" (org-agenda-error-context condition))
+                  :to-be-truthy)
+          (expect (search "max-output-octets"
+                          (org-kit-error-message condition))
+                  :to-be-truthy))
         (expect (document-text first-document) :to-equal source-text)
         (expect (document-text second-document) :to-equal source-text)
         (expect (document-bom-p first-document) :to-be t)

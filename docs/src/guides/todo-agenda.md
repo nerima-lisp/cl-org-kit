@@ -782,6 +782,12 @@ descendants for refile and archive. Repeated agenda rows for the same headline
 are applied once. The `:max-agenda-bulk-actions` limit defaults to 100,000
 selected rows per call.
 
+Edits are staged across documents. If applying one selection fails, the call
+signals `org-agenda-error` with reason `:bulk-action-failed`; its context
+identifies the document and headline path. The call returns results only after
+every selected action succeeds, so earlier staged edits are not returned when
+a later selection fails.
+
 ~~~lisp
 (require :asdf)
 (asdf:load-system "cl-org-kit")
