@@ -95,8 +95,16 @@ Read them with `export-context-extensions` on the caller context or
 
 `register-export-backend` adds a root backend with a body renderer.
 `register-derived-export-backend` adds a backend that inherits from an
-existing backend and overrides only the supplied fields. A root renderer can
-render prepared views through `export-render-context-root-views` and
+existing backend and overrides only the supplied fields. Callback fields use
+the first non-`nil` value found from the child toward its ancestors. For keyed
+maps such as `:transcoders`, `:node-policies`, `:option-specifications`,
+`:raw-output-options`, and `:link-type-handlers`, a child's entry wins when
+the parent has the same key. Accepted and retained keyword sets combine
+entries from the parent and child. Filter callbacks run from child to parent,
+preserving each backend's listed order.
+
+A root renderer can render prepared views through
+`export-render-context-root-views` and
 `export-render-view`. A node transcoder receives the node, its view, a render
 frame, and the callback context. A view is the prepared representation of one
 node and its prepared children. The context accessors are
@@ -173,11 +181,8 @@ nodes in prepared views for later processing. The common citation keywords
 
 Register filters with `:filters` when adding or deriving a backend. The value
 maps stages to ordered callback lists, and each callback receives `(value
-context)`.
-Stages run in this order: `:options`, `:parse-tree`, `:plain-text`,
-`(:element node-type)`, `:body`, and `:final-output`. Within a stage, a derived
-backend's callbacks run before its parent's callbacks, and callbacks keep their
-listed order. Callback values are:
+context)`. Stages run in this order: `:options`, `:parse-tree`, `:plain-text`,
+`(:element node-type)`, `:body`, and `:final-output`. Callback values are:
 
 | Stage | Value |
 |---|---|
@@ -190,9 +195,10 @@ listed order. Callback values are:
 
 A filter that returns `nil` leaves its input unchanged and lets the next
 callback run. An empty string is a valid result and stops the remaining
-callbacks in that stage. `node-post-blank` counts blank lines after an Org
-node. The backend applies its output spacing for that value before the element
-filter runs, so the filter receives that spacing too.
+callbacks in that stage. `node-post-blank` is parsed spacing metadata that
+counts blank lines after an Org node; it is not an export option. HTML omits
+that spacing from both the rendered node and its element-filter input. Other
+backends pass their post-blank spacing to the element filter.
 
 Use `register-export-link-type` to add a handler for one link type on a
 backend. The handler receives the link path, rendered description, render
@@ -218,9 +224,22 @@ example, register a handler for links such as `[[issue:123][Fix the bug]]`:
   (org-kit:unregister-export-link-type :html "issue"))
 ~~~
 
-Call `unregister-export-backend` to remove a custom backend after removing its
-derived backends. `export-backend-derived-p` reports strict ancestry, so a
-backend is not derived from itself. Built-in backends cannot be unregistered.
+The registry rejects a second registration for an existing backend name. It
+also rejects a second link handler for the same type on one backend, compared
+without regard to case. A child backend may register its own handler for a
+type inherited from its parent.
+
+To replace a custom backend under the same name, unregister its derived
+backends from leaf to root, unregister and register the backend, then register
+the derived backends again from root to leaf. A backend with registered
+descendants cannot be unregistered. `export-backend-derived-p` reports strict
+ancestry, so a backend is not derived from itself. Built-in backends cannot be
+unregistered.
+
+To register a custom link handler again for the same backend and type, call
+`unregister-export-link-type` first, then call `register-export-link-type`.
+This removes only that backend's local custom handler; built-in handlers cannot
+be removed.
 
 ## Source blocks
 
