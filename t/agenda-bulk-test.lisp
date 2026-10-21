@@ -336,6 +336,40 @@
         (expect (edit-result-spans unchanged-edit) :to-be nil)
         (expect (document-text first-document) :to-equal source-text)
         (expect (document-text second-document) :to-equal source-text))))
+  (it "applies output limits per document during refile"
+    (let* ((source-text (format nil "* Keep~%* Move~%"))
+           (target-text (format nil "* Destination~%"))
+           (source-updated-text (format nil "* Keep~%"))
+           (target-updated-text (format nil "* Destination~%* Move~%"))
+           (source-limit
+             (length (write-org (parse-org source-updated-text)
+                                :output-type :octets)))
+           (target-limit
+             (length (write-org (parse-org target-updated-text)
+                                :output-type :octets)))
+           (source
+             (parse-org source-text
+                        :limits (make-limits :max-output-octets source-limit)))
+           (target
+             (parse-org target-text
+                        :limits (make-limits :max-output-octets target-limit)))
+           (entry (make-agenda-entry
+                   :source-node (agenda-bulk-test-headline source "Move")))
+           (results (agenda-bulk-action (list entry) :refile
+                                        :target-document target))
+           (source-edit (cdr (assoc source results :test #'eq)))
+           (target-edit (cdr (assoc target results :test #'eq)))
+           (source-updated (edit-result-updated-document source-edit))
+           (target-updated (edit-result-updated-document target-edit)))
+      (with-soft-assertions
+        (expect (document-text source-updated) :to-equal source-updated-text)
+        (expect (document-text target-updated) :to-equal target-updated-text)
+        (expect (length (write-org source-updated :output-type :octets))
+                :to-be source-limit)
+        (expect (length (write-org target-updated :output-type :octets))
+                :to-be target-limit)
+        (expect (document-text source) :to-equal source-text)
+        (expect (document-text target) :to-equal target-text))))
   (it "validates action options, agenda sources, and staged heading paths"
     (let* ((document (parse-org (format nil "* Task~%")))
            (entry (first (agenda-bulk-test-entries document '("Task"))))

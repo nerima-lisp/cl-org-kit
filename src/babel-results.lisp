@@ -386,8 +386,7 @@
          (verified-prepared
            (%make-edit-prepared-patches
             document source patches target
-            (edit-canonical-document expected-document)
-            (edit-prepared-patches-output-octets prepared))))
+            (edit-canonical-document expected-document))))
     (edit-finish-prepared-patches verified-prepared)))
 
 (defun update-babel-results (document block raw-result

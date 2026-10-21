@@ -844,15 +844,43 @@
             (expect (org-resource-limit-error-actual condition) :to-be 6))))
       (expect (document-text document) :to-equal source)))
 
-  (it "uses the minimum output-octet budget for a multi-document transaction"
+  (it "applies output-octet budgets independently per document in a transaction"
     (let* ((source-one (format nil "* a~%"))
            (source-two (format nil "* b~%"))
            (document-one
              (parse-org source-one
-                        :limits (make-limits :max-output-octets 8)))
+                        :limits (make-limits :max-output-octets 4)))
            (document-two
              (parse-org source-two
-                        :limits (make-limits :max-output-octets 6)))
+                        :limits (make-limits :max-output-octets 4)))
+           (patch-one (list (org-kit::edit-make-patch 2 3 "A")))
+           (patch-two (list (org-kit::edit-make-patch 2 3 "B")))
+           (expected-one
+             (org-kit::edit-canonical-document (parse-org (format nil "* A~%"))))
+           (expected-two
+             (org-kit::edit-canonical-document (parse-org (format nil "* B~%"))))
+           (result
+             (org-kit::edit-apply-patches-transaction
+              (list (list document-one patch-one :expected expected-one)
+                    (list document-two patch-two :expected expected-two)))))
+      (with-soft-assertions
+        (expect (length result) :to-be 2)
+        (expect (document-text
+                 (edit-result-updated-document (first result)))
+                :to-equal (format nil "* A~%"))
+        (expect (document-text
+                 (edit-result-updated-document (second result)))
+                :to-equal (format nil "* B~%"))
+        (expect (document-text document-one) :to-equal source-one)
+        (expect (document-text document-two) :to-equal source-two)))
+    (let* ((source-one (format nil "* a~%"))
+           (source-two (format nil "* b~%"))
+           (document-one
+             (parse-org source-one
+                        :limits (make-limits :max-output-octets 4)))
+           (document-two
+             (parse-org source-two
+                        :limits (make-limits :max-output-octets 3)))
            (patch-one (list (org-kit::edit-make-patch 2 3 "A")))
            (patch-two (list (org-kit::edit-make-patch 2 3 "B")))
            (expected-one
@@ -871,38 +899,12 @@
           (with-soft-assertions
             (expect (org-resource-limit-error-limit-name condition)
                     :to-be :max-output-octets)
-            (expect (org-resource-limit-error-limit condition) :to-be 6)
-            (expect (org-resource-limit-error-actual condition) :to-be 8))))
+            (expect (org-resource-limit-error-limit condition) :to-be 3)
+            (expect (org-resource-limit-error-actual condition) :to-be 4))))
       (with-soft-assertions
         (expect transaction-result :to-be :no-result)
         (expect (document-text document-one) :to-equal source-one)
-        (expect (document-text document-two) :to-equal source-two)))
-    (let* ((limits-one (make-limits :max-output-octets 8))
-           (limits-two (make-limits :max-output-octets 9))
-           (document-one (parse-org (format nil "* a~%") :limits limits-one))
-           (document-two (parse-org (format nil "* b~%") :limits limits-two))
-           (expected-one
-             (org-kit::edit-canonical-document (parse-org (format nil "* A~%"))))
-           (expected-two
-             (org-kit::edit-canonical-document (parse-org (format nil "* B~%"))))
-           (result
-             (org-kit::edit-apply-patches-transaction
-              (list (list document-one
-                          (list (org-kit::edit-make-patch 2 3 "A"))
-                          :expected expected-one)
-                    (list document-two
-                          (list (org-kit::edit-make-patch 2 3 "B"))
-                          :expected expected-two)))))
-      (with-soft-assertions
-        (expect (length result) :to-be 2)
-        (expect (document-text
-                 (edit-result-updated-document (first result)))
-                :to-equal (format nil "* A~%"))
-        (expect (document-text
-                 (edit-result-updated-document (second result)))
-                :to-equal (format nil "* B~%"))
-        (expect (document-text document-one) :to-equal (format nil "* a~%"))
-        (expect (document-text document-two) :to-equal (format nil "* b~%")))))
+        (expect (document-text document-two) :to-equal source-two))))
 
   (it "uses the default output budget for an empty transaction"
     (expect (org-kit::edit-apply-patches-transaction nil) :to-equal nil))

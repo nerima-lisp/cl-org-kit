@@ -60,14 +60,13 @@
 
 (defstruct (edit-prepared-patches
             (:constructor %make-edit-prepared-patches
-                (document source patches target expected output-octets))
+                (document source patches target expected))
             (:copier nil))
   document
   source
   patches
   target
-  expected
-  output-octets)
+  expected)
 
 (defun edit-target-description (target)
   "Return a bounded, escaped description suitable for an edit condition."
@@ -407,8 +406,7 @@
       (when (document-encoding document)
         (check-limit limits :max-input-length output-octets))
       (check-limit limits :max-output-octets output-octets)
-      (%make-edit-prepared-patches document source normalized target expected
-                                   output-octets))))
+      (%make-edit-prepared-patches document source normalized target expected))))
 
 (defun edit-finish-prepared-patches (prepared)
   "Splice, reparse, and validate a prepared patch operation."
@@ -437,27 +435,11 @@
 
 (defun edit-apply-patches-transaction (operations)
   "Return edit results only after every independent document edit succeeds.
-
-Each operation is the argument list accepted by EDIT-APPLY-PATCHES-RESULT."
-  (let* ((prepared
-           (mapcar (lambda (arguments)
-                     (apply #'edit-prepare-patches arguments))
-                   operations))
-         (output-octets
-           (reduce #'+ prepared :key #'edit-prepared-patches-output-octets
-                   :initial-value 0))
-         (limits (mapcar (lambda (operation)
-                           (document-limits
-                            (edit-prepared-patches-document operation)))
-                         prepared))
-         (limit (minimum-limit-value limits :max-output-octets)))
-    (when (> output-octets limit)
-      (error 'org-resource-limit-error
-             :message "Resource limit exceeded"
-             :limit-name :max-output-octets
-             :limit limit
-             :actual output-octets))
-    (mapcar #'edit-finish-prepared-patches prepared)))
+Each operation checks output limits for its own document."
+  (mapcar #'edit-finish-prepared-patches
+          (mapcar (lambda (arguments)
+                    (apply #'edit-prepare-patches arguments))
+                  operations)))
 
 (defun edit-apply-patches (document patches &key target expected)
   "Splice PATCHES into DOCUMENT, reparse, and require EXPECTED canonical data.
