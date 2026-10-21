@@ -1255,7 +1255,9 @@ paragraph" table-list) :not :to-be nil))))
           (expect (org-resource-limit-error-limit-name condition)
                   :to-be :max-output-length))
         (expect (> (length source) (* 256 1024)) :to-be t)
-        (expect (< allocated (floor (length source) 2)) :to-be t))))
+        (unless *coverage-run-p*
+          (expect (< allocated (floor (length source) 2))
+                  :to-be t)))))
 
   (it-sequential "checks HTML attribute values before copying them"
     (let* ((body (make-string (* 256 1024) :initial-element #\x))
