@@ -1,0 +1,2 @@
+file	line-covered	line-total	branch-covered	branch-total	uncovered-lines
+progn-direct.lisp	0	1	1	1	2
