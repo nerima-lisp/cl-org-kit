@@ -71,6 +71,116 @@
              "corpus/recalculate/field-column-overlap.org"
              "expected/recalculate/field-column-overlap.org")))
       (expect (length (edit-result-spans result)) :to-be 1)))
+  (it "executes restricted org-sbe calls through the registered Babel executor"
+  (labels ((source-for (formula)
+             (format nil
+                     "#+name: sample~%#+begin_src mock :cache no~%body~%#+end_src~%| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2=~A~%"
+                     formula))
+           (recalculate (formula executor)
+             (let* ((source (source-for formula))
+                    (document (parse-org source))
+                    (table (table-recalculate-test-find-node
+                            (document-root document) :table))
+                    (callbacks (make-callback-registry))
+                    (received-parameters nil)
+                    (received-variables nil))
+               (register-babel-executor
+                callbacks "mock"
+                (lambda (body parameters variables)
+                  (setf received-parameters parameters
+                        received-variables variables)
+                  (funcall executor body parameters variables)))
+               (let* ((result (table-recalculate document table
+                                                 :callbacks callbacks))
+                      (updated (edit-result-updated-document result)))
+                 (values (document-text updated)
+                         received-parameters received-variables)))))
+    (multiple-value-bind (text parameters variables)
+        (recalculate
+         "'(org-sbe sample \":cache yes\" (one 7) (many 1 2) (literal $ \"a b\"))"
+         (lambda (body parameters variables)
+           (declare (ignore body parameters variables))
+           "  trimmed result  "))
+      (with-soft-assertions
+        (expect (not (null (search "| alpha | trimmed result |" text))) :to-be t)
+        (expect (cdr (assoc "CACHE" parameters :test #'string=))
+                :to-equal "yes")
+        (expect (cdr (assoc "one" variables :test #'string=)) :to-equal 7)
+        (progn
+  (expect (cdr (assoc "many" variables :test #'string=))
+          :to-equal '(1 2))
+  (let ((var-parameters
+          (remove-if-not (lambda (parameter)
+                           (string= (car parameter) "VAR"))
+                         parameters)))
+    (expect (cdr (second var-parameters))
+            :to-equal "many=(1 2)")))
+        (expect (cdr (assoc "literal" variables :test #'string=))
+                :to-equal "a b")))
+    (multiple-value-bind (text parameters variables)
+        (recalculate
+         "'(org-sbe \"sample\")"
+         (lambda (body parameters variables)
+           (declare (ignore body parameters variables))
+           42))
+      (declare (ignore parameters variables))
+      (expect (not (null (search "| alpha | 42 |" text))) :to-be t))
+    (multiple-value-bind (text parameters variables)
+        (recalculate
+         "'(org-sbe \"\")"
+         (lambda (body parameters variables)
+           (declare (ignore body parameters variables))
+           (error "Empty org-sbe block must not execute")))
+      (declare (ignore parameters variables))
+      (expect (not (null (search "| alpha |  |" text))) :to-be t))
+    (let* ((source (source-for "'(org-sbe sample)"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (callbacks (make-callback-registry))
+           (calls 0)
+           (condition nil))
+      (register-callback callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (declare (ignore expression))
+                           (incf calls)))
+      (register-babel-executor callbacks "other"
+                               (lambda (&rest arguments)
+                                 (declare (ignore arguments))
+                                 (incf calls)))
+      (setf condition
+            (handler-case
+                (progn (table-recalculate document table :callbacks callbacks)
+                       nil)
+              (org-elisp-evaluator-error (condition) condition)))
+      (with-soft-assertions
+        (expect (typep condition 'org-elisp-evaluator-error) :to-be t)
+        (when condition
+          (expect (org-callback-error-kind condition)
+                  :to-equal "BABEL-EXECUTOR")
+          (expect (org-callback-error-name condition) :to-equal "mock")
+          (expect (org-callback-error-reason condition) :to-be :unregistered))
+        (expect calls :to-be 0)))
+    (let* ((source (source-for "'(org-sbe sample (one . 7))"))
+           (document (parse-org source))
+           (table (table-recalculate-test-find-node (document-root document) :table))
+           (callbacks (make-callback-registry))
+           (calls 0)
+           (condition nil))
+      (register-callback callbacks :evaluator :emacs-lisp
+                         (lambda (expression)
+                           (declare (ignore expression))
+                           (incf calls)))
+      (setf condition
+            (handler-case
+                (progn (table-recalculate document table :callbacks callbacks)
+                       nil)
+              (org-table-unsupported-syntax (condition) condition)))
+      (with-soft-assertions
+        (expect (typep condition 'org-table-unsupported-syntax) :to-be t)
+        (when condition
+          (expect (org-table-unsupported-syntax-feature condition)
+                  :to-be :org-sbe))
+        (expect calls :to-be 0)))))
 
   (it "passes the Org-expanded quoted Lisp form to the evaluator callback"
     (let* ((source

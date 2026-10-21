@@ -1,7 +1,7 @@
 # Tables
 
-Formatting and structural edits apply to Org pipe tables. Table.el tables are
-not supported by these editing functions. Each operation that edits source
+Formatting and structural-edit functions apply to Org pipe tables. Table.el
+tables are not supported by these functions. Each operation that edits source
 returns an `edit-result`; read its updated document with
 `edit-result-updated-document`.
 The examples require the runtime dependencies listed in
@@ -60,10 +60,12 @@ The structural edit functions are:
   `(table-delete-column document target index)`
 - `(table-move-column document target from to)`
 
-Structural edit row and column positions are one-based. Row positions count
-standard rows across the whole table and ignore hlines. `table-move-row` takes
-source and destination positions; a row cannot move across an hline. Without
-hlines, all rows are in the same section.
+Structural edit row and column positions are one-based. Insertions go before
+the row or column at the given index; an index one past the last position
+appends. Row positions count standard rows across the whole table and ignore
+hlines. If an insertion index selects the first standard row after an hline,
+the new row is inserted in that section. `table-move-row` takes source and
+destination positions; a row cannot move across an hline.
 
 `table-insert-row :values` supplies cells in column order, and
 `table-insert-column :values` supplies them in standard-row order. Missing
@@ -77,7 +79,7 @@ has one row section; multiple sections are ambiguous. If either bound is
 supplied on a table with hlines, supply both. An explicit range must stay
 within one hline-delimited section.
 
-Formula expressions support decimal arithmetic, comparisons, duration and
+Expressions accepted by `table-recalculate` support decimal arithmetic, comparisons, duration and
 string literals, field and range references, parentheses, and the built-in
 functions listed below. A range can be used as a vector-function argument or
 as an assignment target.
@@ -123,9 +125,10 @@ A row formula such as `@3=...` assigns across the selected standard row. A
 rectangular range formula such as `@2$2..@4$3=...` assigns across that range. A
 column formula such as `$3=...` applies to the data rows. When a table has
 hlines, rows before its first hline are treated as the header section and are
-skipped by column formulas. A field, row, or range formula takes precedence
-over a column formula for any field both formulas target, but the column formula
-still runs and can signal an error. If two field, row, or range formulas target
+skipped by column formulas. Column formulas run first; field, row, and range
+formulas then read their results and replace them for any field both formulas
+target. The column formula still runs and can signal an error. If two field,
+row, or range formulas target
 the same field, recalculation signals `org-table-error` with reason
 `:duplicate-target`.
 
@@ -160,7 +163,7 @@ the current row contains `2`, `4`, and `6` in columns 1 through 3.
 | `taylor` | `taylor(exp(x),x=7,2)` | `1096.63315843 x + 548.316579215 (x - 7)^2 - 6579.79895058` |
 | `if` | `if(3,2,1)` | `2` |
 | `string` | `string(42)` | The text `42` |
-| `typeof` | `typeof("a")` | Type code `101` |
+| `typeof` | `typeof("a")` | Type code `101` (string) |
 
 The `taylor` built-in accepts `taylor(exp(x),x=point,2)`, where `point` is a
 numeric expression, and returns a formatted second-order polynomial around
@@ -170,8 +173,8 @@ implemented.
 The existing vector helpers `vmin`, `vmax`, and `vcount` are also available.
 
 `if` accepts boolean expressions and numeric conditions; zero is false and any
-nonzero number is true. Calc type code `1` denotes an integer, while `101`
-denotes a string.
+nonzero number is true. `typeof` returns type code `1` for integers and `101`
+for strings.
 
 Other function names can be supplied for one recalculation call. Built-in names
 take precedence and cannot be overridden. `:functions` is an alist from
@@ -282,6 +285,77 @@ literal, so the callback receives `'(identity $1)`. The library never evaluates
 Emacs Lisp. A missing evaluator signals `org-elisp-evaluator-error` with reason
 `:unregistered`; evaluator results must be strings or real numbers.
 
+### Calling Babel blocks from formulas
+
+A quoted Lisp formula can call a named source block with `org-sbe`. Pass the
+table recalculation `:callbacks` registry with an executor registered for the
+block's language. The executor receives the expanded body, resolved header
+parameters, and resolved variables; the library does not start a process.
+Recalculation recognizes `org-sbe` directly and routes it to the Babel
+executor; it does not call the quoted-Lisp formula evaluator for this form.
+
+```org
+#+NAME: subtotal
+#+BEGIN_SRC demo-language
+body passed to the registered executor
+#+END_SRC
+
+| Input | Result |
+|-------+--------|
+| old   | old    |
+#+TBLFM: @2$2='(org-sbe subtotal ":session one" (limit $ "4"))
+```
+
+This complete example registers the executor, recalculates the table, and
+prints its updated document:
+
+```lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(labels ((first-table (document)
+           (let ((found nil))
+             (org-kit:map-nodes
+              (lambda (node)
+                (when (and (null found)
+                           (eq (org-kit:node-type node) :table))
+                  (setf found node)))
+              (org-kit:document-root document))
+             found)))
+  (let* ((source
+           (format nil
+                   "#+NAME: subtotal~%#+BEGIN_SRC demo-language~%body~%#+END_SRC~%| Input | Result |~%|-------+--------|~%| old   | old    |~%#+TBLFM: @2$2='(org-sbe subtotal \":session one\" (limit $ \"4\"))~%"))
+         (document (org-kit:parse-org source))
+         (table (first-table document))
+         (callbacks (org-kit:make-callback-registry)))
+    (org-kit:register-babel-executor
+     callbacks "demo-language"
+     (lambda (body parameters variables)
+       (declare (ignore body))
+       (format nil "session=~A; limit=~A"
+               (cdr (assoc "SESSION" parameters :test #'string=))
+               (cdr (assoc "limit" variables :test #'string=)))))
+    (write-string
+     (org-kit:write-org
+      (org-kit:edit-result-updated-document
+       (org-kit:table-recalculate document table :callbacks callbacks))))))
+```
+
+Resolved parameter keys are uppercase strings such as `"SESSION"`. The
+`org-sbe` variable key keeps the spelling used in the formula, so the executor
+looks up `"limit"` as written. The result cell contains
+`session=one; limit=4`.
+
+The block name can be a symbol or string. The optional second string supplies
+header arguments, as `":session one"` does above. It is followed by zero or
+more `(variable value...)` groups. The values in each group become one variable
+value; multiple values form a list. The `$` marker makes the next value a
+literal string. Org's `org-sbe` behavior returns an empty string for an empty
+block name and trims whitespace from the executor result. A non-string result
+is formatted as a Lisp value. If the block's language has no registered
+executor, recalculation signals `org-elisp-evaluator-error` without calling
+the Emacs Lisp evaluator.
+
 ## Plot write plans
 
 `table-plot-write-plan` reads the table's `#+PLOT` options and returns a
@@ -344,8 +418,9 @@ placeholders for data and header cells in those transformations.
 
 `table-transpose` transposes a rectangular Org pipe table and returns an
 `edit-result`. Hlines are removed, `TBLFM` text is preserved unchanged, and
-text outside the table remains intact. Ragged tables and Table.el tables signal
-`org-table-error`.
+text outside the table remains intact. Formula references are not remapped, so
+review or rewrite them before recalculation if they should follow the moved
+cells. Ragged tables and Table.el tables signal `org-table-error`.
 
 ## Errors and limits
 

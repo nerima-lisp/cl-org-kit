@@ -665,42 +665,137 @@
         (check-limit limits :max-input-length (length expanded))
         expanded))))
 
-(defun table-recalculate-evaluate-entries
-    (entries row-count column-count header-columns limits work-budget
-     work-map cell-value-function target &key hline-rows functions
-       reference-value-function remote-function
-       (callbacks (make-callback-registry)))
-  (dolist (entry entries)
-    (let* ((row (table-recalculate-entry-row entry))
-           (column (table-recalculate-entry-column entry))
-           (key (table-recalculate-target-key row column))
-           (value
-             (table-calc-evaluate-assignment
-              (table-recalculate-entry-assignment entry)
-              (lambda (reference)
-                (table-recalculate-reference-position
-                 reference row column row-count column-count header-columns
-                 hline-rows target))
-              (lambda (reference-row reference-column)
-                (funcall cell-value-function
-                         work-map reference-row reference-column))
-              :limits limits :work-budget work-budget
-              :functions functions
-              :reference-value-function reference-value-function
-              :remote-function remote-function
-              :current-row row :current-column column
-              :callbacks callbacks
-              :elisp-reference-function
-              (lambda (source expression assignment)
-                (table-recalculate-expand-elisp-expression
-                 source expression assignment row column row-count column-count
-                 header-columns hline-rows target
-                 (lambda (reference-row reference-column)
-                   (funcall cell-value-function work-map
-                            reference-row reference-column))
-                 reference-value-function limits work-budget)))))
-      (setf (gethash key work-map) value)))
-  work-map)
+(defun table-recalculate-evaluate-entries (entries row-count
+                                                   column-count
+                                                   header-columns
+                                                   limits
+                                                   work-budget
+                                                   work-map
+                                                   cell-value-function
+                                                   target
+                                                   &key
+                                                   hline-rows
+                                                   functions
+                                                   reference-value-function
+                                                   remote-function
+                                                   (callbacks (make-callback-registry)))
+  (labels ((execute-org-sbe (block-name header variable-overrides)
+             (let* ((document (node-document target))
+                    (source-block (gethash block-name (babel-build-name-index document))))
+               (unless (and source-block (eq (node-type source-block) :src-block))
+                 (babel-signal-error :unresolved-call-target "org-sbe target is not a named source block" block-name))
+               (validate-babel-source-block document source-block)
+               (let* ((language (node-property source-block :language ""))
+                      (ignore
+                       (%lookup-callback callbacks
+                                         :babel-executor
+                                         language
+                                         'org-elisp-evaluator-error
+                                         "No Babel executor is registered"))
+                      (wrapped-registry (make-callback-registry)))
+                 (declare (ignore ignore))
+                 (register-callback wrapped-registry
+                                    :babel-executor
+                                    language
+                                    (lambda (body parameters variables)
+                                      (dolist (override variable-overrides)
+                                        (setf parameters (babel-merge-header-parameter parameters
+                                                                                       "VAR"
+                                                                                       (format nil
+                                                                                               "~A=~S"
+                                                                                               (car override)
+                                                                                               (cdr override))))
+                                        (let ((position
+                                               (position (car override) variables :key #'car :test #'string-equal)))
+                                          (if position
+                                              (setf (cdr (nth position variables)) (cdr override))
+                                              (setf variables (append variables (list override))))))
+                                      (funcall
+                                       (%lookup-callback callbacks
+                                                         :babel-executor
+                                                         language
+                                                         'org-elisp-evaluator-error
+                                                         "No Babel executor is registered")
+                                       body
+                                       parameters
+                                       variables)))
+                 (let* ((parameters (and header (babel-parse-header-arguments header)))
+                        (execution
+                         (%execute-babel-source-block document
+                                                      source-block
+                                                      wrapped-registry
+                                                      :result-node
+                                                      nil
+                                                      :parameters
+                                                      parameters
+                                                      :evaluation-context
+                                                      :execute))
+                        (value (babel-execution-result-value execution))
+                        (text
+                         (if (stringp value)
+                             value
+                             (format nil "~S" value))))
+                   (string-trim '(#\Space #\Tab #\Newline #\Return) text))))))
+    (dolist (entry entries)
+      (let* ((row (table-recalculate-entry-row entry))
+             (column (table-recalculate-entry-column entry))
+             (key (table-recalculate-target-key row column))
+             (value
+              (table-calc-evaluate-assignment (table-recalculate-entry-assignment entry)
+                                              (lambda (reference)
+                                                (table-recalculate-reference-position reference
+                                                                                      row
+                                                                                      column
+                                                                                      row-count
+                                                                                      column-count
+                                                                                      header-columns
+                                                                                      hline-rows
+                                                                                      target))
+                                              (lambda (reference-row reference-column)
+                                                (funcall cell-value-function work-map reference-row reference-column))
+                                              :limits
+                                              limits
+                                              :work-budget
+                                              work-budget
+                                              :functions
+                                              functions
+                                              :reference-value-function
+                                              reference-value-function
+                                              :remote-function
+                                              remote-function
+                                              :current-row
+                                              row
+                                              :current-column
+                                              column
+                                              :callbacks
+                                              callbacks
+                                              :elisp-reference-function
+                                              (lambda (source expression assignment)
+                                                (table-recalculate-expand-elisp-expression source
+                                                                                           expression
+                                                                                           assignment
+                                                                                           row
+                                                                                           column
+                                                                                           row-count
+                                                                                           column-count
+                                                                                           header-columns
+                                                                                           hline-rows
+                                                                                           target
+                                                                                           (lambda
+                                                                                               (reference-row
+                                                                                                reference-column)
+                                                                                             (funcall
+                                                                                              cell-value-function
+                                                                                              work-map
+                                                                                              reference-row
+                                                                                              reference-column))
+                                                                                           reference-value-function
+                                                                                           limits
+                                                                                           work-budget))
+                                              :org-sbe-function
+                                              #'execute-org-sbe)))
+        (setf (gethash key work-map) value)))
+    work-map))
 
 (defun table-recalculate-final-values (column-values field-values)
   (let ((values (make-hash-table :test #'equal)))
