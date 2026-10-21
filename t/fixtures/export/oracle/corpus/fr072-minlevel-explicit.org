@@ -1,0 +1,3 @@
+#+OPTIONS: toc:nil title:nil author:nil date:nil
+* Host
+#+INCLUDE: "included/fragment.org" :minlevel 3

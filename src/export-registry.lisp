@@ -57,9 +57,9 @@
     "PRIORITIES" "CONSTANTS" "EXPORT_FILE_NAME" "DESCRIPTION"
     "KEYWORDS" "SUBTITLE" "EMAIL" "CREATOR" "INCLUDE" "RESULTS"
     "NAME" "CAPTION" "HEADER" "CITE_EXPORT" "BIBLIOGRAPHY"
-    "PRINT_BIBLIOGRAPHY"))
+    "PRINT_BIBLIOGRAPHY" "TOC"))
 (defparameter *export-common-retained-keywords*
-  '("CITE_EXPORT" "BIBLIOGRAPHY" "PRINT_BIBLIOGRAPHY"))
+  '("CITE_EXPORT" "BIBLIOGRAPHY" "PRINT_BIBLIOGRAPHY" "TOC"))
 (defun export-common-node-policies ()
   '((:property-drawer . :prune-children)
     (:node-property . :prune-children)
@@ -1937,3 +1937,109 @@
 
 (eval-when (:load-toplevel :execute)
   (export-initialize-builtin-backends))
+
+(defun export-parse-html-content-option (value source backend &optional auto-p)
+  (cond
+    ((string-equal value "nil") nil)
+    ((string-equal value "t") t)
+    ((and auto-p (string-equal value "auto")) :auto)
+    ((and (>= (length value) 2)
+          (char= (char value 0) #\")
+          (char= (char value (1- (length value))) #\"))
+     (subseq value 1 (1- (length value))))
+    (t (export-invalid-option source backend
+                              "Expected t, nil, or a quoted string"))))
+
+(defun export-parse-html-preamble-option (value source backend)
+  (export-parse-html-content-option value source backend))
+
+(defun export-parse-html-postamble-option (value source backend)
+  (export-parse-html-content-option value source backend t))
+
+(defun export-toc-directive-error (backend node)
+  (export-error backend :toc-mode node "Unsupported TOC directive"))
+
+(defun export-toc-directive-words (value)
+  (let ((start nil)
+        (words nil))
+    (loop for index from 0 to (length value)
+          for separator-p = (or (= index (length value))
+                                (export-whitespace-p (char value index)))
+          do (cond
+               ((and separator-p start)
+                (push (subseq value start index) words)
+                (setf start nil))
+               ((and (not separator-p) (null start))
+                (setf start index))))
+    (nreverse words)))
+
+(defun export-parse-toc-directive (node backend)
+  (let* ((words (export-toc-directive-words
+                 (or (node-property node :value) "")))
+         (mode (and words (string-downcase (first words))))
+         (depth nil)
+         (depth-seen-p nil)
+         (local-p nil))
+    (unless (member mode '("headlines" "local" "tables" "listings")
+                    :test #'string=)
+      (export-toc-directive-error backend node))
+    (dolist (word (rest words))
+      (cond
+        ((and (string= mode "headlines")
+              (string-equal word "local")
+              (not local-p))
+         (setf local-p t))
+        ((and (string= mode "headlines")
+              (every #'digit-char-p word)
+              (not depth-seen-p))
+         (setf depth-seen-p t
+               depth (parse-integer word)))
+        (t (export-toc-directive-error backend node))))
+    (list :mode (cond ((string= mode "headlines") :headlines)
+                      ((string= mode "local") :local)
+                      ((string= mode "tables") :tables)
+                      (t :listings))
+          :depth depth
+          :local local-p)))
+
+(defun export-toc-scope-headline (node)
+  (loop for parent = (node-parent node) then (node-parent parent)
+        while parent
+        when (member (node-type parent) '(:headline :inlinetask) :test #'eq)
+          return parent))
+
+(defun export-node-below-p (node ancestor)
+  (loop for parent = (node-parent node) then (node-parent parent)
+        while parent
+        thereis (eq parent ancestor)))
+
+(defun export-toc-headline-entries (preparation keyword depth local-p)
+  (let* ((scope (and local-p (export-toc-scope-headline keyword)))
+         (scope-level (if scope (node-property scope :level) 0))
+         (heading-depth (or (cdr (assoc :heading-depth
+                                        (export-preparation-options preparation)))
+                            6))
+         (maximum-level
+           (if depth
+               (min heading-depth (+ scope-level depth))
+               heading-depth)))
+    (loop for view in (export-collect-views
+                       (export-preparation-root-views preparation))
+          for node = (export-view-node view)
+          for level = (and (member (node-type node)
+                                   '(:headline :inlinetask) :test #'eq)
+                           (node-property node :level))
+          when (and level
+                    (<= level maximum-level)
+                    (or (null scope) (export-node-below-p node scope)))
+            collect (list :view view
+                          :level (- level scope-level)
+                          :title (node-property node :raw-value)))))
+
+(defun export-toc-object-views (preparation type)
+  (loop for view in (export-collect-views
+                     (export-preparation-root-views preparation))
+        for node = (export-view-node view)
+        when (and (eq (node-type node) type)
+                  (node-property node :caption))
+          collect view))

@@ -1,0 +1,20 @@
+#+OPTIONS: toc:nil latex-use-sans:t
+#+LATEX_CLASS: article
+#+LATEX_CLASS: report
+#+LATEX_CLASS_OPTIONS: 11pt
+#+LATEX_CLASS_OPTIONS: twoside
+#+LATEX_HEADER: one header
+#+LATEX_HEADER: two header
+#+LATEX_HEADER_EXTRA: extra one
+#+LATEX_HEADER_EXTRA: extra two
+#+LATEX_CLASS_PRE: pre one
+#+LATEX_CLASS_PRE: pre two
+#+DESCRIPTION: first description
+#+DESCRIPTION: second description
+#+KEYWORDS: alpha
+#+KEYWORDS: beta
+#+SUBTITLE: Export guide
+#+LATEX_FOOTNOTE_COMMAND: footnote
+#+LATEX_ENGRAVED_THEME: modus-operandi
+#+LATEX_COMPILER: xelatex
+Body.

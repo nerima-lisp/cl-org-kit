@@ -1888,3 +1888,36 @@
           (expect (> (org-resource-limit-error-actual quote-condition) 18)
                   :to-be t)))))
 )
+(describe "Org GFM TOC keyword rendering"
+  (it "renders headline and local TOCs and omits object lists"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+TOC: headlines 1~%* Alpha~%** Beta~%* Parent~%#+TOC: headlines 1 local~%** Child~%*** Deep~%#+TOC: tables~%#+CAPTION: Table caption~%| Value |~%|-------|~%| x |~%#+TOC: listings~%#+CAPTION: Listing caption~%#+BEGIN_SRC text~%source~%#+END_SRC~%"))
+           (output (export-org (parse-org source) :gfm)))
+      (with-soft-assertions
+        (expect (search "# Table of Contents" output) :not :to-be nil)
+        (expect (search "-   [Alpha](#org-alpha)" output) :not :to-be nil)
+        (expect (search "[Beta](#beta)" output) :to-be nil)
+        (expect (search "[Child](#org-child)" output) :not :to-be nil)
+        (expect (search "[Deep](#deep)" output) :to-be nil)
+        (expect (search "List of Tables" output) :to-be nil)
+        (expect (search "List of Listings" output) :to-be nil))))
+  (it "rejects unsupported TOC modes with the named condition"
+    (let* ((condition
+             (export-gfm-test-catch-error
+              (lambda ()
+                (export-org (parse-org "#+TOC: unknown") :gfm)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-reason condition) :to-be :toc-mode)))))
+  (it "leaves standalone local TOC empty"
+    (let ((output
+           (export-org
+            (parse-org
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+TOC: local~%* Alpha~%Body"))
+            :gfm)))
+      (with-soft-assertions
+        (expect (search "Table of Contents" output) :to-be nil)
+        (expect (search "# Alpha" output) :not :to-be nil)))))

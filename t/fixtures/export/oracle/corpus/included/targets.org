@@ -1,0 +1,12 @@
+** Target
+:PROPERTIES:
+:CUSTOM_ID: stable-target
+:END:
+Target body.
+*** Child
+Child body.
+* Sibling
+Sibling body.
+
+#+NAME: named-note
+Named element body.

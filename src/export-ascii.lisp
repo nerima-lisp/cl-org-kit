@@ -292,25 +292,30 @@
     (export-ascii-output-write-range output text 0 end)))
 
 (defun export-ascii-output-write-wrapped-line
-    (output text start end width &key uppercase-p raw-output-p)
+    (output text start end width &key uppercase-p raw-output-p
+                                  double-space-boundaries)
   (let ((position start)
         (line-width 0)
-        (word-start nil))
+        (word-start nil)
+        (space-count 0))
     (labels ((emit-word (word-end)
                (let ((word-width
-                       (export-ascii-output-range-width text word-start word-end)))
+                       (export-ascii-output-range-width
+                        text word-start word-end)))
                  (when (plusp line-width)
-                   (if (> (+ line-width 1 word-width) width)
+                   (if (> (+ line-width space-count word-width) width)
                        (progn
                          (export-ascii-output-newlines output 1)
                          (setf line-width 0))
-                       (progn
-                         (export-ascii-output-write-char output #\Space)
-                         (incf line-width))))
+                     (progn
+                       (export-ascii-output-write-repeat
+                        output #\Space space-count)
+                       (incf line-width space-count))))
                  (export-ascii-output-write-range
                   output text word-start word-end :uppercase-p uppercase-p
                   :raw-output-p raw-output-p)
-                 (incf line-width word-width))))
+                 (incf line-width word-width)
+                 (setf space-count 0))))
       (loop while (< position end)
             for whitespace-p = (export-whitespace-p (char text position))
             do (if whitespace-p
@@ -318,28 +323,42 @@
                      (when word-start
                        (emit-word position)
                        (setf word-start nil))
+                     (setf space-count
+                           (if (and (= space-count 2)
+                                    (not (member position
+                                                 double-space-boundaries)))
+                               2
+                             (if (member position double-space-boundaries)
+                                 2
+                               1)))
                      (incf position))
-                   (progn
-                     (unless word-start (setf word-start position))
-                     (incf position))))
-      (when word-start (emit-word end)))))
+                 (progn
+                   (unless word-start
+                     (setf word-start position))
+                   (incf position))))
+      (when word-start
+        (emit-word end)))))
 
 (defun export-ascii-output-write-wrapped-range
-    (output text start end width &key preserve-breaks uppercase-p raw-output-p)
+    (output text start end width
+            &key preserve-breaks uppercase-p raw-output-p
+              double-space-boundaries)
   (if preserve-breaks
       (loop with line-start = start
             for newline = (position #\Newline text :start line-start :end end)
             for line-end = (or newline end)
             do (export-ascii-output-write-wrapped-line
                 output text line-start line-end width
-                :uppercase-p uppercase-p :raw-output-p raw-output-p)
+                :uppercase-p uppercase-p :raw-output-p raw-output-p
+                :double-space-boundaries double-space-boundaries)
                (when newline
                  (export-ascii-output-newlines output 1)
                  (setf line-start (1+ newline)))
             while newline)
-      (export-ascii-output-write-wrapped-line
-       output text start end width :uppercase-p uppercase-p
-       :raw-output-p raw-output-p))
+    (export-ascii-output-write-wrapped-line
+     output text start end width :uppercase-p uppercase-p
+     :raw-output-p raw-output-p
+     :double-space-boundaries double-space-boundaries))
   output)
 
 (defun export-ascii-option (options key default)
@@ -424,7 +443,7 @@
             (incf (aref counters (1- level)))
             (loop for index from level below 64
                   do (setf (aref counters index) 0))
-            (setf (gethash view numbers)
+            (setf (gethash node numbers)
                   (loop for index from 0 below level
                         collect (aref counters index)))))))
     numbers))
@@ -438,7 +457,7 @@
 (defun export-ascii-numbering-string (view numbers options &optional toc)
   (let* ((node (export-view-node view))
          (level (or (node-property node :level) 1))
-         (numbering (gethash view numbers)))
+         (numbering (gethash node numbers)))
     (when (and numbering (export-ascii-numbering-enabled-p options level))
       (if toc
           (format nil "~D. " (car (last numbering)))
@@ -954,60 +973,244 @@
   output)
 
 (defun export-ascii-output-write-views (output views preparation)
-  (let ((previous nil)
-        (included-heading-level nil)
-        (render-context (export-ascii-output-render-context output)))
-    (dolist (view views)
-      (let* ((node (export-view-node view))
-             (type (node-type node))
-             (heading-p (member type (quote (:headline :inlinetask)) :test (function eq)))
-             (level (and heading-p (or (node-property node :level) 1))))
-        (when heading-p
-          (setf included-heading-level
-                (if (not (eq (export-view-source-document view)
-                             (export-preparation-document preparation)))
-                    level
-                    (and included-heading-level
-                         (> level included-heading-level)
-                         included-heading-level))))
-        (let* ((rendered
-                 (export-ascii-output-scratch
-                  output (if previous
-                             (export-ascii-output-gap-length previous view)
-                             0)))
+  (labels ((copy-view-with-children (view children)
+             (%make-export-view
+              :node (export-view-node view)
+              :children children
+              :payload (export-view-payload view)
+              :source-document (export-view-source-document view)))
+           (append-to-deepest-section (heading pending)
+             (let* ((heading-children (export-view-children heading))
+                    (section
+                      (find-if
+                       (lambda (child)
+                         (eq (node-type (export-view-node child)) :section))
+                       heading-children))
+                    (last-heading
+                      (find-if
+                       (lambda (child)
+                         (member (node-type (export-view-node child))
+                                 '(:headline :inlinetask) :test #'eq))
+                       heading-children :from-end t))
+                    (last-section
+                      (and last-heading
+                           (find-if
+                            (lambda (child)
+                              (eq (node-type (export-view-node child)) :section))
+                            (export-view-children last-heading)))))
+               (cond
+                 ((and last-heading last-section)
+                  (copy-view-with-children
+                   heading
+                   (mapcar
+                    (lambda (child)
+                      (if (eq child last-heading)
+                          (append-to-deepest-section last-heading pending)
+                          child))
+                    heading-children)))
+                 (t
+                  (let* ((section-children (export-view-children section))
+                         (previous (car (last section-children)))
+                         (pending-view (first pending))
+                         (pending-node
+                           (and pending-view (export-view-node pending-view)))
+                         (pending-child-view
+                           (and pending-node
+                                (eq (node-type pending-node) :section)
+                                (first (export-view-children pending-view))))
+                         (next-view (or pending-child-view pending-view))
+                         (previous-node
+                           (and previous (export-view-node previous)))
+                         (next-node
+                           (and next-view (export-view-node next-view)))
+                         (previous-source
+                           (and previous
+                                (export-view-source-document previous)))
+                         (next-source
+                           (and next-view
+                                (export-view-source-document next-view)))
+                         (previous-source-text
+                           (and previous-source
+                                (document-text previous-source)))
+                         (merge-paragraphs-p
+                           (and previous-node next-node
+                                (eq (node-type previous-node) :paragraph)
+                                (eq (node-type next-node) :paragraph)
+                                previous-source next-source
+                                (not (eq previous-source next-source))
+                                (null (node-properties previous-node))
+                                (null (node-properties next-node))
+                                (zerop (node-post-blank previous-node))
+                                (eql (node-begin next-node) 0)
+                                (stringp previous-source-text)
+                                (eql (node-end previous-node)
+                                     (length previous-source-text))))
+                         (remaining-pending
+                           (if merge-paragraphs-p
+                               (if pending-child-view
+                                   (let ((remaining
+                                           (rest
+                                            (export-view-children
+                                             pending-view))))
+                                     (append
+                                      (if remaining
+                                          (list
+                                           (copy-view-with-children
+                                            pending-view remaining))
+                                        nil)
+                                      (rest pending)))
+                                 (rest pending))
+                             pending))
+                         (updated-section-children
+                           (if merge-paragraphs-p
+                               (append
+                                (butlast section-children)
+                                (list
+                                 (%make-export-view
+                                  :node previous-node
+                                  :children
+                                  (append
+                                   (export-view-children previous)
+                                   (export-view-children next-view))
+                                  :payload
+                                  (list
+                                   :joined-paragraphs
+                                   (append
+                                    (or (getf (%export-view-payload previous)
+                                              :joined-paragraphs)
+                                        (list previous))
+                                    (or (getf (%export-view-payload next-view)
+                                              :joined-paragraphs)
+                                        (list next-view))))
+                                  :source-document previous-source))
+                                remaining-pending)
+                             (append section-children pending))))
+                    (copy-view-with-children
+                     heading
+                     (mapcar
+                      (lambda (child)
+                        (if (eq child section)
+                            (copy-view-with-children
+                             section updated-section-children)
+                          child))
+                      heading-children)))))))
+           (group-section-children (views)
+             (let ((result nil)
+                   (active-heading nil)
+                   (active-section nil)
+                   (pending-children nil)
+                   (section-dirty-p nil))
+               (labels ((flush-section ()
+                          (when (and active-heading active-section
+                                     section-dirty-p)
+                            (setf (car result)
+                                  (append-to-deepest-section
+                                   active-heading
+                                   (nreverse pending-children))))))
+                 (dolist (view views)
+                   (let ((type (node-type (export-view-node view))))
+                     (if (member type '(:headline :inlinetask) :test #'eq)
+                         (progn
+                           (flush-section)
+                           (push view result)
+                           (setf active-heading view
+                                 active-section
+                                 (find-if
+                                  (lambda (child)
+                                    (eq (node-type (export-view-node child))
+                                        :section))
+                                  (export-view-children view))
+                                 pending-children nil
+                                 section-dirty-p nil))
+                       (if (and active-section
+                               (not (eq (export-view-source-document view)
+                                        (export-preparation-document preparation))))
+                           (progn
+                             (push view pending-children)
+                             (setf section-dirty-p t))
+                         (progn
+                           (flush-section)
+                           (push view result)
+                           (setf active-heading nil
+                                 active-section nil
+                                 pending-children nil
+                                 section-dirty-p nil))))))
+                 (flush-section)
+                 (nreverse result)))))
+    (let ((previous nil)
+          (included-heading-level nil)
+          (render-context (export-ascii-output-render-context output)))
+      (dolist (view (group-section-children views))
+        (let* ((node (export-view-node view))
+               (type (node-type node))
+               (heading-p (member type '(:headline :inlinetask) :test #'eq))
+               (level (and heading-p (or (node-property node :level) 1)))
+               (gap-length
+                 (if (null previous)
+                     0
+                   (if (and (not (member (node-type (export-view-node previous))
+                                          (list :headline :inlinetask)))
+                            (not heading-p)
+                            (not (eq (export-view-source-document previous)
+                                     (export-preparation-document preparation)))
+                            (not (eq (export-view-source-document view)
+                                     (export-preparation-document preparation)))
+                            (not (eq (export-view-source-document previous)
+                                     (export-view-source-document view)))
+                            (zerop (export-ascii-view-blank-count previous))
+                            (zerop (export-ascii-view-blank-count view)))
+                       1
+                     (export-ascii-output-gap-length previous view))))
+               (rendered (export-ascii-output-scratch output gap-length))
                (indent (export-ascii-output-indent rendered))
                (included-indent-p
                  (and included-heading-level
                       (not heading-p)
                       (not (eq type :section))))
                (post-blank-indent (+ indent (if included-indent-p 2 0))))
+          (when heading-p
+            (setf included-heading-level
+                  (if (not (eq (export-view-source-document view)
+                               (export-preparation-document preparation)))
+                      level
+                    (and included-heading-level
+                         (> level included-heading-level)
+                         included-heading-level))))
           (if included-indent-p
               (export-ascii-output-with-indent
                rendered 2
                (lambda ()
                  (export-ascii-output-render-view
                   rendered view preparation :mode :block)))
-              (export-ascii-output-render-view
-               rendered view preparation :mode :block))
+            (export-ascii-output-render-view
+             rendered view preparation :mode :block))
           (when render-context
             (export-ascii-output-remove-node-post-blank
              rendered node post-blank-indent))
           (when (plusp (export-ascii-output-count rendered))
             (when previous
-              (export-ascii-output-write-gap output previous view))
-            (if (and render-context
-                     (zerop (export-ascii-output-indent output)))
-                (multiple-value-bind (append-node-result owner)
-                    (export-resolved-component
-                     (%export-render-context-ancestry render-context)
-                     (function %export-backend-descriptor-native-sink-append-node-result))
-                  ;; RENDERED was checked with its final output offset.
-                  (funcall append-node-result
-                           output (export-ascii-output-output rendered)
-                           (export-context-for-owner render-context owner)))
-                (export-ascii-output-write-buffer output rendered))
+              (export-ascii-output-newlines output gap-length))
+            (let ((indent-adjustment
+                   (if (and heading-p
+                            (not (eq (export-view-source-document view)
+                                     (export-preparation-document preparation))))
+                       (- (export-ascii-output-indent output))
+                     0)))
+              (export-ascii-output-with-indent
+               output indent-adjustment
+               (lambda ()
+                 (if (and render-context
+                          (zerop (export-ascii-output-indent output)))
+                     (multiple-value-bind (append-node-result owner)
+                         (export-resolved-component
+                          (%export-render-context-ancestry render-context)
+                          #'%export-backend-descriptor-native-sink-append-node-result)
+                       (funcall append-node-result
+                                output (export-ascii-output-output rendered)
+                                (export-context-for-owner render-context owner)))
+                   (export-ascii-output-write-buffer output rendered)))))
             (setf previous view)))))
-  output))
+    output))
 
 (defun export-ascii-output-measure-text-range
     (output text start end &key substitute-tab-p)
@@ -1336,9 +1539,12 @@
 
 (defun export-ascii-output-render-paragraph (output view preparation)
   (let* ((children (export-view-children view))
+         (joined-paragraphs (getf (%export-view-payload view)
+                                  :joined-paragraphs))
          (child (first children))
          (width (export-ascii-current-width (export-view-node view))))
-    (unless (and (not (export-ascii-output-plain-text-rendering-overridden-p output))
+    (unless (and (null joined-paragraphs)
+                 (not (export-ascii-output-plain-text-rendering-overridden-p output))
                  (= (length children) 1)
                  (eq (node-type (export-view-node child)) :plain-text)
                  (export-ascii-output-write-plain-text-paragraph
@@ -1348,9 +1554,24 @@
                output 0 :defer-output-limit-check-p
                (not (and (= (length children) 1)
                          (eq (node-type (export-view-node (first children)))
-                             :link))))))
-        (export-ascii-output-write-trimmed-inline-views
-         inline children preparation)
+                             :link)))))
+            (double-space-boundaries nil))
+        (if joined-paragraphs
+            (loop for paragraph in joined-paragraphs
+                  for first-p = t then nil
+                  do (unless first-p
+                       (if (cdr (assoc :preserve-breaks
+                                       (export-preparation-options preparation)))
+                           (export-ascii-output-newlines inline 1)
+                         (progn
+                           (push
+                            (fill-pointer (export-ascii-output-output inline))
+                            double-space-boundaries)
+                           (export-ascii-output-write-string inline "  "))))
+                     (export-ascii-output-write-trimmed-inline-views
+                      inline (export-view-children paragraph) preparation))
+          (export-ascii-output-write-trimmed-inline-views
+           inline children preparation))
         (let* ((buffer (export-ascii-output-output inline))
                (start 0)
                (end (fill-pointer buffer)))
@@ -1367,6 +1588,7 @@
            :preserve-breaks
            (cdr (assoc :preserve-breaks
                        (export-preparation-options preparation)))
+           :double-space-boundaries (nreverse double-space-boundaries)
            :raw-output-p t))))
   output))
 
@@ -1506,7 +1728,7 @@
             (target-view
              (let* ((target (export-view-node target-view))
                     (numbers (export-ascii-numbering preparation))
-                    (numbering (gethash target-view numbers))
+                    (numbering (gethash target numbers))
                     (label-output (export-ascii-output-scratch output 0))
                     (note (export-ascii-output-scratch output 0)))
                (if (and numbering
@@ -1675,7 +1897,11 @@
           output (or (node-property node :value) ""))))
       (:horizontal-rule
        (export-ascii-output-write-repeat output #\- 72))
-      (:footnote-definition nil)
+      ((:keyword :footnote-definition)
+ (when (and (eq type :keyword)
+            (string-equal (or (node-property node :key) "") "TOC"))
+   (export-ascii-output-write-keyword-toc
+    output node preparation (export-ascii-numbering preparation))))
       ((:bold :italic)
        (let ((delimiter (if (eq type :bold) #\* #\/)))
          (export-ascii-output-write-char output delimiter)
@@ -1820,6 +2046,85 @@
                 output view preparation numbers (- 72 indent) :toc t))
       (export-ascii-output-newlines output 3)))
   output)
+(defun export-ascii-output-write-keyword-toc
+    (output node preparation numbers)
+  (let* ((directive (export-parse-toc-directive node :ascii))
+         (mode (getf directive :mode))
+         (local-p (getf directive :local)))
+    (case mode
+      (:headlines
+       (let ((entries
+               (export-toc-headline-entries
+                preparation node (getf directive :depth) local-p)))
+         (unless local-p
+           (export-ascii-output-write-string output "Table of Contents")
+           (export-ascii-output-newlines output 1)
+           (export-ascii-output-write-string output "_________________")
+           (export-ascii-output-newlines output 2))
+         (loop for entry in entries
+               for first-p = t then nil
+               for view = (getf entry :view)
+               for level = (getf entry :level)
+               for indent = (* (1- level) 3)
+               do (unless first-p
+                    (export-ascii-output-newlines output 1))
+                  (when (plusp indent)
+                    (export-ascii-output-write-repeat
+                     output #\. (1- indent))
+                    (export-ascii-output-write-char output #\Space))
+                  (export-ascii-output-write-heading-title
+                   output view preparation numbers
+                   (max 1 (- 72 indent
+                             (export-ascii-output-indent output)))
+                   :toc t))))
+      ((:tables :listings)
+       (let* ((table-p (eq mode :tables))
+              (entries
+                (export-toc-object-views
+                 preparation (if table-p :table :src-block)))
+              (title (if table-p "List of Tables" "List of Listings"))
+              (label (if table-p "Table" "Listing")))
+         (export-ascii-output-write-string output title)
+         (export-ascii-output-newlines output 1)
+         (export-ascii-output-write-repeat
+          output #\_ (length title))
+         (export-ascii-output-newlines output 2)
+         (loop for view in entries
+               for number from 1
+               for first-p = t then nil
+               for node = (export-view-node view)
+               for caption-value = (node-property node :caption)
+               for caption = (if (stringp caption-value)
+                                 caption-value
+                                 (princ-to-string caption-value))
+               for prefix = (format nil "~A ~D:" label number)
+               for prefix-width = (export-ascii-output-text-width prefix)
+               for text-width =
+                 (max 1 (- 72 (export-ascii-output-indent output)))
+               do (unless first-p
+                    (export-ascii-output-newlines output 1))
+                  (let* ((wrapped (export-ascii-output-scratch output 0))
+                         (buffer nil)
+                         (end nil)
+                         (start 0))
+                    (export-ascii-output-write-wrapped-range
+                     wrapped caption 0 (length caption)
+                     (max 1 (- text-width prefix-width 1)))
+                    (setf buffer (export-ascii-output-output wrapped)
+                          end (fill-pointer buffer))
+                    (export-ascii-output-write-string output prefix)
+                    (export-ascii-output-write-char output #\Space)
+                    (loop for newline = (position #\Newline buffer :start start)
+                          for line-end = (or newline end)
+                          do (export-ascii-output-write-range
+                              output buffer start line-end)
+                             (when newline
+                               (export-ascii-output-newlines output 1)
+                               (export-ascii-output-write-repeat
+                                output #\Space prefix-width)
+                               (setf start (1+ newline)))
+                          while newline))))))
+  output))
 
 (defun export-ascii-output-write-footnotes (output preparation)
   (let ((footnotes (export-preparation-footnotes preparation)))

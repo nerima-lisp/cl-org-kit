@@ -765,14 +765,16 @@
                :comment-block :footnote-definition)
               "")
              (:keyword
-              (let ((key (string-upcase (or (node-property node :key) "")))
-                    (value (or (node-property node :value) "")))
+              (let* ((key (string-upcase (or (node-property node :key) "")))
+                     (value (or (node-property node :value) "")))
                 (cond ((string= key "LATEX")
                        (if (export-latex-raw-output-p state)
                            value ""))
                       ((string= key "ATTR_LATEX")
                        (export-latex-render-attr-comment
                         state value base-count))
+                      ((string= key "TOC")
+                       (export-latex-render-keyword-toc node))
                       (t ""))))
              (:dynamic-block
               (export-latex-render-code state
@@ -1058,10 +1060,38 @@
    :document-class "article"
    :transcoders (export-latex-node-transcoders)
    :node-wrapper #'export-latex-node-wrapper
+   :option-specifications
+   '((:token "latex-use-sans" :key :latex-use-sans :parser :boolean))
    :accepted-keywords
    '("LATEX_CLASS" "LATEX_CLASS_OPTIONS" "LATEX_HEADER"
-     "LATEX_HEADER_EXTRA" "LATEX" "ATTR_LATEX")
+     "LATEX_HEADER_EXTRA" "LATEX_CLASS_PRE" "DESCRIPTION" "KEYWORDS"
+     "SUBTITLE" "LATEX_FOOTNOTE_COMMAND" "LATEX_ENGRAVED_THEME"
+     "LATEX_COMPILER" "DATE" "LATEX" "ATTR_LATEX")
    :retained-keywords '("LATEX" "ATTR_LATEX")
    :raw-output-options '((:latex . :allow-raw-latex))
    :export-block-names '("latex" "tex")
    :export-snippet-names '("latex")))
+
+(defun export-latex-render-keyword-toc (node)
+  (let* ((directive (export-parse-toc-directive node :latex))
+         (mode (getf directive :mode)))
+    (case mode
+      (:headlines
+       (let* ((scope (and (getf directive :local)
+                          (export-toc-scope-headline node)))
+              (scope-level (if scope (node-property scope :level) 0))
+              (depth (getf directive :depth))
+              (depth-setting
+                (and depth
+                     (format nil "\\setcounter{tocdepth}{~D}"
+                             (+ scope-level depth)))))
+         (if scope
+             (format nil
+                     "\\startcontents[level-~D]~%\\printcontents[level-~D]{}{0}{~A}"
+                     scope-level scope-level (or depth-setting ""))
+             (concatenate 'string
+                          (or depth-setting "")
+                          (if depth-setting (format nil "~%") "")
+                          "\\tableofcontents"))))
+      (:tables "\\listoftables")
+      (:listings "\\lstlistoflistings"))))

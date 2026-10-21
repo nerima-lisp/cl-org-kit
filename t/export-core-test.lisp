@@ -61,9 +61,112 @@
     (list (document-text document) (document-source-name document)
           (copy-tree (document-settings document)) (nreverse nodes))))
 
-(defun export-core-test-source-nodes (preparation type)
-  (mapcar #'org-kit::export-view-node
-          (export-core-test-view-nodes preparation type)))
+(describe "FR-074 SETUPFILE expansion"
+  (it "FR-074 matches nested keyword order and effective settings"
+    (let* ((document
+             (parse-org
+              (export-core-test-lines
+               "#+SETUPFILE: \"setup/root.org\""
+               "#+TITLE: Main title"
+               "#+OPTIONS: toc:2 num:nil"
+               "#+LANGUAGE: ja"
+               ""
+               "Main body.")
+              :source-name "manual/main.org"))
+           (calls nil)
+           (resolver
+             (lambda (path parent-source)
+               (push (list path parent-source) calls)
+               (cond
+                 ((string= path "setup/root.org")
+                  (export-core-test-lines
+                   "#+TITLE: Root title"
+                   "#+OPTIONS: toc:1"
+                   "#+SETUPFILE: nested/theme.org"
+                   "#+OPTIONS: toc:3"
+                   "#+LANGUAGE: en"
+                   ""
+                   "Root setup body."))
+                 ((string= path "nested/theme.org")
+                  (export-core-test-lines
+                   "#+TITLE: Theme title"
+                   "#+OPTIONS: toc:nil"
+                   "#+LANGUAGE: fr"
+                   ""
+                   "Theme setup body."))
+                 (t nil))))
+           (keyword-values
+             (multiple-value-bind (records node-count character-count)
+                 (org-kit::export-setupfile-keyword-records
+                  document :html resolver (document-limits document)
+                  (org-kit::export-node-count (document-root document)) 0)
+               (declare (ignore node-count character-count))
+               (setf calls nil)
+               (mapcar
+                (lambda (record) (list (second record) (third record)))
+                (remove-if
+                 (lambda (record) (string= (second record) "SETUPFILE"))
+                 records))))
+           (preparation
+             (org-kit::export-prepare document :html :include-resolver resolver))
+           (metadata (org-kit::export-preparation-metadata preparation))
+           (options (org-kit::export-preparation-options preparation))
+           (paragraph-texts
+             (mapcar (lambda (view)
+                       (node-text (org-kit::export-view-node view)))
+                     (export-core-test-view-nodes preparation :paragraph))))
+      (with-soft-assertions
+        (expect (nreverse calls)
+                :to-equal (list (list "setup/root.org" "manual/main.org")
+                                (list "nested/theme.org" "setup/root.org")))
+        (expect keyword-values
+                :to-equal
+                (list (list "TITLE" "Root title")
+                      (list "OPTIONS" "toc:1")
+                      (list "TITLE" "Theme title")
+                      (list "OPTIONS" "toc:nil")
+                      (list "LANGUAGE" "fr")
+                      (list "OPTIONS" "toc:3")
+                      (list "LANGUAGE" "en")
+                      (list "TITLE" "Main title")
+                      (list "OPTIONS" "toc:2 num:nil")
+                      (list "LANGUAGE" "ja")))
+        (expect (getf metadata :title) :to-equal "Root title Theme title Main title")
+        (expect (getf metadata :language) :to-equal "ja")
+        (expect (cdr (assoc :toc options)) :to-equal 2)
+        (expect (assoc :num options) :to-be-truthy)
+        (expect (cdr (assoc :num options)) :to-be nil)
+        (expect paragraph-texts :to-equal (list "Main body."))))))
+(describe "FR-074 SETUPFILE condition handling" (it "FR-074 reports missing and invalid resolver conditions" (let* ((missing (export-core-test-catch-error (lambda () (export-core-test-preparation "#+SETUPFILE: a.org")))) (invalid (export-core-test-catch-error (lambda () (export-core-test-preparation "#+SETUPFILE: a.org" :include-resolver (lambda (path parent-source) (declare (ignore path parent-source)) nil)))))) (with-soft-assertions (expect (typep missing (intern "ORG-EXPORT-ERROR" "ORG-KIT")) :to-be t) (when (typep missing (intern "ORG-EXPORT-ERROR" "ORG-KIT")) (expect (org-export-error-reason missing) :to-be :missing-setupfile-resolver)) (expect (typep invalid (intern "ORG-EXPORT-ERROR" "ORG-KIT")) :to-be t) (when (typep invalid (intern "ORG-EXPORT-ERROR" "ORG-KIT")) (expect (org-export-error-reason invalid) :to-be :invalid-setupfile-result))))))
+(describe "FR-074 SETUPFILE cycle and form handling"
+  (it "FR-074 reports cycles and malformed paths"
+    (let* ((cycle
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-prepare
+                 (parse-org "#+SETUPFILE: a.org" :source-name "main.org") :html
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore parent-source))
+                   (if (string= path "a.org")
+                       "#+SETUPFILE: a.org"
+                       "unreachable"))))))
+           (malformed
+             (export-core-test-catch-error
+              (lambda ()
+                (export-core-test-preparation "#+SETUPFILE: \"unterminated")))))
+      (with-soft-assertions
+        (expect (typep cycle (intern "ORG-EXPORT-ERROR" "ORG-KIT")) :to-be t)
+        (when (typep cycle (intern "ORG-EXPORT-ERROR" "ORG-KIT"))
+          (expect (org-export-error-reason cycle) :to-be :setupfile-cycle))
+        (expect (typep malformed
+                       (intern "ORG-EXPORT-UNSUPPORTED-SYNTAX" "ORG-KIT"))
+                :to-be t)
+        (when (typep malformed
+                     (intern "ORG-EXPORT-UNSUPPORTED-SYNTAX" "ORG-KIT"))
+          (expect (org-export-unsupported-syntax-feature malformed)
+                  :to-be :setupfile-form))))))
+(describe "FR-074 SETUPFILE depth handling" (it "FR-074 applies the expansion depth limit" (let* ((depth (export-core-test-catch-error (lambda () (org-kit::export-prepare (parse-org "#+SETUPFILE: a.org" :source-name "main.org" :limits (make-limits :max-export-expansion-depth 1)) :html :include-resolver (lambda (path parent-source) (declare (ignore parent-source)) (if (string= path "a.org") "#+SETUPFILE: b.org" "#+TITLE: Beyond limit"))))))) (with-soft-assertions (expect (typep depth (intern "ORG-RESOURCE-LIMIT-ERROR" "ORG-KIT")) :to-be t) (when (typep depth (intern "ORG-RESOURCE-LIMIT-ERROR" "ORG-KIT")) (expect (org-resource-limit-error-limit-name depth) :to-be :max-export-expansion-depth) (expect (org-resource-limit-error-actual depth) :to-be 2))))))
 
 (defclass export-core-test-binary-output-stream
     (sb-gray:fundamental-binary-output-stream)
@@ -725,10 +828,24 @@
                                :type)
                 :to-be :inline))))
 
-  (it "falls back to the source node start when template text is unavailable"
-    (let ((node (make-node :paragraph :begin 17 :end 24)))
+  (it "finds template text within parsed nodes and falls back when unavailable"
+    (let* ((document (parse-org "prefix needle suffix"))
+           (node
+             (let ((paragraph nil))
+               (map-nodes
+                (lambda (candidate)
+                  (when (eq (node-type candidate) :paragraph)
+                    (setf paragraph candidate)))
+                (document-root document))
+               paragraph))
+           (detached-node (make-node :paragraph :begin 17 :end 24)))
       (with-soft-assertions
-        (expect (org-kit::export-node-text-position node "missing") :to-be 17)
+        (expect node :to-be-truthy)
+        (expect (org-kit::export-node-text-position node "needle") :to-be 7)
+        (expect (org-kit::export-node-text-position node "needle" 3) :to-be 10)
+        (expect (org-kit::export-node-text-position node "absent") :to-be 0)
+        (expect (org-kit::export-node-text-position detached-node "missing")
+                :to-be 17)
         (expect (org-kit::export-node-text-position nil "missing") :to-be 0))))
 
   (it "signals public export conditions with their backend, reason, and source"
@@ -941,10 +1058,8 @@
               (lambda ()
                 (export-core-test-preparation "#+MACRO:"))))
            (duplicate-language
-             (export-core-test-catch-error
-              (lambda ()
-                (export-core-test-preparation
-                 (export-core-test-lines "#+LANGUAGE: en" "#+LANGUAGE: ja")))))
+             (export-core-test-preparation
+              (export-core-test-lines "#+LANGUAGE: en" "#+LANGUAGE: ja")))
            (duplicate-macro
              (export-core-test-catch-error
               (lambda ()
@@ -952,31 +1067,41 @@
                  (export-core-test-lines
                   "#+MACRO: repeat first" "#+MACRO: repeat second"))))))
       (with-soft-assertions
-        (expect (cdr (assoc :toc options)) :to-be -1)
-        (expect (cdr (assoc :heading-depth options)) :to-be -2)
-        (expect (cdr (assoc :num options)) :to-be 3)
-        (expect (cdr (assoc :expand-links options)) :to-be t)
-        (expect (cdr (assoc :creator options)) :to-be :comment)
-        (expect (cdr (assoc :^ options)) :to-be nil)
-        (expect (cdr (assoc :title options)) :to-be t)
-        (expect (cdr (assoc :author options)) :to-be nil)
-        (expect (cdr (assoc :date options)) :to-be t)
-        (expect valid-tags :to-equal '("ship-it_@#%"))
-        (expect (typep empty-macro-name 'org-export-unsupported-syntax)
-                :to-be t)
-        (expect (typep invalid-tags 'org-export-unsupported-syntax) :to-be t)
-        (expect (every (lambda (condition)
-                         (typep condition 'org-export-unsupported-syntax))
-                       option-failures)
-                :to-be t)
-        (expect (typep duplicate-language 'org-export-unsupported-syntax) :to-be t)
-        (when (typep duplicate-language 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature duplicate-language)
-                  :to-be :duplicate-keyword))
-        (expect (typep duplicate-macro 'org-export-unsupported-syntax) :to-be t)
-        (when (typep duplicate-macro 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature duplicate-macro)
-                  :to-be :duplicate-macro)))))
+       (expect (cdr (assoc :toc options)) :to-be -1)
+       (expect (cdr (assoc :heading-depth options)) :to-be -2)
+       (expect (cdr (assoc :num options)) :to-be 3)
+       (expect (cdr (assoc :expand-links options)) :to-be t)
+       (expect (cdr (assoc :creator options)) :to-be :comment)
+       (expect (cdr (assoc :^ options)) :to-be nil)
+       (expect (cdr (assoc :title options)) :to-be t)
+       (expect (cdr (assoc :author options)) :to-be nil)
+       (expect (cdr (assoc :date options)) :to-be t)
+       (expect valid-tags :to-equal '("ship-it_@#%"))
+       (let ((duplicate-keyword
+              (export-core-test-catch-error
+               (lambda ()
+                 (export-core-test-preparation
+                  (export-core-test-lines
+                   "#+SELECT_TAGS: first"
+                   "#+SELECT_TAGS: second"))))))
+         (expect (typep duplicate-keyword
+                        'org-export-unsupported-syntax)
+                 :to-be t)
+         (when (typep duplicate-keyword 'org-export-unsupported-syntax)
+           (expect (org-export-unsupported-syntax-feature duplicate-keyword)
+                   :to-be :duplicate-keyword)))
+       (expect (typep empty-macro-name 'org-export-unsupported-syntax)
+               :to-be t)
+       (expect (typep invalid-tags 'org-export-unsupported-syntax) :to-be t)
+       (expect (every (lambda (condition)
+                        (typep condition 'org-export-unsupported-syntax))
+                      option-failures)
+               :to-be t)
+       (expect (getf (org-kit::export-preparation-metadata duplicate-language) :language) :to-equal "ja")
+       (expect (typep duplicate-macro 'org-export-unsupported-syntax) :to-be t)
+       (when (typep duplicate-macro 'org-export-unsupported-syntax)
+         (expect (org-export-unsupported-syntax-feature duplicate-macro)
+                 :to-be :duplicate-macro)))))
 
   (it "expands literal macros without evaluation and rejects recursion"
     (let* ((source
@@ -1054,7 +1179,7 @@
         (expect short-dollar :to-equal "$")
         (expect nondigit-parameter :to-equal "$x")
         (expect multiple-digit-parameters
-                :to-equal "[three][twelve][][][][$x]"))))
+                :to-equal "[three][twelve][][one][one][$x]"))))
   (it "passes function macro templates and parsed arguments to a caller evaluator"
     (let* ((context (make-export-context :title "Caller"))
            (registry (make-callback-registry))
@@ -1137,8 +1262,8 @@
           (expect (eq (first (first arguments)) (first source-arguments))
                   :to-be nil))
       (let* ((condition
-               (make-condition 'simple-error
-                               :format-control "function macro callback failure"))
+              (make-condition 'simple-error
+                              :format-control "function macro callback failure"))
              (throwing-registry (make-callback-registry))
              (caught nil))
         (register-callback
@@ -1155,7 +1280,28 @@
                     "#+MACRO: fail (eval (+ 1 2))"
                     "{{{fail}}}"))
                   :html :callback-registry throwing-registry))))
-        (expect (eq caught condition) :to-be t)))))
+        (expect (eq caught condition) :to-be t)
+        (let* ((immediate-registry (make-callback-registry))
+               (immediate-calls nil)
+               (immediate-output
+                (progn
+                  (register-callback
+                   immediate-registry :evaluator :emacs-lisp
+                   (lambda (expression evaluator-context)
+                     (push (list expression evaluator-context) immediate-calls)
+                     "closed"))
+                  (org-kit:export-org
+                   (parse-org
+                    (export-core-test-lines
+                     "#+MACRO: immediate (eval)"
+                     "{{{immediate}}}"))
+                   :ascii :callback-registry immediate-registry)))
+               (immediate-call (first immediate-calls)))
+          (with-soft-assertions
+           (expect (search "closed" immediate-output) :to-be-truthy)
+           (expect (first immediate-call) :to-equal "(eval)")
+           (expect (getf (second immediate-call) :macro-name)
+                   :to-equal "immediate")))))))
   (it "keeps evaluator template mutations local to each call"
     (let* ((registry (make-callback-registry))
            (expressions nil)
@@ -1184,6 +1330,30 @@
           (expect (nreverse expressions)
                   :to-equal
                   (quote ("(eval (+ 1 2))" "(eval (+ 1 2))")))))))
+  (it "copies string evaluator arguments and preserves other values"
+    (let* ((registry (make-callback-registry))
+           (argument (copy-seq "source"))
+           (received nil)
+           (result
+             (progn
+               (register-callback
+                registry :evaluator :emacs-lisp
+                (lambda (expression context)
+                  (declare (ignore expression))
+                  (setf received (getf context :arguments))
+                  (setf (char (first received) 0) #\X)
+                  "evaluated"))
+               (org-kit::export-evaluate-function-macro
+                (list :template "(eval)") "sample"
+                (list argument :marker)
+                (make-export-context)
+                registry))))
+      (with-soft-assertions
+        (expect result :to-equal "evaluated")
+        (expect argument :to-equal "source")
+        (expect (first received) :to-equal "Xource")
+        (expect (eq (first received) argument) :to-be nil)
+        (expect (eq (second received) :marker) :to-be t))))
   (it "uses the name prefix in parenthesized macro definitions"
     (let* ((preparation
              (export-core-test-preparation
@@ -1218,6 +1388,33 @@
           (expect (org-export-unsupported-syntax-feature option-error)
                   :to-be :invalid-option))
         (expect macro-text :to-equal ""))))
+  (it "ignores unrelated children while reading property macro values"
+    (let* ((document
+             (parse-org
+              (export-core-test-lines
+               "* Heading"
+               ":PROPERTIES:"
+               ":VALUE: stored"
+               ":END:"
+               "{{{property(VALUE)}}}")))
+           (drawer nil))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :property-drawer)
+           (setf drawer node)))
+       (document-root document))
+      (with-soft-assertions
+        (expect drawer :not :to-be nil)
+        (when drawer
+          (setf (node-children drawer)
+                (cons (make-node :paragraph) (node-children drawer)))
+          (let* ((preparation (org-kit::export-prepare document :html))
+                 (texts
+                   (mapcar
+                    (lambda (view)
+                      (getf (org-kit::export-view-payload view) :expanded-text))
+                    (export-core-test-view-nodes preparation :macro))))
+            (expect texts :to-equal (list "stored")))))))
   (it "expands title, author, email, date, and keyword builtins"
     (let* ((source
              (export-core-test-lines
@@ -1347,8 +1544,7 @@
              "{{{property(VALUE)}}}"
              "{{{property(MISSING)}}}"
              "{{{property(VALUE,Heading)}}}"
-             "{{{property(VALUE,#custom)}}}"
-             "{{{property(VALUE,id:id-value)}}}")))
+             "{{{property(VALUE,#custom)}}}")))
          (property-texts
            (mapcar (lambda (view)
                      (getf (org-kit::export-view-payload view) :expanded-text))
@@ -1475,7 +1671,7 @@
                  (getf (org-kit::export-view-payload view) :expanded-text))
                (export-core-test-view-nodes missing-input-file-preparation :macro))
        :to-equal '(""))
-      (expect property-texts :to-equal '("first" "" "first" "first" "first"))
+      (expect property-texts :to-equal '("first" "" "first" "first"))
       (expect
        (typep missing-property-location 'org-export-unsupported-syntax)
        :to-be t)
@@ -1591,7 +1787,7 @@
                                    :fragment-keyword-scope)))
                         fragment-errors)
                  :to-be t))))
-  (it "applies INCLUDE line ranges and minimum heading levels"
+  (it "applies INCLUDE line ranges, minimum heading levels, and fragment-local STARTUP"
     (let* ((calls nil)
            (fragment (export-core-test-lines
                       "skip" "* First" "** Child" "* Omitted" "tail"))
@@ -1655,7 +1851,7 @@
            (export-body "#+END_EXPORT")
            (source-preparation
              (export-core-test-preparation
-              "#+INCLUDE: part.org :minlevel 8 src lisp"
+              "#+INCLUDE: part.org src lisp"
               :include-resolver
               (lambda (path parent-source)
                 (declare (ignore path parent-source))
@@ -2131,7 +2327,506 @@
                    document :html :allow-raw-latex :invalid)))
                'type-error))
          :to-be t)
-        (expect (typep unparsed 'type-error) :to-be t)))))
+        (expect (typep unparsed 'type-error) :to-be t))))
+  (it "formats the full time directive family and boundary cases"
+      (let* ((context
+              (make-export-context :time-context
+                                   (make-time-context :reference-time
+                                                      (make-org-time-value
+                                                       "2030-01-02T03:04:05")
+                                                      :zone
+                                                      (make-fixed-time-zone 0))))
+             (preparation
+              (export-core-test-preparation
+               "{{{time(%% %y %C %e %k %I %l %j %p %P %w %u %V %G %g %U %W %a %A %b %h %B %Z %s %D %R %r %c %x %X %n %t)}}}"
+               :context
+               context))
+             (text
+              (getf
+               (org-kit::export-view-payload
+                (first (export-core-test-view-nodes preparation :macro)))
+               :expanded-text))
+             (week-boundary
+              (export-core-test-preparation "{{{time(%U %W)}}}"
+                                            :context
+                                            (make-export-context :time-context
+                                                                 (make-time-context
+                                                                  :reference-time
+                                                                  (make-org-time-value
+                                                                   "2030-01-13T03:04:05")
+                                                                  :zone
+                                                                  (make-fixed-time-zone
+                                                                   0)))))
+             (week-text
+              (getf
+               (org-kit::export-view-payload
+                (first (export-core-test-view-nodes week-boundary :macro)))
+               :expanded-text))
+             (hour-texts
+              (mapcar
+               (lambda (timestamp)
+                 (let* ((preparation
+                         (export-core-test-preparation "{{{time(%I %l %p %P)}}}"
+                                                       :context
+                                                       (make-export-context
+                                                        :time-context
+                                                        (make-time-context
+                                                         :reference-time
+                                                         (make-org-time-value
+                                                          timestamp)
+                                                         :zone
+                                                         (make-fixed-time-zone 0)))))
+                        (view
+                         (first (export-core-test-view-nodes preparation :macro))))
+                   (getf (org-kit::export-view-payload view) :expanded-text)))
+               '("2030-01-02T00:04:05" "2030-01-02T12:04:05")))
+             (negative-zone
+              (export-core-test-preparation "{{{time(%z)}}}"
+                                            :context
+                                            (make-export-context :time-context
+                                                                 (make-time-context
+                                                                  :reference-time
+                                                                  (make-org-time-value
+                                                                   "2030-01-02T03:04:05")
+                                                                  :zone
+                                                                  (make-fixed-time-zone
+                                                                   -240)))))
+             (negative-zone-text
+              (getf
+               (org-kit::export-view-payload
+                (first (export-core-test-view-nodes negative-zone :macro)))
+               :expanded-text))
+             (trailing-texts
+              (mapcar
+               (lambda (view)
+                 (getf (org-kit::export-view-payload view) :expanded-text))
+               (export-core-test-view-nodes
+                (export-core-test-preparation "{{{time(%)}}} {{{time(%-)}}}"
+                                              :context
+                                              context)
+                :macro)))
+             (unsupported (getf (org-kit::export-view-payload (first (export-core-test-view-nodes (export-core-test-preparation "{{{time(%Q)}}}" :context context) :macro))) :expanded-text)))
+        (with-soft-assertions
+         (expect text
+                 :to-equal
+                 (concatenate 'string
+                              "% 30 20  2  3 03  3 002 AM am 3 3 01 2030 30 00 00 "
+                              "Wed Wednesday Jan Jan January UTC 1893553445 "
+                              "01/02/30 03:04 03:04:05 AM Wed Jan  2 03:04:05 2030 "
+                              "01/02/30 03:04:05 "
+                              (string #\Newline)
+                              " "
+                              (string #\Tab)))
+         (expect week-text :to-equal "02 01")
+         (expect hour-texts :to-equal '("12 12 AM am" "12 12 PM pm"))
+         (expect negative-zone-text :to-equal "-0400")
+         (expect trailing-texts :to-equal '("%" "%-"))
+         (expect unsupported :to-equal "%Q"))))
+  (it "validates include options and preserves target, range, and wrapper semantics"
+      (let* ((invalid-options
+              (mapcar
+               (lambda (source)
+                 (export-core-test-catch-error
+                  (lambda ()
+                    (export-core-test-preparation
+                     source
+                     :include-resolver
+                     (lambda (path parent-source)
+                       (declare (ignore path parent-source))
+                       "Body")))))
+               (list
+                "#+INCLUDE: part.org :lines"
+                "#+INCLUDE: part.org :lines 1-2"
+                "#+INCLUDE: part.org :lines \"1-2\" :lines \"2-3\""
+                "#+INCLUDE: part.org :lines \"1-2-3\""
+                "#+INCLUDE: part.org :lines \"a-2\""
+                "#+INCLUDE: part.org :lines \"-\""
+                "#+INCLUDE: part.org :minlevel"
+                "#+INCLUDE: part.org :minlevel -1"
+                "#+INCLUDE: part.org :minlevel 2 :minlevel 3"
+                "#+INCLUDE: part.org :only-contents"
+                "#+INCLUDE: part.org :only-contents maybe"
+                "#+INCLUDE: part.org :only-contents t :only-contents nil"
+                "#+INCLUDE: part.org unsupported"
+                "#+INCLUDE: part.org example extra")))
+             (contents
+              (export-core-test-preparation
+               "#+INCLUDE: \"part.org::*Target\" :only-contents t"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "* Target" "Body text"))))
+             (contents-nil
+              (export-core-test-preparation
+               "#+INCLUDE: \"part.org::*Target\" :only-contents nil"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "* Target" "Body text"))))
+             (normalized-target
+              (export-core-test-preparation
+               "#+INCLUDE: \"part.org::*Root  Target\""
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "* Root Target" "Selected body"))))
+             (empty-target
+              (export-core-test-preparation
+               "#+INCLUDE: part.org::"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "* Whole fragment" "Whole body"))))
+             (empty-target-headings (export-core-test-view-nodes empty-target :headline))
+             (range-start-zero
+              (export-core-test-preparation
+               "#+INCLUDE: part.org :lines \"0-2\""
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "First" "Second" "Third"))))
+             (range-open-start
+              (export-core-test-preparation
+               "#+INCLUDE: part.org :lines \"-2\""
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "First" "Second" "Third"))))
+             (range-open-end
+              (export-core-test-preparation
+               "#+INCLUDE: part.org :lines \"2-\""
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "First" "Second" "Third"))))
+             (range-end
+              (export-core-test-preparation
+               "#+INCLUDE: part.org :lines \"8-9\""
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 "short")))
+             (leading-blank-line
+              (export-core-test-preparation
+               "#+INCLUDE: part.org"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines "   " "Body"))))
+             (whitespace-only
+              (export-core-test-preparation
+               "#+INCLUDE: part.org"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 "   ")))
+             (source-wrapper
+              (export-core-test-preparation
+               "#+INCLUDE: part.org src lisp"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines
+                  "first"
+                  "   "
+                  ",,,,"))))
+             (source-value
+              (node-property
+               (org-kit::export-view-node
+                (first (export-core-test-view-nodes source-wrapper :src-block)))
+               :value))
+             (empty-source-wrapper
+              (export-core-test-preparation
+               "#+INCLUDE: part.org src lisp"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 "")))
+             (empty-source-value
+              (node-property
+               (org-kit::export-view-node
+                (first
+                 (export-core-test-view-nodes empty-source-wrapper :src-block)))
+               :value))
+             (newline-source-wrapper
+              (export-core-test-preparation
+               "#+INCLUDE: part.org src lisp"
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (format nil "Body~%"))))
+             (newline-source-value
+              (node-property
+               (org-kit::export-view-node
+                (first
+                 (export-core-test-view-nodes newline-source-wrapper :src-block)))
+               :value))
+             (paragraph-texts
+              (lambda (preparation)
+                (mapcar
+                 (lambda (view)
+                   (string-trim '(#\Space #\Newline #\Return)
+                                (node-text (org-kit::export-view-node view))))
+                 (export-core-test-view-nodes preparation :paragraph))))
+             (odd-levels
+              (export-core-test-preparation
+               (export-core-test-lines "#+INCLUDE: part.org :minlevel 3")
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore path parent-source))
+                 (export-core-test-lines
+                  "#+STARTUP: odd"
+                  "* Odd root"
+                  "*** Odd child"))))
+             (odd-levels-stars
+              (mapcar
+               (lambda (view)
+                 (node-property (org-kit::export-view-node view) :level))
+               (export-core-test-view-nodes odd-levels :headline))))
+        (with-soft-assertions
+         (expect (every (lambda (condition)
+                          (typep condition 'org-export-unsupported-syntax))
+                        invalid-options)
+                 :to-be t)
+         (expect (export-core-test-view-nodes contents :headline) :to-equal nil)
+         (expect (export-core-test-view-nodes contents-nil :headline)
+                 :to-be-truthy)
+         (expect
+          (mapcar
+           (lambda (view)
+             (node-property (org-kit::export-view-node view) :raw-value))
+           (export-core-test-view-nodes normalized-target :headline))
+          :to-equal '("Root Target"))
+         (expect
+          (mapcar
+           (lambda (view)
+             (node-property (org-kit::export-view-node view) :raw-value))
+           empty-target-headings)
+          :to-equal '("Whole fragment"))
+         (expect (funcall paragraph-texts range-start-zero) :to-equal '("First"))
+         (expect (funcall paragraph-texts range-open-start) :to-equal '("First"))
+         (expect (funcall paragraph-texts range-open-end)
+                 :to-equal (list (format nil "Second~%Third")))
+         (expect (export-core-test-view-nodes range-end :paragraph) :to-equal nil)
+         (expect (funcall paragraph-texts leading-blank-line) :to-equal '("Body"))
+         (expect (export-core-test-view-nodes whitespace-only :paragraph) :to-equal nil)
+         (expect source-value :to-equal (format nil "first~%   ~%,,,,~%"))
+         (expect empty-source-value :to-equal "")
+         (expect newline-source-value :to-equal (format nil "Body~%"))
+         (expect odd-levels-stars :to-equal (list 3 4)))))
+  (it "filters archived setup files and caches static macro keyword templates"
+      (let* ((resolver-calls nil)
+             (preparation
+              (export-core-test-preparation
+               (export-core-test-lines
+                "#+OPTIONS: arch:headline tasks:nil"
+                "#+TODO: TODO | DONE"
+                "#+SETUPFILE: root.setup"
+                "* Archived :ARCHIVE:"
+                "#+SETUPFILE: archived.setup"
+                "* TODO Hidden"
+                "#+SETUPFILE: todo.setup"
+                "* DONE Completed"
+                "#+SETUPFILE: done.setup"
+                "* Active"
+                "#+SETUPFILE: active.setup")
+               :include-resolver
+               (lambda (path parent-source)
+                 (declare (ignore parent-source))
+                 (push path resolver-calls)
+                 "")))
+             (blank-document (parse-org "#+SETUPFILE:"))
+             (blank-records
+              (nth-value
+               0
+               (org-kit::export-setupfile-keyword-records
+                blank-document :html nil (document-limits blank-document)
+                (org-kit::export-node-count (document-root blank-document))
+                0)))
+             (empty-path
+              (export-core-test-catch-error
+               (lambda ()
+                 (export-core-test-preparation "#+SETUPFILE: \"\""))))
+             (control-path
+              (export-core-test-catch-error
+               (lambda ()
+                 (export-core-test-preparation
+                  (format nil "#+SETUPFILE: \"bad~Cpath\"" #\Tab)))))
+             (macro-document
+              (parse-org
+               (export-core-test-lines
+                "#+MACRO: m {{{keyword(TOPIC)}}}"
+                "#+MACRO: no-key {{{keyword}}}"
+                "#+MACRO: empty-key {{{keyword(,TOPIC)}}}"
+                "#+TOPIC: value"
+                "{{{m}}}"
+                "{{{no-key}}}"
+                "{{{empty-key}}}")))
+             (macro-records (org-kit::export-keyword-records macro-document))
+             (macros
+              (nth-value
+               5
+               (org-kit::export-document-settings
+                macro-document :html nil nil macro-records)))
+             (macro-cache (make-hash-table :test #'eq))
+             (references
+              (org-kit::export-macro-keyword-reference-set
+               macro-document macros macro-cache))
+             (template-cache (gethash macros macro-cache))
+             (cached-template (gethash "m" template-cache))
+             (large-template
+              (format nil "#+MACRO: m ~{~A~^ ~}~%{{{m}}}"
+                      (make-list 8 :initial-element "{{{keyword(TOPIC)}}}")))
+             (limited-document
+              (parse-org large-template :limits (make-limits :max-node-count 5)))
+             (macro-limit-error
+              (export-core-test-catch-error
+               (lambda () (org-kit::export-prepare limited-document :html)))))
+        (with-soft-assertions
+         (expect (org-kit::export-preparation-p preparation) :to-be t)
+         (expect (nreverse resolver-calls)
+                 :to-equal '("root.setup" "active.setup"))
+         (expect (mapcar #'second blank-records) :to-equal '("SETUPFILE"))
+         (expect (typep empty-path 'org-export-unsupported-syntax) :to-be t)
+         (when (typep empty-path 'org-export-unsupported-syntax)
+           (expect (org-export-unsupported-syntax-feature empty-path)
+                   :to-be :setupfile-form))
+         (expect (typep control-path 'org-export-unsupported-syntax) :to-be t)
+         (when (typep control-path 'org-export-unsupported-syntax)
+           (expect (org-export-unsupported-syntax-feature control-path)
+                   :to-be :setupfile-form))
+         (expect (hash-table-p references) :to-be t)
+         (expect (gethash "TOPIC" references) :to-be-truthy)
+         (expect (nth-value 1 (gethash "" references)) :to-be nil)
+         (expect cached-template :to-be-truthy)
+         (expect (typep macro-limit-error 'org-resource-limit-error) :to-be t)
+         (when (typep macro-limit-error 'org-resource-limit-error)
+           (expect (org-resource-limit-error-limit-name macro-limit-error)
+                   :to-be :max-node-count)
+           (expect (org-resource-limit-error-limit macro-limit-error) :to-be 5)
+           (expect (> (org-resource-limit-error-actual macro-limit-error) 5)
+                   :to-be t)))))
+  (it "splits paragraphs around whitespace-only macro expansions"
+      (let* ((preparation
+              (org-kit::export-prepare
+               (parse-org
+                (export-core-test-lines
+                 "#+MACRO: blank"
+                 "before"
+                 "  {{{blank}}}  "
+                 "after"
+                 "  {{{blank}}}  "))
+               :ascii))
+             (paragraphs (export-core-test-view-nodes preparation :paragraph))
+             (expanded-macros
+              (mapcar
+               (lambda (view)
+                 (getf (org-kit::export-view-payload view) :expanded-text))
+               (export-core-test-view-nodes preparation :macro)))
+             (callback-registry (make-callback-registry))
+             (runtime-preparation
+              (progn
+                (register-callback
+                 callback-registry :evaluator :emacs-lisp
+                 (lambda (expression context)
+                   (declare (ignore expression))
+                   (if (string= (getf context :macro-name) "spaces")
+                       " "
+                       "retained")))
+                (org-kit::export-prepare
+                 (parse-org
+                  (export-core-test-lines
+                   "#+MACRO: spaces (eval)"
+                   "#+MACRO: visible (eval)"
+                   "before"
+                   "  {{{spaces}}}  "
+                   "middle"
+                   "  {{{visible}}}  "
+                   "after"))
+                 :ascii :callback-registry callback-registry)))
+             (runtime-paragraphs
+              (export-core-test-view-nodes runtime-preparation :paragraph))
+             (runtime-macros
+              (mapcar
+               (lambda (view)
+                 (getf (org-kit::export-view-payload view) :expanded-text))
+               (export-core-test-view-nodes runtime-preparation :macro)))
+             (boundary-preparation
+              (org-kit::export-prepare
+               (parse-org
+                (export-core-test-lines
+                 "#+MACRO: blank"
+                 "{{{blank}}} "
+                 "middle"
+                 " {{{blank}}}"))
+               :ascii))
+             (suffix-preparation
+              (org-kit::export-prepare
+               (parse-org
+                (export-core-test-lines
+                 "#+MACRO: blank"
+                 "before"
+                 "  {{{blank}}}right"
+                 "after"))
+               :ascii))
+             (input-limit-document
+              (parse-org "#+INCLUDE: part.org"
+                         :limits (make-limits :max-input-length 40)))
+             (input-limit-error
+              (export-core-test-catch-error
+               (lambda ()
+                 (org-kit::export-prepare
+                  input-limit-document :html
+                  :include-resolver
+                  (lambda (path parent-source)
+                    (declare (ignore path parent-source))
+                    (make-string 80 :initial-element (char "a" 0))))))))
+        (with-soft-assertions
+         (expect (length paragraphs) :to-be 2)
+         (expect expanded-macros :to-equal nil)
+         (expect (length runtime-paragraphs) :to-be 3)
+         (expect runtime-macros :to-equal '("retained"))
+         (expect
+          (length
+           (export-core-test-view-nodes boundary-preparation :paragraph))
+          :to-be 1)
+         (expect
+          (export-core-test-view-nodes boundary-preparation :macro)
+          :to-equal nil)
+         (expect
+          (length
+           (export-core-test-view-nodes suffix-preparation :paragraph))
+          :to-be 1)
+         (expect
+          (mapcar
+           (lambda (view)
+             (getf (org-kit::export-view-payload view) :expanded-text))
+           (export-core-test-view-nodes suffix-preparation :macro))
+          :to-equal (list ""))
+         (expect
+          (length
+           (export-core-test-view-nodes
+            (org-kit::export-prepare
+             (parse-org
+              (export-core-test-lines
+               "#+MACRO: blank"
+               "left{{{blank}}} "
+               " {{{blank}}}right"))
+             :ascii)
+            :paragraph))
+          :to-be 1)
+         (expect (typep input-limit-error 'org-resource-limit-error) :to-be t)
+         (when (typep input-limit-error 'org-resource-limit-error)
+           (expect (org-resource-limit-error-limit-name input-limit-error)
+                   :to-be :max-input-length)))))
+  (it "drops an empty built-in macro at source offset zero"
+      (let* ((document (parse-org "{{{keyword(MISSING)}}}"))
+             (preparation (org-kit::export-prepare document :ascii)))
+        (with-soft-assertions
+          (expect (export-core-test-view-nodes preparation :macro)
+                  :to-equal nil)
+          (expect (export-core-test-view-nodes preparation :paragraph)
+                  :to-equal nil)))))
 
 (describe "E1 export resource boundaries"
   (it "bounds preparation depth across included fragments"
@@ -2183,24 +2878,222 @@
         (expect (org-resource-limit-error-limit condition) :to-be 0)
         (expect (org-resource-limit-error-actual condition)
                 :to-be (org-kit::export-node-count (document-root document))))))
+  (it "guards programmatic macro nodes with missing or out-of-range source spans"
+    (let* ((base-source (format nil "#+MACRO: blank~%{{{blank}}}"))
+           (suffix-source
+             (format nil "#+MACRO: blank~% {{{blank}}}right"))
+           (macro-length (length "{{{blank}}}")))
+      (labels ((preparation (source begin end)
+                 (let* ((document (make-document source))
+                        (line-end (position #\Newline source))
+                        (paragraph-begin (1+ line-end))
+                        (macro-node
+                          (make-node :macro :begin begin :end end
+                                     :properties (list :key "blank" :args nil)))
+                        (keyword-node
+                          (make-node :keyword :begin 0 :end line-end
+                                     :properties
+                                     (list :key "MACRO" :value "blank")))
+                        (paragraph-node
+                          (make-node :paragraph :begin paragraph-begin
+                                     :end (length source)
+                                     :children (list macro-node)))
+                        (root
+                          (make-node :org-data :begin 0 :end (length source)
+                                     :children (list keyword-node paragraph-node))))
+                   (setf (document-root document) root)
+                   (org-kit::export-prepare document :ascii))))
+        (dolist (span
+                 (list (list base-source nil nil)
+                       (list base-source 0 nil)
+                       (list base-source (1+ (length base-source))
+                             (+ 2 (length base-source)))
+                       (let ((start (search "{{{blank}}}" suffix-source)))
+                         (list suffix-source start (+ start macro-length)))))
+          (let* ((preparation (apply #'preparation span))
+                 (paragraphs
+                   (export-core-test-view-nodes preparation :paragraph))
+                 (macros (export-core-test-view-nodes preparation :macro)))
+            (expect (length paragraphs) :to-be 1)
+            (expect (length macros) :to-be 1)
+            (expect (getf (org-kit::export-view-payload (first macros))
+                          :expanded-text)
+                    :to-equal ""))))))
+  (it "preserves parser resource errors while scanning and expanding macros"
+    (let* ((static-template "template text")
+           (static-document
+             (parse-org
+              (export-core-test-lines
+               (concatenate 'string "#+MACRO: depth " static-template)
+               "{{{depth}}}")))
+           (static-records (org-kit::export-keyword-records static-document))
+           (static-macros
+             (nth-value
+              5
+              (org-kit::export-document-settings
+               static-document :html nil nil static-records)))
+           (original-parse-org (symbol-function 'parse-org))
+           (static-parser-calls 0)
+           (static-condition
+             (unwind-protect
+                  (progn
+                    (setf (symbol-function 'parse-org)
+                          (lambda (input &rest arguments)
+                            (if (string= input static-template)
+                                (progn
+                                  (incf static-parser-calls)
+                                  (org-kit::check-limit
+                                   (make-limits :max-element-depth 3)
+                                   :max-element-depth 4))
+                                (apply original-parse-org input arguments))))
+                    (export-core-test-catch-error
+                     (lambda ()
+                       (org-kit::export-macro-keyword-reference-set
+                        static-document static-macros
+                        (make-hash-table :test #'eq)))))
+               (setf (symbol-function 'parse-org) original-parse-org)))
+           (expanded-template "[[https://example.invalid][*bold /italic/*]]")
+           (callback-registry (make-callback-registry))
+           (expanded-document
+             (parse-org
+              (export-core-test-lines
+               "#+MACRO: depth (eval)"
+               "{{{depth}}}")))
+           (expanded-parser-calls 0)
+           (expanded-condition
+             (unwind-protect
+                  (progn
+                    (register-callback
+                     callback-registry :evaluator :emacs-lisp
+                     (lambda (expression context)
+                       (declare (ignore expression context))
+                       expanded-template))
+                    (setf (symbol-function 'parse-org)
+                          (lambda (input &rest arguments)
+                            (if (string= input expanded-template)
+                                (progn
+                                  (incf expanded-parser-calls)
+                                  (org-kit::check-limit
+                                   (make-limits :max-element-depth 2)
+                                   :max-element-depth 3))
+                                (apply original-parse-org input arguments))))
+                    (export-core-test-catch-error
+                     (lambda ()
+                       (org-kit::export-prepare
+                        expanded-document :html
+                        :callback-registry callback-registry))))
+               (setf (symbol-function 'parse-org) original-parse-org))))
+      (with-soft-assertions
+        (expect static-parser-calls :to-be 1)
+        (expect (typep static-condition 'org-resource-limit-error) :to-be t)
+        (when (typep static-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name static-condition)
+                  :to-be :max-element-depth)
+          (expect (org-resource-limit-error-limit static-condition)
+                  :to-be 3)
+          (expect (org-resource-limit-error-actual static-condition)
+                  :to-be 4))
+        (expect expanded-parser-calls :to-be 1)
+        (expect (typep expanded-condition 'org-resource-limit-error) :to-be t)
+        (when (typep expanded-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name expanded-condition)
+                  :to-be :max-element-depth)
+          (expect (org-resource-limit-error-limit expanded-condition)
+                  :to-be 2)
+          (expect (org-resource-limit-error-actual expanded-condition)
+                  :to-be 3)))))
 
-  (it "preserves the parser node limit when a fragment exceeds it"
-    (let* ((document (parse-org "#+INCLUDE: \"part.org\""
-                                :limits (make-limits :max-node-count 4)))
-           (condition
+  (it "preserves parser limits when parsing expanded fragments"
+    (let* ((node-limit-document
+             (parse-org "#+INCLUDE: \"part.org\""
+                        :limits (make-limits :max-node-count 4)))
+           (node-limit-condition
              (export-core-test-catch-error
               (lambda ()
                 (org-kit::export-prepare
-                 document :html
+                 node-limit-document :html
                  :include-resolver
                  (lambda (path parent-source)
                    (declare (ignore path parent-source))
                    (export-core-test-lines
-                    "* One" "* Two" "* Three" "* Four" "* Five")))))))
-      (expect (typep condition 'org-resource-limit-error) :to-be t)
-      (when (typep condition 'org-resource-limit-error)
-        (expect (org-resource-limit-error-limit-name condition)
-                :to-be :max-node-count))))
+                    "* One" "* Two" "* Three" "* Four" "* Five"))))))
+           (static-template-document
+             (parse-org
+              (export-core-test-lines
+               "#+MACRO: nested [[https://example.invalid][*bold /italic/*]]"
+               "{{{nested}}}")
+              :limits (make-limits :max-element-depth 3)))
+           (static-template-condition
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-prepare static-template-document :html))))
+           (include-depth-document
+             (parse-org "#+INCLUDE: \"part.org\""
+                        :limits (make-limits :max-element-depth 2)))
+           (include-depth-condition
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-prepare
+                 include-depth-document :html
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   (export-core-test-lines "* Heading" "Body"))))))
+           (remap-source "#+INCLUDE: \"part.org\"")
+           (remap-unbounded-document (parse-org remap-source))
+           (remap-limit
+             (1+ (org-kit::export-node-count
+                  (document-root remap-unbounded-document))))
+           (remap-document
+             (parse-org remap-source
+                        :limits
+                        (make-limits :max-export-expanded-nodes remap-limit)))
+           (remap-condition
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-prepare
+                 remap-document :html
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   (export-core-test-lines "* One" "Body")))))))
+      (with-soft-assertions
+        (expect (typep node-limit-condition 'org-resource-limit-error)
+                :to-be t)
+        (when (typep node-limit-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name node-limit-condition)
+                  :to-be :max-node-count)
+          (expect (org-resource-limit-error-limit node-limit-condition)
+                  :to-be 4)
+          (expect (> (org-resource-limit-error-actual node-limit-condition) 4)
+                  :to-be t))
+        (expect (typep static-template-condition 'org-resource-limit-error)
+                :to-be t)
+        (when (typep static-template-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name static-template-condition)
+                  :to-be :max-element-depth)
+          (expect (org-resource-limit-error-limit static-template-condition)
+                  :to-be 3)
+          (expect (> (org-resource-limit-error-actual static-template-condition) 3)
+                  :to-be t))
+        (expect (typep include-depth-condition 'org-resource-limit-error)
+                :to-be t)
+        (when (typep include-depth-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name include-depth-condition)
+                  :to-be :max-element-depth)
+          (expect (org-resource-limit-error-limit include-depth-condition)
+                  :to-be 2)
+          (expect (> (org-resource-limit-error-actual include-depth-condition) 2)
+                  :to-be t))
+        (expect (typep remap-condition 'org-resource-limit-error) :to-be t)
+        (when (typep remap-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name remap-condition)
+                  :to-be :max-export-expanded-nodes)
+          (expect (org-resource-limit-error-limit remap-condition)
+                  :to-be remap-limit)
+          (expect (> (org-resource-limit-error-actual remap-condition)
+                     remap-limit)
+                  :to-be t)))))
 
   (it "checks expansion depth immediately below, at, and above the limit"
     (let* ((source (export-core-test-lines "#+MACRO: m expansion" "{{{m}}}"))
@@ -2708,3 +3601,250 @@
             (when registered-p
               (unregister-export-backend backend)))))
       ))
+(progn
+  (defun export-core-test-oracle-fixture (relative-path)
+    (uiop:read-file-string
+     (asdf:system-relative-pathname
+      "cl-org-kit"
+      (concatenate 'string "t/fixtures/export/oracle/" relative-path))))
+
+  (describe "X1b oracle-backed export preparation"
+    (it "FR-071 retains backend keyword and OPTIONS values"
+      (let* ((html-options
+               (org-kit::export-preparation-options
+                (org-kit::export-prepare
+                 (parse-org (export-core-test-oracle-fixture
+                             "corpus/fr071-html-settings.org")) :html)))
+             (latex-options
+               (org-kit::export-preparation-options
+                (org-kit::export-prepare
+                 (parse-org (export-core-test-oracle-fixture
+                             "corpus/fr071-latex-settings.org")) :latex)))
+             (invalid-option
+               (export-core-test-catch-error
+                (lambda ()
+                  (org-kit::export-prepare
+                   (parse-org "#+OPTIONS: html5-fancy:maybe") :html)))))
+        (with-soft-assertions
+         (expect (mapcar (lambda (key) (cdr (assoc key html-options)))
+                         '(:html-doctype :html-container :html-content-class
+                                         :description :keywords :html-link-home :html-link-up
+                                         :html-equation-reference-format :html-head
+                                         :html-head-extra :subtitle :infojs-opt :creator
+                                         :html-html5-fancy :html-link-use-abs-url
+                                         :html-postamble :html-preamble
+                                         :html-head-include-default-style
+                                         :html-head-include-scripts :html-self-link-headlines))
+                 :to-equal
+                 (list "html5" "main" "report"
+                       (format nil "first description~%second description")
+                       "alpha beta" "/" "../" "last"
+                       (format nil "head one~%head two")
+                       (format nil "extra one~%extra two")
+                       "Export guide" "toc:1" "Writer"
+                       t nil :auto t nil t nil))
+         (expect (mapcar (lambda (key) (cdr (assoc key latex-options)))
+                         '(:latex-class :latex-class-options :latex-header
+                                        :latex-header-extra :latex-class-pre :description
+                                        :keywords :subtitle :latex-default-footnote-command
+                                        :latex-engraved-theme :latex-compiler :latex-use-sans))
+                 :to-equal
+                 (list "report" "twoside"
+                       (format nil "one header~%two header")
+                       (format nil "extra one~%extra two")
+                       (format nil "pre one~%pre two")
+                       (format nil "first description~%second description")
+                       (format nil "alpha~%beta") "Export guide" "footnote"
+                       "modus-operandi" "xelatex" t))
+         (expect (typep invalid-option 'org-export-unsupported-syntax) :to-be t)
+         (expect
+          (cdr
+           (assoc :creator
+                  (org-kit::export-preparation-options
+                   (org-kit::export-prepare
+                    (parse-org
+                     (export-core-test-lines
+                      "#+OPTIONS: creator:comment"
+                      "#+CREATOR: Writer"
+                      "Body"))
+                    :html))))
+          :to-equal "Writer")
+         (when (typep invalid-option 'org-export-unsupported-syntax)
+           (expect (org-export-unsupported-syntax-feature invalid-option)
+                   :to-be :invalid-option)))))
+
+    (it "FR-075 retains TOC directives in source order and rejects unsupported modes"
+      (let* ((document (parse-org (export-core-test-oracle-fixture
+                                   "corpus/fr075-toc-directives.org")))
+             (preparation (org-kit::export-prepare document :html))
+             (options (org-kit::export-preparation-options preparation))
+             (views (export-core-test-view-nodes preparation :keyword))
+             (nodes (mapcar #'org-kit::export-view-node views))
+             (invalid-mode
+               (export-core-test-catch-error
+                (lambda ()
+                  (export-org (parse-org "#+TOC: unsupported") :html)))))
+        (with-soft-assertions
+          (expect (cdr (assoc :toc options)) :to-be 3)
+          (expect (mapcar (lambda (node) (node-property node :key)) nodes)
+                  :to-equal '("TOC" "TOC" "TOC" "TOC"))
+          (expect (mapcar (lambda (node) (node-property node :value)) nodes)
+                  :to-equal '("headlines 2" "local" "tables" "listings"))
+          (expect (every (lambda (view)
+                           (eq (org-kit::export-view-source-document view) document))
+                         views)
+                  :to-be t)
+          (expect (typep invalid-mode 'org-export-error) :to-be t)
+          (when (typep invalid-mode 'org-export-error)
+            (expect (org-export-error-reason invalid-mode) :to-be :toc-mode)))))
+
+    (it "FR-072 matches the Org 9.8.10 INCLUDE oracle outputs"
+      (let ((cases
+              '(("fr072-lines-exclusive" ("included/fragment.org"))
+                ("fr072-lines-to-eof" ("included/fragment.org"))
+                ("fr072-minlevel-default" ("included/fragment.org"))
+                ("fr072-minlevel-explicit" ("included/fragment.org"))
+                ("fr072-target-and-literal"
+                 ("included/targets.org" "included/targets.org"
+                  "included/targets.org" "included/targets.org"
+                  "included/literal.org" "included/literal.org"
+                  "included/literal.org")))))
+        (with-soft-assertions
+          (dolist (case cases)
+            (destructuring-bind (name expected-calls) case
+              (let* ((source-path
+                       (format nil "t/fixtures/export/oracle/corpus/~A.org" name))
+                     (document
+                       (parse-org (export-core-test-oracle-fixture
+                                   (format nil "corpus/~A.org" name))
+                                  :source-name source-path))
+                     (expected (export-core-test-oracle-fixture
+                               (format nil "ascii/~A.txt" name)))
+                     (calls nil)
+                     (actual
+                       (export-org
+                        document :ascii
+                        :include-resolver
+                        (lambda (path parent-source)
+                          (declare (ignore parent-source))
+                          (push path calls)
+                          (export-core-test-oracle-fixture
+                           (concatenate 'string "corpus/" path))))))
+                (expect actual :to-equal expected)
+                (expect (nreverse calls) :to-equal expected-calls)))))))
+
+    (it "FR-073 matches DATE, file, property, counter, results, and index oracles"
+      (let* ((source-path "t/fixtures/export/oracle/corpus/fr073-macro-expansion.org")
+             (document (parse-org (export-core-test-oracle-fixture
+                                   "corpus/fr073-macro-expansion.org")
+                                  :source-name source-path))
+             (registry (make-callback-registry))
+             (calls nil)
+             (actual
+               (progn
+                 (register-callback
+                  registry :evaluator :emacs-lisp
+                  (lambda (expression macro-context)
+                    (push (list expression macro-context) calls)
+                    (if (getf macro-context :arguments)
+                        "2024-03-04"
+                        "<2024-03-04 Mon>")))
+                 (export-org document :ascii
+                             :context (make-export-context :date "2050-01-01")
+                             :callback-registry registry)))
+             (ordered-calls (nreverse calls))
+             (expected (export-core-test-oracle-fixture
+                        "ascii/fr073-macro-expansion.txt"))
+             (unsupported-id
+               (export-core-test-catch-error
+                (lambda ()
+                  (export-core-test-preparation
+                   (export-core-test-lines "* Heading" ":PROPERTIES:"
+                                           ":VALUE: stored" ":ID: id-value"
+                                           ":END:"
+                                           "{{{property(VALUE,id:id-value)}}}")))))
+             (override
+               (export-core-test-preparation
+                (export-core-test-lines "#+MACRO: results Local $1"
+                                         "{{{results(value)}}}")))
+             (override-text
+               (getf (org-kit::export-view-payload
+                      (first (export-core-test-view-nodes override :macro)))
+                     :expanded-text)))
+        (with-soft-assertions
+          (expect actual :to-equal expected)
+          (expect (length ordered-calls) :to-be 2)
+          (expect (mapcar (lambda (call) (getf (second call) :macro-name))
+                          ordered-calls)
+                  :to-equal '("date" "date"))
+          (expect (mapcar (lambda (call) (getf (second call) :arguments))
+                          ordered-calls)
+                  :to-equal '(("%Y-%m-%d") nil))
+          (expect (every (lambda (call)
+                           (and (search "org-format-timestamp" (first call))
+                                (search "<2024-03-04 Mon>" (first call))))
+                         ordered-calls)
+                  :to-be t)
+          (expect (typep unsupported-id 'org-export-unsupported-syntax) :to-be t)
+          (when (typep unsupported-id 'org-export-unsupported-syntax)
+            (expect (org-export-unsupported-syntax-feature unsupported-id)
+                    :to-be :macro-property-location))
+          (expect override-text :to-equal "Local value"))))
+
+    (it "FR-074 exposes the source and recursively expanded keyword records"
+      (let* ((document
+               (parse-org
+                (export-core-test-lines "#+SETUPFILE: nested.org"
+                                        "#+TITLE: Main title"
+                                        "#+LANGUAGE: ja")
+                :source-name "manual/main.org"))
+             (source-values
+               (mapcar (lambda (record) (list (second record) (third record)))
+                       (org-kit::export-keyword-records document)))
+             (records
+               (nth-value
+                0
+                (org-kit::export-setupfile-keyword-records
+                 document :html
+                 (lambda (path parent-source)
+                   (declare (ignore parent-source))
+                   (if (string= path "nested.org") "#+TITLE: Nested title" ""))
+                 (document-limits document)
+                 (org-kit::export-node-count (document-root document))
+                 0)))
+             (expanded-values
+               (mapcar (lambda (record) (list (second record) (third record)))
+                       (remove-if (lambda (record)
+                                    (string= (second record) "SETUPFILE"))
+                                  records))))
+        (with-soft-assertions
+          (expect source-values
+                  :to-equal '(("SETUPFILE" "nested.org")
+                              ("TITLE" "Main title")
+                              ("LANGUAGE" "ja")))
+          (expect expanded-values
+                  :to-equal '(("TITLE" "Nested title")
+                              ("TITLE" "Main title")
+                              ("LANGUAGE" "ja"))))))
+
+    (it "FR-090 delegates the function macro to its registered evaluator"
+      (let* ((document (parse-org (export-core-test-oracle-fixture
+                                   "corpus/fr090-function-macro.org")))
+             (expected (export-core-test-oracle-fixture
+                        "ascii/fr090-function-macro.txt"))
+             (registry (make-callback-registry))
+             (calls nil)
+             (actual
+               (progn
+                 (register-callback
+                  registry :evaluator :emacs-lisp
+                  (lambda (expression macro-context)
+                    (push (list expression macro-context) calls)
+                    "delegated"))
+                 (export-org document :ascii :callback-registry registry)))
+             (call (first calls)))
+        (with-soft-assertions
+          (expect actual :to-equal expected)
+          (expect (getf (second call) :macro-name) :to-equal "runtime")
+          (expect (getf (second call) :arguments) :to-equal nil)
+          (expect (search "(eval" (first call)) :to-be-truthy))))))

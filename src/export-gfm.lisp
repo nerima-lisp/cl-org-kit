@@ -1208,9 +1208,11 @@
            (+ (length heading) 2 (length children)))
           (format nil "~A~%~%~A" heading children)))))
 
-(defun export-gfm-toc (state)
-  (let ((entries (export-preparation-toc
-                  (export-gfm-state-preparation state))))
+(defun export-gfm-toc (state &optional (entries nil entries-supplied-p))
+  (let ((entries (if entries-supplied-p
+                     entries
+                     (export-preparation-toc
+                      (export-gfm-state-preparation state)))))
     (with-output-to-string (output)
       (let ((output-length 0)
             (first-p t))
@@ -1628,7 +1630,10 @@
      ""))
       ((:comment :comment-block :keyword :property-drawer :node-property
         :planning :clock)
-       "")
+       (if (and (eq type :keyword)
+         (string-equal (or (node-property node :key) "") "TOC"))
+    (export-gfm-render-keyword-toc state node)
+    ""))
       ((:bold :italic :strike-through :underline :subscript :superscript
         :code :verbatim :inline-src-block :entity :link :export-snippet
         :line-break :footnote-reference :target :radio-target :babel-call
@@ -1785,3 +1790,36 @@
    :raw-output-options '((:html . :allow-raw-html))
    :export-block-names '("gfm")
    :export-snippet-names '("gfm")))
+(defun export-gfm-render-keyword-toc (state node)
+  (let* ((directive (export-parse-toc-directive node :gfm))
+         (mode (getf directive :mode)))
+    (if (eq mode :headlines)
+        (let* ((entries
+                 (export-toc-headline-entries
+                  (export-gfm-state-preparation state) node
+                  (getf directive :depth) (getf directive :local)))
+               (local-p (getf directive :local)))
+          (with-output-to-string (output)
+            (unless local-p
+              (write-string "# Table of Contents" output)
+              (terpri output)
+              (terpri output))
+            (dolist (entry entries)
+              (let* ((view (getf entry :view))
+                     (headline (export-view-node view))
+                     (level (getf entry :level))
+                     (title (or (node-property headline :raw-value) ""))
+                     (id (export-gfm-heading-reference state headline)))
+                (setf (gethash headline
+                               (export-gfm-state-anchored-headings state))
+                      t)
+                (write-string
+                 (make-string (* 4 (1- level)) :initial-element #\Space)
+                 output)
+                (write-string "-   [" output)
+                (write-string (export-gfm-escape-literal title) output)
+                (write-string "](#" output)
+                (write-string id output)
+                (write-string ")" output)
+                (terpri output)))))
+        "")))

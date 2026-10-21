@@ -1604,3 +1604,53 @@
           (when had-builtin-types-p
             (expect (eq restored-builtin-types old-builtin-types)
                     :to-be t)))))))
+(describe "Org LaTeX TOC keyword rendering"
+  (it "renders headline, local, table, and listing TOCs"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+TOC: headlines 1~%* Alpha~%** Beta~%* Parent~%#+TOC: headlines 1 local~%** Child~%*** Deep~%#+TOC: tables~%#+CAPTION: Table caption~%| Value |~%|-------|~%| x |~%#+TOC: listings~%#+CAPTION: Listing caption~%#+BEGIN_SRC text~%source~%#+END_SRC~%"))
+           (output (export-org (parse-org source) :latex)))
+      (with-soft-assertions
+        (expect (search
+                 (format nil "\\setcounter{tocdepth}{1}~%\\tableofcontents")
+                 output)
+                :not :to-be nil)
+        (expect (search "\\startcontents[level-1]" output)
+                :not :to-be nil)
+        (expect (search "\\printcontents[level-1]{}{0}{\\setcounter{tocdepth}{2}}"
+                        output)
+                :not :to-be nil)
+        (expect (search "\\listoftables" output) :not :to-be nil)
+        (expect (search "\\lstlistoflistings" output) :not :to-be nil))))
+  (it "rejects invalid LaTeX OPTIONS values with the named condition"
+    (let* ((condition
+             (export-latex-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org "#+OPTIONS: latex-use-sans:maybe") :latex)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-unsupported-syntax) :to-be t)
+        (when (typep condition 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-backend condition)
+                  :to-be :latex)
+          (expect (org-export-unsupported-syntax-feature condition)
+                  :to-be :invalid-option)))))
+  (it "rejects unsupported TOC modes with the named condition"
+    (let* ((condition
+             (export-latex-test-catch-error
+              (lambda ()
+                (export-org (parse-org "#+TOC: unknown") :latex)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-reason condition) :to-be :toc-mode)))))
+  (it "leaves standalone local TOC empty"
+    (let ((output
+           (export-org
+            (parse-org
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+TOC: local~%* Alpha~%Body"))
+            :latex)))
+      (with-soft-assertions
+        (expect (search "\\tableofcontents" output) :to-be nil)
+        (expect (search "\\section*{Alpha}" output) :not :to-be nil)))))

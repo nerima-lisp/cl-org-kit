@@ -1,0 +1,10 @@
+2024-03-04 <2024-03-04 Mon> value [three]|[twelve]|[]|[one]|[one]|[$x]
+fr073-macro-expansion.org
+
+
+1 Property heading
+==================
+
+  stored|stored|stored
+
+  1|2|2|5|6|1

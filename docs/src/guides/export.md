@@ -33,6 +33,8 @@ Texinfo export returns `.texi` source. It does not run `makeinfo` or create an
 `.info` file. Man export returns roff source for a man page; it does not invoke
 a roff formatter.
 
+The export context's title overrides the document's `#+TITLE` for this export.
+
 ## Includes
 
 `export-org` does not open files named by `#+INCLUDE`. Pass an
@@ -57,8 +59,8 @@ resolver can choose how to look up the source.
        (t (error "Unexpected include ~A from ~A" path parent-source))))))
 ~~~
 
-The following directives show option syntax. Their paths are illustrative;
-each included source must be returned by the resolver above.
+The following directives show syntax; each path must be handled by your
+resolver.
 
 ~~~org
 #+INCLUDE: "chapters.org::*Introduction" :lines "2-6" :minlevel 2
@@ -85,6 +87,54 @@ Nested includes use the same resolver, with each including path passed as the
 parent source name. An include cycle signals an `org-export-error` with reason
 `:include-cycle`; a missing target signals reason `:include-target-not-found`.
 
+`#+SETUPFILE` uses the same resolver. The resolver receives the setup path and
+the source name of the document containing the directive; for a nested setup
+file, that source name is the parent setup path. The library collects export
+keywords from the supplied text at the directive's position, following nested
+`#+SETUPFILE` directives in order. Setup file body text is not added to the
+document. A missing resolver, a non-string result, or a setup file cycle signals
+an `org-export-error` with reason `:missing-setupfile-resolver`,
+`:invalid-setupfile-result`, or `:setupfile-cycle`. Exceeding
+`:max-export-expansion-depth` signals an `org-resource-limit-error`.
+
+## Backend keywords, options, and tables of contents
+
+The HTML and LaTeX backends accept the backend-specific keywords and
+`#+OPTIONS` tokens defined by Org 9.8.10. They aggregate repeated keyword
+values using the backend's Org rules and expose the resulting values through
+`export-render-context-options` as an association list. In a backend callback,
+read a value with `(cdr (assoc :html-doctype (org-kit:export-render-context-options context)))`.
+For example,
+`HTML_DOCTYPE` maps to `:html-doctype`, `LATEX_FOOTNOTE_COMMAND` maps to
+`:latex-default-footnote-command`, and `html-style` maps to
+`:html-head-include-default-style`.
+
+The HTML backend applies `#+HTML_CONTENT_CLASS` to its content wrapper. It
+accepts `HTML_DOCTYPE`, `HTML_CONTAINER`, `HTML_LINK_HOME`, `HTML_LINK_UP`,
+`HTML_EQUATION_REFERENCE_FORMAT`, `HTML_HEAD`, `HTML_HEAD_EXTRA`, `INFOJS_OPT`,
+and `LATEX_HEADER`, along with the shared `DESCRIPTION`, `KEYWORDS`,
+`SUBTITLE`, and `CREATOR` keywords. It also parses the `html5-fancy`,
+`html-link-use-abs-url`, `html-postamble`, `html-preamble`, `html-style`,
+`html-scripts`, and `html-self-link-headlines` options. The LaTeX backend uses
+`LATEX_CLASS`, `LATEX_CLASS_OPTIONS`, `LATEX_HEADER`, and
+`LATEX_HEADER_EXTRA` when `:allow-raw-latex` is true. It also accepts
+`LATEX_CLASS_PRE`, `LATEX_FOOTNOTE_COMMAND`, `LATEX_ENGRAVED_THEME`,
+`LATEX_COMPILER`, `DESCRIPTION`, `KEYWORDS`, `SUBTITLE`, and `DATE`, and parses
+the `latex-use-sans` option. Accepted values that the built-in renderer does
+not use remain available in the render context for backend consumers.
+
+`#+OPTIONS: toc:N` sets the depth of the document-wide table of contents;
+`toc:nil` disables it. A `#+TOC: headlines N` directive adds a headline table
+of contents at its position in the document. `#+TOC: headlines local` limits
+the entries to the nearest containing headline. The standalone `#+TOC: local`
+directive is accepted by Org 9.8.10 but emits no table of contents.
+`#+TOC: tables` and `#+TOC: listings` request lists of tables and source
+listings.
+HTML, LaTeX, and ASCII render headline TOCs, local headline TOCs, table lists,
+and listing lists. GFM renders headline and local headline TOCs; Org 9.8.10
+emits no output for its table and listing modes. An unsupported mode signals
+`org-export-error` with reason `:toc-mode`.
+
 ## LaTeX
 
 LaTeX export returns source only; it does not invoke a TeX engine or generate a
@@ -98,9 +148,10 @@ With that option, `#+LATEX_CLASS` selects the class,
 `#+LATEX_HEADER_EXTRA` are inserted after the default packages, in that order.
 Both `#+BEGIN_EXPORT latex` and
 `#+BEGIN_EXPORT tex` pass their contents through only when this option is true.
-Enable raw LaTeX only for trusted documents: commands such as `\input` can read
-local files, subject to TeX's `openin_any` setting, and `\write18` may run
-shell commands depending on the engine and its shell-escape configuration.
+Enable raw LaTeX only for trusted documents. When a downstream TeX engine
+processes the generated source, commands such as `\input` can read local
+files, subject to TeX's `openin_any` setting, and `\write18` may run shell
+commands depending on the engine and its shell-escape configuration.
 
 The LaTeX backend uses `verbatim` for code, example, fixed-width, and dynamic
 blocks; a body containing `\end{verbatim}` signals `org-export-error`.
@@ -365,6 +416,35 @@ RFC 5545; Org 9.8.10 counts characters instead. For example, 74 ASCII bytes
 followed by a two-byte UTF-8 character may make Org's first physical line 76
 octets, while this backend folds before that character to stay within 75.
 
+## Built-in macro values
+
+The `title` and `author` macros use effective metadata, including caller
+context overrides. The `email` and `keyword` macros read effective keyword
+values, including values supplied through `#+SETUPFILE`. The `date` macro reads
+the effective `#+DATE` keyword, including a value supplied through
+`#+SETUPFILE`; an export context's `:date` override changes render metadata but
+does not change this macro value. If `#+DATE` contains one timestamp, the macro
+formats it when given an argument, as in `{{{date(%Y-%m-%d)}}}`. Without an
+argument it returns the timestamp in its source form. Org represents this
+timestamp macro as a function macro, so it expands only when an `:evaluator` /
+`:emacs-lisp` callback is registered; see [Function macros](#function-macros).
+
+The `input-file` macro returns the basename of the source name supplied to
+`parse-org`. If the document has no source name, it expands to an empty string.
+The library does not read a file to resolve this value. The `property` macro
+takes the property name first and an optional location second. Without a
+location it reads the current headline; a location can be a headline title or
+`#CUSTOM_ID`, as in `{{{property(VALUE,#custom-id)}}}`. The `n` macro maintains a
+named counter: no action increments it, `-` keeps the current value, an integer
+sets it, and any other nonempty action resets it to 1.
+
+`$N` in a macro template selects the Nth argument. `$0` and `$000` select the
+first argument, and an index beyond the supplied arguments expands to an empty
+string. A dollar sign followed by a non-digit remains literal. The default
+`results` macro expands to its first argument, or to an empty string when it
+has no argument. A local `#+MACRO: results ...` definition replaces that
+default.
+
 ## Function macros
 
 Org function macros use a template beginning with `(eval`, for example
@@ -375,6 +455,10 @@ argument strings, and the effective export context under `:macro-name`,
 `:arguments`, and `:export-context`. The library does not parse or evaluate the
 expression or substitute arguments into its body; the callback owns those
 steps.
+
+An evaluator can execute code supplied through an Org document. Register one
+only for trusted input, or use a callback that applies its own sandbox and
+resource limits.
 
 Register an evaluator explicitly and pass its registry to `export-org`:
 

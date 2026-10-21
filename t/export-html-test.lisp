@@ -1226,7 +1226,9 @@ paragraph" table-list) :not :to-be nil))))
                   :to-be :max-output-length)
           (expect (org-resource-limit-error-actual condition)
                   :to-be (length text)))
-        (expect (< allocated (floor (length text) 2)) :to-be t))))
+        (unless *coverage-run-p*
+          (expect (< allocated (floor (length text) 2))
+                  :to-be t)))))
 
   (it-sequential "checks dynamic block output before allocating a source slice"
     (let* ((body (make-string (* 256 1024) :initial-element #\x))
@@ -1875,3 +1877,388 @@ paragraph" table-list) :not :to-be nil))))
           (unregister-export-link-type backend "image-scheme"))
         (when backend-registered-p
           (unregister-export-backend backend))))))
+(describe "Org HTML TOC keyword rendering"
+  (it "renders headline, local, table, and listing TOCs"
+    (let* ((source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+TOC: headlines 1~%* Alpha~%** Beta~%* Parent~%#+TOC: headlines 1 local~%** Child~%*** Deep~%#+TOC: tables~%#+CAPTION: Table caption~%| Value |~%|-------|~%| x |~%#+TOC: listings~%#+CAPTION: Listing caption~%#+BEGIN_SRC text~%source~%#+END_SRC~%"))
+           (output (export-org (parse-org source) :html)))
+      (with-soft-assertions
+        (expect (search "id=\"table-of-contents\"" output)
+                :not :to-be nil)
+        (expect (search "id=\"text-table-of-contents-1\"" output)
+                :not :to-be nil)
+        (expect (search ">Alpha</a>" output) :not :to-be nil)
+        (expect (search ">Beta</a>" output) :to-be nil)
+        (expect (search ">Child</a>" output) :not :to-be nil)
+        (expect (search ">Deep</a>" output) :to-be nil)
+        (expect (search "id=\"list-of-tables\"" output)
+                :not :to-be nil)
+        (expect (search "<span class=\"table-number\">Table 1:</span> Table caption"
+                        output)
+                :not :to-be nil)
+        (expect (search "id=\"list-of-listings\"" output)
+                :not :to-be nil)
+        (let* ((fancy-output
+                 (org-kit::export-render-preparation
+                  (org-kit::export-prepare
+                   (parse-org
+                    (format nil
+                            "#+OPTIONS: toc:nil num:nil html5-fancy:t~%#+TOC: headlines 1~%* Fancy heading~%"))
+                   :html)
+                  :html)))
+          (expect (search "<nav id=\"table-of-contents\" role=\"doc-toc\">"
+                          fancy-output)
+                  :not :to-be nil)
+          (expect (search "<div id=\"table-of-contents\"" fancy-output)
+                  :to-be nil))
+        (expect (search "<span class=\"listing-number\">Listing 1:</span> Listing caption"
+                        output)
+                :not :to-be nil))))
+  (it "preserves the default content class and escapes HTML_CONTENT_CLASS"
+    (let* ((default-output (export-org (parse-org "Body") :html))
+           (custom-output
+             (export-org
+              (parse-org
+               (format nil
+                       "#+HTML_CONTENT_CLASS: article\" data-x=\"value~%Body"))
+              :html)))
+      (with-soft-assertions
+        (expect (search "<div id=\"content\" class=\"content\">"
+                        default-output)
+                :not :to-be nil)
+        (expect (search "class=\"article&quot; data-x=&quot;value\""
+                        custom-output)
+                :not :to-be nil)
+        (expect (search "class=\"article\" data-x=\"value\""
+                        custom-output)
+                 :to-be nil))))
+  (it "rejects invalid HTML OPTIONS values with the named condition"
+    (let* ((condition
+             (export-html-test-catch-error
+              (lambda ()
+                (export-org
+                 (parse-org "#+OPTIONS: html5-fancy:maybe") :html)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-unsupported-syntax) :to-be t)
+        (when (typep condition 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-backend condition)
+                  :to-be :html)
+          (expect (org-export-unsupported-syntax-feature condition)
+                  :to-be :invalid-option)))))
+  (it "rejects unsupported TOC modes with the named condition"
+    (let* ((condition
+             (export-html-test-catch-error
+              (lambda ()
+                (export-org (parse-org "#+TOC: unknown") :html)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-reason condition) :to-be :toc-mode)))))
+  (it "leaves standalone local TOC empty"
+    (let ((output
+           (export-org
+            (parse-org
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+TOC: local~%* Alpha~%Body"))
+            :html)))
+      (with-soft-assertions
+        (expect (search "table-of-contents" output) :to-be nil)
+        (expect (search "Table of Contents" output) :to-be nil))))
+  (it "renders recursive headline TOCs with nested sections"
+    (let* ((output
+             (export-org
+              (parse-org
+               (format nil
+                       "#+OPTIONS: toc:nil num:nil~%#+TOC: headlines 3~%* One~%** Two~%*** Three~%* Four~%"))
+              :html))
+           (one (search ">One</a>" output))
+           (two (search ">Two</a>" output))
+           (three (search ">Three</a>" output))
+           (four (search ">Four</a>" output)))
+      (with-soft-assertions
+        (expect (and one two three four (< one two three four)) :to-be t)
+        (expect (search "</a><ul>" output) :not :to-be nil))))
+  (it "parses HTML preamble and postamble values through export-org"
+    (let ((accepted-options
+            '("html-preamble:nil"
+              "html-preamble:t"
+              "html-preamble:\"Quoted preamble\""
+              "html-postamble:nil"
+              "html-postamble:t"
+              "html-postamble:auto"
+              "html-postamble:\"Quoted postamble\""))
+          (rejected-options
+            '("html-preamble:auto"
+              "html-postamble:maybe")))
+      (dolist (option accepted-options)
+        (let ((output
+                (export-org
+                 (parse-org (format nil "#+OPTIONS: ~A~%Body" option))
+                 :html)))
+          (with-soft-assertions
+            (expect (typep output 'string) :to-be t)
+            (expect (search "Body" output) :not :to-be nil))))
+      (dolist (option rejected-options)
+        (let ((condition
+                (export-html-test-catch-error
+                 (lambda ()
+                   (export-org
+                    (parse-org (format nil "#+OPTIONS: ~A~%Body" option))
+                    :html)))))
+          (with-soft-assertions
+            (expect (typep condition 'org-export-unsupported-syntax)
+                    :to-be t)
+            (when (typep condition 'org-export-unsupported-syntax)
+              (expect (org-export-unsupported-syntax-backend condition)
+                      :to-be :html)
+              (expect (org-export-unsupported-syntax-feature condition)
+                      :to-be :invalid-option)))))))
+  (it "rejects duplicate headline TOC qualifiers through export-org"
+    (let ((condition
+            (export-html-test-catch-error
+             (lambda ()
+               (export-org
+                (parse-org
+                 (format nil "#+TOC: headlines 1 2~%* One~%** Two~%"))
+                :html)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-reason condition) :to-be :toc-mode)))))
+  (it "prints nonstring table captions in HTML table TOCs"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+OPTIONS: toc:nil num:nil~%#+TOC: tables~%#+CAPTION: Table caption~%| Value |~%|-------|~%| x |~%")))
+           (table (export-html-test-node-of-type document :table)))
+      (setf (node-property table :caption) 42)
+      (let ((output (export-org document :html)))
+        (expect (search "<span class=\"table-number\">Table 1:</span> 42"
+                        output)
+                :not :to-be nil))))
+  (it "joins adjacent included paragraphs under the deepest heading"
+    (let* ((output
+             (export-org
+              (parse-org
+               (format nil
+                       "#+OPTIONS: toc:nil num:nil~%* Host~%#+INCLUDE: \"heading.org\"~%#+INCLUDE: \"tail.org\"~%"))
+              :html
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (cond
+                  ((string= path "heading.org")
+                   (format nil "* Imported~%** Intermediate~%*** Nested~%Nested body"))
+                  ((string= path "tail.org") "Included tail")))))
+           (direct-output
+             (export-org
+              (parse-org
+               (format nil
+                       "#+OPTIONS: toc:nil num:nil~%* Host~%#+INCLUDE: \"heading.org\"~%#+INCLUDE: \"tail.org\"~%"))
+              :html
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (cond
+                  ((string= path "heading.org")
+                   (format nil "* Imported~%Imported body"))
+                  ((string= path "tail.org") "Included tail")))))
+           (paragraph-start (search (format nil "<p>~%Nested body") output))
+           (body-position (search "Nested body" output))
+           (tail-position (search "Included tail" output))
+           (paragraph-end
+             (and paragraph-start
+                  (search "</p>" output :start2 paragraph-start))))
+      (with-soft-assertions
+       (expect
+        (and paragraph-start
+             body-position
+             tail-position
+             paragraph-end
+             (< paragraph-start body-position tail-position paragraph-end)
+             (not
+              (null
+               (search
+                (format nil "<p>~%Nested body~%Included tail~%</p>")
+                output))))
+        :to-be
+        t)
+       (expect
+        (search
+         (format nil "<p>~%Imported body~%Included tail~%</p>")
+         direct-output)
+        :not :to-be nil))))
+  (it "keeps HTML include paragraphs separate when merge preconditions fail"
+    (labels ((section-result (previous-node next-node previous-source next-source
+                             &key pending-tail heading-sibling)
+               (let* ((previous-view
+                        (org-kit::%make-export-view
+                         :node previous-node
+                         :source-document previous-source))
+                      (next-view
+                        (org-kit::%make-export-view
+                         :node next-node
+                         :source-document next-source))
+                      (section-view
+                        (org-kit::%make-export-view
+                         :node (make-node :section)
+                         :children (list previous-view)))
+                      (heading-view
+                        (org-kit::%make-export-view
+                         :node (make-node :headline)
+                         :children
+                         (append (list section-view)
+                                 (when heading-sibling
+                                   (list heading-sibling)))))
+                      (result
+                        (org-kit::export-html-append-to-deepest-section
+                         heading-view
+                         (cons next-view pending-tail))))
+                 (values result previous-view next-view)))
+             (section-children (heading)
+               (org-kit::export-view-children
+                (find-if
+                 (lambda (view)
+                   (eq (node-type (org-kit::export-view-node view)) :section))
+                 (org-kit::export-view-children heading))))
+             (expect-separated (previous-node next-node previous-source next-source)
+               (multiple-value-bind (heading previous-view next-view)
+                   (section-result
+                    previous-node next-node previous-source next-source)
+                 (let ((children (section-children heading)))
+                   (with-soft-assertions
+                     (expect (length children) :to-be 2)
+                     (expect (first children) :to-be previous-view)
+                     (expect (second children) :to-be next-view))))))
+      (let* ((previous-document (make-document "Previous"))
+             (next-document (make-document "Next"))
+             (previous-node
+               (make-node :paragraph :begin 0 :end 8))
+             (next-node
+               (make-node :paragraph :begin 0 :end 4)))
+        (expect-separated
+         (make-node :paragraph :begin 0 :end 8
+                    :properties (list :name "marked"))
+         next-node previous-document next-document)
+        (expect-separated
+         previous-node
+         (make-node :paragraph :begin 0 :end 4
+                    :properties (list :name "marked"))
+         previous-document next-document)
+        (expect-separated
+         (make-node :paragraph :begin 0 :end 8 :post-blank 1)
+         next-node previous-document next-document)
+        (expect-separated
+         previous-node
+         (make-node :keyword :begin 0 :end 4
+                    :properties (list :key "TITLE"))
+         previous-document next-document)
+        (let* ((pending-tail
+                 (org-kit::%make-export-view
+                  :node (make-node :keyword
+                                   :properties (list :key "TAIL"))))
+               (heading-sibling
+                 (org-kit::%make-export-view
+                  :node (make-node :keyword
+                                   :properties (list :key "SIBLING")))))
+          (multiple-value-bind (heading)
+              (section-result
+               previous-node next-node previous-document next-document
+               :pending-tail (list pending-tail)
+               :heading-sibling heading-sibling)
+            (let* ((heading-children (org-kit::export-view-children heading))
+                   (children (org-kit::export-view-children
+                              (first heading-children)))
+                   (merged-view (first children))
+                   (merge-children (org-kit::export-view-children merged-view)))
+              (with-soft-assertions
+                (expect (length children) :to-be 2)
+                (expect (eq (org-kit::export-view-node merged-view)
+                            previous-node)
+                        :to-be t)
+                (expect (second children) :to-be pending-tail)
+                (expect (second heading-children) :to-be heading-sibling)
+                (expect (length merge-children) :to-be 1)
+                (expect
+                 (node-property (org-kit::export-view-node
+                                 (first merge-children))
+                                :value)
+                 :to-equal (format nil "~%")))))))))
+  (it "routes TOC and ordinary keywords differently in the legacy HTML renderer"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "#+OPTIONS: toc:nil num:nil~%#+TITLE: Legacy title~%#+TOC: headlines 1~%* Alpha~%")))
+           (ordinary-keyword nil)
+           (toc-keyword nil)
+           (state
+             (org-kit::%make-export-html-state
+              :preparation (org-kit::export-prepare document :html)
+              :limits (document-limits document))))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :keyword)
+           (let ((key (node-property node :key)))
+             (cond
+               ((string-equal (or key "") "TITLE")
+                (setf ordinary-keyword node))
+               ((string-equal (or key "") "TOC")
+                (setf toc-keyword node))))))
+       (document-root document))
+      (with-soft-assertions
+        (expect ordinary-keyword :not :to-be nil)
+        (expect toc-keyword :not :to-be nil)
+        (when (and ordinary-keyword toc-keyword)
+          (org-kit::export-html-render-node-legacy
+           state ordinary-keyword nil nil)
+          (expect (fill-pointer (org-kit::export-html-state-output state))
+                  :to-be 0)
+          (org-kit::export-html-render-node-legacy state toc-keyword nil nil)
+          (let ((output (org-kit::export-html-state-output state)))
+            (expect (search "id=\"table-of-contents\"" output)
+                    :not :to-be nil)
+            (expect (search "Table of Contents" output)
+                    :not :to-be nil)
+            (expect (search "Alpha" output)
+                    :not :to-be nil))))))
+  (it "keeps reordered paragraphs from the same source separate"
+    (let* ((document
+             (parse-org (format nil "First paragraph~%~%Last paragraph")))
+           (paragraphs nil))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :paragraph)
+           (push node paragraphs)))
+       (document-root document))
+      (setf paragraphs (nreverse paragraphs))
+      (let* ((first-node (first paragraphs))
+             (last-node (second paragraphs))
+             (previous-view
+               (org-kit::%make-export-view
+                :node last-node :source-document document))
+             (next-view
+               (org-kit::%make-export-view
+                :node first-node :source-document document))
+             (section-view
+               (org-kit::%make-export-view
+                :node (make-node :section)
+                :children (list previous-view)))
+             (heading-view
+               (org-kit::%make-export-view
+                :node (make-node :headline)
+                :children (list section-view)))
+             (result
+               (org-kit::export-html-append-to-deepest-section
+                heading-view (list next-view)))
+             (section-children
+               (org-kit::export-view-children
+                (first (org-kit::export-view-children result)))))
+        (with-soft-assertions
+          (expect (length paragraphs) :to-be 2)
+          (expect (node-begin first-node) :to-be 0)
+          (expect (node-end last-node)
+                  :to-be (length (document-text document)))
+          (expect (length section-children) :to-be 2)
+          (expect (first section-children) :to-be previous-view)
+          (expect (second section-children) :to-be next-view))))))

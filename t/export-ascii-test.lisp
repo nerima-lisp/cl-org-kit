@@ -2713,4 +2713,403 @@
               (expect expected :to-equal (format nil "body~%"))
               (expect (export-org document backend) :to-equal "body")))
         (when registered-p
-          (unregister-export-backend backend))))))
+          (unregister-export-backend backend)))))
+  (it "joins adjacent included paragraphs and preserves remaining fragment content"
+    (let* ((parent-document
+             (parse-org
+              (export-ascii-test-source "* Container" "" "flush")))
+           (parent-heading
+             (export-ascii-test-find-node
+              (document-root parent-document) :headline))
+           (parent-tail
+             (export-ascii-test-find-node
+              (document-root parent-document) :paragraph))
+           (previous-document (parse-org "first"))
+           (previous-paragraph
+             (export-ascii-test-find-node
+              (document-root previous-document) :paragraph))
+           (previous-view
+             (org-kit::export-ascii-output-view-from-node previous-paragraph))
+           (parent-section-view
+             (export-ascii-test-view
+              (make-node :section) parent-document (list previous-view)))
+           (heading-view
+             (export-ascii-test-view
+              parent-heading parent-document (list parent-section-view)))
+           (included-document
+             (parse-org (format nil "second~%~%remainder")))
+           (included-paragraphs
+             (let ((paragraphs nil))
+               (map-nodes
+                (lambda (node)
+                  (when (eq (node-type node) :paragraph)
+                    (push node paragraphs)))
+                (document-root included-document))
+               (nreverse paragraphs)))
+           (included-views
+             (mapcar (function org-kit::export-ascii-output-view-from-node)
+                     included-paragraphs))
+           (included-section-view
+             (export-ascii-test-view
+              (make-node :section) included-document included-views))
+           (parent-tail-view
+             (org-kit::export-ascii-output-view-from-node parent-tail))
+           (preparation
+             (export-ascii-test-preparation parent-document nil))
+           (section-merge-output
+             (export-ascii-test-render-views
+              (list heading-view included-section-view parent-tail-view)
+              preparation))
+           (direct-merge-output
+             (export-ascii-test-render-views
+              (list heading-view (first included-views) parent-tail-view)
+              preparation))
+           (preserve-preparation
+             (export-ascii-test-preparation
+              parent-document nil '((:preserve-breaks . t))))
+           (preserved-merge-output
+             (export-ascii-test-render-views
+              (list heading-view included-section-view parent-tail-view)
+              preserve-preparation)))
+      (with-soft-assertions
+        (expect (length included-paragraphs) :to-be 2)
+        (expect (search "first  second" section-merge-output)
+                :not :to-be nil)
+        (expect (search "remainder" section-merge-output) :not :to-be nil)
+        (expect (search "flush" section-merge-output) :not :to-be nil)
+        (expect (search "first  second" direct-merge-output)
+                :not :to-be nil)
+        (expect (search "flush" direct-merge-output) :not :to-be nil)
+        (expect (search (format nil "first~%second") preserved-merge-output)
+                :not :to-be nil))))
+
+  (it "covers ASCII paragraph boundaries for imported fragments"
+    (let* ((parent-document (parse-org "* Holder"))
+           (parent-heading
+             (export-ascii-test-find-node
+              (document-root parent-document) :headline))
+           (preparation
+             (export-ascii-test-preparation parent-document nil)))
+      (labels ((find-node (document type)
+                 (export-ascii-test-find-node (document-root document) type))
+               (render-included-pair (previous-node next-node next-document)
+                 (let* ((previous-view
+                          (org-kit::export-ascii-output-view-from-node
+                           previous-node))
+                        (section-view
+                          (export-ascii-test-view
+                           (make-node :section) parent-document
+                           (list previous-view)))
+                        (heading-view
+                          (export-ascii-test-view
+                           parent-heading parent-document (list section-view)))
+                        (next-view
+                          (org-kit::export-ascii-output-view-from-node next-node))
+                        (included-section-view
+                          (export-ascii-test-view
+                           (make-node :section) next-document (list next-view))))
+                   (export-ascii-test-render-views
+                    (list heading-view included-section-view) preparation)))
+               (render-source-siblings
+                   (preparation-document first-document first-node
+                    second-document second-node)
+                 (export-ascii-test-render-views
+                  (list
+                   (org-kit::export-ascii-output-view-from-node first-node)
+                   (org-kit::export-ascii-output-view-from-node second-node))
+                  (export-ascii-test-preparation preparation-document nil)))
+               (assert-separated (output first-text second-text newline-count)
+                 (expect
+                  (search
+                   (concatenate
+                    (quote string) first-text
+                    (make-string newline-count :initial-element #\Newline)
+                    second-text)
+                   output)
+                  :not :to-be nil))
+               (assert-not-joined (output first-text second-text)
+                 (expect
+                  (search (concatenate (quote string) first-text "  " second-text)
+                          output)
+                  :to-be nil))
+               (paragraph-view (document type)
+                 (org-kit::export-ascii-output-view-from-node
+                  (find-node document type))))
+        (with-soft-assertions
+          (let* ((left-document (parse-org "left"))
+                 (empty-document (parse-org ""))
+                 (right-document (parse-org "right"))
+                 (left-view (paragraph-view left-document :paragraph))
+                 (empty-view
+                   (export-ascii-test-view
+                    (make-node :paragraph :begin 0 :end 0) empty-document))
+                 (right-view (paragraph-view right-document :paragraph))
+                 (merged-view
+                   (org-kit::%make-export-view
+                    :node (org-kit::export-view-node left-view)
+                    :children
+                    (append (org-kit::export-view-children left-view)
+                            (org-kit::export-view-children right-view))
+                    :payload
+                    (list :joined-paragraphs
+                          (list left-view empty-view right-view))
+                    :source-document left-document))
+                 (output
+                   (export-ascii-test-render-view
+                    merged-view
+                    (export-ascii-test-preparation left-document nil))))
+            (expect output :to-equal "left  right"))
+          (let* ((previous-document (parse-org "before"))
+                 (fragment-document (parse-org "------"))
+                 (previous-node (find-node previous-document :paragraph))
+                 (rule-node (find-node fragment-document :horizontal-rule))
+                 (output
+                   (render-included-pair
+                    previous-node rule-node fragment-document)))
+            (expect rule-node :not :to-be nil)
+            (assert-separated
+             output "before" (make-string 72 :initial-element #\-) 1)
+            (assert-not-joined output "before"
+                               (make-string 72 :initial-element #\-)))
+          (let* ((previous-document (parse-org "before"))
+                 (fragment-document (parse-org "after"))
+                 (previous-node (find-node previous-document :paragraph))
+                 (next-node (find-node fragment-document :paragraph)))
+            (setf (node-property previous-node :test-marker) t)
+            (let ((output
+                    (render-included-pair
+                     previous-node next-node fragment-document)))
+              (expect (node-property previous-node :test-marker) :to-be t)
+              (assert-separated output "before" "after" 1)
+              (assert-not-joined output "before" "after")))
+          (let* ((previous-document
+                   (parse-org
+                    (export-ascii-test-source "before" "" "")))
+                 (fragment-document (parse-org "after"))
+                 (previous-node (find-node previous-document :paragraph))
+                 (next-node (find-node fragment-document :paragraph))
+                 (post-blank (node-post-blank previous-node))
+                 (output
+                   (render-included-pair
+                    previous-node next-node fragment-document)))
+            (expect (plusp post-blank) :to-be t)
+            (assert-separated
+             output "before" "after" (max 2 (1+ post-blank)))
+            (assert-not-joined output "before" "after"))
+          (let* ((previous-document (parse-org "before"))
+                 (fragment-document
+                   (parse-org
+                    (export-ascii-test-source "#+TITLE: Fragment" "" "after")))
+                 (previous-node (find-node previous-document :paragraph))
+                 (next-node (find-node fragment-document :paragraph))
+                 (next-begin (node-begin next-node))
+                 (output
+                   (render-included-pair
+                    previous-node next-node fragment-document)))
+            (expect (plusp next-begin) :to-be t)
+            (assert-separated output "before" "after" 1)
+            (assert-not-joined output "before" "after"))
+          (let* ((parent-source (parse-org "parent"))
+                 (left-document (parse-org "left"))
+                 (right-document (parse-org "right"))
+                 (left-node (find-node left-document :paragraph))
+                 (right-node (find-node right-document :paragraph))
+                 (output
+                   (render-source-siblings
+                    parent-source left-document left-node
+                    right-document right-node)))
+            (assert-separated output "left" "right" 1))
+          (let* ((parent-source (parse-org "parent"))
+                 (included-document (parse-org "imported"))
+                 (included-node (find-node included-document :paragraph))
+                 (parent-node (find-node parent-source :paragraph))
+                 (output
+                   (render-source-siblings
+                    parent-source included-document included-node
+                    parent-source parent-node)))
+            (assert-separated output "imported" "parent" 2))
+          (let* ((parent-source (parse-org "parent"))
+                 (sibling-document
+                   (parse-org (export-ascii-test-source "local" "------")))
+                 (paragraph (find-node sibling-document :paragraph))
+                 (rule (find-node sibling-document :horizontal-rule))
+                 (output
+                   (render-source-siblings
+                    parent-source sibling-document paragraph
+                    sibling-document rule)))
+            (expect (node-post-blank paragraph) :to-be 0)
+            (expect (node-post-blank rule) :to-be 0)
+            (assert-separated
+             output "local" (make-string 72 :initial-element #\-) 2))))))
+  (it "keeps reordered ASCII paragraphs from one source separate"
+    (let* ((parent-document (parse-org "* Holder"))
+           (parent-heading
+             (export-ascii-test-find-node
+              (document-root parent-document) :headline))
+           (source-document
+             (parse-org
+              (format nil "First paragraph~%~%Last paragraph")))
+           (paragraphs nil))
+      (map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :paragraph)
+           (push node paragraphs)))
+       (document-root source-document))
+      (setf paragraphs (nreverse paragraphs))
+      (let* ((first-node (first paragraphs))
+             (last-node (second paragraphs))
+             (previous-view
+               (org-kit::export-ascii-output-view-from-node last-node))
+             (section-view
+               (export-ascii-test-view
+                (make-node :section) parent-document (list previous-view)))
+             (heading-view
+               (export-ascii-test-view
+                parent-heading parent-document (list section-view)))
+             (next-view
+               (org-kit::export-ascii-output-view-from-node first-node))
+             (included-section-view
+               (export-ascii-test-view
+                (make-node :section) source-document (list next-view)))
+             (output
+               (export-ascii-test-render-views
+                (list heading-view included-section-view)
+                (export-ascii-test-preparation parent-document nil))))
+        (with-soft-assertions
+          (expect (length paragraphs) :to-be 2)
+          (expect (node-begin first-node) :to-be 0)
+          (expect (node-end last-node)
+                  :to-be (length (document-text source-document)))
+          (expect (node-properties first-node) :to-equal nil)
+          (expect (node-properties last-node) :to-equal nil)
+          (expect (node-post-blank last-node) :to-be 0)
+          (expect (search "Last paragraph" output) :not :to-be nil)
+          (expect (search "First paragraph" output) :not :to-be nil)
+          (expect (search "Last paragraph  First paragraph" output)
+                  :to-be nil)))))
+  (it "appends imported content without dropping a child heading"
+    (let* ((parent-document
+             (parse-org
+              (export-ascii-test-source
+               "* Holder" "Original body" "** Empty child")))
+           (parent-heading
+             (export-ascii-test-find-node
+              (document-root parent-document) :headline))
+           (parent-view
+             (export-ascii-test-view
+              parent-heading parent-document
+              (mapcar #'org-kit::export-ascii-output-view-from-node
+                      (node-children parent-heading))))
+           (included-document (parse-org "Imported body"))
+           (included-paragraph
+             (export-ascii-test-find-node
+              (document-root included-document) :paragraph))
+           (included-section
+             (export-ascii-test-view
+              (make-node :section) included-document
+              (list (org-kit::export-ascii-output-view-from-node
+                     included-paragraph))))
+           (output
+             (export-ascii-test-render-views
+              (list parent-view included-section)
+              (export-ascii-test-preparation parent-document nil))))
+      (with-soft-assertions
+        (expect (search "Original body" output) :not :to-be nil)
+        (expect (search "Imported body" output) :not :to-be nil)
+        (expect (search "Empty child" output) :not :to-be nil)))))
+(describe "Org ASCII TOC keyword rendering"
+  (it "renders headline, local, table, and listing TOCs"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              "#+TOC: headlines 1"
+              "* Alpha"
+              "** Beta"
+              "* Parent"
+              "#+TOC: headlines 1 local"
+              "** Child"
+              "*** Deep"
+              "#+TOC: tables"
+              "#+CAPTION: Table caption"
+              "| Value |"
+              "|-------|"
+              "| x |"
+              "#+TOC: listings"
+              "#+CAPTION: Listing caption"
+              "#+BEGIN_SRC text"
+              "source"
+              "#+END_SRC"))
+           (output (export-org (parse-org source) :ascii)))
+      (with-soft-assertions
+        (expect (search "Table of Contents" output) :not :to-be nil)
+        (expect (search "Alpha" output) :not :to-be nil)
+        (expect (search ".. Beta" output) :to-be nil)
+        (expect (search "Child" output) :not :to-be nil)
+        (expect (search ".. Deep" output) :to-be nil)
+        (expect (search "List of Tables" output) :not :to-be nil)
+        (expect (search "Table 1: Table caption" output)
+                :not :to-be nil)
+        (expect (search "List of Listings" output) :not :to-be nil)
+        (expect (search "Listing 1: Listing caption" output)
+                :not :to-be nil))))
+  (it "rejects unsupported TOC modes with the named condition"
+    (let* ((condition
+             (export-ascii-test-catch-error
+              (lambda ()
+                (export-org (parse-org "#+TOC: unknown") :ascii)))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-reason condition) :to-be :toc-mode)))))
+  (it "leaves standalone local TOC empty"
+    (let ((output
+           (export-org
+            (parse-org
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              "#+TOC: local"
+              "* Alpha"
+              "Body"))
+            :ascii)))
+      (with-soft-assertions
+        (expect (search "Table of Contents" output) :to-be nil)
+        (expect (search "Alpha" output) :not :to-be nil))))
+  (it "indents nested keyword TOC entries"
+    (let* ((source
+             (export-ascii-test-source
+              "#+OPTIONS: toc:nil num:nil"
+              "#+TOC: headlines 3"
+              "* Alpha"
+              "** Beta"
+              "*** Gamma"))
+           (output (export-org (parse-org source) :ascii)))
+      (with-soft-assertions
+        (expect (search (format nil "Alpha~%.. Beta~%..... Gamma") output)
+                :not :to-be nil))))
+  (it "wraps table captions in keyword TOCs and stringifies non-string values"
+    (let* ((document
+             (parse-org
+              (export-ascii-test-source
+               "#+OPTIONS: toc:nil num:nil"
+               "#+TOC: tables"
+               "#+CAPTION: Numeric placeholder"
+               "| Value |"
+               "|-------|"
+               "| one |"
+               "#+CAPTION: This caption has enough words to continue on the following ASCII TOC line after its label"
+               "| Value |"
+               "|-------|"
+               "| two |")))
+           (table
+             (export-ascii-test-find-node
+              (document-root document) :table))
+           (output nil))
+      (setf (node-property table :caption) 42
+            output (export-org document :ascii))
+      (with-soft-assertions
+        (expect (search "Table 1: 42" output) :not :to-be nil)
+        (expect (search "Table 2: This caption has enough words" output)
+                :not :to-be nil)
+        (expect
+         (search (format nil "~8TASCII TOC line after its label") output)
+         :not :to-be nil)))))

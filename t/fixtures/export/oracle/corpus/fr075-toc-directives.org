@@ -1,0 +1,8 @@
+#+OPTIONS: toc:3
+#+TOC: headlines 2
+* First
+#+TOC: local
+** Child
+#+TOC: tables
+#+TOC: listings
+Body.

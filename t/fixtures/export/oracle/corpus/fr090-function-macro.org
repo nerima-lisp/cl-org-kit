@@ -1,0 +1,3 @@
+#+OPTIONS: toc:nil title:nil author:nil date:nil
+#+MACRO: runtime (eval (format "%s" "delegated"))
+{{{runtime}}}

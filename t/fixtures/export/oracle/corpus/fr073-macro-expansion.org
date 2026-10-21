@@ -1,0 +1,17 @@
+#+OPTIONS: toc:nil title:nil author:nil date:nil
+#+DATE: <2024-03-04 Mon>
+#+MACRO: many [$3]|[$12]|[$13]|[$0]|[$000]|[$x]
+{{{date(%Y-%m-%d)}}}
+{{{date}}}
+{{{results(value)}}}
+{{{many(one,two,three,four,five,six,seven,eight,nine,ten,eleven,twelve)}}}
+{{{input-file}}}
+* Property heading
+:PROPERTIES:
+:VALUE: stored
+:CUSTOM_ID: custom-property
+:ID: id-property
+:END:
+{{{property(VALUE)}}}|{{{property(VALUE,Property heading)}}}|{{{property(VALUE,#custom-property)}}}
+{{{property(MISSING)}}}
+{{{n(step)}}}|{{{n(step)}}}|{{{n(step,-)}}}|{{{n(step,5)}}}|{{{n(step)}}}|{{{n(step,restart)}}}

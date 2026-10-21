@@ -25,7 +25,8 @@
   (footnote-reference-counts (make-hash-table :test #'equal))
   (footnote-numbers (make-hash-table :test #'equal))
   (heading-numbers (make-hash-table :test #'eq))
-  (next-reference 0))
+  (next-reference 0)
+  (keyword-toc-count 0))
 
 (defparameter +export-html-default-css+
   "  #content { max-width: 60em; margin: auto; }
@@ -659,11 +660,27 @@
             :from-end
             t))
          (last-section
-           (and last-heading
-                (find-if
-                 (lambda (child)
-                   (eq (node-type (export-view-node child)) :section))
-                 (export-view-children last-heading)))))
+           (loop with candidate = last-heading
+                 for candidate-children =
+                   (and candidate (export-view-children candidate))
+                 for candidate-section =
+                   (find-if
+                    (lambda (child)
+                      (eq (node-type (export-view-node child)) :section))
+                    candidate-children)
+                 while candidate
+                 when candidate-section
+                   return candidate-section
+                 do (setf candidate
+                          (find-if
+                           (lambda (child)
+                             (member (node-type (export-view-node child))
+                                     (list :headline :inlinetask)
+                                     :test
+                                     (function eq)))
+                           candidate-children
+                           :from-end
+                           t)))))
     (cond
       ((and last-heading last-section)
        (export-html-copy-view-with-children
@@ -674,7 +691,6 @@
                (export-html-append-to-deepest-section last-heading pending)
                child))
          heading-children)))
-      ((null section) heading)
       (t
        (let* ((section-children (export-view-children section))
               (previous (car (last section-children)))
@@ -729,6 +745,16 @@
                       (export-html-copy-view-with-children
                        previous
                        (append (export-view-children previous)
+                               (unless (export-html-ends-with-newline-p
+                                        previous-source-text)
+                                 (list
+                                  (%make-export-view
+                                   :node
+                                   (make-node
+                                    :plain-text
+                                    :properties (list :value
+                                                    (string #\Newline)))
+                                   :source-document next-source)))
                                (export-view-children next-view))))
                      remaining-pending)
                     (append section-children pending))))
@@ -748,7 +774,27 @@
         (active-section nil)
         (pending-children nil)
         (section-dirty-p nil))
-    (labels ((flush-section ()
+    (labels ((heading-has-section-p (heading)
+               (let* ((heading-children (export-view-children heading))
+                      (section
+                        (find-if
+                         (lambda (child)
+                           (eq (node-type (export-view-node child)) :section))
+                         heading-children))
+                      (last-heading
+                        (find-if
+                         (lambda (child)
+                           (member (node-type (export-view-node child))
+                                   (list :headline :inlinetask)
+                                   :test
+                                   (function eq)))
+                         heading-children
+                         :from-end
+                         t)))
+                 (or section
+                     (and last-heading
+                          (heading-has-section-p last-heading)))))
+             (flush-section ()
                (when (and active-heading active-section section-dirty-p)
                  (setf (car result)
                        (export-html-append-to-deepest-section
@@ -761,11 +807,7 @@
                 (flush-section)
                 (push view result)
                 (setf active-heading view
-                      active-section
-                      (find-if
-                       (lambda (child)
-                         (eq (node-type (export-view-node child)) :section))
-                       (export-view-children view))
+                      active-section (heading-has-section-p view)
                       pending-children nil
                       section-dirty-p nil))
               (if active-section
@@ -1790,7 +1832,7 @@
              (export-html-write state entity)
              (export-html-escape-to-output state :text (or entity "")))))
       ((:text :plain-text)
-       (export-html-write-text state (or (node-text node) "")))
+       (export-html-write-text state (or (node-text node) (node-property node :value) "")))
       ((:babel-call :inline-babel-call :citation :citation-reference
         :latex-fragment :statistics-cookie)
        (export-html-write-raw-text state node))
@@ -1809,9 +1851,9 @@
                (export-html-write state "\">")
                (export-html-write-node-children state node child-views view)
                (export-html-write state "</a>")))))
-      ((:keyword :comment :comment-block :property-drawer :node-property
-        :planning :clock)
-       nil))))
+      (:keyword
+       (when (string-equal (or (node-property node :key) "") "TOC")
+         (export-html-render-keyword-toc state node))))))
 
 (defun export-html-dispatch-node (state node child-views view
                                       &key (mode nil mode-p)
@@ -1906,6 +1948,13 @@
     (cond ((null entry) default)
           ((and (eq key :creator) (eq (cdr entry) :comment)) t)
           (t (cdr entry)))))
+(defun export-html-write-content-container-open (state)
+  (export-html-write state "<div id=\"content\"")
+  (export-html-write-attribute
+   state "class"
+   (export-html-option-enabled-p state :html-content-class "content"))
+  (export-html-write state ">
+"))
 
 (defun export-html-write-head-metadata (state)
   (let* ((metadata (export-preparation-metadata
@@ -1972,8 +2021,7 @@
   (let* ((preparation (export-html-state-preparation state))
          (title (getf (export-preparation-metadata preparation) :title)))
     (export-html-write-head-metadata state)
-    (export-html-write state "<div id=\"content\" class=\"content\">
-")
+    (export-html-write-content-container-open state)
     (when (and title (export-html-option-enabled-p state :title))
       (export-html-write state "<h1 class=\"title\">")
       (export-html-escape-to-output state :text title)
@@ -2041,8 +2089,7 @@
           (export-html-state-limits state) (export-render-context-limits context)
           (export-html-state-render-context state) context)
     (export-html-start-render-component state)
-    (export-html-write state "<div id=\"content\" class=\"content\">
-")
+    (export-html-write-content-container-open state)
     (when (and title (export-html-option-enabled-p state :title))
       (export-html-write state "<h1 class=\"title\">")
       (export-html-escape-to-output state :text title)
@@ -2078,6 +2125,134 @@
    :make-state #'export-html-make-state
    :transcoders (export-html-node-transcoders)
    :node-policies (export-html-node-policies)
+   :option-specifications
+   (list
+    (list :token "html5-fancy" :key :html-html5-fancy :parser :boolean)
+    (list :token "html-link-use-abs-url" :key :html-link-use-abs-url :parser :boolean)
+    (list :token "html-postamble" :key :html-postamble
+          :parser (function export-parse-html-postamble-option))
+    (list :token "html-preamble" :key :html-preamble
+          :parser (function export-parse-html-preamble-option))
+    (list :token "html-style" :key :html-head-include-default-style
+          :parser :boolean)
+    (list :token "html-scripts" :key :html-head-include-scripts
+          :parser :boolean)
+    (list :token "html-self-link-headlines" :key :html-self-link-headlines
+          :parser :boolean))
+   :accepted-keywords
+   '("HTML_DOCTYPE" "HTML_CONTAINER" "HTML_CONTENT_CLASS" "HTML_LINK_HOME"
+     "HTML_LINK_UP" "HTML_EQUATION_REFERENCE_FORMAT" "HTML_HEAD"
+     "HTML_HEAD_EXTRA" "INFOJS_OPT" "LATEX_HEADER")
    :raw-output-options '((:html . :allow-raw-html))
    :export-block-names '("html")
    :export-snippet-names '("html")))
+
+(defun export-html-render-keyword-headlines (state node directive)
+  (let* ((preparation (export-html-state-preparation state))
+         (entries (export-toc-headline-entries
+                   preparation node (getf directive :depth)
+                   (getf directive :local))))
+    (when entries
+      (let* ((local-p (getf directive :local))
+             (counter (export-html-state-keyword-toc-count state))
+             (suffix (if (plusp counter) (format nil "-~D" counter) ""))
+             (outer-tag (if (export-html-option-enabled-p
+                             state :html-html5-fancy nil)
+                            "nav" "div")))
+        (incf (export-html-state-keyword-toc-count state))
+        (unless local-p
+          (export-html-write
+           state (format nil "<~A id=\"table-of-contents~A\" role=\"doc-toc\">~%"
+                         outer-tag suffix))
+          (export-html-write state (format nil "<h2>Table of Contents</h2>~%")))
+        (export-html-write
+         state (format nil "<div id=\"text-table-of-contents~A\" role=\"doc-toc\">~%"
+                       suffix))
+        (labels ((render-list (minimum-level)
+                              (export-html-write state (format nil "<ul>~%"))
+                              (loop while entries
+                                    for entry = (first entries)
+                                    for level = (getf entry :level)
+                                    do (cond
+                                        ((< level minimum-level) (return))
+                                        (t
+                                         (pop entries)
+                                         (let* ((view (getf entry :view))
+                                                (headline (export-view-node view))
+                                                (reference
+                                                 (export-html-reference state headline)))
+                                           (export-html-write state "<li><a href=\"#")
+                                           (export-html-escape-to-output
+                                            state :attribute reference)
+                                           (export-html-write state "\">")
+                                           (export-html-write-heading-number
+                                            state headline t)
+                                           (export-html-write-heading-state
+                                            state headline)
+                                           (export-html-heading-title
+                                            state headline view)
+                                           (export-html-write state "</a>")
+                                           (when (and entries
+                                                      (> (getf (first entries) :level)
+                                                         level))
+                                             (render-list
+                                              (getf (first entries) :level)))
+                                           (export-html-write
+                                            state (format nil "</li>~%"))))))
+                              (export-html-write state (format nil "</ul>~%"))))
+          (render-list (getf (first entries) :level)))
+        (export-html-write state (format nil "</div>~%"))
+        (unless local-p
+          (export-html-write state (format nil "</~A>~%" outer-tag)))))))
+
+(defun export-html-render-keyword-object-list (state mode entries)
+  (when entries
+    (let* ((table-p (eq mode :tables))
+           (container (if table-p "list-of-tables" "list-of-listings"))
+           (text-container (if table-p "text-list-of-tables"
+                               "text-list-of-listings"))
+           (title (if table-p "List of Tables" "List of Listings"))
+           (label (if table-p "Table" "Listing"))
+           (number-class (if table-p "table-number" "listing-number")))
+      (export-html-write state (format nil "<div id=\"~A\">~%" container))
+      (export-html-write state (format nil "<h2>~A</h2>~%" title))
+      (export-html-write state
+                         (format nil "<div id=\"~A\">~%<ul>~%"
+                                 text-container))
+      (loop for view in entries
+            for number from 1
+            for node = (export-view-node view)
+            for caption = (node-property node :caption)
+            for reference = (export-html-reference state node)
+            do (export-html-write state "<li>")
+               (when reference
+                 (export-html-write state "<a href=\"#")
+                 (export-html-escape-to-output state :attribute reference)
+                 (export-html-write state "\">"))
+               (export-html-write state "<span class=\"")
+               (export-html-write state number-class)
+               (export-html-write state "\">")
+               (export-html-escape-to-output
+                state :text (format nil "~A ~D:" label number))
+               (export-html-write state "</span> ")
+               (export-html-escape-to-output
+                state :text (if (stringp caption) caption
+                                (princ-to-string caption)))
+               (when reference (export-html-write state "</a>"))
+               (export-html-write state (format nil "</li>~%")))
+      (export-html-write state
+                         (format nil "</ul>~%</div>~%</div>~%")))))
+
+(defun export-html-render-keyword-toc (state node)
+  (let* ((directive (export-parse-toc-directive node :html))
+         (preparation (export-html-state-preparation state))
+         (mode (getf directive :mode)))
+    (case mode
+      (:headlines
+       (export-html-render-keyword-headlines state node directive))
+      (:tables
+       (export-html-render-keyword-object-list
+        state mode (export-toc-object-views preparation :table)))
+      (:listings
+       (export-html-render-keyword-object-list
+        state mode (export-toc-object-views preparation :src-block))))))

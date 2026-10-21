@@ -1094,6 +1094,66 @@
           (org-kit::export-initialize-builtin-backends)
           (expect (eq html (gethash :html org-kit::*export-backend-registry*))
                   :to-be t)))))
+  (it "registers the pinned HTML and LaTeX keyword and option surface"
+  (let* ((html (gethash :html org-kit::*export-backend-registry*))
+         (latex (gethash :latex org-kit::*export-backend-registry*))
+         (html-keywords
+           (org-kit::%export-backend-descriptor-accepted-keywords html))
+         (latex-keywords
+           (org-kit::%export-backend-descriptor-accepted-keywords latex))
+         (html-options
+           (org-kit::%export-backend-descriptor-option-specifications html))
+         (latex-options
+           (org-kit::%export-backend-descriptor-option-specifications latex)))
+    (labels ((has-keyword-p (keywords name)
+               (not (null (member name keywords :test #'string=))))
+             (option (options token)
+               (find token options :key (lambda (spec) (getf spec :token))
+                     :test #'string-equal)))
+      (with-soft-assertions
+        (dolist (name '("HTML_DOCTYPE" "HTML_CONTAINER" "HTML_CONTENT_CLASS"
+                        "HTML_LINK_HOME" "HTML_LINK_UP"
+                        "HTML_EQUATION_REFERENCE_FORMAT" "HTML_HEAD"
+                        "HTML_HEAD_EXTRA" "INFOJS_OPT" "LATEX_HEADER"
+                        "DESCRIPTION" "KEYWORDS" "SUBTITLE" "TOC"))
+          (expect (has-keyword-p html-keywords name) :to-be t))
+        (dolist (name '("LATEX_CLASS" "LATEX_CLASS_OPTIONS" "LATEX_HEADER"
+                        "LATEX_HEADER_EXTRA" "LATEX_CLASS_PRE" "DESCRIPTION"
+                        "KEYWORDS" "SUBTITLE" "LATEX_FOOTNOTE_COMMAND"
+                        "LATEX_ENGRAVED_THEME" "LATEX_COMPILER" "LATEX"
+                        "ATTR_LATEX" "TOC"))
+          (expect (has-keyword-p latex-keywords name) :to-be t))
+        (expect (has-keyword-p html-keywords "HTML_MATHJAX") :to-be nil)
+        (dolist (mapping
+                 '(("html5-fancy" :html-html5-fancy)
+                   ("html-link-use-abs-url" :html-link-use-abs-url)
+                   ("html-postamble" :html-postamble)
+                   ("html-preamble" :html-preamble)
+                   ("html-style" :html-head-include-default-style)
+                   ("html-scripts" :html-head-include-scripts)
+                   ("html-self-link-headlines" :html-self-link-headlines)))
+          (let ((spec (option html-options (first mapping))))
+            (expect spec :not :to-be nil)
+            (when spec
+              (expect (getf spec :key) :to-be (second mapping)))))
+        (let ((spec (option html-options "html5-fancy")))
+          (expect spec :not :to-be nil)
+          (when spec
+            (expect (getf spec :parser) :to-be :boolean)))
+        (let ((spec (option html-options "html-postamble")))
+          (expect spec :not :to-be nil)
+          (when spec
+            (expect (functionp (getf spec :parser)) :to-be t)))
+        (let ((spec (option html-options "tex")))
+          (expect spec :not :to-be nil)
+          (when spec
+            (expect (getf spec :key) :to-be :latex)
+            (expect (getf spec :parser) :to-be :latex-mode)))
+        (let ((spec (option latex-options "latex-use-sans")))
+          (expect spec :not :to-be nil)
+          (when spec
+            (expect (getf spec :key) :to-be :latex-use-sans)
+            (expect (getf spec :parser) :to-be :boolean)))))))
   (it "validates registry predicate boundaries"
     (with-soft-assertions
       (expect (org-kit::export-backend-name-p :valid-backend) :to-be t)
@@ -3864,4 +3924,55 @@
                         :api-registry-root-missing-native-callbacks)
             :to-equal "body"))))
       (with-soft-assertions
-        (expect missing-callbacks-p :to-be t)))))
+        (expect missing-callbacks-p :to-be t))))
+  (it "parses standalone local TOC as a no-output directive"
+    (let* ((record
+             (first
+              (org-kit::export-keyword-records
+               (parse-org "#+TOC: local"))))
+           (directive
+             (org-kit::export-parse-toc-directive (first record) :html)))
+      (with-soft-assertions
+        (expect (getf directive :mode) :to-be :local)
+        (expect (getf directive :depth) :to-be nil)
+        (expect (getf directive :local) :to-be nil))))
+  (it "parses HTML content options and rejects invalid preamble values"
+    (let* ((options
+             (org-kit::export-preparation-options
+              (org-kit::export-prepare
+               (parse-org "#+OPTIONS: html-preamble:\"custom\" html-postamble:nil")
+               :html)))
+           (preamble (assoc :html-preamble options))
+           (postamble (assoc :html-postamble options))
+           (invalid
+             (handler-case
+                 (progn
+                   (org-kit::export-prepare
+                    (parse-org "#+OPTIONS: html-preamble:auto") :html)
+                   nil)
+               (org-export-unsupported-syntax (condition) condition))))
+      (with-soft-assertions
+        (expect preamble :not :to-be nil)
+        (expect (cdr preamble) :to-equal "custom")
+        (expect postamble :not :to-be nil)
+        (expect (cdr postamble) :to-be nil)
+        (expect (typep invalid 'org-export-unsupported-syntax) :to-be t)
+        (when (typep invalid 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-feature invalid)
+                  :to-be :invalid-option)))))
+  (it "rejects invalid arguments after a supported TOC mode"
+    (let ((condition
+            (handler-case
+                (progn
+                  (export-org (parse-org "#+TOC: headlines 2 extra") :html)
+                  nil)
+              (org-export-error (condition) condition))))
+      (with-soft-assertions
+        (expect (typep condition 'org-export-error) :to-be t)
+        (when (typep condition 'org-export-error)
+          (expect (org-export-error-reason condition) :to-be :toc-mode))))))
+
+(describe "Export TOC directive tokenization"
+  (it "ignores leading whitespace before the first TOC word"
+    (expect (org-kit::export-toc-directive-words " local")
+            :to-equal '("local"))))

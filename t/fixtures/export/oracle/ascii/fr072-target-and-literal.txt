@@ -1,0 +1,32 @@
+1 Target
+========
+
+  Target body.
+
+
+1.1 Child
+~~~~~~~~~
+
+  Child body.  Target body.
+
+
+2 Child
+=======
+
+  Child body.
+
+
+3 Target
+========
+
+  Target body.
+
+
+3.1 Child
+~~~~~~~~~
+
+  Child body.
+  Named element body.
+  literal-sentinel
+  literal-sentinel
+  literal-sentinel

@@ -1,0 +1,4 @@
+1 Included section
+==================
+
+  The include source is copied into the generator's temporary directory.

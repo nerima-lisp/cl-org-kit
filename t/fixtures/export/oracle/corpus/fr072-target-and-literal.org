@@ -1,0 +1,8 @@
+#+OPTIONS: toc:nil title:nil author:nil date:nil
+#+INCLUDE: "included/targets.org::#stable-target"
+#+INCLUDE: "included/targets.org::#stable-target" :only-contents t
+#+INCLUDE: "included/targets.org::Target"
+#+INCLUDE: "included/targets.org::named-note"
+#+INCLUDE: "included/literal.org" :minlevel 8 example
+#+INCLUDE: "included/literal.org" :minlevel 8 src emacs-lisp
+#+INCLUDE: "included/literal.org" :minlevel 8 export html

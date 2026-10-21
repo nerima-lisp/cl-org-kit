@@ -1,0 +1,2 @@
+#+OPTIONS: toc:nil title:nil author:nil date:nil
+#+INCLUDE: "included/fragment.org" :lines "1-2"
