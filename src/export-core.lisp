@@ -1100,17 +1100,368 @@
                  (progn
                    (write-char (char template position) output)
                    (incf position))))))
-(defun export-include-path (value source backend)
-  (let ((value (export-trim value)))
-    (unless (and (> (length value) 2)
-                 (char= (char value 0) #\")
-                 (char= (char value (1- (length value))) #\")
-                 (not (find #\" value :start 1 :end (1- (length value))))
-                 (not (some #'export-control-character-p value)))
-      (export-unsupported-syntax backend source (export-source-position source)
-                                 :include-form
-                                 "Only a quoted literal include path is supported"))
-    (subseq value 1 (1- (length value)))))
+(defun export-include-spec (value source backend)
+  (let* ((text (export-trim value))
+         (length (length text))
+         (quoted-p (and (plusp length) (char= (char text 0) #\")))
+         (path-end (if quoted-p
+                       (position #\" text :start 1)
+                       (position-if #'export-whitespace-p text)))
+         (token-end (if quoted-p
+                        (and path-end (1+ path-end))
+                        (or path-end length))))
+    (unless (and token-end
+                 (> (if quoted-p (1- token-end) token-end)
+                    (if quoted-p 1 0))
+                 (or (not quoted-p)
+                     (or (= token-end length)
+                         (export-whitespace-character-p (char text token-end)))))
+      (export-unsupported-syntax
+       backend source (export-source-position source) :include-form
+       "Malformed include path"))
+    (let* ((token (subseq text (if quoted-p 1 0)
+                          (if quoted-p (1- token-end) token-end)))
+           (location-separator (search "::" token))
+           (path (if location-separator
+                     (subseq token 0 location-separator)
+                     token))
+           (target (and location-separator
+                        (subseq token (+ location-separator 2))))
+           (suffix (export-trim (subseq text token-end)))
+           (tokens (export-split-words suffix))
+           (remaining nil)
+           (lines nil)
+           (lines-seen-p nil)
+           (minlevel nil)
+           (minlevel-seen-p nil))
+      (when (or (zerop (length path))
+                (some #'export-control-character-p path)
+                (and (not quoted-p) (find #\" token)))
+        (export-unsupported-syntax
+         backend source (export-source-position source) :include-form
+         "Include path must be nonempty and contain no control characters or quotes"))
+      (when (and target (zerop (length target)))
+        (setf target nil))
+      (loop while tokens
+            for token = (pop tokens)
+            do (cond
+                 ((string-equal token ":lines")
+                  (when lines-seen-p
+                    (export-unsupported-syntax
+                     backend source (export-source-position source) :include-lines
+                     "Duplicate :lines include option"))
+                  (unless tokens
+                    (export-unsupported-syntax
+                     backend source (export-source-position source) :include-lines
+                     "Missing :lines range"))
+                  (let* ((range-token (pop tokens))
+                         (range (if (and (> (length range-token) 1)
+                                         (char= (char range-token 0) #\")
+                                         (char= (char range-token (1- (length range-token)))))
+                                    (subseq range-token 1 (1- (length range-token)))
+                                    nil))
+                         (separator (and range (position #\- range))))
+                    (unless (and separator
+                                 (not (position #\- range :start (1+ separator)))
+                                 (loop for index below (length range)
+                                       for character = (char range index)
+                                       always (or (= index separator)
+                                                  (<= 48 (char-code character) 57)))
+                                 (or (plusp separator)
+                                     (< (1+ separator) (length range))))
+                      (export-unsupported-syntax
+                       backend source (export-source-position source) :include-lines
+                       "Expected a quoted N-M line range"))
+                    (setf lines
+                          (cons (if (zerop separator)
+                                    0
+                                    (parse-integer range :end separator))
+                                (if (= (1+ separator) (length range))
+                                    0
+                                    (parse-integer range :start (1+ separator))))
+                          lines-seen-p t)))
+                 ((string-equal token ":minlevel")
+                  (when minlevel-seen-p
+                    (export-unsupported-syntax
+                     backend source (export-source-position source) :include-minlevel
+                     "Duplicate :minlevel include option"))
+                  (unless (and tokens
+                               (every (lambda (character)
+                                        (<= 48 (char-code character) 57))
+                                      (first tokens)))
+                    (export-unsupported-syntax
+                     backend source (export-source-position source) :include-minlevel
+                     "Expected a numeric :minlevel"))
+                  (setf minlevel (parse-integer (pop tokens))
+                        minlevel-seen-p t))
+                 (t (push token remaining))))
+      (setf remaining (nreverse remaining))
+      (let* ((wrapper-name (first remaining))
+             (wrapper (cond ((and wrapper-name
+                                  (string-equal wrapper-name "src"))
+                             :src)
+                            ((and wrapper-name
+                                  (string-equal wrapper-name "example"))
+                             :example)
+                            ((and wrapper-name
+                                  (string-equal wrapper-name "export"))
+                             :export))))
+        (when (and remaining (null wrapper))
+          (export-unsupported-syntax
+           backend source (export-source-position source) :include-form
+           "Unsupported include wrapper or option"))
+        (when (and (eq wrapper :example) (rest remaining))
+          (export-unsupported-syntax
+           backend source (export-source-position source) :include-form
+           "The example include wrapper takes no arguments"))
+        (list :path path
+              :target target
+              :lines lines
+              :minlevel minlevel
+              :wrapper wrapper
+              :arguments (and wrapper
+                              (not (eq wrapper :example))
+                              (plusp (length remaining))
+                              (format nil "~{~A~^ ~}" (rest remaining))))))))
+(defun export-include-content (text path spec source backend limits)
+  (labels
+      ((normalize-search-text (value)
+         (with-output-to-string (output)
+           (let ((pending-space nil)
+                 (written-p nil))
+             (loop for character across value
+                   do (if (export-whitespace-character-p character)
+                          (setf pending-space t)
+                          (progn
+                            (when (and pending-space written-p)
+                              (write-char #\Space output))
+                            (setf pending-space nil
+                                  written-p t)
+                            (write-char (char-downcase character) output)))))))
+       (first-content-line-start (value)
+         (loop with start = 0
+               for newline = (position #\Newline value :start start)
+               for end = (or newline (length value))
+               when (loop for index from start below end
+                          thereis (not (export-whitespace-character-p
+                                        (char value index))))
+                 return start
+               when (null newline) return (length value)
+               do (setf start (1+ newline))))
+       (line-offset (value line start)
+         (if (zerop line)
+             (length value)
+             (loop with offset = start
+                   repeat (1- line)
+                   do (let ((newline (position #\Newline value :start offset)))
+                        (if newline
+                            (setf offset (1+ newline))
+                            (progn
+                              (setf offset (length value))
+                              (return))))
+                   finally (return offset))))
+       (slice-lines (value range target-p)
+         (if (null range)
+             value
+             (let* ((first (car range))
+                    (last (cdr range))
+                    (origin (if target-p
+                                (first-content-line-start value)
+                                0))
+                    (start (if (zerop first)
+                               0
+                               (line-offset value first origin)))
+                    (end (if (zerop last)
+                             (length value)
+                             (line-offset value last
+                                          (if target-p start origin)))))
+               (subseq value start (max start end)))))
+       (trim-included-text (value)
+         (let* ((start (first-content-line-start value))
+                (end (length value))
+                (trailing-newline-p
+                  (and (plusp end) (char= (char value (1- end)) #\Newline))))
+           (loop while (and (> end start)
+                            (export-whitespace-character-p
+                             (char value (1- end))))
+                 do (decf end))
+           (when (and trailing-newline-p (< end (length value)))
+             (incf end))
+           (subseq value start end)))
+       (find-target (document target)
+         (let* ((custom-id-p (and (plusp (length target))
+                                  (char= (char target 0) #\#)))
+                (search (normalize-search-text
+                         (if custom-id-p (subseq target 1) target)))
+                (headline-search
+                  (normalize-search-text
+                   (if (and (plusp (length target))
+                            (char= (char target 0) #\*))
+                       (subseq target 1)
+                       target)))
+                (found nil))
+           (map-nodes
+            (lambda (node)
+              (when (and (null found)
+                         (if custom-id-p
+                             (and (member (node-type node)
+                                          '(:headline :inlinetask) :test #'eq)
+                                  (multiple-value-bind (value property-source)
+                                      (effective-property document node "CUSTOM_ID")
+                                    (and property-source
+                                         (stringp value)
+                                         (string=
+                                          (normalize-search-text value) search))))
+                             (let ((name (node-property node :name)))
+                               (and (stringp name)
+                                    (string=
+                                     (normalize-search-text name) search)))))
+                (setf found node)))
+            (document-root document))
+           (unless (or found custom-id-p)
+             (map-nodes
+              (lambda (node)
+                (when (and (null found)
+                           (eq (node-type node) :headline)
+                           (string=
+                            (normalize-search-text
+                             (or (node-property node :raw-value) ""))
+                            headline-search))
+                  (setf found node)))
+              (document-root document)))
+           found))
+       (default-minlevel (include-node)
+         (loop for ancestor = (node-parent include-node)
+                 then (node-parent ancestor)
+               while ancestor
+               when (eq (node-type ancestor) :headline)
+                 return (1+ (node-property ancestor :level 0))
+               finally (return 1)))
+       (slice-target (value target)
+         (let* ((document (parse-org value :source-name path :limits limits))
+                (node (find-target document target)))
+           (unless node
+             (export-error backend :include-target-not-found source
+                           "Include target was not found"))
+           (subseq value (node-begin node) (node-end node))))
+       (adjust-minlevel (value requested-minlevel)
+         (let* ((document (parse-org value :source-name path :limits limits))
+                (headings nil)
+                (minimum nil)
+                (maximum nil)
+                (odd-levels-p (org-setting-value document :odd-levels-only-p)))
+           (map-nodes
+            (lambda (node)
+              (when (eq (node-type node) :headline)
+                (let ((level (node-property node :level 0)))
+                  (push node headings)
+                  (setf minimum (if minimum (min minimum level) level)
+                        maximum (if maximum (max maximum level) level)))))
+            (document-root document))
+           (if (null headings)
+               value
+               (let* ((desired (or requested-minlevel
+                                   (default-minlevel source)))
+                      (logical-offset (- desired minimum))
+                      (source-offset (if odd-levels-p
+                                         (* 2 logical-offset)
+                                         logical-offset))
+                      (maximum-level (+ maximum logical-offset))
+                      (added (if (plusp source-offset)
+                                 (* source-offset (length headings))
+                                 0))
+                      (new-length (+ (length value) added))
+                      (changes nil))
+                 (check-limit limits :max-heading-depth maximum-level)
+                 (check-limit limits :max-input-length new-length)
+                 (unless (zerop source-offset)
+                   (dolist (node headings)
+                     (let* ((title-range (node-property node
+                                                        :reader-title-range))
+                            (title-start (car title-range))
+                            (line-start
+                              (1+ (or (position #\Newline value
+                                                :end title-start :from-end t)
+                                      -1)))
+                            (star-start
+                              (position #\* value :start line-start
+                                                  :end title-start)))
+                       (when star-start
+                         (push (list star-start source-offset) changes))))
+                   (dolist (change (sort changes #'> :key #'first))
+                     (let* ((start (first change))
+                            (offset (second change))
+                            (end (if (minusp offset)
+                                     (min (length value) (- start offset))
+                                     start))
+                            (replacement (if (plusp offset)
+                                             (make-string offset :initial-element #\*)
+                                             "")))
+                       (setf value
+                             (concatenate 'string (subseq value 0 start)
+                                          replacement
+                                          (subseq value end))))))
+                 value))))
+       (escape-code (value)
+         (with-output-to-string (output)
+           (loop with start = 0
+                 for newline = (position #\Newline value :start start)
+                 for end = (or newline (length value))
+                 for line = (subseq value start end)
+                 for syntax-start = (position-if-not
+                                     (lambda (character)
+                                       (find character '(#\Space #\Tab)))
+                                     line)
+                 do (if (null syntax-start)
+                        (write-string line output)
+                        (let* ((marker-start
+                                 (or (position-if-not
+                                      (lambda (character)
+                                        (char= character #\,))
+                                      line :start syntax-start)
+                                     (length line)))
+                               (marker (and (< marker-start (length line))
+                                            (char line marker-start)))
+                               (special-p
+                                 (or (eql marker #\*)
+                                     (and (eql marker #\#)
+                                          (< (1+ marker-start) (length line))
+                                          (eql (char line (1+ marker-start))
+                                               #\+)))))
+                          (write-string (subseq line 0 syntax-start) output)
+                          (when special-p
+                            (write-char #\, output))
+                          (write-string (subseq line syntax-start) output)))
+                    (when newline
+                      (write-char #\Newline output)
+                      (setf start (1+ newline)))
+                 while newline)))
+       (wrap-code (value wrapper arguments)
+         (let* ((name (string-upcase (symbol-name wrapper)))
+                (header (if arguments
+                            (format nil "#+BEGIN_~A ~A" name arguments)
+                            (format nil "#+BEGIN_~A" name)))
+                (escaped (escape-code value))
+                (body (if (or (zerop (length escaped))
+                             (char= (char escaped (1- (length escaped)))
+                                    #\Newline))
+                        escaped
+                        (concatenate 'string escaped (string #\Newline))))
+                (result (format nil "~A~%~A#+END_~A~%"
+                                header body name)))
+           (check-limit limits :max-input-length (length result))
+           result)))
+    (let* ((wrapper (getf spec :wrapper))
+           (target (and (null wrapper) (getf spec :target)))
+           (selected (if target
+                         (slice-target text target)
+                         text))
+           (selected (slice-lines selected (getf spec :lines)
+                                        (not (null target))))
+           (selected (trim-included-text selected)))
+      (if wrapper
+          (wrap-code selected wrapper (getf spec :arguments))
+          (adjust-minlevel selected (getf spec :minlevel))))))
 
 (defun export-copy-source-name (source-name)
   (unless (or (null source-name) (stringp source-name))
@@ -1542,7 +1893,7 @@
              (account-expanded-text (text)
                (account-expanded-length (length text)))
              (parse-fragment (text source-name selected-scope depth element-depth
-                                   active-includes active-macros)
+                               active-includes active-macros &optional unescape-code-p)
                (let* ((remaining-nodes
                         (- (limit-value limits :max-export-expanded-nodes)
                            expanded-node-count))
@@ -1569,14 +1920,24 @@
                                                    condition)))
                                 (error condition)))))
                       (fragment-root (document-root fragment)))
+                 (when unescape-code-p
+                   (map-nodes
+                    (lambda (node)
+                      (when (member (node-type node) '(:src-block :export-block)
+                                    :test #'eq)
+                        (setf (node-property node :value)
+                              (reader-blocks-example-value
+                               (or (node-property node :value) "")))))
+                    fragment-root))
                  (account-tree fragment-root)
                  (prepare-siblings (node-children fragment-root) fragment
                                    selected-scope depth element-depth
                                    active-includes active-macros t)))
              (prepare-include (node source-document selected-scope depth element-depth
-                                   active-includes active-macros)
-               (let* ((path (export-include-path
+                               active-includes active-macros)
+               (let* ((spec (export-include-spec
                              (node-property node :value) node backend))
+                      (path (getf spec :path))
                       (next-depth (1+ depth)))
                  (when (member path active-includes :test #'string=)
                    (export-error backend :include-cycle node
@@ -1593,8 +1954,16 @@
                      (export-error backend :invalid-include-result node
                                    "Include resolver must return a string"))
                    (account-expanded-text text)
-                   (parse-fragment text path selected-scope next-depth element-depth
-                                   (cons path active-includes) active-macros))))
+                   (let* ((prepared-text
+                            (export-include-content text path spec node backend limits))
+                          (added-length
+                            (max 0 (- (length prepared-text) (length text)))))
+                     (account-expanded-length added-length)
+                     (parse-fragment prepared-text path selected-scope next-depth
+                                     element-depth (cons path active-includes)
+                                     active-macros
+                                     (member (getf spec :wrapper) '(:src :export)
+                                             :test #'eq))))))
              (prepare-macro (node source-document selected-scope depth
                                   element-depth active-includes active-macros)
                             (let* ((key (string-downcase (node-property node :key)))

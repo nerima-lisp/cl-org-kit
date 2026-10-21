@@ -641,45 +641,131 @@
                      :children children
                      :payload (export-view-payload view)
                      :source-document (export-view-source-document view)))
+(defun export-html-append-to-deepest-section (heading pending)
+  (let* ((heading-children (export-view-children heading))
+         (section
+           (find-if
+            (lambda (child)
+              (eq (node-type (export-view-node child)) :section))
+            heading-children))
+         (last-heading
+           (find-if
+            (lambda (child)
+              (member (node-type (export-view-node child))
+                      (list :headline :inlinetask)
+                      :test
+                      (function eq)))
+            heading-children
+            :from-end
+            t))
+         (last-section
+           (and last-heading
+                (find-if
+                 (lambda (child)
+                   (eq (node-type (export-view-node child)) :section))
+                 (export-view-children last-heading)))))
+    (cond
+      ((and last-heading last-section)
+       (export-html-copy-view-with-children
+        heading
+        (mapcar
+         (lambda (child)
+           (if (eq child last-heading)
+               (export-html-append-to-deepest-section last-heading pending)
+               child))
+         heading-children)))
+      ((null section) heading)
+      (t
+       (let* ((section-children (export-view-children section))
+              (previous (car (last section-children)))
+              (pending-view (first pending))
+              (pending-node
+                (and pending-view (export-view-node pending-view)))
+              (pending-child-view
+                (and pending-node
+                     (eq (node-type pending-node) :section)
+                     (first (export-view-children pending-view))))
+              (next-view (or pending-child-view pending-view))
+              (previous-node
+                (and previous (export-view-node previous)))
+              (next-node
+                (and next-view (export-view-node next-view)))
+              (previous-source
+                (and previous (export-view-source-document previous)))
+              (next-source
+                (and next-view (export-view-source-document next-view)))
+              (previous-source-text
+                (and previous-source (document-text previous-source)))
+              (merge-paragraphs-p
+                (and previous-node
+                     next-node
+                     (eq (node-type previous-node) :paragraph)
+                     (eq (node-type next-node) :paragraph)
+                     previous-source
+                     next-source
+                     (not (eq previous-source next-source))
+                     (null (node-properties previous-node))
+                     (null (node-properties next-node))
+                     (zerop (node-post-blank previous-node))
+                     (eql (node-begin next-node) 0)
+                     (stringp previous-source-text)
+                     (eql (node-end previous-node)
+                          (length previous-source-text))))
+              (remaining-pending
+                (if merge-paragraphs-p
+                    (if pending-child-view
+                        (cons
+                         (export-html-copy-view-with-children
+                          pending-view
+                          (rest (export-view-children pending-view)))
+                         (rest pending))
+                        (rest pending))
+                    pending))
+              (updated-section-children
+                (if merge-paragraphs-p
+                    (append
+                     (butlast section-children)
+                     (list
+                      (export-html-copy-view-with-children
+                       previous
+                       (append (export-view-children previous)
+                               (export-view-children next-view))))
+                     remaining-pending)
+                    (append section-children pending))))
+         (export-html-copy-view-with-children
+          heading
+          (mapcar
+           (lambda (child)
+             (if (eq child section)
+                 (export-html-copy-view-with-children
+                  section updated-section-children)
+                 child))
+           heading-children)))))))
 
 (defun export-html-group-section-children (views)
   (let ((result nil)
         (active-heading nil)
         (active-section nil)
-        (section-children nil)
         (pending-children nil)
         (section-dirty-p nil))
     (labels ((flush-section ()
                (when (and active-heading active-section section-dirty-p)
-                 (let* ((updated-section
-                          (export-html-copy-view-with-children
-                           active-section
-                           (append section-children
-                                   (nreverse pending-children))))
-                        (updated-children
-                          (mapcar (lambda (child)
-                                    (if (eq child active-section)
-                                        updated-section
-                                        child))
-                                  (export-view-children active-heading))))
-                   (setf (car result)
-                         (export-html-copy-view-with-children
-                          active-heading updated-children))))))
+                 (setf (car result)
+                       (export-html-append-to-deepest-section
+                        active-heading
+                        (nreverse pending-children))))))
       (dolist (view views)
         (let ((type (node-type (export-view-node view))))
-          (if (member type '(:headline :inlinetask) :test #'eq)
+          (if (member type (list :headline :inlinetask) :test (function eq))
               (progn
                 (flush-section)
                 (push view result)
                 (setf active-heading view
                       active-section
-                      (find-if (lambda (child)
-                                 (eq (node-type (export-view-node child))
-                                     :section))
-                               (export-view-children view))
-                      section-children
-                      (and active-section
-                           (export-view-children active-section))
+                      (find-if
+                       (lambda (child)
+                         (eq (node-type (export-view-node child)) :section))
+                       (export-view-children view))
                       pending-children nil
                       section-dirty-p nil))
               (if active-section
@@ -691,7 +777,7 @@
                     (push view result)
                     (setf active-heading nil))))))
       (flush-section)
-    (nreverse result))))
+      (nreverse result))))
 
 (defun export-html-write-node-children (state node child-views view)
   (let ((previous (export-html-state-verse-output-p state))

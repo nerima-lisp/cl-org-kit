@@ -199,9 +199,11 @@
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents" role="doc-toc">
 <ul>
-<li><a href="#org0000001">1. Host</a></li>
-<li><a href="#org0000002">2. Imported</a><ul>
-<li><a href="#org0000003">2.1. Nested</a></li>
+<li><a href="#org0000001">1. Host</a><ul>
+<li><a href="#org0000002">1.1. Imported</a><ul>
+<li><a href="#org0000003">1.1.1. Nested</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
@@ -210,21 +212,19 @@
 <div id="outline-container-org0000001" class="outline-2">
 <h2 id="org0000001"><span class="section-number-2">1.</span> Host</h2>
 <div class="outline-text-2" id="text-1">
-<div id="outline-container-org0000002" class="outline-2">
-<h2 id="org0000002"><span class="section-number-2">2.</span> Imported</h2>
-<div class="outline-text-2" id="text-2">
+<div id="outline-container-org0000002" class="outline-3">
+<h3 id="org0000002"><span class="section-number-3">1.1.</span> Imported</h3>
+<div class="outline-text-3" id="text-1.1">
 <p>
 Body
 </p>
-<p>
-Included tail
-</p>
 </div>
-<div id="outline-container-org0000003" class="outline-3">
-<h3 id="org0000003"><span class="section-number-3">2.1.</span> Nested</h3>
-<div class="outline-text-3" id="text-2.1">
+<div id="outline-container-org0000003" class="outline-4">
+<h4 id="org0000003"><span class="section-number-4">1.1.1.</span> Nested</h4>
+<div class="outline-text-4" id="text-1.1.1">
 <p>
 Nested body
+Included tail
 </p>
 </div>
 </div>

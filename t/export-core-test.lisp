@@ -1559,39 +1559,214 @@
           (expect (org-export-error-reason condition) :to-be :include-cycle)))))
 
   (it "validates include forms and rejects fragment-scoped settings"
-    (let* ((invalid-include-forms
-             (mapcar
-              (lambda (value)
-                (export-core-test-catch-error
-                 (lambda ()
-                   (export-core-test-preparation
-                    (format nil "#+INCLUDE: ~A" value)))))
-              (list "" "part.org" "\"part.org" "part.org\"" "\"a\"b\""
-                    (format nil "\"bad~%path\"")
-                    (format nil "\"bad~Cpath\"" #\Tab))))
-           (fragment-errors
-             (mapcar
-              (lambda (fragment)
-                (export-core-test-catch-error
-                 (lambda ()
-                   (org-kit::export-prepare
-                    (parse-org "#+INCLUDE: \"part.org\"") :html
-                    :include-resolver (lambda (path parent)
-                                        (declare (ignore path parent))
-                                        fragment)))))
-              '("#+TITLE: included title" "#+TODO: TODO DONE"))))
+      (let* ((invalid-include-forms
+              (mapcar
+               (lambda (value)
+                 (export-core-test-catch-error
+                  (lambda ()
+                    (export-core-test-preparation
+                     (format nil "#+INCLUDE: ~A" value)))))
+               (list "" "\"part.org" "part.org\"" "\"a\"b\""
+                     (format nil "\"bad~%path\"")
+                     (format nil "\"bad~Cpath\"" #\Tab))))
+             (fragment-errors
+              (mapcar
+               (lambda (fragment)
+                 (export-core-test-catch-error
+                  (lambda ()
+                    (org-kit::export-prepare
+                     (parse-org "#+INCLUDE: \"part.org\"") :html
+                     :include-resolver (lambda (path parent)
+                                         (declare (ignore path parent))
+                                         fragment)))))
+               '("#+TITLE: included title" "#+TODO: TODO DONE"))))
+        (with-soft-assertions
+         (expect (every (lambda (condition)
+                          (typep condition 'org-export-unsupported-syntax))
+                        invalid-include-forms)
+                 :to-be t)
+         (expect (every (lambda (condition)
+                          (and (typep condition 'org-export-unsupported-syntax)
+                               (eq (org-export-unsupported-syntax-feature condition)
+                                   :fragment-keyword-scope)))
+                        fragment-errors)
+                 :to-be t))))
+  (it "applies INCLUDE line ranges and minimum heading levels"
+    (let* ((calls nil)
+           (fragment (export-core-test-lines
+                      "skip" "* First" "** Child" "* Omitted" "tail"))
+           (top-level
+             (export-core-test-preparation
+              "#+INCLUDE: part.org :lines \"2-4\""
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (push path calls)
+                fragment)))
+           (top-headings (export-core-test-view-nodes top-level :headline))
+           (nested
+             (export-core-test-preparation
+              (export-core-test-lines
+               "* Parent"
+               "#+INCLUDE: part.org :lines \"1-0\"")
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (push path calls)
+                fragment)))
+           (nested-headings
+             (remove-if
+              (lambda (view)
+                (string= (node-property (org-kit::export-view-node view)
+                                        :raw-value)
+                         "Parent"))
+              (export-core-test-view-nodes nested :headline)))
+           (explicit
+             (export-core-test-preparation
+              "#+INCLUDE: part.org :minlevel 3"
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (push path calls)
+                fragment)))
+           (explicit-heading
+             (first (export-core-test-view-nodes explicit :headline))))
       (with-soft-assertions
-        (expect (every (lambda (condition)
-                         (typep condition 'org-export-unsupported-syntax))
-                       invalid-include-forms)
+        (expect (mapcar (lambda (view)
+                          (node-property (org-kit::export-view-node view)
+                                         :raw-value))
+                        top-headings)
+                :to-equal '("First" "Child"))
+        (expect (mapcar (lambda (view)
+                          (node-property (org-kit::export-view-node view) :level))
+                        top-headings)
+                :to-equal '(1 2))
+        (expect (mapcar (lambda (view)
+                          (node-property (org-kit::export-view-node view) :level))
+                        nested-headings)
+                :to-equal '(2 3 2))
+        (expect (node-property (org-kit::export-view-node explicit-heading) :level)
+                :to-be 3)
+        (expect (nreverse calls)
+                :to-equal '("part.org" "part.org" "part.org")))))
+  (it "wraps included text as source, example, and export blocks"
+    (let* ((source-body (export-core-test-lines "* literal" "#+END_SRC"))
+           (example-body (export-core-test-lines "* example" "#+TITLE: literal"))
+           (export-body "#+END_EXPORT")
+           (source-preparation
+             (export-core-test-preparation
+              "#+INCLUDE: part.org :minlevel 8 src lisp"
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore path parent-source))
+                source-body)))
+           (example-preparation
+             (export-core-test-preparation
+              "#+INCLUDE: part.org example"
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore path parent-source))
+                example-body)))
+           (export-preparation
+             (export-core-test-preparation
+              "#+INCLUDE: part.org export html"
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore path parent-source))
+                export-body)))
+           (source-block
+             (first (export-core-test-view-nodes source-preparation :src-block)))
+           (example-block
+             (first (export-core-test-view-nodes example-preparation :example-block)))
+           (export-block
+             (first (export-core-test-view-nodes export-preparation :export-block))))
+      (with-soft-assertions
+        (expect (node-property (org-kit::export-view-node source-block) :language)
+                :to-equal "lisp")
+        (expect (node-property (org-kit::export-view-node source-block) :value)
+                :to-equal (format nil "* literal~%#+END_SRC~%"))
+        (expect (export-core-test-view-nodes source-preparation :headline)
+                :to-equal nil)
+        (expect (node-property (org-kit::export-view-node example-block) :value)
+                :to-equal (format nil "* example~%#+TITLE: literal~%"))
+        (expect (node-property (org-kit::export-view-node export-block) :type)
+                :to-equal "HTML")
+        (expect (node-property (org-kit::export-view-node export-block) :value)
+                :to-equal (format nil "#+END_EXPORT~%")))))
+  (it "selects include headings, custom IDs, and named elements"
+    (let* ((fragment
+             (export-core-test-lines
+              "* RangeRoot"
+              "** First"
+              "first"
+              "** Second"
+              "second"
+              "** Third"
+              "third"
+              "* Custom"
+              ":PROPERTIES:"
+              ":CUSTOM_ID: selected-id"
+              ":END:"
+              "custom body"
+              ""
+              "#+NAME: named-note"
+              "Named element body."))
+           (calls nil)
+           (preparation
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+INCLUDE: part.org::*RangeRoot"
+               "#+INCLUDE: part.org::*RangeRoot :lines \"2-6\""
+               "#+INCLUDE: part.org::#selected-id"
+               "#+INCLUDE: part.org::named-note")
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (push path calls)
+                fragment)))
+           (headings (export-core-test-view-nodes preparation :headline))
+           (named-element
+             (find-if
+              (lambda (view)
+                (string= (or (node-property (org-kit::export-view-node view) :name)
+                             "")
+                         "named-note"))
+              (export-core-test-view-nodes preparation :paragraph)))
+           (missing-target
+             (export-core-test-catch-error
+              (lambda ()
+                (export-core-test-preparation
+                 "#+INCLUDE: part.org::Missing"
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   fragment)))))
+           (invalid-lines
+             (export-core-test-catch-error
+              (lambda ()
+                (export-core-test-preparation
+                 "#+INCLUDE: part.org :lines \"2\""
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   fragment))))))
+      (with-soft-assertions
+        (expect (mapcar (lambda (view)
+                          (node-property (org-kit::export-view-node view) :raw-value))
+                        headings)
+                :to-equal '("RangeRoot" "First" "Second" "Third"
+                            "First" "Second" "Third" "Custom"))
+        (expect named-element :to-be-truthy)
+        (expect (nreverse calls)
+                :to-equal '("part.org" "part.org" "part.org" "part.org"))
+        (expect (and (typep missing-target 'org-export-error)
+                     (eq (org-export-error-reason missing-target)
+                         :include-target-not-found))
                 :to-be t)
-        (expect (every (lambda (condition)
-                         (and (typep condition 'org-export-unsupported-syntax)
-                              (eq (org-export-unsupported-syntax-feature condition)
-                                  :fragment-keyword-scope)))
-                       fragment-errors)
+        (expect (and (typep invalid-lines 'org-export-unsupported-syntax)
+                     (eq (org-export-unsupported-syntax-feature invalid-lines)
+                         :include-lines))
                 :to-be t))))
-
   (it "passes a NIL parent source name to include resolvers"
     (let* ((document (parse-org "#+INCLUDE: \"part.org\""))
            (parent-source :not-called)

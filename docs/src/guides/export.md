@@ -33,6 +33,60 @@ Texinfo export returns `.texi` source. It does not run `makeinfo` or create an
 `.info` file. Man export returns roff source for a man page; it does not invoke
 a roff formatter.
 
+## Includes
+
+`export-org` does not open files named by `#+INCLUDE`. Pass an
+`:include-resolver` function to supply each included source as a string. The
+function receives the include path and the including document's source name,
+which is `nil` when that document has no source name. It must return a string.
+The path argument excludes an optional `::target` and include options, so the
+resolver can choose how to look up the source.
+
+~~~lisp
+(let ((document
+        (org-kit:parse-org "#+INCLUDE: intro.org"
+                           :source-name "main.org")))
+  (org-kit:export-org
+   document :html
+   :include-resolver
+   (lambda (path parent-source)
+     (cond
+       ((and (string= path "intro.org")
+             (string= parent-source "main.org"))
+        (format nil "* Introduction~%Supplied by caller."))
+       (t (error "Unexpected include ~A from ~A" path parent-source))))))
+~~~
+
+The following directives show option syntax. Their paths are illustrative;
+each included source must be returned by the resolver above.
+
+~~~org
+#+INCLUDE: "chapters.org::*Introduction" :lines "2-6" :minlevel 2
+#+INCLUDE: "chapters.org::#stable-id"
+#+INCLUDE: "notes.org::named-note"
+#+INCLUDE: "snippets.org" src lisp
+#+INCLUDE: "examples.org" example
+#+INCLUDE: "raw.html" export html
+~~~
+
+Include targets can select a heading, a heading's `CUSTOM_ID` with `#id`, or a
+named element declared with `#+NAME`. Without a target, `:lines "2-4"`
+includes file lines 2 and 3, stopping before line 4. Org resolves a
+`::target` first, then computes the range relative to that selected element.
+For a selected heading, `:lines "2-6"` includes target-relative lines 2
+through 6 and stops before line 7. In both cases, the end position is
+exclusive. `:minlevel N` sets the shallowest included heading level; when
+omitted, Org places the included headings one level below the nearest containing
+heading, or at level 1 at the document top level.
+
+The `src LANG`, `example`, and `export BACKEND` wrappers include the supplied
+text as literal block contents. `:minlevel` does not change wrapped text.
+Nested includes use the same resolver, with each including path passed as the
+parent source name. An include cycle signals an `org-export-error` with reason
+`:include-cycle`; a missing target signals reason `:include-target-not-found`.
+
+## LaTeX
+
 LaTeX export returns source only; it does not invoke a TeX engine or generate a
 PDF. By default it uses the `article` class with `[11pt]` options, ignores
 `#+LATEX_CLASS`, `#+LATEX_CLASS_OPTIONS`, and `#+LATEX_HEADER`, and omits raw
@@ -64,10 +118,14 @@ resolves and otherwise render their label.
 `ATTR_LATEX` values are comments, so `:options` and `:environment` do not affect
 rendering.
 
+## Footnotes
+
 A labeled footnote reference such as `[fn:a]` uses a matching definition such
 as `[fn:a] Note text.`; repeated references outside a footnote render the
 definition again, while references inside a footnote render as
 `\footnotemark`.
+
+## Inlinetasks
 
 The default `:inlinetask-min-level` is 15. Pass this keyword to `parse-org` to
 change which star counts are classified as inlinetasks. For example,
@@ -76,11 +134,15 @@ LaTeX backend, the heading renderer maps its 15-star level to `subparagraph`.
 Setting `#+OPTIONS: num:nil` renders this heading with a starred
 `\subparagraph*` command.
 
+## Output types
+
 With `:output-type :octets`, export returns a UTF-8 octet vector. With
 `:output-type :stream`, supply an output stream with `:stream`. Character streams
 receive text; streams whose element type is
 `(unsigned-byte 8)` receive UTF-8 octets. Other stream element types are
 rejected, and a successful call returns the stream.
+
+## Export contexts and time macros
 
 `make-export-context` accepts `:title`, `:author`, `:date`, `:language`, and
 `:time-context`. Non-NIL title, author, date, and language values override

@@ -1079,25 +1079,86 @@ paragraph" table-list) :not :to-be nil))))
         (expect (search "nested child" output) :not :to-be nil))))
 
   (it "groups resolved include siblings under imported headings"
-    (let* ((document
-             (parse-org
-              (format nil
-                      "* Host~%#+INCLUDE: \"heading.org\"~%#+INCLUDE: \"tail.org\"~%")))
-           (output
-             (export-org
-              document :html
-              :include-resolver
-              (lambda (path parent-source)
-                (declare (ignore parent-source))
-                (cond ((string= path "heading.org")
-                       (format nil
-                               "* Imported~%:PROPERTIES:~%:ID: imported~%:END:~%~%Body~%** Nested~%Nested body~%"))
-                      ((string= path "tail.org")
-                       (format nil "Included tail~%")))))))
-      (with-soft-assertions
-        (expect (search "Imported" output) :not :to-be nil)
-        (expect (search "Nested body" output) :not :to-be nil)
-        (expect (search "Included tail" output) :not :to-be nil))))
+      (let* ((document
+              (parse-org
+               (format nil
+                       "* Host~%#+INCLUDE: \"heading.org\"~%#+INCLUDE: \"tail.org\"~%")))
+             (output
+              (export-org document
+                          :html
+                          :include-resolver
+                          (lambda (path parent-source)
+                            (declare (ignore parent-source))
+                            (cond
+                             ((string= path "heading.org")
+                              (format nil
+                                      "* Imported~%:PROPERTIES:~%:ID: imported~%:END:~%~%Body~%** Nested~%Nested body~%"))
+                             ((string= path "tail.org")
+                              (format nil "Included tail~%"))))))
+             (host-position (search "Host</h2>" output))
+             (imported-position (search "Imported</h3>" output))
+             (nested-position (search "Nested</h4>" output))
+             (nested-section-start
+              (and nested-position
+                   (search "<div class=\"outline-text-4\""
+                           output
+                           :start2
+                           nested-position)))
+             (tail-position
+              (and nested-section-start
+                   (search "Included tail"
+                           output
+                           :start2
+                           nested-section-start)))
+             (nested-paragraph
+              (and nested-section-start
+                   (search (format nil "<p>~%Nested body~%Included tail~%</p>")
+                           output
+                           :start2
+                           nested-section-start)))
+             (nested-section-end
+              (and nested-section-start
+                   (search "</div>"
+                           output
+                           :start2
+                           nested-section-start))))
+        (with-soft-assertions
+         (expect
+          (and host-position
+               imported-position
+               nested-position
+               (< host-position imported-position nested-position))
+          :to-be
+          t)
+         (expect (search "Nested body" output) :not :to-be nil)
+         (expect (and nested-section-start
+                      tail-position
+                      nested-section-end
+                      (< nested-section-start tail-position nested-section-end))
+                 :to-be
+                 t)
+         (expect nested-paragraph :not :to-be nil))))
+  (it "preserves blank-line boundaries between included paragraphs"
+      (let* ((document
+              (parse-org
+               (format nil
+                       "* Host~%#+INCLUDE: \"body.org\"~%#+INCLUDE: \"tail.org\"~%")))
+             (output
+              (export-org document
+                          :html
+                          :include-resolver
+                          (lambda (path parent-source)
+                            (declare (ignore parent-source))
+                            (cond
+                             ((string= path "body.org")
+                              (format nil "Body~%~%"))
+                             ((string= path "tail.org")
+                              (format nil "Tail~%"))))))
+             (separate-paragraphs
+              (search (format nil "<p>~%Body~%</p>~%<p>~%Tail~%</p>")
+                      output)))
+        (with-soft-assertions
+         (expect separate-paragraphs :not :to-be nil))))
 
   (it "renders empty literal objects, rule-only tables, and entities"
     (let* ((literal (export-org (parse-org "==") :html))
