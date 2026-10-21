@@ -111,6 +111,10 @@
                (:file "export-ascii")
                ;; Unit E5 LaTeX export
                (:file "export-latex")
+               ;; Unit E6 Texinfo export
+               (:file "export-texinfo")
+               ;; Unit E7 man export
+               (:file "export-man")
                (:file "agenda")
                (:file "export-icalendar")
                (:file "table-radio")
@@ -257,6 +261,10 @@
                (:file "export-latex-test")
                ;; FR-100 iCalendar export
                (:file "export-icalendar-test")
+               ;; Unit E6 Texinfo export
+               (:file "export-texinfo-test")
+               ;; Unit E7 man export
+               (:file "export-man-test")
                ;; FR-120 Org lint checker tests
                (:file "lint-document-a-test")
                (:file "lint-document-b-test")
