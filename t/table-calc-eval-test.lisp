@@ -1238,6 +1238,10 @@
                               quote-character)
                              :org-sbe)
                        (cons (format nil "~A(org-sbe . sample)" quote-character)
+                             :org-sbe)
+                       (cons (format nil
+                              "~A(org-sbe sample (many \"1\" \"(1 . 2)\"))"
+                              quote-character)
                              :org-sbe)))
             (table-calc-eval-test-expect-unsupported-syntax
              (unsupported (car case))
