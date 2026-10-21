@@ -71,6 +71,7 @@
                (:file "store-link")
                (:file "bibtex")
                (:file "edit-elements")
+               (:file "babel-detangle")
                (:file "edit-subtree")
                (:file "statistics-cookies")
                ;; Unit E subtree relocation and sort
@@ -180,6 +181,7 @@
                (:file "babel-vars-test")
                (:file "babel-noweb-test")
                (:file "babel-tangle-test")
+               (:file "babel-detangle-test")
                (:file "babel-results-test")
                (:file "babel-execution-test")
                (:file "babel-call-test")

@@ -92,7 +92,8 @@
    #:parse-org #:write-org #:emit-org
    ;; Babel header arguments
    #:resolve-babel-parameters #:resolve-babel-variables #:expand-babel-noweb
-   #:babel-tangle #:update-babel-results
+   #:babel-tangle
+   #:babel-detangle #:update-babel-results
    #:register-babel-executor
    #:make-babel-shell-reference-executor
    #:make-babel-common-lisp-reference-executor
@@ -280,5 +281,4 @@
    #:capture-template-result-cursor-offset #:expand-capture-template
    #:capture-target-result #:make-capture-target-result #:capture-target-result-p
    #:capture-target-result-edit-result #:capture-target-result-target-document
-   #:capture-target-result-cursor-offset #:capture-into-target
-))
+   #:capture-target-result-cursor-offset #:capture-into-target))

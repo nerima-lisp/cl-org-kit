@@ -113,7 +113,7 @@
     "RESOLVE-BABEL-PARAMETERS" "RESOLVE-BABEL-VARIABLES" "EXPAND-BABEL-NOWEB"
     "BIBTEX-IMPORT" "BIBTEX-EXPORT"
     ;; Babel execution
-    "BABEL-TANGLE" "UPDATE-BABEL-RESULTS"
+    "BABEL-TANGLE" "BABEL-DETANGLE" "UPDATE-BABEL-RESULTS"
     "REGISTER-BABEL-EXECUTOR"
     "MAKE-BABEL-SHELL-REFERENCE-EXECUTOR"
     "MAKE-BABEL-COMMON-LISP-REFERENCE-EXECUTOR"
@@ -396,6 +396,17 @@ docs/src/reference/node-model.md.")
     (expect (limit-value (make-limits :max-babel-result-elements 7)
                          :max-babel-result-elements)
             :to-be 7))
+
+  (it "pins the Babel detangling API documentation"
+    (expect (documentation 'babel-detangle 'function)
+            :to-equal
+            "Return an edit result that copies linked tangling output into DOCUMENT.
+
+TANGLED-CONTENT is scanned for Org link comments and their matching
+source-name end markers. Only the matched source-block bodies are replaced;
+no file is read or written and no process is started. Unmatched links are left
+alone. Ambiguous source names and malformed linked sections signal
+ORG-BABEL-ERROR."))
 
   (it "documents every exported symbol"
     (with-soft-assertions
