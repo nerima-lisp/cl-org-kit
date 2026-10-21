@@ -418,7 +418,7 @@
                           "* Task~%:PROPERTIES:~%:ID: range-task~%:END:~%SCHEDULED: <2025-03-02 Sun +1w>--<2025-03-09 Sun>~%")))
         (let* ((source-text
                  (format nil
-                         "* Task~%SCHEDULED: <2025-03-01 Sat +1w>--<2025-03-08 Sat>~%"))
+                         "* Task~%SCHEDULED:  <2025-03-01 Sat +1w>--<2025-03-08 Sat>~%Keep this text.~%"))
                (document (parse-org source-text))
                (entries (agenda-bulk-test-entries document '("Task")))
                (results
@@ -427,17 +427,51 @@
                  (document-text
                   (edit-result-updated-document
                    (cdr (assoc document results :test #'eq))))))
-          (expect updated :to-equal (format nil "* Task~%")))
-        (let* ((source-text (format nil "* Task~%"))
-               (document (parse-org source-text))
-               (results
-                 (agenda-bulk-action
-                  (agenda-bulk-test-entries document '("Task"))
-                  :schedule :schedule-date nil))
-               (edit (cdr (assoc document results :test #'eq))))
-          (expect (document-text (edit-result-updated-document edit))
-                  :to-equal source-text)
-          (expect (edit-result-spans edit) :to-be nil)))))
+          (progn
+            (expect updated :to-equal (format nil "* Task~%Keep this text.~%"))
+            (let* ((source-text
+                     (format nil
+                             "* Task~%SCHEDULED: <2025-03-01 Sat +1w>--<2025-03-08 Sat> Keep this too.~%"))
+                   (document (parse-org source-text))
+                   (entries (agenda-bulk-test-entries document '("Task")))
+                   (results
+                     (agenda-bulk-action entries :schedule :schedule-date nil))
+                   (updated
+                     (document-text
+                      (edit-result-updated-document
+                       (cdr (assoc document results :test (function eq)))))))
+              (expect updated :to-equal (format nil "* Task~%Keep this too.~%")))
+            (let* ((source-text
+                     (format nil
+                             "* Task~%SCHEDULED: <2025-03-01 Sat +1w>--<2025-03-08 Sat>"))
+                   (document (parse-org source-text))
+                   (entries (agenda-bulk-test-entries document '("Task")))
+                   (results
+                     (agenda-bulk-action entries :schedule :schedule-date nil))
+                   (updated
+                     (document-text
+                      (edit-result-updated-document
+                       (cdr (assoc document results :test (function eq)))))))
+              (expect updated :to-equal (format nil "* Task~%")))))
+        (dolist (source-text
+                 (list (format nil "* Task~%")
+                       (format nil
+                               "* Task~%SCHEDULED:<2025-03-01 Sat> Keep this text.~%")
+                       (format nil
+                               "* Task~%SCHEDULED: extra <2025-03-01 Sat> Keep this text.~%")
+                       (format nil
+                               "* Task~%<2025-03-01 Sat> SCHEDULED: Keep this text.~%")
+                       (format nil
+                               "* Task~%DEADLINE: <2025-03-01 Sat> Keep this text.~%")))
+          (let* ((document (parse-org source-text))
+                 (results
+                   (agenda-bulk-action
+                    (agenda-bulk-test-entries document (list "Task"))
+                    :schedule :schedule-date nil))
+                 (edit (cdr (assoc document results :test (function eq)))))
+            (expect (document-text (edit-result-updated-document edit))
+                    :to-equal source-text)
+            (expect (edit-result-spans edit) :to-be nil))))))
   (it "checks archive headers, local archive targets, and refile cycles"
     (let* ((source (parse-org (format nil "* Task~%")
                               :source-name "source.org"))

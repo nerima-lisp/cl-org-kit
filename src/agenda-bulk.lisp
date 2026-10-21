@@ -300,15 +300,38 @@
             (find-if
              (lambda (timestamp)
                (and (eq (node-type timestamp) :timestamp)
-                    (string= "SCHEDULED: "
-                             (subseq source (node-begin paragraph)
-                                     (node-begin timestamp)))))
+                    (let* ((paragraph-start (node-begin paragraph))
+                           (timestamp-start (node-begin timestamp))
+                           (keyword-end (+ paragraph-start
+                                           (length "SCHEDULED:"))))
+                      (and (<= keyword-end timestamp-start)
+                           (string-equal "SCHEDULED:" source
+                                         :start2 paragraph-start
+                                         :end2 keyword-end)
+                           (let ((value-start
+                                   (reader-heading-skip-horizontal-space
+                                    source keyword-end timestamp-start)))
+                             (and (< keyword-end value-start)
+                                  (= value-start timestamp-start)))))))
              (node-children paragraph))))
      (and section (node-children section)))))
 
 (defun agenda-bulk-remove-scheduled-paragraph (document heading paragraph)
   (let* ((source (document-text document))
-         (patch (edit-make-patch (node-begin paragraph) (node-end paragraph)
+         (timestamp
+           (find :timestamp
+                 (node-children paragraph)
+                 :key (function node-type)))
+         (timestamp-end (node-end timestamp))
+         (line-end
+           (position #\Newline source
+                     :start timestamp-end
+                     :end (node-end paragraph)))
+         (patch-end
+           (if (and line-end (= line-end timestamp-end))
+               (1+ line-end)
+               timestamp-end))
+         (patch (edit-make-patch (node-begin paragraph) patch-end
                                  "" heading))
          (updated-source (edit-splice-source source (list patch)))
          (expected
