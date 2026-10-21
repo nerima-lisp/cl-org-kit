@@ -13,6 +13,7 @@
     (:max-output-octets 268435456)
     (:max-agenda-range-days 3660)
     (:max-agenda-entries 1000000)
+    (:max-agenda-bulk-actions 100000)
     (:max-future-repeats 10000)
     (:max-subtree-clones 1000)
     (:max-clock-consistency-issues 100000)

@@ -205,6 +205,7 @@
    #:agenda-match-entry-document #:agenda-match-entry-node
    #:agenda-match-entry-heading-path #:agenda-match-entry-line
    #:agenda-match-entry-end-line
+   #:agenda-bulk-action
    #:agenda #:agenda-todo-list #:agenda-match #:agenda-search-view #:agenda-stuck-projects #:agenda-time-grid #:agenda-time-grid-row #:agenda-time-grid-row-p #:agenda-time-grid-row-date #:agenda-time-grid-row-time #:agenda-time-grid-row-current-p #:agenda-custom #:agenda-custom-view #:agenda-custom-view-p #:agenda-custom-view-key #:agenda-custom-view-description #:agenda-custom-view-type #:agenda-custom-view-result #:agenda-format-text #:agenda-to-org #:agenda-write-into
    ;; Effective Org semantics
    #:effective-heading-tags #:effective-property #:startup-options

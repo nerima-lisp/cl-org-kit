@@ -3340,6 +3340,304 @@
 (advice-add 'org-fixture--dispatch-main :around
             #'org-fixture--html-oracle-dispatch)
 
-(org-fixture--dispatch-main)
+(progn
+  (defun org-fixture--e-agenda-bulk-run
+      (name source-name source-input selected-headlines action-key &rest options)
+    (progn (require 'org-archive) (require 'org-agenda))
+    (let* ((root (file-name-directory
+                  (directory-file-name (file-name-directory load-file-name))))
+           (source-file (expand-file-name source-name root))
+           (target-input (or (plist-get options :target-input) ""))
+           (target-heading (plist-get options :target-heading))
+           (target-file
+            (and target-heading
+                 (expand-file-name
+                  (concat "t/fixtures/e/oracle/agenda-bulk/" name "-target.org")
+                  root)))
+           (source-buffer (generate-new-buffer " *e-agenda-bulk-source*"))
+           (agenda-buffer-name (generate-new-buffer-name "*Org Agenda E Bulk*"))
+           (agenda-buffer (get-buffer-create agenda-buffer-name))
+           (target-buffer (and target-heading
+                               (generate-new-buffer " *e-agenda-bulk-target*")))
+           (target-marker nil)
+           (source-markers nil)
+           (archive-location (plist-get options :archive-location))
+           (archive-file nil)
+           (archive-buffer nil)
+           (completion-choice (plist-get options :completion-choice))
+           (date-choice (plist-get options :date-choice))
+           (date-value (and date-choice (encode-time 0 0 0 10 3 2025 "UTC")))
+           (prefix (plist-get options :prefix))
+           (fixed-time (encode-time 0 34 12 19 2 2024 "UTC"))
+           (fixed-format (org-time-stamp-format 'with-time 'no-brackets))
+           (fixed-time-string nil)
+           (processed nil)
+           (skipped 0)
+           (target-expected "")
+           (source-expected ""))
+      (unwind-protect
+          (progn
+            (with-current-buffer source-buffer
+              (insert source-input)
+              (org-mode)
+              (setq buffer-file-name source-file)
+              (dolist (headline selected-headlines)
+                (let (matches)
+                  (save-excursion
+                    (goto-char (point-min))
+                    (while (re-search-forward org-heading-regexp nil t)
+                      (beginning-of-line)
+                      (when (equal headline (org-get-heading t t t t))
+                        (push (copy-marker (point)) matches))
+                      (forward-line 1)))
+                  (unless (= (length matches) 1)
+                    (error "Expected one agenda source heading named %s" headline))
+                  (push (car matches) source-markers)))
+              (setq source-markers (nreverse source-markers))
+              (setq fixed-time-string
+                    (format-time-string fixed-format fixed-time "UTC"))
+              (when archive-location
+                (setq archive-file
+                      (car (org-archive--compute-location archive-location))))
+              (when target-buffer
+                (with-current-buffer target-buffer
+                  (insert target-input)
+                  (org-mode)
+                  (setq buffer-file-name target-file)
+                  (goto-char (point-min))
+                  (unless (re-search-forward
+                           (concat "^\\*+ " (regexp-quote target-heading) "$")
+                           nil t)
+                    (error "Missing agenda bulk refile target %s" target-heading))
+                  (beginning-of-line)
+                  (setq target-marker (copy-marker (point) t)))))
+            (with-current-buffer agenda-buffer
+              (let ((org-agenda-buffer-name agenda-buffer-name))
+                (org-agenda-mode))
+              (setq-local org-agenda-type 'agenda)
+              (setq-local org-agenda-bulk-marked-entries source-markers)
+              (let ((inhibit-read-only t))
+                (dolist (marker source-markers)
+                  (let ((start (point))
+                        (headline
+                         (with-current-buffer (marker-buffer marker)
+                           (org-get-heading t t t t))))
+                    (insert headline "\n")
+                    (add-text-properties
+                     start (point)
+                     (list 'org-hd-marker marker 'org-marker marker))))
+                (goto-char (point-min))))
+            (let ((org-agenda-buffer-name agenda-buffer-name)
+                  (org-agenda-persistent-marks t)
+                  (org-refile-keep nil)
+                  (org-refile-use-outline-path nil)
+                  (org-reverse-note-order nil)
+                  (org-refile-allow-creating-parent-nodes t)
+                  (org-archive-location archive-location)
+                  (org-archive-subtree-save-file-p nil)
+                  (org-archive-save-context-info '(time file olpath category todo itags))
+                  (org-archive-subtree-add-inherited-tags 'infile)
+                  (org-archive-mark-done nil)
+                  (org-read-date-final-answer nil)
+                  (inhibit-message nil))
+              (let ((original-format-time-string
+                     (symbol-function 'format-time-string)))
+                (cl-letf
+    (((symbol-function 'read-char-exclusive)
+      (lambda (&rest _arguments) (aref action-key 0)))
+     ((symbol-function 'completing-read)
+      (lambda (&rest _arguments) completion-choice))
+     ((symbol-function 'org-read-date)
+      (lambda (&rest _arguments)
+        (setq org-read-date-final-answer date-choice)
+        date-value))
+     ((symbol-function 'org-refile-get-location)
+      (lambda (&rest _arguments)
+        (list target-heading target-file nil target-marker)))
+     ((symbol-function 'org-agenda-change-all-lines)
+      (lambda (&rest _arguments) nil))
+     ((symbol-function 'org-agenda-show-new-time)
+      (lambda (&rest _arguments) nil))
+     ((symbol-function 'org-agenda-redo)
+      (lambda (&rest _arguments) nil))
+     ((symbol-function 'format-time-string)
+      (lambda (format-string &optional time zone)
+        (if (and (null time) (equal format-string fixed-format))
+            (funcall original-format-time-string
+                     format-string fixed-time "UTC")
+          (funcall original-format-time-string format-string time zone)))))
+    (with-current-buffer agenda-buffer (org-agenda-bulk-action prefix))))
+            (unless (and (integerp (plist-get options :expected-processed))
+                   (integerp (plist-get options :expected-skipped)))
+              (error "Agenda bulk counts are missing for %s" name))
+            (setq processed (plist-get options :expected-processed)
+                  skipped (plist-get options :expected-skipped)
+                  source-expected
+                  (with-current-buffer source-buffer (buffer-string)))
+            (when target-buffer
+              (setq target-expected
+                    (with-current-buffer target-buffer (buffer-string))))
+            (when archive-file
+              (setq archive-buffer
+                    (or (get-file-buffer archive-file)
+                        (error "Org archive buffer missing for %s" name)))
+              (setq target-expected
+                    (with-current-buffer archive-buffer (buffer-string))))
+            (list :name name
+                  :emacs-version emacs-version
+                  :org-version (org-version)
+                  :operation :agenda-bulk
+                  :action (plist-get options :operation)
+                  :action-key action-key
+                  :prefix prefix
+                  :selected-headlines selected-headlines
+                  :completion-choice completion-choice
+                  :date-choice date-choice
+                  :processed processed
+                  :skipped skipped
+                  :source-file source-name
+                  :source-input source-input
+                  :source-expected source-expected
+                  :target-input target-input :target-heading target-heading
+                  :target-expected target-expected
+                  :archive-location archive-location
+                  :archive-time (and archive-location fixed-time-string))))
+        (dolist (buffer (list source-buffer agenda-buffer target-buffer archive-buffer))
+          (when (buffer-live-p buffer)
+            (with-current-buffer buffer (set-buffer-modified-p nil))
+            (kill-buffer buffer))))))
+
+  (defun org-fixture--e-agenda-bulk-update-manifest
+      (oracle-directory names)
+    (let* ((manifest-file (expand-file-name "manifest.sexp" oracle-directory))
+           (manifest-data
+            (with-temp-buffer
+              (insert-file-contents manifest-file)
+              (car (read-from-string (buffer-string)))))
+           (existing-cases (plist-get manifest-data :cases))
+           (retained-cases
+            (cl-remove-if
+             (lambda (case)
+               (or (eq (plist-get case :key) :agenda-bulk)
+                   (and (stringp (plist-get case :path))
+                        (string-prefix-p "agenda-bulk/"
+                                         (plist-get case :path)))))
+             existing-cases))
+           (agenda-cases
+            (mapcar (lambda (name)
+                      (list :name name
+                            :path (concat "agenda-bulk/" name ".sexp")
+                            :key :agenda-bulk))
+                    names)))
+      (setq manifest-data
+            (plist-put manifest-data :cases
+                       (append retained-cases agenda-cases)))
+      (org-fixture--e-write-case oracle-directory "manifest.sexp"
+                                manifest-data)))
+
+  (defun org-fixture--e-agenda-bulk-generate (output-directory)
+    (unless (and (equal emacs-version "31.1")
+                 (equal (org-version) "9.8.10"))
+      (error "Agenda bulk oracle requires Emacs 31.1 and Org 9.8.10"))
+    (let* ((root (file-name-directory
+                  (directory-file-name (file-name-directory load-file-name))))
+           (expected-directory
+            (expand-file-name "t/fixtures/e/oracle/agenda-bulk" root))
+           (output-directory (expand-file-name output-directory))
+           (cases
+            (list
+             (list :name "todo-multi" :action-key "t"
+                   :selected-headlines '("First" "Second")
+                   :source-input
+                   (concat "#+TODO: TODO | DONE\n"
+                           "* TODO First\n* TODO Second\n* TODO Keep\n")
+                   :options '(:operation :todo :completion-choice "DONE" :expected-processed 2 :expected-skipped 0))
+             (list :name "tag-add-multi" :action-key "+"
+                   :selected-headlines '("First" "Second")
+                   :source-input
+                   (concat "#+TAGS: old local added\n"
+                           "* TODO First :old:\n* TODO Second :local:\n")
+                   :options '(:operation :tag-add :completion-choice "added" :expected-processed 2 :expected-skipped 0))
+             (list :name "schedule-set-multi" :action-key "s"
+                   :selected-headlines '("Weekly" "Plain")
+                   :source-input
+                   (concat "#+TODO: TODO | DONE\n"
+                           "* TODO Weekly\n"
+                           "SCHEDULED: <2024-12-02 Mon ++1w -2d>\n"
+                           "* TODO Plain\n"
+                           "SCHEDULED: <2024-12-03 Tue>\n")
+                   :options '(:operation :schedule-set :date-choice "2025-03-10" :expected-processed 2 :expected-skipped 0))
+             (list :name "schedule-delete-multi" :action-key "s"
+                   :selected-headlines '("Weekly" "Plain")
+                   :source-input
+                   (concat "#+TODO: TODO | DONE\n"
+                           "* TODO Weekly\n"
+                           "SCHEDULED: <2024-12-02 Mon ++1w -2d>\n"
+                           "* TODO Plain\n"
+                           "SCHEDULED: <2024-12-03 Tue>\n")
+                   :options '(:operation :schedule-delete :prefix (4) :expected-processed 2 :expected-skipped 0))
+             (list :name "refile-parent-child" :action-key "r"
+                   :selected-headlines '("Parent" "Child" "Other")
+                   :source-input
+                   (concat "#+TODO: TODO | DONE\n"
+                           "* TODO Parent :PARENT:\n"
+                           "** TODO Child :CHILD:\n"
+                           "* TODO Other\n* TODO Keep\n")
+                   :options '(:operation :refile :target-heading "Target" :target-input "* Target\nExisting\n" :expected-processed 2 :expected-skipped 1))
+             (list :name "archive-parent-child" :action-key "$"
+                   :selected-headlines '("Parent" "Child" "Other")
+                   :source-input
+                   (concat "#+TODO: TODO | DONE\n"
+                           "* TODO Parent :PARENT:\n"
+                           "** TODO Child :CHILD:\n"
+                           "* TODO Other\n* TODO Keep\n")
+                   :options '(:operation :archive :archive-location "%s_archive::" :expected-processed 2 :expected-skipped 1))))
+           (written nil))
+      (unless (equal output-directory expected-directory)
+        (error "Agenda bulk output must be t/fixtures/e/oracle/agenda-bulk"))
+      (dolist (spec cases)
+        (let* ((name (plist-get spec :name))
+               (source-name
+                (concat "t/fixtures/e/oracle/agenda-bulk/"
+                        name "-source.org"))
+               (options (plist-get spec :options))
+               (raw
+                (apply #'org-fixture--e-agenda-bulk-run
+                       name source-name (plist-get spec :source-input)
+                       (plist-get spec :selected-headlines)
+                       (plist-get spec :action-key) options))
+               (data (if (eq (plist-get options :operation) :archive)
+                         (org-fixture--e-normalize-archive-data
+                          raw source-name)
+                       raw)))
+          (push (org-fixture--e-write-case
+                 output-directory (concat name ".sexp") data)
+                written)))
+      (let ((names (mapcar (lambda (spec) (plist-get spec :name)) cases)))
+        (org-fixture--e-agenda-bulk-update-manifest
+         (file-name-directory (directory-file-name output-directory)) names))
+      (dolist (relative (nreverse written))
+        (princ (format "Wrote agenda-bulk/%s\n" relative)))
+      (princ (format "Generated %d agenda bulk oracle fixtures.\n"
+                     (length written)))
+      (princ (format "Emacs %s; Org %s\n" emacs-version (org-version)))))
+
+  (defun org-fixture--e-agenda-bulk-dispatch (original)
+    (let ((arguments (if (equal (car command-line-args-left) "--")
+                         (cdr command-line-args-left)
+                       command-line-args-left)))
+      (if (equal (car arguments) "--e-agenda-bulk-oracle")
+          (progn
+            (setq command-line-args-left nil)
+            (unless (= (length arguments) 2)
+              (error (concat
+                      "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el "
+                      "--e-agenda-bulk-oracle t/fixtures/e/oracle/agenda-bulk")))
+            (org-fixture--e-agenda-bulk-generate (nth 1 arguments)))
+        (funcall original))))
+
+  (advice-add 'org-fixture--dispatch-main :around
+              #'org-fixture--e-agenda-bulk-dispatch)
+  (org-fixture--dispatch-main))
 
 ;;; generate-org-fixtures.el ends here

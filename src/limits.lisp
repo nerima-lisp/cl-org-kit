@@ -15,6 +15,7 @@
   (max-output-octets 0 :read-only t)
   (max-agenda-range-days 0 :read-only t)
   (max-agenda-entries 0 :read-only t)
+  (max-agenda-bulk-actions 0 :read-only t)
   (max-diary-work 0 :read-only t)
   (max-diary-expression-length 0 :read-only t)
   (max-diary-expression-depth 0 :read-only t)
@@ -53,6 +54,7 @@
                          (max-output-octets (* 256 1024 1024))
                          (max-agenda-range-days 3660)
                          (max-agenda-entries 1000000)
+                         (max-agenda-bulk-actions 100000)
                          (max-diary-work 1000000)
                          (max-diary-expression-length 65536)
                          (max-diary-expression-depth 128)
@@ -92,7 +94,8 @@ are per formula; work is per table recalculation. Write-plan entries count files
 in one application, and write-plan bytes count combined UTF-8 string content
 and octet-vector content. Write-plan path bytes count UTF-8 octets in each
 submitted path, and path depth counts non-empty components other than dot.
-Clock consistency issue counts are per check. Each keyword overrides its
+Agenda bulk actions count selected entries per bulk-action call. Clock
+consistency issue counts are per check. Each keyword overrides its
 corresponding default with a non-negative integer. An operation enforces the
 limits documented for that operation."
   (%make-limits :max-input-length (checked-limit-value max-input-length)
@@ -108,6 +111,8 @@ limits documented for that operation."
                 (checked-limit-value max-agenda-range-days)
                 :max-agenda-entries
                 (checked-limit-value max-agenda-entries)
+                :max-agenda-bulk-actions
+                (checked-limit-value max-agenda-bulk-actions)
                 :max-diary-work (checked-limit-value max-diary-work)
                 :max-diary-expression-length
                 (checked-limit-value max-diary-expression-length)
@@ -160,6 +165,7 @@ limits documented for that operation."
     (:max-output-octets (%limits-max-output-octets limits))
     (:max-agenda-range-days (%limits-max-agenda-range-days limits))
     (:max-agenda-entries (%limits-max-agenda-entries limits))
+    (:max-agenda-bulk-actions (%limits-max-agenda-bulk-actions limits))
     (:max-diary-work (%limits-max-diary-work limits))
     (:max-diary-expression-length (%limits-max-diary-expression-length limits))
     (:max-diary-expression-depth (%limits-max-diary-expression-depth limits))

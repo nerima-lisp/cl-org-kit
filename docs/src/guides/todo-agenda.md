@@ -758,6 +758,54 @@ bytes.
   (list text org-text))
 ~~~
 
+### Apply bulk actions
+
+`agenda-bulk-action` applies one action to the headlines in an agenda result,
+custom view, or list of agenda entries. It returns an alist of original
+documents paired with their combined `edit-result`. The function stages edits
+in memory; callers can inspect each updated document or build a write plan.
+
+Use `:todo` with `:state` and explicit `:at` values to transition selected
+headlines. Bulk transitions suppress workflow logging and, like Org 9.8.10's
+agenda bulk action, ignore TODO dependency blockers. A date-time repeater also
+requires `:time-context`. Use `:add-tag` with `:tag` to add a local tag, or
+`:schedule` with `:schedule-date` to set a date-only schedule. Pass `nil` as
+the schedule date to remove `SCHEDULED`. Replacing a schedule preserves its
+repeater, warning delay, and range length.
+
+Use `:refile` with `:target-document` and an optional `:target-heading` to move
+selected subtrees. `:archive` moves them below an `Archive` sibling in the same
+document; pass a `:target-document` and optional `:target-heading` to archive
+into another in-memory document. Archive operations require an explicit
+`:time-context` to set `ARCHIVE_TIME`. A selected parent covers selected
+descendants for refile and archive. Repeated agenda rows for the same headline
+are applied once. The `:max-agenda-bulk-actions` limit defaults to 100,000
+selected rows per call.
+
+~~~lisp
+(require :asdf)
+(asdf:load-system "cl-org-kit")
+
+(let* ((document
+         (org-kit:parse-org
+          (format nil
+                  "#+TODO: TODO | DONE~%~%* TODO Publish release~%DEADLINE: <2025-01-02 Thu>~%")))
+       (start-date (org-kit:make-org-time-value "2025-01-02"))
+       (end-date start-date)
+       (time-context
+         (org-kit:make-time-context
+          :reference-time
+          (org-kit:make-org-time-value "2025-01-01T12:00:00")
+          :zone (org-kit:make-fixed-time-zone 0)))
+       (view (org-kit:agenda (list document) start-date end-date
+                             :time-context time-context))
+       (results
+         (org-kit:agenda-bulk-action
+          view :schedule :schedule-date (org-kit:make-org-time-value "2025-01-03")))
+       (edit (cdr (assoc document results))))
+  (org-kit:document-text (org-kit:edit-result-updated-document edit)))
+~~~
+
 See [Clock](clock.md) for clock aggregation and
 [API Stability](../reference/api-stability.md), which defines the released
 0.2.0 API scope and identifies agenda APIs added after that release.

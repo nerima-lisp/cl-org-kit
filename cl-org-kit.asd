@@ -128,7 +128,8 @@
                (:file "agenda-stuck-projects")
                (:file "agenda-time-grid")
                (:file "agenda-custom")
-               (:file "agenda-write"))
+               (:file "agenda-write")
+               (:file "agenda-bulk"))
   :in-order-to ((test-op (test-op "cl-org-kit/test"))))
 
 (asdf:defsystem "cl-org-kit/test"
@@ -238,6 +239,7 @@
                (:file "agenda-time-grid-test")
                (:file "agenda-custom-test")
                (:file "agenda-write-test")
+               (:file "agenda-bulk-test")
                ;; Unit E1 export core
                (:file "clocktable-test")
                (:file "export-core-test")

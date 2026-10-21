@@ -1446,10 +1446,12 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
 (defun transition-heading-todo
     (document target state &key (at (values nil) at-supplied-p) time-context
                                workflow-options note
-                               (log-drawer (values nil) log-drawer-supplied-p))
+                               (log-drawer (values nil) log-drawer-supplied-p)
+                               inhibit-blocking)
   "Transition a headline to STATE and return its edit and transition results.
 AT is required for every transition; logging and repeat behavior use the
-document's normalized TODO sequence and the supplied workflow settings."
+document's normalized TODO sequence and the supplied workflow settings.
+INHIBIT-BLOCKING allows a transition to ignore TODO dependency blockers."
   (let* ((heading (edit-headline-resolve-target document target))
          (previous-state (node-property heading :todo-keyword)))
     (unless at-supplied-p
@@ -1462,6 +1464,9 @@ document's normalized TODO sequence and the supplied workflow settings."
                 (org-workflow-options-p workflow-options))
       (edit-todo-error heading :invalid-value
                        "WORKFLOW-OPTIONS must be an Org workflow options value"))
+    (unless (member inhibit-blocking '(nil t))
+      (edit-todo-error heading :invalid-value
+                       "INHIBIT-BLOCKING must be a boolean"))
     (let* ((at-value (edit-todo-normalize-at at))
            (sequence (and (or previous-state state)
                           (edit-todo-selected-sequence
@@ -1472,7 +1477,8 @@ document's normalized TODO sequence and the supplied workflow settings."
                                    (edit-todo-done-state-p sequence previous-state)))
              (repeat-updates
                (progn
-                 (when (and requested-done-p
+                 (when (and (not inhibit-blocking)
+                            requested-done-p
                             (not previous-done-p)
                             (org-todo-blocked-p heading))
                    (edit-todo-error heading :blocked

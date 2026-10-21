@@ -44,4 +44,16 @@
 	(:name "todo-missing-last" :path
 	       "../policy/sort/todo-missing-last.sexp" :key :todo :policy t)
 	(:name "alpha-code-point-case-sensitive" :path
-	       "../policy/sort/alpha-code-point-case-sensitive.sexp" :key :alpha :policy t)))
+	       "../policy/sort/alpha-code-point-case-sensitive.sexp" :key :alpha :policy t)
+	(:name "todo-multi" :path
+	       "agenda-bulk/todo-multi.sexp" :key :agenda-bulk)
+	(:name "tag-add-multi" :path
+	       "agenda-bulk/tag-add-multi.sexp" :key :agenda-bulk)
+	(:name "schedule-set-multi" :path
+	       "agenda-bulk/schedule-set-multi.sexp" :key :agenda-bulk)
+	(:name "schedule-delete-multi" :path
+	       "agenda-bulk/schedule-delete-multi.sexp" :key :agenda-bulk)
+	(:name "refile-parent-child" :path
+	       "agenda-bulk/refile-parent-child.sexp" :key :agenda-bulk)
+	(:name "archive-parent-child" :path
+	       "agenda-bulk/archive-parent-child.sexp" :key :agenda-bulk)))
