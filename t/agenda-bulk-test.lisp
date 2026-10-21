@@ -293,6 +293,49 @@
         (expect (document-text second-document) :to-equal source-text)
         (expect (document-bom-p first-document) :to-be t)
         (expect (document-bom-p second-document) :to-be t))))
+  (it "applies max-output-octets per changed document"
+    (let* ((source-text (format nil "#+TODO: TODO | DONE~%* TODO Item~%"))
+           (expected-output (format nil "#+TODO: TODO | DONE~%* DONE Item~%"))
+           (unchanged-source (format nil "* Unchanged~%"))
+           (input-octets (agenda-bulk-test-utf8-bom-octets source-text))
+           (expected-document
+             (parse-org (agenda-bulk-test-utf8-bom-octets expected-output)
+                        :encoding :utf-8))
+           (output-octets
+             (length (write-org expected-document :output-type :octets)))
+           (first-document
+             (parse-org input-octets :encoding :utf-8
+                        :limits (make-limits :max-output-octets output-octets)))
+           (second-document
+             (parse-org input-octets :encoding :utf-8
+                        :limits (make-limits :max-output-octets output-octets)))
+           (unchanged-document
+             (parse-org unchanged-source
+                        :limits (make-limits :max-output-octets 0)))
+           (entries
+             (append (agenda-bulk-test-entries first-document '("Item"))
+                     (agenda-bulk-test-entries second-document '("Item"))))
+           (at (make-org-time-value "2024-02-19T12:34:00+00:00"))
+           (time-context (agenda-bulk-test-time-context))
+           (results
+             (agenda-bulk-action entries :todo :state "DONE"
+                                 :at at :time-context time-context
+                                 :target-document unchanged-document))
+           (first-edit (cdr (assoc first-document results :test #'eq)))
+           (second-edit (cdr (assoc second-document results :test #'eq)))
+           (unchanged-edit (cdr (assoc unchanged-document results :test #'eq)))
+           (first-updated (edit-result-updated-document first-edit))
+           (second-updated (edit-result-updated-document second-edit))
+           (unchanged-updated (edit-result-updated-document unchanged-edit)))
+      (with-soft-assertions
+        (expect (length (write-org first-updated :output-type :octets))
+                :to-be output-octets)
+        (expect (length (write-org second-updated :output-type :octets))
+                :to-be output-octets)
+        (expect (document-text unchanged-updated) :to-equal unchanged-source)
+        (expect (edit-result-spans unchanged-edit) :to-be nil)
+        (expect (document-text first-document) :to-equal source-text)
+        (expect (document-text second-document) :to-equal source-text))))
   (it "validates action options, agenda sources, and staged heading paths"
     (let* ((document (parse-org (format nil "* Task~%")))
            (entry (first (agenda-bulk-test-entries document '("Task"))))

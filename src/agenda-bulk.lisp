@@ -493,17 +493,11 @@
                   (agenda-bulk-edit-result (car entry) (cdr entry))))
           staged))
 
-(defun agenda-bulk-check-output-limit (staged)
-  (let* ((documents (mapcar #'car staged))
-         (limits (mapcar #'document-limits documents))
-         (octets
-           (loop for entry in staged
-                 sum (edit-prospective-output-octets
-                      (cdr entry) (document-text (cdr entry)) nil))))
-    (check-limit
-     (make-limits :max-output-octets
-                  (minimum-limit-value limits :max-output-octets))
-     :max-output-octets octets)))
+(defun agenda-bulk-check-output-limit (original updated)
+  (check-limit
+   (document-limits original)
+   :max-output-octets
+   (edit-prospective-output-octets updated (document-text updated) nil)))
 
 (defun agenda-bulk-validate-action
     (action state state-supplied-p at-supplied-p tag tag-supplied-p
@@ -602,15 +596,17 @@ is the original document and whose CDR is its combined EDIT-RESULT."
                             current-target-heading-path time-context)))
                     (cond
                       ((member action '(:todo :add-tag :schedule))
-                       (setf staged
-                             (agenda-bulk-stage-document
-                              staged source-document
-                              (edit-result-updated-document result))))
+                       (let ((updated (edit-result-updated-document result)))
+                         (agenda-bulk-check-output-limit source-document updated)
+                         (setf staged
+                               (agenda-bulk-stage-document staged source-document
+                                                           updated))))
                       ((and (eq action :archive) (null target-document))
-                       (setf staged
-                             (agenda-bulk-stage-document
-                              staged source-document
-                              (edit-result-updated-document result))))
+                       (let ((updated (edit-result-updated-document result)))
+                         (agenda-bulk-check-output-limit source-document updated)
+                         (setf staged
+                               (agenda-bulk-stage-document staged source-document
+                                                           updated))))
                       (t
                        (let* ((source-edit
                                 (relocation-result-source-edit result))
@@ -623,16 +619,25 @@ is the original document and whose CDR is its combined EDIT-RESULT."
                                     (agenda-bulk-align-moved-subtree-tags
                                      (edit-result-updated-document target-edit)
                                      (relocation-result-target-path result))
-                                    (edit-result-updated-document target-edit))))
+                                    (edit-result-updated-document target-edit)))
+                              (same-document-p (eq source-document target-document)))
+                         (if same-document-p
+                             (agenda-bulk-check-output-limit source-document
+                                                             target-updated)
+                             (progn
+                               (agenda-bulk-check-output-limit source-document
+                                                               source-updated)
+                               (agenda-bulk-check-output-limit target-document
+                                                               target-updated)))
                          (setf staged
-                               (agenda-bulk-stage-document staged source-document
-                                                           source-updated))
-                         (when target-document
+                               (agenda-bulk-stage-document
+                                staged source-document
+                                (if same-document-p target-updated source-updated)))
+                         (when (and target-document (not same-document-p))
                            (setf staged
                                  (agenda-bulk-stage-document staged target-document
                                                              target-updated))))))
                     (push selection processed-selections)))
-                (agenda-bulk-check-output-limit staged)
                 (agenda-bulk-results staged))
             (org-kit-error (condition)
               (agenda-signal-error
