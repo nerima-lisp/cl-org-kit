@@ -1369,6 +1369,95 @@
                             "results-code" "results-result" "unrun-code"
                             "none-code" "none-result"))
                   :to-equal '(t t t nil t nil nil nil t nil nil nil))))))
+  (it "exports sent radio tables and preserves lint findings"
+    (labels ((find-table (node)
+               (or (when (eq (node-type node) :table) node)
+                   (some (function find-table) (node-children node))))
+             (receive-body (text)
+               (let* ((begin-marker "<!-- BEGIN RECEIVE ORGTBL radio -->")
+                      (end-marker "<!-- END RECEIVE ORGTBL radio -->")
+                      (begin (search begin-marker text))
+                      (body-start (and begin
+                                       (position #\Newline text :start begin)))
+                      (end (and body-start
+                                (search end-marker text :start2 body-start))))
+                 (when (and body-start end)
+                   (subseq text (1+ body-start) end)))))
+      (let* ((source
+               (export-core-test-lines
+                "[[#missing]]"
+                "#+ORGTBL: SEND radio orgtbl-to-orgtbl"
+                "| Name | Value |"
+                "|------+-------|"
+                "| Ada  | one   |"
+                "| Bob  | two   |"
+                "<!-- BEGIN RECEIVE ORGTBL radio -->"
+                "old"
+                "<!-- END RECEIVE ORGTBL radio -->"))
+             (document (parse-org source))
+             (table (find-table (document-root document)))
+             (edit (table-send-radio document table))
+             (updated-document (edit-result-updated-document edit))
+             (updated-source (document-text updated-document))
+             (directive "#+ORGTBL: SEND radio orgtbl-to-orgtbl")
+             (directive-start (search directive updated-source))
+             (exportable-source
+               (if directive-start
+                   (concatenate 'string
+                                (subseq updated-source 0 directive-start)
+                                (subseq updated-source
+                                        (+ directive-start (length directive))))
+                   updated-source))
+             (received-body (receive-body updated-source))
+             (exportable-document (parse-org exportable-source))
+             (before (org-lint exportable-document
+                               :checkers (list "invalid-custom-id-link")))
+             (output
+               (let ((*export-baseline-current-test* nil))
+                 (export-org exportable-document :html)))
+             (after (org-lint exportable-document
+                              :checkers (list "invalid-custom-id-link")))
+             (first-table (search "<table" output))
+             (second-table
+               (and first-table
+                    (search "<table" output
+                            :start2 (+ first-table (length "<table")))))
+             (third-table
+               (and second-table
+                    (search "<table" output
+                            :start2 (+ second-table (length "<table")))))
+             (first-ada
+               (and first-table (search "Ada" output :start2 first-table)))
+             (second-ada
+               (and second-table (search "Ada" output :start2 second-table))))
+        (with-soft-assertions
+          (expect directive-start :to-be-truthy)
+          (expect (search directive exportable-source) :to-be nil)
+          (expect (search "[[#missing]]" exportable-source) :to-be-truthy)
+          (expect received-body :to-be-truthy)
+          (expect (receive-body exportable-source) :to-equal received-body)
+          (expect (search "Ada" received-body) :to-be-truthy)
+          (expect (length before) :to-be 1)
+          (expect (length after) :to-be 1)
+          (when (= 1 (length before))
+            (expect (org-lint-diagnostic-checker (first before))
+                    :to-equal "invalid-custom-id-link")
+            (expect (org-lint-diagnostic-position (first before)) :to-be 1))
+          (when (= 1 (length after))
+            (expect (org-lint-diagnostic-checker (first after))
+                    :to-equal "invalid-custom-id-link")
+            (expect (org-lint-diagnostic-position (first after)) :to-be 1))
+          (when (and (= 1 (length before)) (= 1 (length after)))
+            (expect (org-lint-diagnostic-message (first before))
+                    :to-equal (org-lint-diagnostic-message (first after)))
+            (expect (search "missing"
+                            (org-lint-diagnostic-message (first before)))
+                    :to-be-truthy))
+          (expect first-table :to-be-truthy)
+          (expect second-table :to-be-truthy)
+          (expect third-table :to-be nil)
+          (expect first-ada :to-be-truthy)
+          (expect second-ada :to-be-truthy)))))
 
   (it "does not mutate documents on successful preparation or failure"
     (let* ((source (parse-org "#+INCLUDE: \"part.org\"" :source-name "main.org"))
