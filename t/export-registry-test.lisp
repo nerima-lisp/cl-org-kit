@@ -550,6 +550,84 @@
            (expect metadata-isolated-p :to-be t)
            (expect options-isolated-p :to-be t))))))
 
+  (it "keeps the registry snapshot for an export already in progress"
+    (let* ((backend :api-registry-export-snapshot-in-progress)
+           (document (parse-org "Snapshot body."))
+           (gate-lock (sb-thread:make-mutex :name "export snapshot test gate"))
+           (gate-waitqueue
+             (sb-thread:make-waitqueue :name "export snapshot test gate"))
+           (renderer-entered-p nil)
+           (renderer-release-p nil)
+           (worker-finished-p nil)
+           (worker-condition nil)
+           (output nil)
+           (worker nil)
+           (registered-p nil))
+      (unwind-protect
+           (progn
+             (register-export-backend
+              backend
+              :renderer
+              (lambda (context)
+                (sb-thread:with-mutex (gate-lock)
+                  (setf renderer-entered-p t)
+                  (sb-thread:condition-broadcast gate-waitqueue)
+                  (loop until renderer-release-p
+                        do (sb-thread:condition-wait gate-waitqueue gate-lock)))
+                (export-registry-test-render-views context))
+              :transcoders
+              (list
+               (cons :paragraph
+                     (lambda (node view frame context)
+                       (declare (ignore node view frame context))
+                       "old"))))
+             (setf registered-p t
+                   worker
+                   (sb-thread:make-thread
+                    (lambda ()
+                      (unwind-protect
+                           (handler-case
+                               (setf output
+                                     (export-org document backend))
+                             (error (condition)
+                               (setf worker-condition condition)))
+                        (sb-thread:with-mutex (gate-lock)
+                          (setf worker-finished-p t)
+                          (sb-thread:condition-broadcast gate-waitqueue))))
+                    :name "export registry snapshot test"))
+             (sb-thread:with-mutex (gate-lock)
+               (loop until (or renderer-entered-p worker-finished-p)
+                     do (sb-thread:condition-wait gate-waitqueue gate-lock)))
+             (when renderer-entered-p
+               (unregister-export-backend backend)
+               (setf registered-p nil)
+               (register-export-backend
+                backend
+                :renderer #'export-registry-test-render-views
+                :transcoders
+                (list
+                 (cons :paragraph
+                       (lambda (node view frame context)
+                         (declare (ignore node view frame context))
+                         "new"))))
+               (setf registered-p t))
+             (sb-thread:with-mutex (gate-lock)
+               (setf renderer-release-p t)
+               (sb-thread:condition-broadcast gate-waitqueue))
+             (sb-thread:join-thread worker)
+             (setf worker nil)
+             (with-soft-assertions
+               (expect renderer-entered-p :to-be t)
+               (expect worker-condition :to-be nil)
+               (expect output :to-equal "old")))
+        (when worker
+          (sb-thread:with-mutex (gate-lock)
+            (setf renderer-release-p t)
+            (sb-thread:condition-broadcast gate-waitqueue))
+          (sb-thread:join-thread worker))
+        (when registered-p
+          (unregister-export-backend backend)))))
+
   (it "validates renderer results before filters can replace them"
     (let ((filter-ran-p nil))
       (export-registry-test-with-root-backend
@@ -841,7 +919,112 @@
                    :to-be t))))))
 
 
-  (it "passes post-blank output to element filters"
+  (it "omits HTML post-blank before element filters and preserves filter whitespace"
+    (let* ((node (make-node :paragraph :post-blank 2))
+           (transcoder
+             (lambda (node view frame context)
+               (declare (ignore node view frame context))
+               "item"))
+           (plain-context
+             (org-kit::%make-export-render-context
+              :backend :html :limits (make-limits)
+              :ancestry
+              (list
+               (org-kit::%make-export-backend-descriptor
+                :name :html :transcoders (list (cons :paragraph transcoder))))))
+           (filtered-value nil)
+           (filtered-context
+             (org-kit::%make-export-render-context
+              :backend :html :limits (make-limits)
+              :ancestry
+              (list
+               (org-kit::%make-export-backend-descriptor
+                :name :html :transcoders (list (cons :paragraph transcoder))
+                :filters
+                (list
+                 (cons '(:element :paragraph)
+                       (list (lambda (value context)
+                               (declare (ignore context))
+                               (setf filtered-value value)
+                               (concatenate 'string value
+                                            (format nil "~%~%")))))))))))
+      (with-soft-assertions
+        (expect (org-kit::export-render-node plain-context node)
+                :to-equal "item")
+        (let ((state
+                (org-kit::%make-export-html-state
+                 :limits (make-limits)
+                 :render-context filtered-context)))
+          (org-kit::export-html-dispatch-node state node nil nil)
+          (expect (coerce (org-kit::export-html-state-output state) 'string)
+                  :to-equal (format nil "item~%~%")))
+        (expect filtered-value :to-equal "item"))))
+
+  (it "suppresses post-blank for a derived HTML backend"
+    (let* ((backend :api-registry-derived-html-post-blank)
+           (document
+             (parse-org
+              (format nil "#+OPTIONS: toc:nil num:nil~%~%x~%~%~%")))
+           (paragraph
+             (let ((paragraph nil))
+               (map-nodes
+                (lambda (node)
+                  (when (and (null paragraph)
+                             (eq (node-type node) :paragraph))
+                    (setf paragraph node)))
+                (document-root document))
+               paragraph))
+           (post-blank (node-post-blank paragraph))
+           (filtered-suffix
+             (make-string (* 2 post-blank) :initial-element #\Newline))
+           (filtered-value nil)
+           (registered-p nil)
+           (output nil))
+      (unwind-protect
+           (progn
+             (register-derived-export-backend
+              backend :html
+              :transcoders
+              (list
+               (cons :paragraph
+                     (lambda (node view frame context)
+                       (declare (ignore node view frame context))
+                       "item")))
+              :filters
+              (list
+               (cons '(:element :paragraph)
+                     (list (lambda (value context)
+                             (declare (ignore context))
+                             (setf filtered-value value)
+                             (concatenate 'string value filtered-suffix))))))
+             (setf registered-p t
+                   output (export-org document backend))
+             (with-soft-assertions
+               (expect (plusp post-blank) :to-be t)
+               (expect filtered-value :to-equal "item")
+               (expect (search (concatenate 'string "item" filtered-suffix)
+                               output)
+                       :not :to-be nil)
+               (multiple-value-bind (descriptor ancestry)
+                   (org-kit::export-registry-snapshot backend)
+                 (declare (ignore descriptor))
+                 (let* ((context
+                          (org-kit::%make-export-render-context
+                           :backend backend :document document
+                           :limits (make-limits) :ancestry ancestry))
+                        (state
+                          (org-kit::%make-export-html-state
+                           :limits (make-limits)
+                           :render-context context)))
+                   (org-kit::export-html-dispatch-node
+                    state paragraph nil nil)
+                   (expect
+                    (coerce (org-kit::export-html-state-output state) 'string)
+                    :to-equal (concatenate 'string "item" filtered-suffix))))))
+        (when registered-p
+          (unregister-export-backend backend)))))
+
+  (it "passes non-HTML post-blank to element filters"
     (let ((filtered-value nil))
       (export-registry-test-with-root-backend
        :api-registry-element-post-blank

@@ -1772,11 +1772,9 @@
                                    :table-cell-p table-cell-p
                                    :preserve-source-breaks-p
                                    preserve-source-breaks-p)))
-                        (let ((result
-                                (export-node-strip-post-blank node result)))
-                          (if (eq (export-render-context-backend context) :html)
-                              (export-html-append-checked-result state result)
-                              (export-html-write state result))))
+                        (if (eq (export-render-context-backend context) :html)
+                            (export-html-append-checked-result state result)
+                            (export-html-write state result)))
                    (setf (export-html-state-output-offset state) base-offset)))))
       (setf (export-html-state-trim-list-indent-p state) previous-trim
             (export-html-state-standalone-image-node state) previous-image-node

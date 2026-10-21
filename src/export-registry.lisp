@@ -1247,6 +1247,13 @@
   (make-string (node-post-blank node)
                :initial-element (export-node-post-blank-character node)))
 
+(defun export-render-context-html-p (context)
+  (not
+   (null
+    (some (lambda (descriptor)
+            (eq (%export-backend-descriptor-name descriptor) :html))
+          (%export-render-context-ancestry context)))))
+
 (defun export-node-strip-post-blank (node rendered)
   (let* ((count (node-post-blank node))
          (start (- (length rendered) count))
@@ -1486,8 +1493,11 @@
                    (render-with-wrapper scratch frame)
                    (let* ((native-result (sink-string scratch))
                           (with-post-blank
-                            (concatenate 'string native-result
-                                         (export-node-post-blank-string node)))
+                            (if (and (plusp (node-post-blank node))
+                                     (not (export-render-context-html-p context)))
+                                (concatenate 'string native-result
+                                             (export-node-post-blank-string node))
+                                native-result))
                           (element-result
                             (if element-filters
                                 (let ((*export-current-output-offset* base-offset))
@@ -1511,7 +1521,8 @@
             (render-scratch)
           (progn
             (render-with-wrapper sink frame)
-            (when (plusp (node-post-blank node))
+            (when (and (plusp (node-post-blank node))
+                       (not (export-render-context-html-p context)))
               (sink-write-string sink (export-node-post-blank-string node)))
             (when (and wrapper-added-text-p
                        (first wrapper-and-owner)
@@ -1617,7 +1628,8 @@
               (error 'program-error)))
           (setf result (render-implementation
                         (%export-render-frame-output-offset frame))))
-      (when (plusp (node-post-blank node))
+      (when (and (plusp (node-post-blank node))
+                 (not (export-render-context-html-p context)))
         (setf result
               (concatenate 'string result
                            (export-node-post-blank-string node))))
