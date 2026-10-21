@@ -55,7 +55,7 @@
   (and (plusp (length text))
        (every (lambda (character)
                 (or (babel-ascii-digit-p character)
-                    (find character "e.+- ")))
+                    (find character "eE.+- ")))
               text)))
 
 (defun babel-parse-number-result (number end text)

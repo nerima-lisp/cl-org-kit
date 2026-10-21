@@ -408,6 +408,14 @@ no file is read or written and no process is started. Unmatched links are left
 alone. Ambiguous source names and malformed linked sections signal
 ORG-BABEL-ERROR."))
 
+  (it "pins the Babel shell reference executor contract"
+    (expect (documentation 'make-babel-shell-reference-executor 'function)
+            :to-equal
+            "Return an opt-in shell executor that delegates process execution to RUNNER.
+SHELL is passed to RUNNER with the expanded SCRIPT, optional STDIN, and raw CMDLINE.
+RUNNER must return standard output as a string. This helper starts no process.
+Persistent shell sessions are unsupported; :stdin and :cmdline use one-shot scripts."))
+
   (it "documents every exported symbol"
     (with-soft-assertions
       (dolist (name (sort (external-symbol-names) #'string<))

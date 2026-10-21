@@ -118,33 +118,366 @@
       (expect (notany (lambda (size) (> size 1024)) range-sizes) :to-be t)
       (expect (count 1024 range-sizes) :to-be 2))))
 
-  (it "uses the explicit shell runner adapter without starting a process"
-    (let* ((document
-             (parse-org
-              (babel-execution-test-lines
-               "#+NAME: task"
-               "#+BEGIN_SRC shell :session one"
-               "echo ready"
-               "#+END_SRC")))
-           (block (babel-execution-test-named-source-block document "task"))
-           (registry (org-kit:make-callback-registry))
-           (runner-calls 0)
-           (runner
-             (lambda (body parameters variables)
-               (incf runner-calls)
-               (expect body :to-equal "echo ready")
-               (expect (cdr (assoc "SESSION" parameters :test #'string=))
-                       :to-equal "one")
-               (expect variables :to-equal nil)
-               "runner result"))
-           (adapter (org-kit:make-babel-shell-reference-executor runner)))
-      (org-kit:register-babel-executor registry "shell" adapter)
-      (let ((result (org-kit:execute-babel-source-block document block registry)))
-        (with-soft-assertions
-          (expect (eq adapter runner) :to-be t)
-          (expect (org-kit:babel-execution-result-value result)
-                  :to-equal "runner result")
-          (expect runner-calls :to-be 1)))))
+  (it "matches Org's session and async selection for one-shot runs"
+  (let* ((runner-calls 0)
+         (executor
+           (org-kit:make-babel-shell-reference-executor
+            (lambda (shell script stdin cmdline)
+              (declare (ignore shell script stdin cmdline))
+              (incf runner-calls)
+              "runner result")))
+         (session-condition
+           (babel-execution-test-condition
+            (lambda ()
+              (funcall executor "body" '(("SESSION" . "build")) nil))))
+         (async-value
+           (funcall executor "body" '(("ASYNC" . "yes")) nil))
+         (external-session-value
+           (funcall executor
+                    "body"
+                    '(("SESSION" . "build") ("CMDLINE" . ""))
+                    nil)))
+    (with-soft-assertions
+      (expect (typep session-condition 'org-babel-error) :to-be t)
+      (expect (org-babel-error-reason session-condition)
+              :to-be :unsupported-session)
+      (expect async-value :to-equal "runner result")
+      (expect external-session-value :to-equal "runner result")
+      (expect runner-calls :to-be 2))))
+  (it "enforces shell runner input and output limits"
+  (let* ((input-document
+           (parse-org "" :limits (make-limits :max-input-length 3)))
+         (output-document
+           (parse-org "" :limits (make-limits :max-output-length 3)))
+         (output-octet-document
+           (parse-org "" :limits (make-limits :max-output-octets 3)))
+         (runner-calls 0)
+         (runner-output "four")
+         (executor
+           (org-kit:make-babel-shell-reference-executor
+            (lambda (shell script stdin cmdline)
+              (declare (ignore shell script stdin cmdline))
+              (incf runner-calls)
+              runner-output)))
+         (input-character-condition
+           (let ((org-kit::*babel-execution-document* input-document))
+             (babel-execution-test-condition
+              (lambda () (funcall executor "xx" nil nil)))))
+         (input-octet-condition
+           (let ((org-kit::*babel-execution-document* input-document))
+             (babel-execution-test-condition
+              (lambda () (funcall executor "é" nil nil)))))
+         (output-condition
+           (let ((org-kit::*babel-execution-document* output-document))
+             (babel-execution-test-condition
+              (lambda () (funcall executor "x" nil nil)))))
+         (output-octet-condition
+           (let ((org-kit::*babel-execution-document* output-octet-document))
+             (setf runner-output "éé")
+             (babel-execution-test-condition
+              (lambda () (funcall executor "x" nil nil))))))
+    (with-soft-assertions
+      (expect (typep input-character-condition 'org-resource-limit-error)
+              :to-be t)
+      (expect (org-resource-limit-error-limit-name input-character-condition)
+              :to-be :max-input-length)
+      (expect (org-resource-limit-error-actual input-character-condition)
+              :to-be 4)
+      (expect (typep input-octet-condition 'org-resource-limit-error)
+              :to-be t)
+      (expect (org-resource-limit-error-limit-name input-octet-condition)
+              :to-be :max-input-length)
+      (expect (org-resource-limit-error-actual input-octet-condition)
+              :to-be 4)
+      (expect (typep output-condition 'org-resource-limit-error) :to-be t)
+      (expect (org-resource-limit-error-limit-name output-condition)
+              :to-be :max-output-length)
+      (expect (org-resource-limit-error-actual output-condition) :to-be 4)
+      (expect (typep output-octet-condition 'org-resource-limit-error)
+              :to-be t)
+      (expect (org-resource-limit-error-limit-name output-octet-condition)
+              :to-be :max-output-octets)
+      (expect (org-resource-limit-error-actual output-octet-condition)
+              :to-be 4)
+      (expect runner-calls :to-be 2))))
+  (it "returns and renders the shell exit status for value tables"
+  (let* ((document
+           (parse-org
+            (babel-execution-test-lines
+             "#+NAME: task"
+             "#+BEGIN_SRC shell :results value table"
+             "exit 0"
+             "#+END_SRC")))
+         (block (babel-execution-test-named-source-block document "task"))
+         (registry (org-kit:make-callback-registry))
+         (observed-script nil))
+    (org-kit:register-babel-executor
+     registry "shell"
+     (org-kit:make-babel-shell-reference-executor
+      (lambda (shell script stdin cmdline)
+        (declare (ignore shell stdin cmdline))
+        (setf observed-script script)
+        (format nil "0~%"))))
+    (let* ((result (org-kit:execute-babel-source-block document block registry))
+           (updated (org-kit:edit-result-updated-document
+                     (org-kit:babel-execution-result-edit-result result))))
+      (with-soft-assertions
+        (expect observed-script :to-equal (format nil "exit 0~%echo $?"))
+        (expect (org-kit:babel-execution-result-value result) :to-be 0)
+        (expect (document-text updated) :to-contain "| 0 |")))))
+  (it "imports output tables like Org shell Babel"
+  (let* ((document
+           (parse-org
+            (babel-execution-test-lines
+             "#+NAME: task"
+             "#+BEGIN_SRC shell :results output table"
+             "printf rows"
+             "#+END_SRC")))
+         (block (babel-execution-test-named-source-block document "task"))
+         (registry (org-kit:make-callback-registry))
+         (runner-output (format nil "1~Calpha~%2~Cbeta~%" #\Tab #\Tab)))
+    (org-kit:register-babel-executor
+     registry "shell"
+     (org-kit:make-babel-shell-reference-executor
+      (lambda (shell script stdin cmdline)
+        (declare (ignore shell script stdin cmdline))
+        runner-output)))
+    (let* ((result (org-kit:execute-babel-source-block document block registry))
+           (edit (org-kit:babel-execution-result-edit-result result))
+           (updated (org-kit:edit-result-updated-document edit)))
+      (with-soft-assertions
+        (expect (org-kit:babel-execution-result-value result)
+                :to-equal '((1 "alpha") (2 "beta")))
+        (expect (document-text updated)
+                :to-contain (babel-execution-test-lines
+                             "| 1 | alpha |" "| 2 | beta |"))))))
+  (it "preserves empty raw shell output"
+  (let ((executor
+          (org-kit:make-babel-shell-reference-executor
+           (lambda (shell script stdin cmdline)
+             (declare (ignore shell script stdin cmdline))
+             ""))))
+    (expect (funcall executor "body" '(("RESULTS" . "output")) nil)
+            :to-equal "")))
+  (it "imports shell output and value using Org Babel table rules"
+  (let* ((document (make-document ""))
+         (runner-output nil)
+         (executor
+           (org-kit:make-babel-shell-reference-executor
+            (lambda (shell script stdin cmdline)
+              (declare (ignore shell script stdin cmdline))
+              runner-output)))
+         (table-cases
+ (list
+  (list (format nil "first,second~%\"with,comma\",3~%")
+        '(("first" "second") ("with,comma" 3)))
+  (list (format nil "first second~%one two~%")
+        '(("first" "second") ("one" "two")))
+  (list (format nil "---~Cignored~%1~Calpha~%" #\Tab #\Tab)
+        '(("---" "ignored") (1 "alpha")))
+  (list (format nil "|a|b|~%|c|d|~%")
+        '(("" "a" "b") ("" "c" "d")))
+  (list (format nil "| a | b |~%| 1 | 2 |~%")
+        '(("" "" "a" "" "" "b" "")
+          ("" "" 1 "" "" 2 "")))
+  (list "---" "---")
+  (list "1E3" 1000.0d0)
+  (list (format nil "~{~A~%~}" (make-list 1000 :initial-element "row")) nil)
+  (list (format nil "\"\"~Cempty~%" #\Tab) (list (list "" "empty")))
+  (list (format nil "a~Cb~Cc~%1~C2~%" #\Tab #\Tab #\Tab #\Tab)
+        '(("a" "b" "c") (1 2 "")))
+  (list (format nil "a~Cb~%~%c~Cd~Ce~%" #\Tab #\Tab #\Tab #\Tab)
+        '(("a" "b" "") ("" "" "") ("c" "d" "e")))
+  (list (format nil "key,value~%\"a\\nb\",\"1\"~%")
+        '(("key" "value") ("a\\nb" 1)))
+  (list "" nil)
+  (list (format nil "~%") nil)
+  (list (format nil "a~%~%") nil)
+  (list (format nil "a~%   ~%") (quote (("a") (""))))
+  (list (format nil "~%   ~%") (quote (("") ("")))))))
+    (let ((org-kit::*babel-execution-document* document))
+      (setf runner-output "plain stdout")
+      (expect (funcall executor "body" '(("RESULTS" . "output")) nil)
+              :to-equal "plain stdout")
+      (progn
+  (dolist (case table-cases)
+    (setf runner-output (first case))
+    (expect
+     (funcall executor "body" '(("RESULTS" . "output table")) nil)
+     :to-equal (second case)))
+  (setf runner-output (format nil "discarded~%1~Calpha~%" #\Tab))
+  (expect (funcall executor "body" '(("RESULTS" . "value")) nil)
+          :to-equal '((1 "alpha")))
+  (setf runner-output (format nil "previous~%status~%"))
+  (expect (funcall executor "body" '(("RESULTS" . "value output")) nil)
+          :to-equal "status")))))
+  (it "passes shell script, stdin, and raw cmdline to the runner"
+  (let* ((document (make-document ""))
+         (runner-arguments nil)
+         (executor
+           (org-kit:make-babel-shell-reference-executor
+            (lambda (shell script stdin cmdline)
+              (setf runner-arguments (list shell script stdin cmdline))
+              "runner result")
+            :shell "/bin/bash"))
+         (parameters '(("PROLOGUE" . "setup")
+                       ("EPILOGUE" . "finish")
+                       ("RESULTS" . "output")
+                       ("STDIN" . "\"input data\"")
+                       ("CMDLINE" . "--flag \"two words\"")
+                       ("SHEBANG" . "#!/usr/bin/env bash")
+                       ("PADLINE" . "no")))
+         (expected-script
+           (babel-execution-test-lines
+            "#!/usr/bin/env bash"
+            "setup"
+            "echo ready"
+            "finish")))
+    (let ((org-kit::*babel-execution-document* document))
+      (funcall executor "echo ready" parameters nil))
+    (expect runner-arguments
+            :to-equal
+            (list "/bin/bash" expected-script "input data"
+                  "--flag \"two words\""))))
+  (it "selects script mode from a shebang alone"
+    (let* ((runner-arguments nil)
+           (executor
+             (org-kit:make-babel-shell-reference-executor
+              (lambda (shell script stdin cmdline)
+                (setf runner-arguments (list shell script stdin cmdline))
+                "runner result"))))
+      (funcall executor
+               "body"
+               (list (cons "SHEBANG" "#!/usr/bin/env bash")
+                     (cons "PADLINE" "no"))
+               nil)
+      (expect runner-arguments
+              :to-equal
+              (list "sh" (format nil "#!/usr/bin/env bash~%body") nil nil))))
+  (it "resolves named shell stdin tables through the executor"
+  (let* ((document
+           (parse-org
+            (babel-execution-test-lines
+             "#+NAME: payload"
+             "| name | value |"
+             "| one | 1 |"
+             ""
+             "#+NAME: task"
+             "#+BEGIN_SRC shell :stdin payload :results output"
+             "cat"
+             "#+END_SRC")))
+         (block (babel-execution-test-named-source-block document "task"))
+         (registry (org-kit:make-callback-registry))
+         (runner-arguments nil)
+         (expected-stdin (format nil "name~Cvalue~%one~C1" #\Tab #\Tab))
+         (executor
+           (org-kit:make-babel-shell-reference-executor
+            (lambda (shell script stdin cmdline)
+              (setf runner-arguments (list shell script stdin cmdline))
+              stdin))))
+    (org-kit:register-babel-executor registry "shell" executor)
+    (let ((result (org-kit:execute-babel-source-block document block registry)))
+      (with-soft-assertions
+        (expect runner-arguments
+                :to-equal
+                (list "sh"
+                      (babel-execution-test-lines
+                       "#!/usr/bin/env sh" "" "cat")
+                      expected-stdin nil))
+        (expect (org-kit:babel-execution-result-value result)
+                :to-equal expected-stdin)))))
+  (it "matches Org generic and fish shell variable assignments"
+  (let* ((document (make-document ""))
+         (parameters '(("PROLOGUE" . "setup")
+                       ("EPILOGUE" . "finish")
+                       ("RESULTS" . "output")))
+         (variables '(("message" . "it's")
+                      ("items" . ("red" "blue"))
+                      ("records" . (("one" "1") ("two" "2")))))
+         (records-text (format nil "records='one~C1~%two~C2'"
+                               #\Tab #\Tab))
+         (fish-records-text (format nil "set records 'one~C1~%two~C2'"
+                                    #\Tab #\Tab))
+         (cases
+           (list
+            (list "/bin/sh"
+                  (babel-execution-test-lines
+                   "setup" "message='it'\"'\"'s'" "items='red" "blue'"
+                   records-text "echo ready" "finish"))
+            (list "/usr/bin/fish"
+                  (babel-execution-test-lines
+                   "setup" "set message 'it'\"'\"'s'" "set items 'red"
+                   "blue'" fish-records-text "echo ready" "finish")))))
+    (dolist (case cases)
+      (let* ((shell (first case))
+             (expected-script (second case))
+             (observed-script nil)
+             (executor
+               (org-kit:make-babel-shell-reference-executor
+                (lambda (runner-shell script stdin cmdline)
+                  (declare (ignore runner-shell stdin cmdline))
+                  (setf observed-script script)
+                  "runner result")
+                :shell shell)))
+        (let ((org-kit::*babel-execution-document* document))
+          (funcall executor "echo ready" parameters variables))
+        (expect observed-script :to-equal expected-script)))))
+  (it "matches Emacs Org 9.8.10 shell variable assignments and body expansion"
+  (let* ((document (make-document ""))
+         (runner-arguments nil)
+         (executor
+           (org-kit:make-babel-shell-reference-executor
+            (lambda (shell script stdin cmdline)
+              (setf runner-arguments (list shell script stdin cmdline))
+              "runner result")
+            :shell "/bin/bash"))
+         (parameters '( ("PROLOGUE" . "setup")
+                        ("EPILOGUE" . "finish")
+                        ("RESULTS" . "output")))
+         (variables '(("message" . "it's")
+                      ("items" . ("red" "blue"))
+                      ("records" . (("one" "1") ("two" "2")))))
+         (expected-script
+           (babel-execution-test-lines
+            "setup"
+            "message='it'\"'\"'s'"
+            "unset items"
+            "declare -a items=( 'red' 'blue' )"
+            "unset records"
+            "declare -A records"
+            "records['one']='1'"
+            "records['two']='2'"
+            "echo ready"
+            "finish")))
+    (let ((org-kit::*babel-execution-document* document))
+      (funcall executor "echo ready" parameters variables))
+    (expect runner-arguments
+            :to-equal (list "/bin/bash" expected-script nil nil))))
+  (it "uses the shell reference executor without starting a process"
+  (let* ((document
+           (parse-org
+            (babel-execution-test-lines
+             "#+NAME: task"
+             "#+BEGIN_SRC shell"
+             "echo ready"
+             "#+END_SRC")))
+         (block (babel-execution-test-named-source-block document "task"))
+         (registry (org-kit:make-callback-registry))
+         (runner-calls 0)
+         (runner-arguments nil)
+         (runner (lambda (shell script stdin cmdline)
+                   (incf runner-calls)
+                   (setf runner-arguments (list shell script stdin cmdline))
+                   "runner result"))
+         (adapter (org-kit:make-babel-shell-reference-executor runner)))
+    (org-kit:register-babel-executor registry "shell" adapter)
+    (let ((result (org-kit:execute-babel-source-block document block registry)))
+      (with-soft-assertions
+        (expect (eq adapter runner) :to-be nil)
+        (expect runner-arguments :to-equal '("sh" "echo ready" nil nil))
+        (expect (org-kit:babel-execution-result-value result)
+                :to-equal "runner result")
+        (expect runner-calls :to-be 1)))))
 
   (it "keeps the Common Lisp reference executor opt-in and resolves variables privately"
     (let* ((variable-name "executor-only-variable")

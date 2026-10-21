@@ -393,7 +393,7 @@
              (babel-results-test-condition
               (lambda ()
                 (babel-results-test-update
-                 source "not a table" (quote (("RESULTS" . "table"))))))))
+                 source (quote (1 . 2)) (quote (("RESULTS" . "table"))))))))
       (with-soft-assertions
         (expect (typep invalid-document 'type-error) :to-be t)
         (expect (typep invalid-block 'type-error) :to-be t)

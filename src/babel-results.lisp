@@ -152,14 +152,27 @@
                             "Babel result format requires a sequence" value))))
 
 (defun babel-results-write-table (stream value newline)
-  (dolist (row (babel-results-sequence value))
-    (write-char #\| stream)
-    (dolist (cell (babel-results-sequence row))
-      (write-char #\Space stream)
-      (babel-results-write-value stream cell newline)
-      (write-char #\Space stream)
-      (write-char #\| stream))
-    (write-string newline stream)))
+  (let* ((items
+           (cond
+             ((and (listp value)
+                   (integerp (edit-proper-list-length value)))
+              value)
+             ((and (vectorp value) (not (stringp value)))
+              (coerce value 'list))
+             (t (list value))))
+         (first-item (first items))
+         (row-p (or (listp first-item)
+                    (and (vectorp first-item)
+                         (not (stringp first-item)))))
+         (rows (if (and items row-p) items (mapcar #'list items))))
+    (dolist (row rows)
+      (write-char #\| stream)
+      (dolist (cell (babel-results-sequence row))
+        (write-char #\Space stream)
+        (babel-results-write-value stream cell newline)
+        (write-char #\Space stream)
+        (write-char #\| stream))
+      (write-string newline stream))))
 
 (defun babel-results-write-list (stream value newline)
   (dolist (item (babel-results-sequence value))
@@ -194,13 +207,14 @@
   (let* ((stream (make-instance 'babel-results-bounded-stream :document document))
          (output stream)
          (newline (babel-results-newline document offset))
-         (render-value (if (string= channel "output")
-                           (if (stringp value)
-                               value
-                               (babel-results-error
-                                :unsupported-result-channel
-                                "Babel output results must be strings" value))
-                           value))
+         (render-value (if (and (string= channel "output")
+         (not (string= format "table")))
+    (if (stringp value)
+        value
+        (babel-results-error
+         :unsupported-result-channel
+         "Babel output results must be strings" value))
+    value))
          (language (or language (node-property block :language) "text")))
     (when (and (string= format "code")
                (or (not (stringp language))
