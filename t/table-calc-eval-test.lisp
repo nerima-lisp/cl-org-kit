@@ -1156,7 +1156,7 @@
                           #\Newline #\Tab #\Page #\Backspace #\Return #\" #\\))
                  (source
                   (format nil
-                          "  ~A(org-sbe sample (bare $ \"literal text\") (number $ 7) (list $ (1 2)) (empty) (many 1 2) (escaped $ \"line\\nnext\\tpage\\fform\\bback\\rreturn quote\\\" slash\\\\end\") (parsed-many \"3\" \"4\"))"
+                          "  ~A(org-sbe sample (bare $ \"literal text\") (number $ 7) (list $ (1 2)) (empty) (many 1 2) (literal-many $ \"3\" $ \"4\") (escaped $ \"line\\nnext\\tpage\\fform\\bback\\rreturn quote\\\" slash\\\\end\") (parsed-many \"3\" \"4\"))"
                           quote-character))
                  (received nil)
                  (result
@@ -1176,6 +1176,7 @@
                                 (cons "list" '(1 2))
                                 (cons "empty" "")
                                 (cons "many" '(1 2))
+                                (cons "literal-many" (list "3" "4"))
                                 (cons "escaped" escaped-value)
                                 (cons "parsed-many" '(3 4)))
                           (list (list "bare" (list "literal text") (list t))
@@ -1183,6 +1184,7 @@
                                 (list "list" (list '(1 2)) (list t))
                                 (list "empty" nil nil)
                                 (list "many" (list 1 2) (list nil nil))
+                                (list "literal-many" (list "3" "4") (list t t))
                                 (list "escaped" (list escaped-value) (list t))
                                 (list "parsed-many" (list 3 4) (list nil nil)))))))
           (let ((evaluator-inputs nil)
