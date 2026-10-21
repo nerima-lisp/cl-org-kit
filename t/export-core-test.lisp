@@ -755,7 +755,7 @@
           (expect (stringp (org-export-unsupported-syntax-source unsupported))
                   :to-be t)))))
 
-  (it "registers every node type and rejects unsupported or unknown syntax"
+  (it "registers node types and permits custom keywords referenced by static macros"
     (let* ((known-types (sort (copy-list (node-types)) #'string<
                               :key #'symbol-name))
            (transcoder-mapped-types
@@ -788,7 +788,18 @@
            (unknown-keyword
              (export-core-test-catch-error
               (lambda ()
-                (export-core-test-preparation unknown-keyword-source)))))
+                (export-core-test-preparation unknown-keyword-source))))
+           (macro-template-preparation
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+MACRO: m {{{keyword(TOPIC)}}}"
+               "#+TOPIC: value"
+               "{{{m}}}")))
+           (macro-template-texts
+             (mapcar
+              (lambda (view)
+                (getf (org-kit::export-view-payload view) :expanded-text))
+              (export-core-test-view-nodes macro-template-preparation :macro))))
       (with-soft-assertions
         (expect (every (lambda (types) (equal types known-types)) transcoder-mapped-types)
                 :to-be t)
@@ -803,7 +814,26 @@
           (expect (org-export-unsupported-syntax-feature unknown-keyword)
                   :to-be :unknown-keyword)
           (expect (org-export-unsupported-syntax-position unknown-keyword)
-                  :to-be (search "#+UNSUPPORTED" unknown-keyword-source))))))
+                  :to-be (search "#+UNSUPPORTED" unknown-keyword-source)))
+        (progn
+          (expect macro-template-texts
+                  :to-equal '("{{{keyword(TOPIC)}}}" "value"))
+          (expect
+           (mapcar
+            (lambda (view)
+              (getf (org-kit::export-view-payload view) :expanded-text))
+            (export-core-test-view-nodes
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+MACRO: m {{{keyword($1)}}}"
+               "#+TOPIC: value"
+               "#+OTHER: second"
+               "{{{m(TOPIC)}}}"
+               "{{{m(OTHER)}}}"))
+             :macro))
+           :to-equal
+           '("{{{keyword(TOPIC)}}}" "value"
+             "{{{keyword(OTHER)}}}" "second"))))))
 
   (it "retains common citation processor keywords during preparation"
     (let* ((preparation
@@ -910,11 +940,11 @@
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation "#+MACRO:"))))
-           (duplicate-title
+           (duplicate-language
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation
-                 (export-core-test-lines "#+TITLE: first" "#+TITLE: second")))))
+                 (export-core-test-lines "#+LANGUAGE: en" "#+LANGUAGE: ja")))))
            (duplicate-macro
              (export-core-test-catch-error
               (lambda ()
@@ -939,9 +969,9 @@
                          (typep condition 'org-export-unsupported-syntax))
                        option-failures)
                 :to-be t)
-        (expect (typep duplicate-title 'org-export-unsupported-syntax) :to-be t)
-        (when (typep duplicate-title 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature duplicate-title)
+        (expect (typep duplicate-language 'org-export-unsupported-syntax) :to-be t)
+        (when (typep duplicate-language 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-feature duplicate-language)
                   :to-be :duplicate-keyword))
         (expect (typep duplicate-macro 'org-export-unsupported-syntax) :to-be t)
         (when (typep duplicate-macro 'org-export-unsupported-syntax)
@@ -975,13 +1005,6 @@
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation "#+MACRO: bad$ value"))))
-           (unsupported-parameter
-             (export-core-test-catch-error
-              (lambda ()
-                (export-core-test-preparation
-                 (export-core-test-lines
-                  "#+MACRO: third $3"
-                  "{{{third(value)}}}")))))
            (short-dollar-preparation
              (export-core-test-preparation
               (export-core-test-lines "#+MACRO: short $" "{{{short}}}")))
@@ -996,12 +1019,16 @@
              (first (export-core-test-view-nodes nondigit-preparation :macro)))
            (nondigit-parameter (getf (org-kit::export-view-payload nondigit-view)
                                     :expanded-text))
-           (multiple-digit-source
-             (export-core-test-lines "#+MACRO: many $12" "{{{many}}}"))
-           (multiple-digit-parameter
-             (export-core-test-catch-error
-              (lambda ()
-                (export-core-test-preparation multiple-digit-source)))))
+           (multiple-digit-preparation
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+MACRO: many [$3][$12][$13][$0][$000][$x]"
+               "{{{many(one,two,three,four,five,six,seven,eight,nine,ten,eleven,twelve)}}}")))
+           (multiple-digit-view
+             (first (export-core-test-view-nodes multiple-digit-preparation :macro)))
+           (multiple-digit-parameters
+             (getf (org-kit::export-view-payload multiple-digit-view)
+                   :expanded-text)))
       (with-soft-assertions
         (expect (getf (org-kit::export-view-payload macro-view) :expanded-text)
                 :to-equal "Hello, World! again / World")
@@ -1022,44 +1049,299 @@
         (when (typep invalid-macro-name 'org-export-unsupported-syntax)
           (expect (org-export-unsupported-syntax-feature invalid-macro-name)
                   :to-be :invalid-macro))
-        (expect (typep unsupported-parameter 'org-export-unsupported-syntax)
-                :to-be t)
-        (when (typep unsupported-parameter 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature unsupported-parameter)
-                  :to-be :unsupported-macro-parameter))
         (expect short-dollar :to-equal "$")
         (expect nondigit-parameter :to-equal "$x")
-        (expect (typep multiple-digit-parameter 'org-export-unsupported-syntax)
-                :to-be t)
-        (when (typep multiple-digit-parameter 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature multiple-digit-parameter)
-                  :to-be :unsupported-macro-parameter)
-          (expect (org-export-unsupported-syntax-position multiple-digit-parameter)
-                  :to-be (search "$12" multiple-digit-source))))))
+        (expect multiple-digit-parameters
+                :to-equal "[three][twelve][][][][$x]"))))
 
-  (it "rejects long numeric options and macro parameters"
+  (it "rejects long numeric options and expands oversized macro indices to empty"
     (let* ((digits (make-string 4096 :initial-element #\9))
            (option-error
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation
                  (concatenate 'string "#+OPTIONS: toc:" digits)))))
-           (macro-error
-             (export-core-test-catch-error
-              (lambda ()
-                (export-core-test-preparation
-                 (export-core-test-lines
-                  (concatenate 'string "#+MACRO: many $" digits)
-                  "{{{many}}}"))))))
+           (macro-preparation
+             (export-core-test-preparation
+              (export-core-test-lines
+               (concatenate 'string "#+MACRO: many $" digits)
+               "{{{many}}}")))
+           (macro-view (first (export-core-test-view-nodes macro-preparation :macro)))
+           (macro-text (getf (org-kit::export-view-payload macro-view)
+                             :expanded-text)))
       (with-soft-assertions
         (expect (typep option-error 'org-export-unsupported-syntax) :to-be t)
         (when (typep option-error 'org-export-unsupported-syntax)
           (expect (org-export-unsupported-syntax-feature option-error)
                   :to-be :invalid-option))
-        (expect (typep macro-error 'org-export-unsupported-syntax) :to-be t)
-        (when (typep macro-error 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature macro-error)
-                  :to-be :unsupported-macro-parameter)))))
+        (expect macro-text :to-equal ""))))
+  (it "expands title, author, email, date, and keyword builtins"
+    (let* ((source
+             (export-core-test-lines
+              "#+TITLE: Parsed $1 title"
+              "#+TITLE: duplicate"
+              "#+AUTHOR: Parsed $1 author"
+              "#+AUTHOR: second author"
+              "#+EMAIL: parsed+$1@example.test"
+              "#+EMAIL: ignored@example.test"
+              "#+DATE: $1 literal date"
+              "#+DATE: second date"
+              "#+TOPIC: first $1"
+              "#+TOPIC: second"
+              "{{{title(name)}}}"
+              "{{{author(name)}}}"
+              "{{{email(test)}}}"
+              "{{{date(now)}}}"
+              "{{{keyword(EMAIL)}}}"
+              "{{{keyword(TOPIC)}}}"
+              "{{{keyword(MISSING)}}}"))
+           (preparation (export-core-test-preparation source))
+           (metadata (org-kit::export-preparation-metadata preparation))
+           (expanded
+             (mapcar (lambda (view)
+                       (getf (org-kit::export-view-payload view) :expanded-text))
+                     (export-core-test-view-nodes preparation :macro)))
+           (overridden
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+TITLE: Parsed title"
+               "#+AUTHOR: Parsed author"
+               "#+AUTHOR: second author"
+               "#+EMAIL: parsed@example.test"
+               "#+DATE: 2025-05-04"
+               "#+DATE: second date"
+               "#+MACRO: title Local title $1"
+               "#+MACRO: keyword Local keyword $1"
+               "{{{title(context)}}}"
+               "{{{author}}}"
+               "{{{email}}}"
+               "{{{date}}}"
+               "{{{keyword(TITLE)}}}")
+              :context (make-export-context
+                        :title "Context title"
+                        :author "Context author"
+                        :date "Context date")))
+           (overridden-metadata
+             (org-kit::export-preparation-metadata overridden))
+           (overridden-texts
+             (mapcar
+              (lambda (view)
+                (getf (org-kit::export-view-payload view) :expanded-text))
+              (export-core-test-view-nodes overridden :macro))))
+      (with-soft-assertions
+        (expect expanded
+                :to-equal '("Parsed name title duplicate"
+                            "Parsed name author second author"
+                            "parsed+test@example.test"
+                            "now literal date"
+                            "parsed+$1@example.test ignored@example.test"
+                            "first $1 second"
+                            ""))
+        (expect (getf metadata :date)
+                :to-equal "$1 literal date second date")
+        (expect overridden-texts
+                :to-equal '("Local title context" "Context author"
+                            "parsed@example.test" "2025-05-04"
+                            "Local keyword TITLE"))
+        (expect (getf overridden-metadata :date) :to-equal "Context date"))))
+  (it "expands context-backed built-in macros"
+  (let* ((time-context
+           (make-time-context
+            :reference-time (make-org-time-value "2030-01-02T03:04:05")
+            :zone (make-fixed-time-zone 0)))
+         (time-preparation
+           (export-core-test-preparation
+            "{{{time(%F %T %a|%^a %A|%^A %b|%^b %B|%^B %-d %_d %0d)}}}"
+            :context (make-export-context :time-context time-context)))
+         (time-texts
+           (mapcar (lambda (view)
+                     (getf (org-kit::export-view-payload view) :expanded-text))
+                   (export-core-test-view-nodes time-preparation :macro)))
+         (missing-time
+           (export-core-test-catch-error
+            (lambda ()
+              (export-core-test-preparation "{{{time(%F)}}}"))))
+         (missing-time-format
+           (export-core-test-catch-error
+            (lambda ()
+              (export-core-test-preparation
+               "{{{time}}}"
+               :context (make-export-context :time-context time-context)))))
+         (modification-preparation
+           (export-core-test-preparation
+            "{{{modification-time(%F %T)}}}"
+            :context
+            (make-export-context
+             :extensions (list (cons :modification-time time-context)))))
+         (modification-texts
+           (mapcar (lambda (view)
+                     (getf (org-kit::export-view-payload view) :expanded-text))
+                   (export-core-test-view-nodes modification-preparation :macro)))
+         (missing-modification-preparation (export-core-test-preparation "{{{modification-time}}}"))
+         (missing-modification-format
+           (export-core-test-catch-error
+            (lambda ()
+              (export-core-test-preparation
+               "{{{modification-time}}}"
+               :context
+               (make-export-context
+                :extensions (list (cons :modification-time time-context)))))))
+         (input-file-preparation
+           (org-kit::export-prepare
+            (parse-org "{{{input-file}}}" :source-name "docs/guide.org")
+            :html))
+         (missing-input-file-preparation
+           (export-core-test-preparation "{{{input-file}}}"))
+         (property-preparation
+           (export-core-test-preparation
+            (export-core-test-lines
+             "* Heading"
+             ":PROPERTIES:"
+             ":VALUE: first"
+             ":CUSTOM_ID: custom"
+             ":ID: id-value"
+             ":END:"
+             "{{{property(VALUE)}}}"
+             "{{{property(MISSING)}}}"
+             "{{{property(VALUE,Heading)}}}"
+             "{{{property(VALUE,#custom)}}}"
+             "{{{property(VALUE,id:id-value)}}}")))
+         (property-texts
+           (mapcar (lambda (view)
+                     (getf (org-kit::export-view-payload view) :expanded-text))
+                   (export-core-test-view-nodes property-preparation :macro)))
+         (missing-property-location
+           (export-core-test-catch-error
+            (lambda ()
+              (export-core-test-preparation
+               (export-core-test-lines
+                "* Heading"
+                "{{{property(VALUE,Absent)}}}")))))
+         (counter-preparation
+           (export-core-test-preparation
+            (export-core-test-lines
+             "{{{n(step)}}} {{{n(step)}}} {{{n(step,-)}}}"
+             "{{{n(step,5)}}} {{{n(step)}}} {{{n(step,restart)}}}")))
+         (counter-texts
+           (mapcar (lambda (view)
+                     (getf (org-kit::export-view-payload view) :expanded-text))
+                   (export-core-test-view-nodes counter-preparation :macro)))
+         (results-preparation
+           (export-core-test-preparation
+            (export-core-test-lines
+             "#+RESULTS: ignored"
+             "{{{results(value)}}}"
+             "{{{results}}}")))
+         (results-texts
+           (mapcar (lambda (view)
+                     (getf (org-kit::export-view-payload view) :expanded-text))
+                   (export-core-test-view-nodes results-preparation :macro)))
+         (overridden-preparation
+           (export-core-test-preparation
+            (export-core-test-lines
+             "#+MACRO: n Local $1"
+             "{{{n(step)}}}")))
+         (overridden-texts
+           (mapcar (lambda (view)
+                     (getf (org-kit::export-view-payload view) :expanded-text))
+                   (export-core-test-view-nodes overridden-preparation :macro))))
+    (with-soft-assertions
+      (progn
+        (expect
+         time-texts
+         :to-equal
+         '("2030-01-02 03:04:05 Wed|WED Wednesday|WEDNESDAY Jan|JAN January|JANUARY 2  2 02"))
+        (expect
+         (flet ((time-zone-macro-texts (offset)
+                  (let ((preparation
+                          (export-core-test-preparation
+                           "{{{time(%z)}}}"
+                           :context
+                           (make-export-context
+                            :time-context
+                            (make-time-context
+                             :reference-time
+                             (make-org-time-value "2030-01-02T03:04:05")
+                             :zone (make-fixed-time-zone offset))))))
+                    (mapcar
+                     (lambda (view)
+                       (getf (org-kit::export-view-payload view) :expanded-text))
+                     (export-core-test-view-nodes preparation :macro)))))
+           (list (time-zone-macro-texts 0)
+                 (time-zone-macro-texts 330)))
+         :to-equal '(("+0000") ("+0530"))))
+      (expect (typep missing-time 'org-export-unsupported-syntax) :to-be t)
+      (when (typep missing-time 'org-export-unsupported-syntax)
+        (expect (org-export-unsupported-syntax-feature missing-time)
+                :to-be :macro-context-required))
+      (progn
+        (progn
+          (expect modification-texts :to-equal '("2030-01-02 03:04:05"))
+          (expect
+           (flet ((modification-macro-texts (macro-text vc-context)
+                    (let ((preparation
+                            (export-core-test-preparation
+                             macro-text
+                             :context
+                             (make-export-context
+                              :extensions
+                              (append
+                               (list (cons :modification-time time-context))
+                               (when vc-context
+                                 (list (cons :modification-time-vc
+                                             vc-context))))))))
+                      (mapcar
+                       (lambda (view)
+                         (getf (org-kit::export-view-payload view) :expanded-text))
+                       (export-core-test-view-nodes preparation :macro)))))
+             (let ((vc-context
+                     (make-time-context
+                      :reference-time (make-org-time-value "2031-03-04T05:06:07")
+                      :zone (make-fixed-time-zone 0))))
+               (list
+                (modification-macro-texts
+                 "{{{modification-time(%F,vc)}}}" vc-context)
+                (modification-macro-texts
+                 "{{{modification-time(%F,vc)}}}" nil)
+                (modification-macro-texts
+                 "{{{modification-time(%F)}}}" vc-context)
+                (modification-macro-texts
+                 "{{{modification-time(%F,   )}}}" vc-context))))
+           :to-equal '(("2031-03-04") ("2030-01-02") ("2030-01-02") ("2030-01-02"))))
+        (expect (typep missing-time-format 'org-export-unsupported-syntax) :to-be t)
+        (when (typep missing-time-format 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-feature missing-time-format)
+                  :to-be :macro-format-required))
+        (expect (typep missing-modification-format 'org-export-unsupported-syntax)
+                :to-be t)
+        (when (typep missing-modification-format 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-feature missing-modification-format)
+                  :to-be :macro-format-required)))
+      (expect
+       (mapcar (lambda (view)
+                 (getf (org-kit::export-view-payload view) :expanded-text))
+               (export-core-test-view-nodes missing-modification-preparation :macro))
+       :to-equal '(""))
+      (expect
+       (mapcar (lambda (view)
+                 (getf (org-kit::export-view-payload view) :expanded-text))
+               (export-core-test-view-nodes input-file-preparation :macro))
+       :to-equal '("guide.org"))
+      (expect
+       (mapcar (lambda (view)
+                 (getf (org-kit::export-view-payload view) :expanded-text))
+               (export-core-test-view-nodes missing-input-file-preparation :macro))
+       :to-equal '(""))
+      (expect property-texts :to-equal '("first" "" "first" "first" "first"))
+      (expect
+       (typep missing-property-location 'org-export-unsupported-syntax)
+       :to-be t)
+      (when (typep missing-property-location 'org-export-unsupported-syntax)
+        (expect (org-export-unsupported-syntax-feature missing-property-location)
+                :to-be :macro-property-location))
+      (expect counter-texts :to-equal '("1" "2" "2" "5" "6" "1"))
+      (expect results-texts :to-equal '("value" ""))
+      (expect overridden-texts :to-equal '("Local step")))))
 
   (it "uses only the include callback and rejects missing, invalid, or cyclic includes"
     (let* ((source (parse-org "#+INCLUDE: \"part.org\"" :source-name "main.org"))
@@ -1627,7 +1909,8 @@
         (expect above :to-be nil))))
 
   (it "checks expanded characters immediately below, at, and above the limit"
-    (let* ((source (export-core-test-lines "#+MACRO: m abc" "{{{m}}}"))
+    (let* ((source
+             (export-core-test-lines "#+MACRO: m $1" "{{{m(abc)}}}"))
            (below (export-core-test-catch-error
                    (lambda ()
                      (export-core-test-prepare-with-limit

@@ -288,17 +288,23 @@
 (defun export-records-for-key (records key)
   (remove-if-not (lambda (record) (string= (second record) key)) records))
 
-(defun export-single-keyword-value (records key backend)
+(defun export-single-keyword-value (records key backend &optional mode)
   (let ((matches (export-records-for-key records key)))
-    (when (> (length matches) 1)
+    (when (and (not (member mode '(:first :collect)))
+               (> (length matches) 1))
       (export-unsupported-syntax
        backend (first (first matches))
        (export-source-position (first (first matches)))
-                                 :duplicate-keyword
-                                 "Duplicate export keyword is ambiguous"))
-    (if matches
-        (values (third (first matches)) t (first (first matches)))
-        (values nil nil nil))))
+       :duplicate-keyword
+       "Duplicate export keyword is ambiguous"))
+    (values
+     (cond
+       ((eq mode :collect)
+        (export-trim
+         (format nil "~{~a~^ ~}" (mapcar #'third matches))))
+       (matches (third (first matches))))
+     (not (null matches))
+     (when matches (first (first matches))))))
 
 (defun export-parse-tag-list (value source backend feature)
   (let ((tags (export-split-words value)))
@@ -546,12 +552,40 @@
                                                    (length name))))
               template function-p node))))
 
-(defun export-build-macro-table (records backend)
+(defun export-build-macro-table (records backend metadata extensions)
   (let ((macros (make-hash-table :test #'equal)))
+    (dolist (specification '(("title" . :title)
+                             ("author" . :author)))
+      (setf (gethash (car specification) macros)
+            (list :builtin (cdr specification)
+                  :value (or (getf metadata (cdr specification)) ""))))
+    (multiple-value-bind (date present-p source)
+        (export-single-keyword-value records "DATE" backend :first)
+      (declare (ignore source))
+      (setf (gethash "date" macros)
+            (list :builtin :date :value (if present-p date ""))))
+    (dolist (specification '(("input-file" . :input-file)
+                             ("time" . :time)
+                             ("property" . :property)
+                             ("n" . :n)))
+      (setf (gethash (car specification) macros)
+            (list :builtin (cdr specification))))
+    (setf (gethash "modification-time" macros)
+          (list :builtin :modification-time
+                :modification-time-context
+                (cdr (assoc :modification-time extensions :test #'eq))
+                :modification-time-vc-context
+                (cdr (assoc :modification-time-vc extensions :test #'eq))))
+    (setf (gethash "email" macros)
+          (list :builtin :email :records records))
+    (setf (gethash "keyword" macros)
+          (list :builtin :keyword :records records))
+    (setf (gethash "results" macros)
+          (list :builtin :results :template "$1"))
     (dolist (record (export-records-for-key records "MACRO"))
       (multiple-value-bind (name template function-p source)
           (export-macro-definition record backend)
-        (when (gethash name macros)
+        (when (getf (gethash name macros) :source)
           (export-unsupported-syntax backend source
                                      (export-source-position source) :duplicate-macro
                                      "Duplicate macro definition"))
@@ -572,7 +606,10 @@
     (dolist (specification '(("TITLE" . :title) ("AUTHOR" . :author)
                              ("DATE" . :date) ("LANGUAGE" . :language)))
       (multiple-value-bind (value present-p source)
-          (export-single-keyword-value records (car specification) backend)
+          (export-single-keyword-value
+           records (car specification) backend
+           (if (member (cdr specification) '(:title :author :date) :test #'eq)
+              :collect nil))
         (declare (ignore source))
         (when present-p
           (setf (getf metadata (cdr specification)) value))))
@@ -616,7 +653,7 @@
              (and select-tags
                   (or select-present-p
                       (export-document-has-tag-p document select-tags))))
-           (macros (export-build-macro-table records backend)))
+           (macros (export-build-macro-table records backend metadata (export-context-extensions context))))
       (when filter-context
         (setf (%export-render-context-metadata filter-context) metadata
               (%export-render-context-options filter-context) options
@@ -650,56 +687,397 @@
       (values metadata options select-active-p
               select-tags exclude-tags macros))))
 
-(defun export-macro-parameter-index (template position source backend)
+(defun export-macro-parameter-index (template position argument-count)
   (let ((digit-position (1+ position)))
     (when (and (< digit-position (length template))
                (digit-char-p (char template digit-position)))
-      (let ((digit (char template digit-position)))
-        (unless (and (member digit '(#\1 #\2))
-                     (or (= (1+ digit-position) (length template))
-                         (not (digit-char-p
-                               (char template (1+ digit-position))))))
-          (export-unsupported-syntax
-           backend source (export-node-text-position source template position)
-           :unsupported-macro-parameter
-           "Only $1 and $2 macro parameters are supported"))
-        (if (char= digit #\1) 1 2)))))
+      (loop with index = 0
+            with maximum-quotient = (floor argument-count 10)
+            with maximum-remainder = (mod argument-count 10)
+            with too-large-p = nil
+            with end = digit-position
+            while (and (< end (length template))
+                       (digit-char-p (char template end)))
+            for digit = (digit-char-p (char template end))
+            do (unless too-large-p
+                 (if (or (> index maximum-quotient)
+                         (and (= index maximum-quotient)
+                              (> digit maximum-remainder)))
+                     (setf too-large-p t)
+                     (setf index (+ (* index 10) digit))))
+               (incf end)
+            finally
+               (return (values (and (not too-large-p)
+                                    (plusp index)
+                                    index)
+                               end))))))
 
-(defun export-macro-expanded-length (template arguments source backend)
+
+(defun export-macro-expanded-length (template arguments)
   (loop with position = 0
         with total = 0
         while (< position (length template))
-        do (let ((argument-index
-                   (and (char= (char template position) #\$)
-                        (export-macro-parameter-index
-                         template position source backend))))
-             (if argument-index
-                 (progn
-                   (incf total
-                         (length (or (nth (1- argument-index) arguments) "")))
-                   (incf position 2))
-                 (progn
-                   (incf total)
-                   (incf position))))
+        do (if (char= (char template position) #\$)
+               (multiple-value-bind (argument-index end)
+                   (export-macro-parameter-index template position
+                                                 (length arguments))
+                 (if end
+                     (progn
+                       (incf total
+                             (length (or (and argument-index
+                                              (nth (1- argument-index) arguments))
+                                         "")))
+                       (setf position end))
+                     (progn
+                       (incf total)
+                       (incf position))))
+               (progn
+                 (incf total)
+                 (incf position)))
         finally (return total)))
+(defun export-macro-format-time (format-string time-context backend source)
+  (unless (org-time-context-p time-context)
+    (export-unsupported-syntax backend source (export-source-position source)
+                               :macro-context-required
+                               "Time macro requires an explicit time context"))
+  (unless (stringp format-string)
+    (export-unsupported-syntax
+     backend source (export-source-position source)
+     :macro-format-required
+     "Time macro requires a format argument"))
+  (let* ((zone (org-time-context-zone time-context))
+         (instant (org-time-context-reference-instant time-context))
+         (local (cl-date-kit:local-date-time-of-instant
+                 instant (org-time-zone-backend zone)))
+         (date (cl-date-kit:local-date-time-date local))
+         (year (cl-date-kit:local-date-time-year local))
+         (month (cl-date-kit:local-date-time-month local))
+         (day (cl-date-kit:local-date-time-day local))
+         (hour (cl-date-kit:local-date-time-hour local))
+         (minute (cl-date-kit:local-date-time-minute local))
+         (second (cl-date-kit:local-date-time-second local))
+         (weekday (cl-date-kit:day-of-week date))
+         (iso-weekday (cl-date-kit:day-of-week-value weekday))
+         (sunday-weekday (mod iso-weekday 7))
+         (day-of-year (cl-date-kit:day-of-year date))
+         (week-year (cl-date-kit:local-date-week-based-year date))
+         (week-number (cl-date-kit:local-date-week-of-week-based-year date))
+         (offset-seconds
+           (cl-date-kit:zone-offset-total-seconds
+            (cl-date-kit:offset-for-instant
+             (org-time-zone-backend zone) instant)))
+         (zone-state
+           (cl-date-kit:zone-state-for-instant
+            (org-time-zone-backend zone) instant))
+         (weekday-names #("Sunday" "Monday" "Tuesday" "Wednesday"
+                          "Thursday" "Friday" "Saturday"))
+         (month-names #("January" "February" "March" "April" "May" "June"
+                        "July" "August" "September" "October" "November"
+                        "December")))
+    (labels ((number-string (value width flag &optional (default-pad #\0))
+               (let* ((digits (format nil "~D" value))
+                      (pad-character
+                        (cond
+                          ((string= flag "-") nil)
+                          ((string= flag "_") #\Space)
+                          ((string= flag "0") #\0)
+                          (t default-pad))))
+                 (if (null pad-character)
+                     digits
+                     (concatenate
+                      'string
+                      (make-string (max 0 (- width (length digits)))
+                                   :initial-element pad-character)
+                      digits))))
+             (offset-string ()
+               (let* ((minutes (truncate (abs offset-seconds) 60))
+                      (hours (floor minutes 60))
+                      (remainder (mod minutes 60)))
+                 (format nil "~A~2,'0D~2,'0D"
+                         (if (minusp offset-seconds) "-" "+")
+                         hours remainder)))
+             (directive-value (directive flag)
+               (case directive
+                 (#\% "%")
+                 (#\Y (number-string year 4 flag))
+                 (#\y (number-string (mod year 100) 2 flag))
+                 (#\C (number-string (floor year 100) 2 flag))
+                 (#\m (number-string month 2 flag))
+                 (#\d (number-string day 2 flag))
+                 (#\e (number-string day 2 flag #\Space))
+                 (#\H (number-string hour 2 flag))
+                 (#\k (number-string hour 2 flag #\Space))
+                 (#\I
+                  (number-string (let ((value (mod hour 12)))
+                                   (if (zerop value) 12 value))
+                                 2 flag))
+                 (#\l
+                  (number-string (let ((value (mod hour 12)))
+                                   (if (zerop value) 12 value))
+                                 2 flag #\Space))
+                 (#\M (number-string minute 2 flag))
+                 (#\S (number-string second 2 flag))
+                 (#\j (number-string day-of-year 3 flag))
+                 (#\a (subseq (aref weekday-names sunday-weekday) 0 3))
+                 (#\A (aref weekday-names sunday-weekday))
+                 ((#\b #\h) (subseq (aref month-names (1- month)) 0 3))
+                 (#\B (aref month-names (1- month)))
+                 (#\p (if (< hour 12) "AM" "PM"))
+                 (#\P (if (< hour 12) "am" "pm"))
+                 (#\w (princ-to-string sunday-weekday))
+                 (#\u (princ-to-string iso-weekday))
+                 (#\V (number-string week-number 2 flag))
+                 (#\G (number-string week-year 4 flag))
+                 (#\g (number-string (mod week-year 100) 2 flag))
+                 (#\U
+                  (let* ((jan1 (cl-date-kit:make-local-date year 1 1))
+                         (jan1-sunday
+                           (mod (cl-date-kit:day-of-week-value
+                                 (cl-date-kit:day-of-week jan1))
+                                7))
+                         (first-sunday (+ 1 (mod (- 7 jan1-sunday) 7))))
+                    (number-string
+                     (if (< day-of-year first-sunday)
+                         0
+                         (1+ (floor (- day-of-year first-sunday) 7)))
+                     2 flag)))
+                 (#\W
+                  (let* ((jan1 (cl-date-kit:make-local-date year 1 1))
+                         (jan1-monday
+                           (cl-date-kit:day-of-week-value
+                            (cl-date-kit:day-of-week jan1)))
+                         (first-monday (+ 1 (mod (- 8 jan1-monday) 7))))
+                    (number-string
+                     (if (< day-of-year first-monday)
+                         0
+                         (1+ (floor (- day-of-year first-monday) 7)))
+                     2 flag)))
+                 ((#\Z #\z)
+                  (if (char= directive #\z)
+                      (offset-string)
+                      (or (cl-date-kit:zone-state-abbreviation zone-state)
+                          (org-time-zone-name zone))))
+                 (#\s (princ-to-string
+                        (cl-date-kit:instant-epoch-second instant)))
+                 (#\D
+                  (concatenate 'string
+                               (directive-value #\m flag) "/"
+                               (directive-value #\d flag) "/"
+                               (directive-value #\y flag)))
+                 (#\F
+                  (concatenate 'string
+                               (directive-value #\Y flag) "-"
+                               (directive-value #\m flag) "-"
+                               (directive-value #\d flag)))
+                 (#\R
+                  (concatenate 'string
+                               (directive-value #\H flag) ":"
+                               (directive-value #\M flag)))
+                 (#\T
+                  (concatenate 'string
+                               (directive-value #\H flag) ":"
+                               (directive-value #\M flag) ":"
+                               (directive-value #\S flag)))
+                 (#\r
+                  (concatenate 'string
+                               (directive-value #\I flag) ":"
+                               (directive-value #\M flag) ":"
+                               (directive-value #\S flag) " "
+                               (directive-value #\p flag)))
+                 (#\c
+                  (concatenate 'string
+                               (directive-value #\a flag) " "
+                               (directive-value #\b flag) " "
+                               (directive-value #\e flag) " "
+                               (directive-value #\H flag) ":"
+                               (directive-value #\M flag) ":"
+                               (directive-value #\S flag) " "
+                               (directive-value #\Y flag)))
+                 (#\x
+                  (concatenate 'string
+                               (directive-value #\m flag) "/"
+                               (directive-value #\d flag) "/"
+                               (directive-value #\y flag)))
+                 (#\X
+                  (concatenate 'string
+                               (directive-value #\H flag) ":"
+                               (directive-value #\M flag) ":"
+                               (directive-value #\S flag)))
+                 (#\n (string #\Newline))
+                 (#\t (string #\Tab))
+                 (otherwise
+                  (export-unsupported-syntax
+                   backend source (export-source-position source)
+                   :unsupported-time-format
+                   "Unsupported time format directive"))))
+             (render (format-string)
+               (with-output-to-string (output)
+                 (loop with position = 0
+                       while (< position (length format-string))
+                       for character = (char format-string position)
+                       do (if (char= character #\%)
+                              (let ((next (1+ position))
+                                    (flag ""))
+                                (when (and (< next (length format-string))
+                                           (find (char format-string next)
+                                                 "_-0^"))
+                                  (setf flag (string (char format-string next)))
+                                  (incf next))
+                                (when (>= next (length format-string))
+                                  (write-char #\% output)
+                                  (setf position next))
+                                (when (< next (length format-string))
+                                  (let* ((directive (char format-string next))
+                                         (value (directive-value directive flag)))
+                                    (write-string
+                                     (if (string= flag "^")
+                                         (string-upcase value)
+                                         value)
+                                     output)
+                                    (setf position (1+ next)))))
+                              (progn
+                                (write-char character output)
+                                (incf position)))))))
+      (render (or format-string "")))))
+(defun export-macro-runtime-value
+    (builtin arguments node source-document definition metadata counters backend)
+  (labels ((source-basename (source-name)
+             (if (and (stringp source-name) (plusp (length source-name)))
+                 (let ((separator
+                         (position-if
+                          (lambda (character)
+                            (find character "/\\"))
+                          source-name :from-end t)))
+                   (if separator
+                       (subseq source-name (1+ separator))
+                       source-name))
+                 ""))
+           (heading-property (heading property-name)
+             (let* ((section
+                      (find :section (node-children heading) :key #'node-type))
+                    (drawer
+                      (and section
+                           (find :property-drawer (node-children section)
+                                 :key #'node-type))))
+               (when drawer
+                 (let ((property
+                         (find-if
+                          (lambda (candidate)
+                            (and (eq (node-type candidate) :node-property)
+                                 (string-equal
+                                  (or (node-property candidate :key) "")
+                                  property-name)))
+                          (node-children drawer))))
+                   (and property (node-property property :value))))))
+           (current-heading ()
+             (loop for current = node then (node-parent current)
+                   while current
+                   when (eq (node-type current) :headline)
+                     return current))
+           (headings ()
+             (let ((result nil))
+               (map-nodes
+                (lambda (candidate)
+                  (when (eq (node-type candidate) :headline)
+                    (push candidate result)))
+                (document-root source-document))
+               (nreverse result)))
+           (property-value (property-name location)
+             (let* ((location (and location (export-trim location)))
+                    (id-property
+                      (cond
+                        ((and location
+                              (>= (length location) 3)
+                              (string-equal location "id:" :end1 3))
+                         "ID")
+                        ((and location
+                              (> (length location) 1)
+                              (char= (char location 0) #\#))
+                         "CUSTOM_ID")))
+                    (id
+                      (and id-property
+                           (subseq location
+                                   (if (string= id-property "ID") 3 1))))
+                    (heading
+                      (if (and location (plusp (length location)))
+                          (find-if
+                           (lambda (candidate)
+                             (if id-property
+                                 (string-equal
+                                  (or (heading-property candidate id-property) "")
+                                  id)
+                                 (string-equal
+                                  (or (node-property candidate :raw-value) "")
+                                  location)))
+                           (headings))
+                          (current-heading))))
+               (unless (or heading (null location) (zerop (length location)))
+                 (export-unsupported-syntax
+                  backend node (export-source-position node)
+                  :macro-property-location
+                  "Property macro location does not identify a headline"))
+               (or (and heading (heading-property heading property-name)) "")))
+           (counter-value (name action)
+             (let* ((name (export-trim (or name "")))
+                    (action (and action (export-trim action)))
+                    (action (and action (plusp (length action)) action))
+                    (value
+                      (cond
+                        ((null action) (1+ (gethash name counters 0)))
+                        ((string= action "-") (gethash name counters 1))
+                        ((every (lambda (character)
+                                  (<= 48 (char-code character) 57))
+                                action)
+                         (parse-integer action))
+                        (t 1))))
+               (setf (gethash name counters) value)
+               (princ-to-string value))))
+    (case builtin
+      (:input-file
+       (source-basename (document-source-name source-document)))
+      (:modification-time
+       (let* ((file-time-context (getf definition :modification-time-context))
+              (vc-time-context (getf definition :modification-time-vc-context))
+              (request-vc-p
+                (and (second arguments)
+                     (plusp (length (export-trim (second arguments))))))
+              (time-context
+                (or (and request-vc-p vc-time-context)
+                    file-time-context)))
+         (if time-context
+             (export-macro-format-time (first arguments) time-context backend node)
+             "")))
+      (:time
+       (export-macro-format-time (first arguments)
+                                 (getf metadata :time-context) backend node))
+      (:property
+       (property-value (or (first arguments) "") (second arguments)))
+      (:n
+       (counter-value (first arguments) (second arguments)))
+      (otherwise nil))))
 
-(defun export-substitute-macro (template arguments source backend)
+(defun export-substitute-macro (template arguments)
   (with-output-to-string (output)
     (loop with position = 0
           while (< position (length template))
-          do (let ((argument-index
-                     (and (char= (char template position) #\$)
-                          (export-macro-parameter-index
-                           template position source backend))))
-               (if argument-index
-                   (progn
-                     (write-string
-                      (or (nth (1- argument-index) arguments) "") output)
-                     (incf position 2))
-                   (progn
-                     (write-char (char template position) output)
-                     (incf position)))))))
-
+          do (if (char= (char template position) #\$)
+                 (multiple-value-bind (argument-index end)
+                     (export-macro-parameter-index template position
+                                                   (length arguments))
+                   (if end
+                       (progn
+                         (write-string
+                          (or (and argument-index
+                                   (nth (1- argument-index) arguments))
+                              "")
+                          output)
+                         (setf position end))
+                       (progn
+                         (write-char (char template position) output)
+                         (incf position))))
+                 (progn
+                   (write-char (char template position) output)
+                   (incf position))))))
 (defun export-include-path (value source backend)
   (let ((value (export-trim value)))
     (unless (and (> (length value) 2)
@@ -884,25 +1262,154 @@
                        :test #'string=)
            (reader-heading-setting-kind key))))
 
-(defun export-validate-keywords (records backend &key fragment-p ancestry)
+(defun export-validate-keywords (records backend
+                                 &key fragment-p ancestry referenced-keywords)
   (let ((accepted
           (export-resolved-string-set
            (or ancestry (export-backend-ancestry backend))
            #'%export-backend-descriptor-accepted-keywords)))
-  (dolist (record records)
-    (let ((key (second record))
-          (source (first record)))
-      (cond
-        ((or (member key accepted :test #'string-equal)
-             (reader-heading-setting-kind key))
-         (when (and fragment-p (export-global-keyword-p key))
-           (export-unsupported-syntax
-            backend source (export-source-position source) :fragment-keyword-scope
-                                    "Global export keywords in fragments are unsupported")))
-        (t
-         (export-unsupported-syntax backend source (export-source-position source)
-                                    :unknown-keyword
-                                    "Unknown export keyword")))))))
+    (dolist (record records)
+      (let ((key (second record))
+            (source (first record)))
+        (cond
+          ((or (member key accepted :test #'string-equal)
+               (reader-heading-setting-kind key)
+               (and referenced-keywords
+                    (gethash key referenced-keywords)))
+           (when (and fragment-p (export-global-keyword-p key))
+             (export-unsupported-syntax
+              backend source (export-source-position source)
+              :fragment-keyword-scope
+              "Global export keywords in fragments are unsupported")))
+          (t
+           (export-unsupported-syntax backend source (export-source-position source)
+                                      :unknown-keyword
+                                      "Unknown export keyword")))))))
+(defun export-macro-keyword-reference-set (document macros cache)
+  (let ((limits (document-limits document)))
+    (multiple-value-bind (references present-p) (gethash document cache)
+      (if present-p
+          references
+          (setf (gethash document cache)
+                (when (eq (getf (gethash "keyword" macros) :builtin) :keyword)
+                  (let ((references (make-hash-table :test #'equal))
+                        (visited (make-hash-table :test #'equal))
+                        (template-cache (gethash macros cache)))
+                    (unless template-cache
+                      (setf template-cache (make-hash-table :test #'equal)
+                            (gethash macros cache) template-cache
+                            (gethash :characters template-cache) 0
+                            (gethash :nodes template-cache) 0))
+                    (labels
+                        ((template-document (name)
+                           (multiple-value-bind (cached present-p)
+                               (gethash name template-cache)
+                             (if present-p
+                                 (unless (eq cached :not-static) cached)
+                                 (let ((definition (gethash name macros)))
+                                   (if (and (getf definition :source)
+                                            (not (getf definition :function-p)))
+                                       (let* ((template (getf definition :template))
+                                              (parsed-characters
+                                                (+ (gethash :characters template-cache 0)
+                                                   (length template)))
+                                              (parsed-nodes
+                                                (gethash :nodes template-cache 0)))
+                                         (check-limit limits :max-input-length
+                                                      parsed-characters)
+                                         (let* ((node-budget
+                                                  (- (limit-value
+                                                      limits :max-node-count)
+                                                     parsed-nodes))
+                                                (parsed-document
+                                                  (handler-case
+                                                      (parse-org
+                                                       template
+                                                       :source-name
+                                                       (document-source-name document)
+                                                       :limits
+                                                       (export-limits-with-node-budget
+                                                        limits node-budget))
+                                                    (org-resource-limit-error (condition)
+                                                      (if (eq
+                                                           (org-resource-limit-error-limit-name
+                                                            condition)
+                                                           :max-node-count)
+                                                          (error
+                                                           'org-resource-limit-error
+                                                           :message
+                                                           "Resource limit exceeded"
+                                                           :limit-name :max-node-count
+                                                           :limit
+                                                           (limit-value
+                                                            limits :max-node-count)
+                                                           :actual
+                                                           (+ parsed-nodes
+                                                              (org-resource-limit-error-actual
+                                                               condition)))
+                                                          (error condition)))))
+                                                (actual-nodes
+                                                  (export-node-count
+                                                   (document-root parsed-document)))
+                                                (total-nodes
+                                                  (+ parsed-nodes actual-nodes)))
+                                           (check-limit limits :max-node-count
+                                                        total-nodes)
+                                           (setf (gethash :characters template-cache)
+                                                 parsed-characters
+                                                 (gethash :nodes template-cache)
+                                                 total-nodes
+                                                 (gethash name template-cache)
+                                                 parsed-document)
+                                           parsed-document))
+                                       (progn
+                                         (setf (gethash name template-cache)
+                                               :not-static)
+                                         nil))))))
+                         (scan-template (name arguments depth active-macros)
+                           (unless (member name active-macros :test #'string=)
+                             (let ((visit-key
+                                     (list name arguments depth active-macros)))
+                               (unless (gethash visit-key visited)
+                                 (setf (gethash visit-key visited) t)
+                                 (let ((parsed-document
+                                         (template-document name)))
+                                   (when parsed-document
+                                     (map-nodes
+                                      (lambda (node)
+                                        (scan-node node arguments t depth
+                                                   (cons name active-macros)))
+                                      (document-root parsed-document))))))))
+                         (scan-node (node template-arguments template-p depth active-macros)
+                           (when (eq (node-type node) :macro)
+                             (let* ((name
+                                      (string-downcase
+                                       (or (node-property node :key) "")))
+                                    (next-depth (1+ depth))
+                                    (arguments
+                                      (if template-p
+                                          (mapcar
+                                           (lambda (argument)
+                                             (export-substitute-macro
+                                              (or argument "") template-arguments))
+                                           (node-property node :args))
+                                          (node-property node :args))))
+                               (unless (member name active-macros :test #'string=)
+                                 (export-check-expansion-depth next-depth limits)
+                                 (if (string= name "keyword")
+                                     (let ((key (first arguments)))
+                                       (when (and (stringp key)
+                                                  (plusp (length key)))
+                                         (setf (gethash (string-upcase key)
+                                                        references)
+                                               t)))
+                                     (scan-template name arguments next-depth
+                                                    active-macros)))))))
+                      (map-nodes
+                       (lambda (node)
+                         (scan-node node nil nil 0 nil))
+                       (document-root document))
+                      references))))))))
 
 (defun export-option-selects-name-p (value name)
   (if (eq (first value) :exclude)
@@ -977,7 +1484,9 @@
          (ancestry (if filter-context
                        (%export-render-context-ancestry filter-context)
                        (nth-value 1 (export-registry-snapshot backend))))
-         (limits (document-limits document)))
+         (limits (document-limits document))
+         (keyword-reference-cache (make-hash-table :test #'eq))
+         (macro-counters (make-hash-table :test #'equal)))
     (unless root
       (error 'type-error :datum root :expected-type 'node))
     (let ((expanded-node-count (export-node-count root))
@@ -1055,54 +1564,85 @@
                    (account-expanded-text text)
                    (parse-fragment text path selected-scope next-depth element-depth
                                    (cons path active-includes) active-macros))))
-             (prepare-macro (node source-document selected-scope depth element-depth
-                                 active-includes active-macros)
-               (let* ((key (string-downcase (node-property node :key)))
-                      (definition (gethash key macros))
-                      (definition-source (getf definition :source))
-                      (next-depth (1+ depth)))
-                 (unless definition
-                   (export-unsupported-syntax
-                    backend node (export-source-position node) :unknown-macro
-                                              "Unknown macro"))
-                 (when (getf definition :function-p)
-                   (export-unsupported-syntax
-                    backend node (export-source-position node) :function-macro
-                                              "Function macros are unsupported"))
-                 (when (member key active-macros :test #'string=)
-                   (export-unsupported-syntax
-                    backend node (export-source-position node) :recursive-macro
-                                              "Recursive macro expansion"))
-                 (export-check-expansion-depth next-depth limits)
-                 (let* ((arguments (node-property node :args))
-                        (template (getf definition :template))
-                        (expanded-length
-                          (export-macro-expanded-length
-                           template arguments definition-source backend)))
-                   (account-expanded-length expanded-length)
-                   (let* ((text (export-substitute-macro template arguments
-                                                         definition-source backend))
-                          (fragment-views
-                            (parse-fragment
-                             text
-                             (document-source-name source-document)
-                             selected-scope next-depth (1+ element-depth)
-                             active-includes
-                             (cons key active-macros))))
-                     (values
-                      (list (%make-export-view
-                             :node node :children fragment-views
-                             :payload (list :expanded-text text)
-                             :source-document source-document))
-                      nil)))))
+             (prepare-macro (node source-document selected-scope depth
+                                  element-depth active-includes active-macros)
+                            (let* ((key (string-downcase (node-property node :key)))
+                                   (definition (gethash key macros))
+                                   (next-depth (1+ depth)))
+                              (unless definition
+                                (export-unsupported-syntax
+                                 backend node (export-source-position node) :unknown-macro
+                                 "Unknown macro"))
+                              (when (getf definition :function-p)
+                                (export-unsupported-syntax
+                                 backend node (export-source-position node) :function-macro
+                                 "Function macros are unsupported"))
+                              (when (member key active-macros :test #'string=)
+                                (export-unsupported-syntax
+                                 backend node (export-source-position node) :recursive-macro
+                                 "Recursive macro expansion"))
+                              (export-check-expansion-depth next-depth limits)
+                              (let* ((arguments (node-property node :args))
+                                     (builtin (getf definition :builtin))
+                                     (direct-p
+                                      (member builtin
+                                              '(:keyword :time :modification-time :property :n)
+                                              :test #'eq))
+                                     (template
+                                      (case builtin
+                                        (:keyword
+                                         (let ((keyword (first arguments)))
+                                           (if keyword
+                                               (multiple-value-bind (value present-p source)
+                                                   (export-single-keyword-value
+                                                    (getf definition :records)
+                                                    (string-upcase keyword) backend :collect)
+                                                 (declare (ignore source))
+                                                 (if present-p value ""))
+                                             "")))
+                                        (:email
+                                         (multiple-value-bind (value present-p source)
+                                             (export-single-keyword-value
+                                              (getf definition :records) "EMAIL" backend :first)
+                                           (declare (ignore source))
+                                           (if present-p value "")))
+                                        ((:title :author :date)
+                                         (getf definition :value))
+                                        ((:input-file :time :modification-time :property :n)
+                                         (export-macro-runtime-value
+                                          builtin arguments node source-document definition
+                                          metadata macro-counters backend))
+                                        (otherwise
+                                         (getf definition :template))))
+                                     (expanded-length
+                                      (if direct-p
+                                          (length template)
+                                        (export-macro-expanded-length template arguments)))
+                                     (text
+                                      (progn
+                                        (account-expanded-length expanded-length)
+                                        (if direct-p
+                                            template
+                                          (export-substitute-macro template arguments)))))
+                                (let ((fragment-views
+                                       (parse-fragment
+                                        text
+                                        (document-source-name source-document)
+                                        selected-scope next-depth (1+ element-depth)
+                                        active-includes
+                                        (cons key active-macros))))
+                                  (values
+                                   (list (%make-export-view
+                                          :node node :children fragment-views
+                                          :payload (list :expanded-text text)
+                                          :source-document source-document))
+                                   nil)))))
              (prepare-title-macros (node source-document selected-scope depth
                                          element-depth active-includes active-macros)
                (loop for segment in (node-property node :title)
                      when (and (node-p segment)
                                (eq (node-type segment) :macro))
-                       when (eq :default
-                                (export-resolved-node-policy
-                                 ancestry (node-type segment)))
+                       when (eq :default (export-resolved-node-policy ancestry (node-type segment)))
                        collect
                        (progn
                          (check-limit limits :max-element-depth element-depth)
@@ -1185,8 +1725,11 @@
                         (let ((key (string-upcase
                                     (or (node-property node :key) ""))))
                           (export-validate-keywords
-                           (list (list node key (or (node-property node :value) "")))
-                           backend :fragment-p fragment-p :ancestry ancestry)
+                            (list (list node key (or (node-property node :value) "")))
+                            backend :fragment-p fragment-p :ancestry ancestry
+                            :referenced-keywords
+                            (export-macro-keyword-reference-set
+                             source-document macros keyword-reference-cache))
                           (if (member
                                key
                                (export-resolved-string-set

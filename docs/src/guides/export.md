@@ -98,6 +98,62 @@ application-specific state. Keys must be keywords. The constructor and
 they do not copy its values. Keep those values unchanged until export finishes.
 Read them with `export-context-extensions` on the caller context or
 `export-render-context-extension` inside a renderer or filter.
+The built-in `modification-time` macro formats caller-supplied
+`org-time-context` values. Its first argument is the format string. An optional
+second argument containing non-whitespace text requests the version-control
+modification time. Put
+the file modification context under `:modification-time` and the version-control
+context under `:modification-time-vc` in `:extensions`:
+
+~~~lisp
+(let* ((file-time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2030-01-02T03:04:05")
+          :zone (org-kit:make-fixed-time-zone 0)))
+       (vc-time-context
+         (org-kit:make-time-context
+          :reference-time (org-kit:make-org-time-value "2031-03-04T05:06:07")
+          :zone (org-kit:make-fixed-time-zone 0)))
+       (context
+         (org-kit:make-export-context
+          :extensions (list (cons :modification-time file-time-context)
+                            (cons :modification-time-vc vc-time-context))))
+       (document
+         (org-kit:parse-org "{{{modification-time(%F,vc)}}}")))
+  (org-kit:export-org document :ascii :context context))
+~~~
+
+Pass `file-time-context` as `:time-context` as well when formatting `time`
+macros; `(org-kit:make-export-context :time-context file-time-context)` makes
+`{{{time(%F)}}}` expand to `2030-01-02`.
+
+Here, `{{{modification-time(%F,vc)}}}` expands to `2031-03-04`. A second
+argument containing non-whitespace text selects `:modification-time-vc` when
+that context is supplied; otherwise it falls back to `:modification-time`
+(`2030-01-02`). A missing or whitespace-only second argument uses
+`:modification-time`. When `:modification-time` has no value, the macro expands
+to an empty string regardless of the arguments. The library does not read file
+modification times or query version control.
+
+`time` and `modification-time` accept these format directives: `%%`, `%Y`,
+`%y`, `%C`, `%m`, `%d`, `%e`, `%H`, `%k`, `%I`, `%l`, `%M`, `%S`, `%j`, `%a`,
+`%A`, `%b`, `%h`, `%B`, `%p`, `%P`, `%w`, `%u`, `%V`, `%G`, `%g`, `%U`, `%W`,
+`%z`, `%Z`, `%s`, `%D`, `%F`, `%R`, `%T`, `%r`, `%c`, `%x`, `%X`, `%n`, and
+`%t`. One modifier may follow `%` before a directive: `_` pads numeric output
+with spaces, `-` removes numeric padding, `0` uses zero padding, and `^`
+uppercases text output. A trailing `%` is retained literally. Unsupported
+directives signal `org-export-unsupported-syntax` with feature
+`:unsupported-time-format`.
+
+`time` requires a `:time-context` and a format argument. Without the context,
+it signals `org-export-unsupported-syntax` with feature
+`:macro-context-required`; without the argument, it signals the same condition
+with feature `:macro-format-required`. `modification-time` requires a format
+argument when the `:modification-time` extension is present. With that
+extension, omitting the argument signals `org-export-unsupported-syntax` with
+feature `:macro-format-required`. Without the extension, it expands to an
+empty string regardless of whether a format argument was supplied. These
+omitted-argument conditions match Org 9.8.10's required first argument.
 
 ## iCalendar
 
