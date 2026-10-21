@@ -360,6 +360,7 @@ body
       (expect checked-file :to-equal "photo.png")
       (expect checked-node-type :to-equal :link)
       (expect messages :to-equal nil))))
+(progn
 (describe "Org Babel header interpretation"
   (it "reports a missing colon in an affiliated header argument"
     (let* ((document
@@ -412,3 +413,149 @@ body
                    with-header "wrong-header-argument" context)
                   :to-equal
                   (list "Unknown header argument \":bogus\"")))))))
+
+(describe "Org Babel caller-material edge cases"
+  (it "checks complete header argument properties at document and drawer scope"
+    (let ((context (lint-test-babel-header-context t)))
+      (dolist (source
+                (list "#+PROPERTY: unrelated value
+#+PROPERTY: header-args :bogus yes
+"
+                      "#+PROPERTY: header-args+ :bogus yes
+"
+                      "#+PROPERTY: header-args:emacs-lisp+ :bogus yes
+"
+                      "* Heading
+:PROPERTIES:
+:header-args+: :bogus yes
+:END:
+#+BEGIN_SRC emacs-lisp
+body
+#+END_SRC
+"
+                      "* Heading
+:PROPERTIES:
+:header-args:emacs-lisp+: :bogus yes
+:END:
+#+BEGIN_SRC emacs-lisp
+body
+#+END_SRC
+"))
+        (expect (lint-test-selected-messages
+                 (parse-org source) "wrong-header-argument" context)
+                :to-equal
+                (list "Unknown header argument \":bogus\"")))
+      (expect (lint-test-selected-messages
+               (parse-org "#+PROPERTY: header-args
+")
+               "wrong-header-argument" context)
+              :to-equal nil)))
+  (it "checks inline source and Babel call header arguments"
+    (let ((context (lint-test-babel-header-context t)))
+      (expect (lint-test-selected-messages
+               (parse-org "src_emacs-lisp[:bogus yes]{(+ 1 2)}")
+               "wrong-header-argument" context)
+              :to-equal
+              (list "Unknown header argument \":bogus\""))
+      (expect (lint-test-selected-messages
+               (parse-org "#+CALL: target[:bogus yes]() :other no
+")
+               "wrong-header-argument" context)
+              :to-equal
+              (list "Unknown header argument \":other\""
+                    "Unknown header argument \":bogus\""))
+      (expect (lint-test-selected-messages
+               (parse-org "call_target[:bogus yes](1)[:other no]")
+               "wrong-header-argument" context)
+              :to-equal
+              (list "Unknown header argument \":other\""
+                    "Unknown header argument \":bogus\""))))
+  (it "checks string source-block parameters from the parsed node"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC emacs-lisp
+body
+#+END_SRC
+"))
+           (block (first (org-kit::%lint-nodes document :src-block))))
+      (setf (org-kit::node-property block :parameters) ":bogus yes")
+      (expect (lint-test-selected-messages
+               document "wrong-header-argument"
+               (lint-test-babel-header-context t))
+              :to-equal
+              (list "Unknown header argument \":bogus\""))))
+  (it "accepts any values within an allowed group and reports empty values"
+    (let ((context
+            (list :babel-header-specifications
+                  (list :complete t
+                        :common (list (cons "exports" (list (list :any))))
+                        :languages nil))))
+      (expect (lint-test-selected-messages
+               (parse-org "#+BEGIN_SRC emacs-lisp :exports unusual
+body
+#+END_SRC
+")
+               "wrong-header-value" context)
+              :to-equal nil))
+    (expect (org-kit::%lint-context-header-value-messages
+             ":exports" "" (list (list "code")))
+            :to-equal
+            (list "Unknown value \"nil\" for header \":exports\""))
+    (expect (org-kit::%lint-context-header-value-messages
+             ":exports" 42 (list (list "code")))
+            :to-equal
+            (list "Unknown value \"42\" for header \":exports\""))
+    (expect (lint-test-selected-messages
+             (parse-org "#+BEGIN_SRC emacs-lisp :exports
+body
+#+END_SRC
+")
+             "wrong-header-value"
+             (lint-test-babel-header-context t))
+            :to-equal
+            (list "Unknown value \"nil\" for header \":exports\"")))
+  (it "uses the preceding source block for an unreferenced named result"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC emacs-lisp :exports code
+(+ 1 2)
+#+END_SRC
+#+NAME: result
+#+RESULTS:
+: 3
+"))
+           (block (first (org-kit::%lint-nodes document :src-block)))
+           (begin (org-kit::node-begin block)))
+      (expect (lint-test-selected-messages
+               document "named-result"
+               (list :babel-effective-exports (list (cons begin "code"))))
+              :to-equal
+              (list "Links to \"result\" will not be valid during export unless the parent source block has :exports results or both")))
+    (expect (lint-test-selected-messages
+             (parse-org "#+NAME: result
+#+RESULTS:
+: 3
+")
+             "named-result"
+             (list :babel-effective-exports nil))
+            :to-equal nil))
+  (it "uses a resolved attachment filename in a missing-file finding"
+    (expect (lint-test-selected-messages
+             (parse-org "[[attachment:photo.png]]")
+             "link-to-local-file"
+             (list :file-exists-p (lambda (file)
+                                   (declare (ignore file))
+                                   t)
+                   :attachment-file-exists-p
+                   (lambda (file node)
+                     (declare (ignore file node))
+                     (values nil "resolved/photo.png"))))
+            :to-equal
+            (list "Link to non-existent local file \"resolved/photo.png\""))))
+
+(describe "Org lint checker dispatch without implementations"
+  (it "skips a checker entry without an implementation function"
+    (let* ((document (parse-org "Plain text."))
+           (org-kit::*org-lint-checkers*
+             (list (list "empty-checker" nil :document-only nil))))
+      (expect (org-lint document :checkers '("empty-checker"))
+              :to-equal nil))))
+)
