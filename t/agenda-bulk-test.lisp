@@ -699,10 +699,16 @@
         (expect (org-kit::agenda-bulk-archive-target-document
                  source-with-name source-with-name source-with-name)
                 :to-be source-with-name)
-        (expect (document-text
-                (org-kit::agenda-bulk-archive-target-document
-                 unnamed-source existing-target existing-target))
-                :to-equal (format nil "* Existing~%"))
+        (expect
+           (document-text
+            (org-kit::agenda-bulk-archive-target-document
+             unnamed-source existing-target existing-target))
+           :to-equal (format nil "* Existing~%"))
+        (let ((empty-target (parse-org "")))
+          (expect
+           (org-kit::agenda-bulk-archive-target-document
+            unnamed-source empty-target empty-target)
+           :to-be empty-target))
         (dolist (condition (list self-cycle descendant-cycle))
           (expect (typep condition 'org-agenda-error) :to-be t)
           (when (typep condition 'org-agenda-error)
