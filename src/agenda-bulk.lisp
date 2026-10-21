@@ -170,38 +170,37 @@
                            "Bulk action document was not staged"))
     (setf (cdr entry) updated)
     staged))
-(defun agenda-bulk-archive-target-document (source-document target-document)
+(defun agenda-bulk-archive-target-document
+    (source-document target-document original-target-document)
   (let ((source-name (document-source-name source-document)))
-    (if (or (eq source-document target-document) (not (stringp source-name)))
+    (if (or (eq source-document original-target-document)
+            (not (stringp source-name))
+            (not (string= (document-text original-target-document) "")))
         target-document
         (let* ((source (document-text target-document))
                (archive-header
-                (format nil "Archived entries from file ~A~%~%~%" source-name))
+                 (format nil "Archived entries from file ~A~%~%~%" source-name))
                (header
-                (if (string= source "")
-                    (format nil "#    -*- mode: org -*-~%~%~%~A" archive-header)
-                    (concatenate 'string
-                                 (if (document-final-newline-p target-document)
-                                     (format nil "~%")
-                                     (format nil "~%~%"))
-                                 archive-header)))
+                 (if (string= source "")
+                     (format nil "#    -*- mode: org -*-~%~%~%~A"
+                             archive-header)
+                     (concatenate 'string
+                                  (if (document-final-newline-p target-document)
+                                      (format nil "~%")
+                                      (format nil "~%~%"))
+                                  archive-header)))
                (updated-source (concatenate 'string source header))
                (expected
-                (edit-canonical-document
-                 (edit-reparse-source target-document
-                                      updated-source
-                                      :archive-header))))
+                 (edit-canonical-document
+                  (edit-reparse-source target-document
+                                       updated-source
+                                       :archive-header))))
           (edit-result-updated-document
-           (edit-apply-patches-result target-document
-                                      (list
-                                       (edit-make-patch (length source)
-                                                        (length source)
-                                                        header
-                                                        :archive-header))
-                                      :target
-                                      :archive-header
-                                      :expected
-                                      expected))))))
+           (edit-apply-patches-result
+            target-document
+            (list (edit-make-patch (length source) (length source) header
+                                   :archive-header))
+            :target :archive-header :expected expected))))))
 (defun agenda-bulk-align-heading-tags (document path)
   (let ((heading (agenda-bulk-resolve-heading-path document path)))
     (multiple-value-bind (tag-start tag-end)
@@ -454,7 +453,8 @@
     (:archive
      (if target-document
          (let* ((timestamp (archive-time-string time-context))
-                (tagged-document (set-property document heading "ARCHIVE_TIME" timestamp))
+                (tagged-document
+                  (set-property document heading "ARCHIVE_TIME" timestamp))
                 (current-heading
                   (agenda-bulk-resolve-heading-path
                    tagged-document (node-heading-path heading)))
@@ -463,7 +463,8 @@
                    source-original-document
                    (if (eq source-original-document target-document)
                        tagged-document
-                       (agenda-bulk-current-document staged target-document))))
+                       (agenda-bulk-current-document staged target-document))
+                   target-document))
                 (target-heading
                   (agenda-bulk-target-node current-target target-heading-path)))
            (archive-subtree-to tagged-document current-heading current-target

@@ -570,6 +570,15 @@
              (document-text
               (edit-result-updated-document
                (cdr (assoc archive-target archive-results :test #'eq)))))
+           (new-target (parse-org ""))
+           (new-results
+             (agenda-bulk-action (list entry) :archive
+                                 :target-document new-target
+                                 :time-context context))
+           (updated-new-target
+             (document-text
+              (edit-result-updated-document
+               (cdr (assoc new-target new-results :test #'eq)))))
            (local-source (parse-org (format nil "* Task~%")))
            (local-results
              (agenda-bulk-action
@@ -615,17 +624,20 @@
                tabbed-document (list (format nil "Tab~CTitle" #\Tab)))
               :add-tag :tag "bulk")))
       (with-soft-assertions
-        (expect (not (null (search "Archived entries from file source.org"
-                                   updated-target)))
-                :to-be t)
+        (expect (search "Archived entries from file source.org" updated-target)
+                :to-be nil)
+        (expect (search "* Task" updated-target) :to-be-truthy)
+        (expect (search "Archived entries from file source.org"
+                        updated-new-target)
+                :to-be-truthy)
         (expect (not (null (search "Archive" local-updated))) :to-be t)
         (expect (not (null (search "ARCHIVE_TIME" same-document-updated)))
                 :to-be t)
         (expect (org-kit::agenda-bulk-archive-target-document
-                 source-with-name source-with-name)
+                 source-with-name source-with-name source-with-name)
                 :to-be source-with-name)
         (expect (org-kit::agenda-bulk-archive-target-document
-                 unnamed-source existing-target)
+                 unnamed-source existing-target existing-target)
                 :to-be existing-target)
         (dolist (condition (list self-cycle descendant-cycle))
           (expect (typep condition 'org-agenda-error) :to-be t)
