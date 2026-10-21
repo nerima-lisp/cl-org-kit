@@ -570,6 +570,124 @@
         (table-calc-decimal-string decimal)
         "0")))
 
+(defun table-recalculate-org-sbe-printed-data (value)
+  (typecase value
+    (null "nil")
+    (string (table-recalculate-elisp-string value))
+    (symbol (if (keywordp value)
+                (format nil ":~A" (symbol-name value))
+                (symbol-name value)))
+    (cons
+     (format nil "(~{~A~^ ~})"
+             (mapcar #'table-recalculate-org-sbe-printed-data value)))
+    (t (format nil "~S" value))))
+
+(defun table-recalculate-org-sbe-argument-text (value literal-p)
+  (if (and literal-p (stringp value))
+      (table-recalculate-elisp-string value)
+      (typecase value
+        (null "nil")
+        (string value)
+        (symbol (if (keywordp value)
+                    (format nil ":~A" (symbol-name value))
+                    (symbol-name value)))
+        (cons (table-recalculate-org-sbe-printed-data value))
+        (t (format nil "~A" value)))))
+
+(defun table-recalculate-org-sbe-parameter-text
+    (name values literal-flags limits)
+  (let* ((value-text
+           (cond
+             ((null values) "")
+             ((rest values)
+              (format nil "'(~{~A~^ ~})"
+                      (loop for value in values
+                            for literal-p in literal-flags
+                            collect
+                            (table-recalculate-org-sbe-argument-text
+                             value literal-p))))
+             (t
+              (table-recalculate-org-sbe-argument-text
+               (first values) (first literal-flags)))))
+         (assignment (format nil "~A=~A" name value-text)))
+    (check-limit limits :max-input-length (length assignment))
+    assignment))
+
+(defun table-recalculate-org-sbe-resolve-value (value literal-p context)
+  (if literal-p
+      value
+      (typecase value
+        (null nil)
+        (string (babel-static-scalar context value :resolve-reference t))
+        (symbol (babel-static-scalar context (symbol-name value)
+                                     :resolve-reference t))
+        (t value))))
+
+(defun table-recalculate-org-sbe-override (spec context)
+  (destructuring-bind (name values literal-flags) spec
+    (cons name
+          (cond
+            ((null values) "")
+            ((null (rest values))
+             (table-recalculate-org-sbe-resolve-value
+              (first values) (first literal-flags) context))
+            (t values)))))
+
+(defun table-recalculate-org-sbe-resolved-parameter-text (name value limits)
+  (cond
+    ((null value)
+     (let ((assignment (format nil "~A='()" name)))
+       (check-limit limits :max-input-length (length assignment))
+       assignment))
+    ((consp value)
+     (table-recalculate-org-sbe-parameter-text
+      name value (mapcar (lambda (item) (stringp item)) value) limits))
+    ((stringp value)
+     (table-recalculate-org-sbe-parameter-text name (list value) '(t) limits))
+    (t
+     (table-recalculate-org-sbe-parameter-text name (list value) '(nil) limits))))
+
+(defun table-recalculate-execute-org-sbe-block
+    (document source-block callbacks
+              &key header parameter-overrides variable-overrides
+              (resolved-variables nil resolved-variables-p) result-resolver)
+  (validate-babel-source-block document source-block)
+  (let* ((language (node-property source-block :language ""))
+         (executor (%lookup-callback callbacks
+                                     :babel-executor
+                                     language
+                                     'org-elisp-evaluator-error
+                                     "No Babel executor is registered"))
+         (wrapped-registry (make-callback-registry)))
+    (register-callback
+     wrapped-registry
+     :babel-executor
+     language
+     (lambda (body parameters variables)
+       (when resolved-variables-p
+         (setf variables resolved-variables))
+       (dolist (assignment parameter-overrides)
+         (setf parameters
+               (babel-merge-header-parameter parameters "VAR" assignment)))
+       (dolist (override variable-overrides)
+         (let ((position
+                (position (car override) variables :key #'car :test #'string-equal)))
+           (if position
+               (setf (cdr (nth position variables)) (cdr override))
+             (setf variables (append variables (list override))))))
+       (funcall executor body parameters variables)))
+    (let* ((parameters (and header (babel-parse-header-arguments header)))
+           (execution
+            (apply (function %execute-babel-source-block)
+                   document source-block wrapped-registry
+                   (list :result-node nil
+                         :parameters parameters
+                         :resolved-variables resolved-variables
+                         :resolved-variables-p resolved-variables-p
+                         :result-resolver result-resolver
+                         :evaluation-context :execute))))
+      (babel-execution-result-value execution))))
+
 (defun table-recalculate-elisp-reference-value
     (reference current-row current-column row-count column-count header-columns
      hline-rows target cell-value-function reference-value-function)
@@ -679,63 +797,73 @@
                                                    reference-value-function
                                                    remote-function
                                                    (callbacks (make-callback-registry)))
-  (labels ((execute-org-sbe (block-name header variable-overrides)
-             (let* ((document (node-document target))
-                    (source-block (gethash block-name (babel-build-name-index document))))
-               (unless (and source-block (eq (node-type source-block) :src-block))
-                 (babel-signal-error :unresolved-call-target "org-sbe target is not a named source block" block-name))
-               (validate-babel-source-block document source-block)
-               (let* ((language (node-property source-block :language ""))
-                      (ignore
-                       (%lookup-callback callbacks
-                                         :babel-executor
-                                         language
-                                         'org-elisp-evaluator-error
-                                         "No Babel executor is registered"))
-                      (wrapped-registry (make-callback-registry)))
-                 (declare (ignore ignore))
-                 (register-callback wrapped-registry
-                                    :babel-executor
-                                    language
-                                    (lambda (body parameters variables)
-                                      (dolist (override variable-overrides)
-                                        (setf parameters (babel-merge-header-parameter parameters
-                                                                                       "VAR"
-                                                                                       (format nil
-                                                                                               "~A=~S"
-                                                                                               (car override)
-                                                                                               (cdr override))))
-                                        (let ((position
-                                               (position (car override) variables :key #'car :test #'string-equal)))
-                                          (if position
-                                              (setf (cdr (nth position variables)) (cdr override))
-                                              (setf variables (append variables (list override))))))
-                                      (funcall
-                                       (%lookup-callback callbacks
-                                                         :babel-executor
-                                                         language
-                                                         'org-elisp-evaluator-error
-                                                         "No Babel executor is registered")
-                                       body
-                                       parameters
-                                       variables)))
-                 (let* ((parameters (and header (babel-parse-header-arguments header)))
-                        (execution
-                         (%execute-babel-source-block document
-                                                      source-block
-                                                      wrapped-registry
-                                                      :result-node
-                                                      nil
-                                                      :parameters
-                                                      parameters
-                                                      :evaluation-context
-                                                      :execute))
-                        (value (babel-execution-result-value execution))
-                        (text
-                         (if (stringp value)
-                             value
-                             (format nil "~S" value))))
-                   (string-trim '(#\Space #\Tab #\Newline #\Return) text))))))
+  (labels ((execute-org-sbe
+            (block-name header variable-overrides variable-parameters)
+            (declare (ignore variable-overrides))
+            (let* ((document (node-document target))
+                   (name-index (babel-build-name-index document))
+                   (source-block (gethash block-name name-index))
+                   (active-results (make-hash-table :test #'equal)))
+              (unless (and source-block (eq (node-type source-block) :src-block))
+                (babel-signal-error :unresolved-call-target
+                                    "org-sbe target is not a named source block"
+                                    block-name))
+              (labels ((resolve-source-result (referenced-name resolved-variables)
+                                              (let ((referenced-block (gethash referenced-name name-index)))
+                                                (unless (and referenced-block
+                                                             (eq (node-type referenced-block) :src-block))
+                                                  (babel-signal-error :unresolved-reference
+                                                                      "Babel source-block reference was not found"
+                                                                      referenced-name))
+                                                (when (gethash referenced-name active-results)
+                                                  (babel-signal-error :cyclic-reference
+                                                                      "Cyclic Babel source-block reference"
+                                                                      referenced-name))
+                                                (setf (gethash referenced-name active-results) t)
+                                                (unwind-protect
+                                                    (table-recalculate-execute-org-sbe-block
+                                                     document referenced-block callbacks
+                                                     :parameter-overrides
+                                                     (mapcar
+                                                      (lambda (variable)
+                                                       (table-recalculate-org-sbe-resolved-parameter-text
+                                                        (car variable) (cdr variable) limits))
+                                                      resolved-variables)
+                                                     :resolved-variables resolved-variables
+                                                     :result-resolver #'resolve-source-result)
+                                                  (remhash referenced-name active-results)))))
+                (when (gethash block-name active-results)
+                  (babel-signal-error :cyclic-reference
+                                      "Cyclic Babel source-block reference"
+                                      block-name))
+                (setf (gethash block-name active-results) t)
+                (unwind-protect
+                    (let* ((context
+                            (make-babel-resolution-context
+                             :document document
+                             :result-resolver #'resolve-source-result
+                             :names name-index))
+                           (overrides
+                            (mapcar
+                             (lambda (spec)
+                               (table-recalculate-org-sbe-override spec context))
+                             variable-parameters))
+                           (parameter-overrides
+                            (mapcar
+                             (lambda (spec)
+                               (table-recalculate-org-sbe-parameter-text
+                                (first spec) (second spec) (third spec) limits))
+                             variable-parameters))
+                           (value
+                            (table-recalculate-execute-org-sbe-block
+                             document source-block callbacks
+                             :header header
+                             :parameter-overrides parameter-overrides
+                             :variable-overrides overrides
+                             :result-resolver #'resolve-source-result))
+                           (text (if (stringp value) value (format nil "~S" value))))
+                      (string-trim '(#\Space #\Tab #\Newline #\Return) text))
+                  (remhash block-name active-results))))))
     (dolist (entry entries)
       (let* ((row (table-recalculate-entry-row entry))
              (column (table-recalculate-entry-column entry))

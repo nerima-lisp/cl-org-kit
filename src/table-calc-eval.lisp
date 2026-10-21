@@ -1195,192 +1195,194 @@ WORK-BUDGET across assignments in one table recalculation."
          (target (table-calc-assignment-target-description assignment)))
     (table-calc-validate-assignment-target assignment target)
     (labels ((whitespace-p (character)
-               (find character '(#\Space #\Tab #\Newline #\Return)))
+                           (find character '(#\Space #\Tab #\Newline #\Return)))
              (candidate-p (source)
-               (let ((position 0)
-                     (length (length source)))
-                 (labels ((skip-space ()
-                            (loop while (and (< position length) (whitespace-p (char source position)))
-                                  do (incf position))))
-                   (skip-space)
-                   (when (and (< position length) (char= (char source position) #\'))
-                     (incf position)
-                     (skip-space)
-                     (when (and (< position length) (char= (char source position) #\())
-                       (incf position)
-                       (skip-space)
-                       (let ((start position))
-                         (loop while (and (< position length)
-                                          (not (whitespace-p (char source position)))
-                                          (not (find (char source position) "()")))
-                               do (incf position))
-                         (string-equal source "org-sbe" :start1 start :end1 position)))))))
+                          (let ((position 0)
+                                (length (length source)))
+                            (labels ((skip-space ()
+                                                 (loop while (and (< position length) (whitespace-p (char source position)))
+                                                       do (incf position))))
+                              (skip-space)
+                              (when (and (< position length) (char= (char source position) #\'))
+                                (incf position)
+                                (skip-space)
+                                (when (and (< position length) (char= (char source position) #\())
+                                  (incf position)
+                                  (skip-space)
+                                  (let ((start position))
+                                    (loop while (and (< position length)
+                                                     (not (whitespace-p (char source position)))
+                                                     (not (find (char source position) "()")))
+                                          do (incf position))
+                                    (string-equal source "org-sbe" :start1 start :end1 position)))))))
              (proper-list-p (object)
-               (let ((tail object))
-                 (loop while (consp tail)
-                       do (setf tail (cdr tail)))
-                 (null tail)))
+                            (let ((tail object))
+                              (loop while (consp tail)
+                                    do (setf tail (cdr tail)))
+                              (null tail)))
              (safe-data-p (object depth)
-               (check-limit limits :max-formula-ast-depth depth)
-               (cond
-                 ((or (null object) (symbolp object) (numberp object) (stringp object)) t)
-                 ((consp object)
-                  (and (proper-list-p object)
-                       (every
-                        (lambda (item)
-                          (safe-data-p item (1+ depth)))
-                        object)))
-                 (t nil)))
+                          (check-limit limits :max-formula-ast-depth depth)
+                          (cond
+                           ((or (null object) (symbolp object) (numberp object) (stringp object)) t)
+                           ((proper-list-p object)
+                            (every
+                             (lambda (item)
+                               (safe-data-p item (1+ depth)))
+                             object))))
              (parse-org-sbe (source)
-               (block parse-org-sbe
-                 (check-limit limits :max-input-length (length source))
-                 (when (candidate-p source)
-                   (table-calc-charge-work limits budget (length source)))
-                 (unless (candidate-p source)
-                   (return-from parse-org-sbe
-                     (values nil nil nil nil)))
-                 (let ((depth 0)
-                       (tokens 0)
-                       (in-string nil)
-                       (escaped nil)
-                       (in-token nil))
-                   (loop for character across source
-                         do (cond
-                              (in-string
-                               (cond
-                                 (escaped
-                                  (setf escaped nil))
-                                 ((char= character #\\)
-                                  (setf escaped t))
-                                 ((char= character #\")
-                                  (setf in-string nil))))
-                              ((char= character #\")
-                               (setf in-string t
-                                     in-token nil))
-                              ((char= character #\#)
-                               (table-calc-fail source 0 :reader-dispatch "Reader dispatch is not supported in org-sbe"))
-                              ((char= character #\()
-                                (setf in-token nil)
-                                (incf depth)
-                                (check-limit limits :max-formula-ast-depth depth))
-                              ((char= character #\))
-                                (setf in-token nil)
-                                (decf depth)
-                                (when (minusp depth)
+                            (block parse-org-sbe
+                              (check-limit limits :max-input-length (length source))
+                              (when (candidate-p source)
+                                (table-calc-charge-work limits budget (length source)))
+                              (unless (candidate-p source)
+                                (return-from parse-org-sbe
+                                             (values nil nil nil nil)))
+                              (let ((depth 0)
+                                    (tokens 0)
+                                    (in-string nil)
+                                    (escaped nil)
+                                    (in-token nil))
+                                (loop for character across source
+                                      do (cond
+                                          (in-string
+                                           (cond
+                                            (escaped
+                                             (setf escaped nil))
+                                            ((char= character #\\)
+                                             (setf escaped t))
+                                            ((char= character #\")
+                                             (setf in-string nil))))
+                                          ((char= character #\")
+                                           (setf in-string t
+                                                 in-token nil))
+                                          ((char= character #\#)
+                                           (table-calc-fail source 0 :reader-dispatch "Reader dispatch is not supported in org-sbe"))
+                                          ((char= character #\()
+                                           (setf in-token nil)
+                                           (incf depth)
+                                           (check-limit limits :max-formula-ast-depth depth))
+                                          ((char= character #\))
+                                           (setf in-token nil)
+                                           (decf depth)
+                                           (when (minusp depth)
+                                             (table-calc-fail source 0 :org-sbe "Malformed org-sbe form")))
+                                          ((whitespace-p character)
+                                           (setf in-token nil))
+                                          ((not in-token)
+                                           (setf in-token t)
+                                           (incf tokens)
+                                           (check-limit limits :max-formula-tokens tokens))))
+                                (when (or in-string escaped (not (zerop depth)))
                                   (table-calc-fail source 0 :org-sbe "Malformed org-sbe form")))
-                              ((whitespace-p character)
-                               (setf in-token nil))
-                              ((not in-token)
-                                (setf in-token t)
-                                (incf tokens)
-                                (check-limit limits :max-formula-tokens tokens))))
-                   (when (or in-string escaped (not (zerop depth)))
-                     (table-calc-fail source 0 :org-sbe "Malformed org-sbe form")))
-                 (let* ((readtable (copy-readtable nil))
-                        (eof (gensym "EOF"))
-                        (*read-eval* nil)
-                        (*readtable* readtable))
-                   (progn
-                     (setf (readtable-case readtable) :preserve)
-                     (set-macro-character #\"
-                                          (lambda (stream delimiter)
-                                            (declare (ignore delimiter))
-                                            (with-output-to-string (output)
-                                              (loop for character = (read-char stream nil nil)
-                                                    do (cond
-                                                         ((null character)
-                                                          (table-calc-fail source
-                                                                           0
-                                                                           :org-sbe
-                                                                           "Unterminated org-sbe string"))
-                                                         ((char= character #\") (return))
-                                                         ((char= character #\\)
-                                                          (let ((escaped-character (read-char stream nil nil)))
-                                                            (unless escaped-character
-                                                              (table-calc-fail source
-                                                                               0
-                                                                               :org-sbe
-                                                                               "Incomplete org-sbe string escape"))
-                                                            (write-char
-                                                             (case escaped-character
-                                                               (#\n #\Newline)
-                                                               (#\r #\Return)
-                                                               (#\t #\Tab)
-                                                               (#\f #\Page)
-                                                               (#\b #\Backspace)
-                                                               (otherwise escaped-character))
-                                                             output)))
-                                                         (t (write-char character output))))))
-                                          nil
-                                          readtable))
-                   (let ((form
-                          (handler-case (multiple-value-bind (form end) (read-from-string source nil eof)
-                                          (unless (and (not (eq form eof)) (every #'whitespace-p (subseq source end)))
-                                            (table-calc-fail source end :org-sbe "Expected one complete org-sbe form"))
-                                          form)
-                            (org-resource-limit-error (condition)
-                              (error condition))
-                            (error ()
-                              (table-calc-fail source 0 :org-sbe "Malformed org-sbe form")))))
-                     (unless
-                         (and (proper-list-p form)
-                              (= (length form) 2)
-                              (symbolp (first form))
-                              (string-equal (symbol-name (first form)) "QUOTE"))
-                       (table-calc-fail source 0 :org-sbe "Expected quoted org-sbe form"))
-                     (let* ((call (second form))
-                            (arguments
-                             (and (proper-list-p call)
-                                  (consp call)
-                                  (symbolp (first call))
-                                  (string-equal (symbol-name (first call)) "org-sbe")
-                                  (rest call))))
-                       (unless arguments
-                         (table-calc-fail source 0 :org-sbe "Malformed org-sbe arguments"))
-                       (let* ((block (first arguments))
-                              (rest-arguments (rest arguments))
-                              (header (and (stringp (first rest-arguments)) (pop rest-arguments)))
-                              (variables '()))
-                         (unless (or (stringp block) (symbolp block))
-                           (table-calc-fail source 0 :org-sbe "Invalid org-sbe block name"))
-                         (dolist (variable rest-arguments)
-                           (unless (and (proper-list-p variable) (consp variable) (symbolp (first variable)))
-                             (table-calc-fail source 0 :org-sbe "Invalid org-sbe variable"))
-                           (let ((values (rest variable))
-                                 (resolved '()))
-                             (loop while values
-                                   for value = (pop values)
-                                   do (if (and (symbolp value) (string= (symbol-name value) "$"))
-                                          (progn
-                                            (unless values
-                                              (table-calc-fail source 0 :org-sbe "Missing value after org-sbe $"))
-                                            (setf value (pop values))
-                                            (unless (safe-data-p value 0)
-                                              (table-calc-fail source 0 :org-sbe "Unsupported org-sbe value"))
-                                            (push
-                                             (if (stringp value)
-                                                 value
-                                                 (if (symbolp value)
-                                                     (symbol-name value)
-                                                     (format nil "~S" value)))
-                                             resolved))
-                                          (progn
-                                            (unless (safe-data-p value 0)
-                                              (table-calc-fail source 0 :org-sbe "Unsupported org-sbe value"))
-                                            (push value resolved))))
-                             (push
-                              (cons (symbol-name (first variable))
-                                    (cond
-                                      ((null resolved) nil)
-                                      ((null (rest resolved)) (first resolved))
-                                      (t (nreverse resolved))))
-                              variables)))
-                         (values t
-                                 (if (stringp block)
-                                     block
-                                     (symbol-name block))
-                                 header
-                                 (nreverse variables)))))))))
+                              (let* ((readtable (copy-readtable nil))
+                                     (*read-eval* nil)
+                                     (*readtable* readtable))
+                                (progn
+                                  (setf (readtable-case readtable) :preserve)
+                                  (set-macro-character #\"
+                                                       (lambda (stream delimiter)
+                                                         (declare (ignore delimiter))
+                                                         (with-output-to-string (output)
+                                                           (loop for character = (read-char stream nil nil)
+                                                                 do (cond
+                                                                     ((char= character #\") (return))
+                                                                     ((char= character #\\)
+                                                                      (let ((escaped-character (read-char stream nil nil)))
+                                                                        (write-char
+                                                                         (case escaped-character
+                                                                           (#\n #\Newline)
+                                                                           (#\r #\Return)
+                                                                           (#\t #\Tab)
+                                                                           (#\f #\Page)
+                                                                           (#\b #\Backspace)
+                                                                           (otherwise escaped-character))
+                                                                         output)))
+                                                                     (t (write-char character output))))))
+                                                       nil
+                                                       readtable))
+                                (let ((form
+                                       (handler-case
+                                           (multiple-value-bind (form end) (read-from-string source)
+                                             (unless (every #'whitespace-p (subseq source end))
+                                               (table-calc-fail source end :org-sbe
+                                                                "Expected one complete org-sbe form"))
+                                             form)
+                                         (org-resource-limit-error (condition)
+                                                                   (error condition))
+                                         (error ()
+                                                (table-calc-fail source 0 :org-sbe "Malformed org-sbe form")))))
+                                  (let* ((call (second form))
+                                         (arguments
+                                          (and (proper-list-p call)
+                                               (consp call)
+                                               (symbolp (first call))
+                                               (string-equal (symbol-name (first call)) "org-sbe")
+                                               (rest call))))
+                                    (unless arguments
+                                      (table-calc-fail source 0 :org-sbe "Malformed org-sbe arguments"))
+                                    (let* ((block (first arguments))
+                                           (rest-arguments (rest arguments))
+                                           (header (and (stringp (first rest-arguments)) (pop rest-arguments)))
+                                           (variables '())
+                                           (variable-parameters '()))
+                                      (unless (or (stringp block) (symbolp block))
+                                        (table-calc-fail source 0 :org-sbe "Invalid org-sbe block name"))
+                                      (dolist (variable rest-arguments)
+                                        (unless (and (proper-list-p variable) (consp variable) (symbolp (first variable)))
+                                          (table-calc-fail source 0 :org-sbe "Invalid org-sbe variable"))
+                                        (let ((values (rest variable))
+                                              (resolved '())
+                                              (literal-flags '()))
+                                          (loop while values
+                                                for value = (pop values)
+                                                do (if (and (symbolp value) (string= (symbol-name value) "$"))
+                                                       (progn
+                                                         (unless values
+                                                           (table-calc-fail source 0 :org-sbe "Missing value after org-sbe $"))
+                                                         (setf value (pop values))
+                                                         (unless (safe-data-p value 0)
+                                                           (table-calc-fail source 0 :org-sbe "Unsupported org-sbe value"))
+                                                         (push t literal-flags)
+                                                         (push value resolved))
+                                                     (progn
+                                                       (unless (safe-data-p value 0)
+                                                         (table-calc-fail source 0 :org-sbe "Unsupported org-sbe value"))
+                                                       (push nil literal-flags)
+                                                       (push value resolved))))
+                                          (let* ((raw-values (nreverse resolved))
+                                                 (flags (nreverse literal-flags))
+                                                 (parsed-values
+                                                  (if (rest raw-values)
+                                                      (loop for value in raw-values
+                                                            for literal-p in flags
+                                                            collect
+                                                            (if (and (stringp value) (not literal-p))
+                                                                (progn
+                                                                  (check-limit limits :max-input-length (length value))
+                                                                  (multiple-value-bind (object end)
+                                                                      (handler-case
+                                                                          (read-from-string value nil nil)
+                                                                        (org-resource-limit-error (condition)
+                                                                                                  (error condition))
+                                                                        (error ()
+                                                                               (table-calc-fail source 0 :org-sbe "Malformed org-sbe value")))
+                                                                    (unless (and (plusp end) (safe-data-p object 0))
+                                                                      (table-calc-fail source 0 :org-sbe "Unsupported org-sbe value"))
+                                                                    object))
+                                                              value))
+                                                    raw-values))
+                                                 (name (symbol-name (first variable)))
+                                                 (value (cond
+                                                         ((null parsed-values) "")
+                                                         ((null (rest parsed-values)) (first parsed-values))
+                                                         (t parsed-values))))
+                                            (push (cons name value) variables)
+                                            (push (list name parsed-values flags) variable-parameters))))
+                                      (values t
+                                              (if (stringp block) block (symbol-name block))
+                                              header
+                                              (nreverse variables)
+                                              (nreverse variable-parameters)))))))))
       (let* ((expression (table-calc-assignment-expression assignment))
              (value
               (if (eq (table-calc-expression-kind expression) :quoted-lisp)
@@ -1388,38 +1390,42 @@ WORK-BUDGET across assignments in one table recalculation."
                          (expanded
                           (if elisp-reference-function
                               (funcall elisp-reference-function source expression assignment)
-                              source)))
-                    (multiple-value-bind (org-sbe-p block-name header variables) (parse-org-sbe expanded)
+                            source)))
+                    (multiple-value-bind
+                        (org-sbe-p block-name header variables variable-parameters)
+                        (parse-org-sbe expanded)
                       (let ((result
                              (cond
-                               ((not org-sbe-p) (evaluate-elisp callbacks expanded))
-                               ((zerop (length block-name)) "")
-                               (org-sbe-function (funcall org-sbe-function block-name header variables))
-                               (t (table-calc-fail expanded 0 :org-sbe "org-sbe execution is unavailable")))))
+                              ((not org-sbe-p) (evaluate-elisp callbacks expanded))
+                              ((zerop (length block-name)) "")
+                              (org-sbe-function
+                               (funcall org-sbe-function block-name header variables
+                                        variable-parameters))
+                              (t (table-calc-fail expanded 0 :org-sbe "org-sbe execution is unavailable")))))
                         (unless (or (stringp result) (realp result))
                           (table-calc-evaluation-error :invalid-function-result target))
                         (when (stringp result)
                           (check-limit limits :max-output-length (length result)))
                         result)))
-                  (table-calc-evaluate-expression expression
-                                                  reference-position-function
-                                                  cell-value-function
-                                                  (table-calc-assignment-mode assignment)
-                                                  limits
-                                                  budget
-                                                  target
-                                                  :flags
-                                                  (table-calc-assignment-flags assignment)
-                                                  :functions
-                                                  functions
-                                                  :reference-value-function
-                                                  reference-value-function
-                                                  :remote-function
-                                                  remote-function
-                                                  :current-row
-                                                  current-row
-                                                  :current-column
-                                                  current-column))))
+                (table-calc-evaluate-expression expression
+                                                reference-position-function
+                                                cell-value-function
+                                                (table-calc-assignment-mode assignment)
+                                                limits
+                                                budget
+                                                target
+                                                :flags
+                                                (table-calc-assignment-flags assignment)
+                                                :functions
+                                                functions
+                                                :reference-value-function
+                                                reference-value-function
+                                                :remote-function
+                                                remote-function
+                                                :current-row
+                                                current-row
+                                                :current-column
+                                                current-column))))
         (table-calc-format-result value
                                   (table-calc-assignment-format-precision assignment)
                                   (table-calc-assignment-flags assignment)

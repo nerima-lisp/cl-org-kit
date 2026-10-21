@@ -1126,4 +1126,109 @@
                     (org-kit::make-table-calc-work-budget) "target"
                     nil nil nil nil nil nil)
                  (error (condition) condition))
-               :unsupported-mode))))))))
+               :unsupported-mode)))))))
+  (it "parses org-sbe literal values and rejects malformed reader data"
+      (let* ((quote-character (string (code-char 39)))
+             (limits (make-limits))
+             (assignment
+              (table-calc-eval-test-assignment
+               (format nil "@1$1=~A(org-sbe sample)" quote-character)))
+             (expression (org-kit::table-calc-assignment-expression assignment))
+             (callbacks (make-callback-registry)))
+        (labels ((evaluate-source (source &optional org-sbe-function)
+                                  (setf (org-kit::table-calc-expression-value expression) source)
+                                  (org-kit::table-calc-evaluate-assignment
+                                   assignment
+                                   (table-calc-eval-test-position-function 1 1 1 nil)
+                                   (table-calc-eval-test-cell-value-function
+                                    (table-calc-eval-test-cell-map))
+                                   :limits limits
+                                   :work-budget (org-kit::make-table-calc-work-budget)
+                                   :callbacks callbacks
+                                   :org-sbe-function org-sbe-function))
+                 (unsupported (source)
+                              (handler-case
+                                  (evaluate-source source)
+                                (org-table-unsupported-syntax (condition) condition))))
+          (let* ((escaped-value
+                  (format nil
+                          "line~Cnext~Cpage~Cform~Cback~Creturn quote~C slash~Cend"
+                          #\Newline #\Tab #\Page #\Backspace #\Return #\" #\\))
+                 (source
+                  (format nil
+                          "  ~A(org-sbe sample (bare $ \"literal text\") (number $ 7) (list $ (1 2)) (empty) (many 1 2) (escaped $ \"line\\nnext\\tpage\\fform\\bback\\rreturn quote\\\" slash\\\\end\"))"
+                          quote-character))
+                 (received nil)
+                 (result
+                  (evaluate-source
+                   source
+                   (lambda (block-name header variables variable-parameters)
+                     (setf received
+                           (list block-name header variables variable-parameters))
+                     "block result"))))
+            (with-soft-assertions
+             (expect result :to-equal "block result")
+             (expect received
+                     :to-equal
+                     (list "sample" nil
+                           (list (cons "bare" "literal text")
+                                 (cons "number" 7)
+                                 (cons "list" '(1 2))
+                                 (cons "empty" "")
+                                 (cons "many" '(1 2))
+                                 (cons "escaped" escaped-value))
+                           (list (list "bare" (list "literal text") (list t))
+                                 (list "number" (list 7) (list t))
+                                 (list "list" (list '(1 2)) (list t))
+                                 (list "empty" nil nil)
+                                 (list "many" (list 1 2) (list nil nil))
+                                 (list "escaped" (list escaped-value) (list t)))))))
+          (let ((evaluator-inputs nil)
+                (non-list (format nil "~Anon-list" quote-character)))
+            (register-callback
+             callbacks :evaluator :emacs-lisp
+             (lambda (source)
+               (setf evaluator-inputs (append evaluator-inputs (list source)))
+               "evaluator result"))
+            (with-soft-assertions
+             (dolist (source (list "" quote-character non-list))
+               (expect (evaluate-source source) :to-equal "evaluator result"))
+             (expect evaluator-inputs
+                     :to-equal
+                     (list "" quote-character non-list))))
+          (dolist (case
+                      (list
+                       (cons (format nil "~A(org-sbe sample #.(error \"blocked\"))"
+                                     quote-character)
+                             :reader-dispatch)
+                       (cons (format nil "~A(org-sbe sample))" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample) trailing" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample (one .))" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe)" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample 42)" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample (42))" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample (one $))" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample (one $ (a . b)))"
+                                     quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample (one (a . b)))"
+                                     quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe sample)" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe 42)" quote-character)
+                             :org-sbe)
+                       (cons (format nil "~A(org-sbe . sample)" quote-character)
+                             :org-sbe)))
+            (table-calc-eval-test-expect-unsupported-syntax
+             (unsupported (car case))
+             (cdr case)))))))

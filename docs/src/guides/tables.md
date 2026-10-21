@@ -348,13 +348,15 @@ looks up `"limit"` as written. The result cell contains
 
 The block name can be a symbol or string. The optional second string supplies
 header arguments, as `":session one"` does above. It is followed by zero or
-more `(variable value...)` groups. The values in each group become one variable
-value; multiple values form a list. The `$` marker makes the next value a
-literal string. Org's `org-sbe` behavior returns an empty string for an empty
-block name and trims whitespace from the executor result. A non-string result
-is formatted as a Lisp value. If the block's language has no registered
-executor, recalculation signals `org-elisp-evaluator-error` without calling
-the Emacs Lisp evaluator.
+more `(variable value...)` groups. Babel resolves a single value as a variable,
+so `(count "4")` passes the number `4`. Prefix `$` to pass the next value
+through Lisp's `%S` formatting: `(limit $ "4")` passes the string `"4"`.
+Multiple values are read as Lisp data and combined into a list, as in
+`(many 1 2)`, which passes `'(1 2)`. Org's `org-sbe` behavior returns an empty
+string for an empty block name and trims whitespace from the executor result.
+A non-string result is formatted as a Lisp value. If the block's language has
+no registered executor, recalculation signals `org-elisp-evaluator-error`
+without calling the Emacs Lisp evaluator.
 
 ## Plot write plans
 

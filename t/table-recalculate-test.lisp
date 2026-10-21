@@ -114,7 +114,7 @@
                            (string= (car parameter) "VAR"))
                          parameters)))
     (expect (cdr (second var-parameters))
-            :to-equal "many=(1 2)")))
+            :to-equal "many='(1 2)")))
         (expect (cdr (assoc "literal" variables :test #'string=))
                 :to-equal "a b")))
     (multiple-value-bind (text parameters variables)
@@ -1620,4 +1620,84 @@
            (expected
              (format nil "~A(list ~S ~S)" quote-character "1" "3")))
       (expect expanded :to-equal expected)))
+  (it "matches Org org-sbe argument coercion and resolves named source blocks"
+      (let* ((quote-character (code-char 39))
+             (callbacks (make-callback-registry))
+             (received-parameters nil)
+             (received-variables nil)
+             (calls 0)
+             (source
+              (format nil
+                      "#+name: nested-source~%#+begin_src mock~%nested body~%#+end_src~%#+name: value-source~%#+begin_src mock :var inner=nested-source~%value body~%#+end_src~%#+name: sample~%#+begin_src mock :var one=3 :var inner=value-source~%sample body~%#+end_src~%| number | text | result |~%|--------+------+--------|~%| 42 | alpha | old |~%#+TBLFM: @2$3=~A(org-sbe sample (one 7) (number $1) (literal $$1) (many $1 $2) (forced-many $$1 $2))~%"
+                      quote-character))
+             (document (parse-org source))
+             (table (table-recalculate-test-find-node (document-root document) :table)))
+        (register-babel-executor
+         callbacks "mock"
+         (lambda (body parameters variables)
+           (incf calls)
+           (cond
+            ((search "nested body" body) "nested result")
+            ((search "value body" body) "source result")
+            ((search "sample body" body)
+             (setf received-parameters parameters
+                   received-variables variables)
+             "  completed  ")
+            (t "unexpected body"))))
+        (let* ((result (table-recalculate document table :callbacks callbacks))
+               (updated (edit-result-updated-document result))
+               (many (cdr (assoc "many" received-variables :test #'string=)))
+               (forced-many
+                (cdr (assoc "forced-many" received-variables :test #'string=)))
+               (var-values
+                (mapcar #'cdr
+                        (remove-if-not
+                         (lambda (parameter)
+                           (string= (car parameter) "VAR"))
+                         received-parameters))))
+          (with-soft-assertions
+           (expect (not (null (search "| 42 | alpha | completed |"
+                                      (document-text updated))))
+                   :to-be t)
+           (expect (cdr (assoc "one" received-variables :test #'string=))
+                   :to-equal 7)
+           (expect (cdr (assoc "number" received-variables :test #'string=))
+                   :to-equal 42)
+           (expect (cdr (assoc "literal" received-variables :test #'string=))
+                   :to-equal "42")
+           (expect (first many) :to-equal 42)
+           (expect (symbol-name (second many)) :to-equal "alpha")
+           (expect (first forced-many) :to-equal "42")
+           (expect (symbol-name (second forced-many)) :to-equal "alpha")
+           (expect var-values
+                   :to-equal
+                   (list "inner=value-source"
+                       "one=7"
+                       "number=42"
+                       "literal=\"42\""
+                       "many='(42 alpha)"
+                       "forced-many='(\"42\" alpha)"))
+           (expect (list calls (cdr (assoc "inner" received-variables :test #'string=)))
+                   :to-equal (list 3 "source result"))))
+        (let* ((missing-source
+                (format nil
+                        "#+name: sample~%#+begin_src mock~%body~%#+end_src~%| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2=~A(org-sbe missing)~%"
+                        quote-character))
+               (missing-document (parse-org missing-source))
+               (missing-table
+                (table-recalculate-test-find-node
+                 (document-root missing-document) :table))
+               (condition
+                (handler-case
+                    (progn
+                      (table-recalculate missing-document missing-table
+                                         :callbacks callbacks)
+                      nil)
+                  (org-babel-error (condition) condition))))
+          (with-soft-assertions
+           (expect (typep condition 'org-babel-error) :to-be t)
+           (when condition
+             (expect (org-babel-error-reason condition)
+                     :to-be :unresolved-call-target))
+           (expect calls :to-be 3)))))
 )

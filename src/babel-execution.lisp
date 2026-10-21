@@ -150,7 +150,8 @@ the RESULTS channel is OUTPUT, captured output follows the document limits."
 (defun %execute-babel-source-block
     (document source-block registry
      &key result-node parameters result-resolver confirmation-function
-       hash-function evaluation-context variable-document)
+       hash-function evaluation-context variable-document
+       resolved-variables resolved-variables-p)
   (validate-babel-source-block document source-block)
   (unless (callback-registry-p registry)
     (error 'type-error :datum registry :expected-type 'callback-registry))
@@ -182,7 +183,10 @@ the RESULTS channel is OUTPUT, captured output follows the document limits."
                         :result-resolver result-resolver
                         :names (babel-build-name-index variable-document)))
            (variables
-             (babel-resolve-parameters-variables resolution effective-parameters))
+             (if resolved-variables-p
+                 resolved-variables
+                 (babel-resolve-parameters-variables
+                  resolution effective-parameters)))
            (cache-enabled (and result-node
                                (babel-execution-cache-enabled-p
                                 effective-parameters)))
