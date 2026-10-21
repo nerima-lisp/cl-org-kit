@@ -12,6 +12,24 @@
                      (asdf:system-relative-pathname "cl-org-kit" "t/"))
         when (uiop:string-suffix-p "-test.lisp" (namestring path))
           collect (namestring path)))
+(defun lint-test-selected-messages (document checker &optional context)
+  (mapcar #'org-kit::org-lint-diagnostic-message
+          (org-lint document
+                    :context context
+                    :checkers (list checker))))
+(defun lint-test-babel-header-context (complete-p)
+  (list :babel-header-specifications
+        (list :complete complete-p
+              :common
+              (list (cons "results" :any)
+                    (cons "exports"
+                          (list (list "code" "results" "both" "none"))))
+              :languages
+              (list
+               (cons "emacs-lisp"
+                     (list (cons "elisp-only" :any)
+                           (cons "exports"
+                                 (list (list "code" "results" "both" "none")))))))))
 
 (describe "Org lint registration and dispatch"
   (it "registers every test source in the canonical ASDF suite"
@@ -20,20 +38,16 @@
       (expect (set-difference registered on-disk :test #'string=) :to-equal '())
       (expect (set-difference on-disk registered :test #'string=) :to-equal '())))
 
-  (it "registers 61 Org checker names: 58 dispatchable and three marked :dependency-wait"
+  (it "registers all 61 Org checker names as dispatchable"
     (let* ((table org-kit::*org-lint-checkers*)
            (active (remove-if (lambda (checker)
                                 (eq (third checker) :dependency-wait))
-                              table))
-           (deferred (remove-if-not (lambda (checker)
-                                      (eq (third checker) :dependency-wait))
-                                    table)))
+                              table)))
       (expect (length table) :to-be 61)
       (expect (count :document-only table :key #'third) :to-be 46)
-      (expect (count :caller-material table :key #'third) :to-be 12)
-      (expect (count :dependency-wait table :key #'third) :to-be 3)
-      (expect (length active) :to-be 58)
-      (expect (length deferred) :to-be 3)
+      (expect (count :caller-material table :key #'third) :to-be 15)
+      (expect (count :dependency-wait table :key #'third) :to-be 0)
+      (expect (length active) :to-be 61)
       (expect (length (remove-duplicates table :key #'first :test #'string-equal))
               :to-be 61)))
 
@@ -119,3 +133,282 @@ body
       (expect (org-kit::%lint-report document "test" 6 "message") :to-be nil)
       (expect (org-kit::%lint-report document "test" "1" "message") :to-be nil)))
 )
+(describe "Org Babel lint caller material"
+  (it "reports unknown source-block header arguments with the exact Org message"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC emacs-lisp :bogus yes
+body
+#+END_SRC
+"))
+           (messages
+             (lint-test-selected-messages
+              document "wrong-header-argument"
+              (lint-test-babel-header-context t))))
+      (expect messages :to-equal
+              (list "Unknown header argument \":bogus\""))))
+  (it "reports a missing colon in a source-block header argument with the exact Org message"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC emacs-lisp results output
+body
+#+END_SRC
+"))
+           (messages
+             (lint-test-selected-messages
+              document "wrong-header-argument"
+              (lint-test-babel-header-context t))))
+      (expect messages :to-equal
+              (list "Missing colon in header argument \"RESULTS\""))))
+  (it "accepts common and language-specific source-block header names"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC emacs-lisp :exports code :elisp-only yes
+body
+#+END_SRC
+"))
+           (messages
+             (lint-test-selected-messages
+              document "wrong-header-argument"
+              (lint-test-babel-header-context t))))
+      (expect messages :to-equal nil)))
+  (it "does not treat a colon-prefixed token parsed as the language as a header argument"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC :elisp-only yes
+body
+#+END_SRC
+"))
+           (messages
+             (lint-test-selected-messages
+              document "wrong-header-argument"
+              (lint-test-babel-header-context t))))
+      (expect messages :to-equal nil)))
+  (it "skips source-block header-name checks when specifications are absent or incomplete"
+    (let ((document
+            (parse-org "#+BEGIN_SRC emacs-lisp :bogus yes
+body
+#+END_SRC
+")))
+      (expect (lint-test-selected-messages document "wrong-header-argument")
+              :to-equal nil)
+      (expect (lint-test-selected-messages
+               document "wrong-header-argument"
+               (lint-test-babel-header-context nil))
+              :to-equal nil)))
+  (it "reports unknown source-block header values with the exact Org message"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC emacs-lisp :exports invalid
+body
+#+END_SRC
+"))
+           (messages
+             (lint-test-selected-messages
+              document "wrong-header-value"
+              (lint-test-babel-header-context t))))
+      (expect messages :to-equal
+              (list "Unknown value \"invalid\" for header \":exports\""))))
+  (it "accepts language-specific values and rejects common-only values for the same header"
+    (let ((context
+            (list :babel-header-specifications
+                  (list :complete t
+                        :common
+                        (list (cons "exports" (list (list "code"))))
+                        :languages
+                        (list (cons "emacs-lisp"
+                                    (list (cons "exports"
+                                                (list (list "both"))))))))))
+      (expect (lint-test-selected-messages
+               (parse-org "#+BEGIN_SRC emacs-lisp :exports both
+body
+#+END_SRC
+")
+               "wrong-header-value" context)
+              :to-equal nil)
+      (expect (lint-test-selected-messages
+               (parse-org "#+BEGIN_SRC emacs-lisp :exports code
+body
+#+END_SRC
+")
+               "wrong-header-value" context)
+              :to-equal
+              (list "Unknown value \"code\" for header \":exports\""))))
+  (it "skips source-block header-value checks when specifications are absent or incomplete"
+    (let ((document
+            (parse-org "#+BEGIN_SRC emacs-lisp :exports invalid
+body
+#+END_SRC
+")))
+      (expect (lint-test-selected-messages document "wrong-header-value")
+              :to-equal nil)
+      (expect (lint-test-selected-messages
+               document "wrong-header-value"
+               (lint-test-babel-header-context nil))
+              :to-equal nil)))
+  (it "reports named results when effective exports omit results"
+    (let* ((document
+             (parse-org "#+NAME: block
+#+BEGIN_SRC emacs-lisp :exports code
+(+ 1 2)
+#+END_SRC
+#+NAME: result
+#+RESULTS: block
+: 3
+"))
+           (block (first (org-kit::%lint-nodes document :src-block)))
+           (begin (org-kit::node-begin block))
+           (messages
+             (lint-test-selected-messages
+              document "named-result"
+              (list :babel-effective-exports
+                    (list (cons begin "code"))))))
+      (expect messages :to-equal
+              (list "Links to \"result\" will not be valid during export unless the parent source block has :exports results or both"))))
+  (it "accepts named results with effective exports results or both"
+    (let* ((document
+             (parse-org "#+NAME: block
+#+BEGIN_SRC emacs-lisp :exports code
+(+ 1 2)
+#+END_SRC
+#+NAME: result
+#+RESULTS: block
+: 3
+"))
+           (block (first (org-kit::%lint-nodes document :src-block)))
+           (begin (org-kit::node-begin block)))
+      (dolist (exports (list "results" "both"))
+        (expect (lint-test-selected-messages
+                 document "named-result"
+                 (list :babel-effective-exports
+                       (list (cons begin exports))))
+                :to-equal nil))))
+  (it "skips named-result checks without a matching valid effective-export entry"
+    (let* ((document
+             (parse-org "#+NAME: block
+#+BEGIN_SRC emacs-lisp :exports code
+(+ 1 2)
+#+END_SRC
+#+NAME: result
+#+RESULTS: block
+: 3
+"))
+           (block (first (org-kit::%lint-nodes document :src-block)))
+           (begin (org-kit::node-begin block)))
+      (expect (lint-test-selected-messages document "named-result")
+              :to-equal nil)
+      (expect (lint-test-selected-messages
+               document "named-result"
+               (list :babel-effective-exports
+                     (list (cons (1+ begin) "code"))))
+              :to-equal nil)
+      (expect (lint-test-selected-messages
+               document "named-result"
+               (list :babel-effective-exports
+                     (list (cons begin 42))))
+              :to-equal nil)))
+  (it "skips attachment links when only the generic file predicate is supplied"
+    (let* ((file-predicate-called nil)
+           (messages
+             (lint-test-selected-messages
+              (parse-org "[[attachment:photo.png]]")
+              "link-to-local-file"
+              (list :file-exists-p
+                    (lambda (file)
+                      (declare (ignore file))
+                      (setf file-predicate-called t)
+                      t)))))
+      (expect messages :to-equal nil)
+      (expect file-predicate-called :to-be nil)))
+  (it "reports a missing attachment through the attachment-aware predicate"
+    (let* ((generic-predicate-called nil)
+           (checked-file nil)
+           (checked-node-type nil)
+           (messages
+             (lint-test-selected-messages
+              (parse-org "[[attachment:photo.png]]")
+              "link-to-local-file"
+              (list :file-exists-p
+                    (lambda (file)
+                      (declare (ignore file))
+                      (setf generic-predicate-called t)
+                      t)
+                    :attachment-file-exists-p
+                    (lambda (file node)
+                      (setf checked-file file
+                            checked-node-type (org-kit::node-type node))
+                      nil)))))
+      (expect generic-predicate-called :to-be nil)
+      (expect checked-file :to-equal "photo.png")
+      (expect checked-node-type :to-equal :link)
+      (expect messages :to-equal
+              (list "Link to non-existent local file \"photo.png\""))))
+  (it "accepts an attachment confirmed by the attachment-aware predicate"
+    (let* ((generic-predicate-called nil)
+           (checked-file nil)
+           (checked-node-type nil)
+           (messages
+             (lint-test-selected-messages
+              (parse-org "[[attachment:photo.png]]")
+              "link-to-local-file"
+              (list :file-exists-p
+                    (lambda (file)
+                      (declare (ignore file))
+                      (setf generic-predicate-called t)
+                      t)
+                    :attachment-file-exists-p
+                    (lambda (file node)
+                      (setf checked-file file
+                            checked-node-type (org-kit::node-type node))
+                      t)))))
+      (expect generic-predicate-called :to-be nil)
+      (expect checked-file :to-equal "photo.png")
+      (expect checked-node-type :to-equal :link)
+      (expect messages :to-equal nil))))
+(describe "Org Babel header interpretation"
+  (it "reports a missing colon in an affiliated header argument"
+    (let* ((document
+             (parse-org "#+HEADER: results output
+#+BEGIN_SRC emacs-lisp
+body
+#+END_SRC
+"))
+           (messages
+             (lint-test-selected-messages
+              document "wrong-header-argument"
+              (lint-test-babel-header-context t))))
+      (expect messages :to-equal
+              (list "Missing colon in header argument \"RESULTS\""))))
+  (it "reports a forbidden combination of exclusive header values"
+    (let* ((document
+             (parse-org "#+BEGIN_SRC emacs-lisp :exports code both
+body
+#+END_SRC
+"))
+           (context
+             (list :babel-header-specifications
+                   (list :complete t
+                         :common
+                         (list
+                          (cons "exports"
+                                (list (list "code" "results" "both" "none"))))
+                         :languages nil)))
+           (messages
+             (lint-test-selected-messages
+              document "wrong-header-value" context)))
+      (expect messages :to-equal
+              (list "Forbidden combination in header \":exports\": code, both"))))
+  (it "strips source-block switches and checks following header arguments"
+    (let ((context (lint-test-babel-header-context t)))
+      (dolist (switches '("-i" "-k" "-r" "-l \"label\"" "-n" "+n" "-n 4" "+n 4"
+                          "-i -k -r -l \"label\" -n 4 +n 5"))
+        (let* ((switch-only
+                 (parse-org
+                  (format nil "#+BEGIN_SRC emacs-lisp ~a~%body~%#+END_SRC~%"
+                          switches)))
+               (with-header
+                 (parse-org
+                  (format nil "#+BEGIN_SRC emacs-lisp ~a :bogus yes~%body~%#+END_SRC~%"
+                          switches))))
+          (expect (lint-test-selected-messages
+                   switch-only "wrong-header-argument" context)
+                  :to-equal nil)
+          (expect (lint-test-selected-messages
+                   with-header "wrong-header-argument" context)
+                  :to-equal
+                  (list "Unknown header argument \":bogus\"")))))))
