@@ -1,8 +1,10 @@
 # Export
 
 `export-org` renders a parsed document as HTML, GitHub Flavored Markdown (GFM),
-ASCII, LaTeX source, or iCalendar. The backend selects the document format. `:output-type`
-selects its representation: a string by default, UTF-8 octets, or a stream.
+ASCII, LaTeX, iCalendar, Texinfo, or man output. The backend selects the
+document format. `:output-type` selects its representation: a string by default,
+UTF-8 octets, or a stream. `export-org-texinfo` and `export-org-man` are
+convenience entrypoints for the Texinfo and man backends.
 
 In this repository, `nix develop --command sbcl` opens a REPL with the pinned
 dependencies available. For another ASDF setup, make `cl-org-kit` and its
@@ -14,16 +16,22 @@ dependencies available as described in [Getting Started](../getting-started.md).
 
 (let* ((document
          (org-kit:parse-org
-          (format nil "#+TITLE: Release notes~%~%* Version 0.1.0~%A *small* release.~%")))
+          (format nil "#+TITLE: Project release notes~%~%* Version 0.1.0~%A *small* release.~%")))
        (context (org-kit:make-export-context :title "Project release notes")))
   (list
    (org-kit:export-org document :html :context context)
    (org-kit:export-org document :gfm :context context)
    (org-kit:export-org document :ascii :context context)
    (org-kit:export-org document :latex :context context)
+   (org-kit:export-org-texinfo document :context context)
+   (org-kit:export-org-man document :context context)
    (org-kit:export-org document :gfm
                        :context context :output-type :octets)))
 ~~~
+
+Texinfo export returns `.texi` source. It does not run `makeinfo` or create an
+`.info` file. Man export returns roff source for a man page; it does not invoke
+a roff formatter.
 
 LaTeX export returns source only; it does not invoke a TeX engine or generate a
 PDF. By default it uses the `article` class with `[11pt]` options, ignores
@@ -80,8 +88,8 @@ rejected, and a successful call returns the stream.
 value in effect. `:time-context` accepts an `org-time-context` value and is
 separate from Org keyword metadata. It carries an explicit reference time, time
 zone, and daylight-saving policy into callback metadata under `:time-context`.
-A callback can read it with
-`(getf (org-kit:export-render-context-metadata context) :time-context)`. See
+A renderer or filter callback can read it with
+`(getf (org-kit:export-render-context-metadata render-context) :time-context)`. See
 [Clock](clock.md) for an example of constructing a time context.
 
 Pass per-export extension data with `:extensions` when a callback needs
@@ -346,11 +354,15 @@ context)`. Stages run in this order: `:options`, `:parse-tree`, `:plain-text`,
 | Stage | Value |
 |---|---|
 | `:options` | The explicit option alist; defaults are read separately with `export-option-value`. |
-| `:parse-tree` | The list of prepared root `export-view` values. Use `org-kit:export-view-p` to test a value before calling `org-kit:export-view-node`, `org-kit:export-view-children`, or `org-kit:export-view-source-document`. |
+| `:parse-tree` | The list of prepared root `export-view` values. |
 | `:plain-text` | The rendered string for a plain-text node. |
 | `(:element node-type)` | The rendered string for one node. |
 | `:body` | The body string after rendering. |
 | `:final-output` | The complete output string. |
+
+Check a parse-tree value with `org-kit:export-view-p` before calling
+`org-kit:export-view-node`, `org-kit:export-view-children`, or
+`org-kit:export-view-source-document`.
 
 A filter that returns `nil` leaves its input unchanged and lets the next
 callback run. An empty string is a valid result and stops the remaining

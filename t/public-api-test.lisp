@@ -276,8 +276,9 @@
     "EXPORT-VIEW-SOURCE-DOCUMENT" "MAKE-EXPORT-VIEW"
     "MAKE-EXPORT-LINK-RESULT" "EXPORT-LINK-RESULT-KIND"
     "EXPORT-LINK-RESULT-DESTINATION" "EXPORT-LINK-RESULT-DESCRIPTION"
-    ;; Unit E2 HTML export
-    "EXPORT-ORG" "EXPORT-ICALENDAR-DOCUMENTS"
+    ;; Export API
+    "EXPORT-ORG" "EXPORT-ORG-MAN" "EXPORT-ORG-TEXINFO"
+    "EXPORT-ICALENDAR-DOCUMENTS"
     ;; Org crypt
     "ORG-CRYPT-ERROR" "ORG-CRYPT-ERROR-REASON" "ORG-CRYPT-ERROR-CAUSE"
     "CRYPT-ENCRYPT-ENTRY" "CRYPT-DECRYPT-ENTRY"
@@ -613,6 +614,18 @@ Missing values stay last in both directions, and ties retain source order.")))
       (expect readback :to-equal "Stable title")
       (setf (char readback 0) #\Y)
       (expect (export-context-title context) :to-equal "Stable title")))
+
+  (it "exports Texinfo and man through their public entrypoints"
+    (let ((document (parse-org "Public export.")))
+      (expect (export-org-texinfo document)
+              :to-equal (export-org document :texinfo))
+      (expect (export-org-man document :output-type :octets)
+              :to-equalp (export-org document :man :output-type :octets))))
+  (it "documents the Texinfo and man export entrypoints"
+    (expect (documentation (quote export-org-texinfo) (quote function))
+            :to-equal "Export DOCUMENT with the :TEXINFO backend.")
+    (expect (documentation (quote export-org-man) (quote function))
+            :to-equal "Export DOCUMENT with the man backend."))
 
   (it "registers derived backends and applies their filter chains"
     (let* ((document (parse-org "A custom export."))

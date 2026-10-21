@@ -263,8 +263,9 @@
    #:org-bibtex-error #:org-bibtex-error-reason
    #:org-bibtex-error-position #:org-bibtex-error-context
    #:bibtex-import #:bibtex-export
-   ;; Unit E2 HTML export
-   #:export-org #:export-view-p #:export-icalendar-documents
+   ;; Export API
+   #:export-org #:export-org-man #:export-org-texinfo #:export-view-p
+   #:export-icalendar-documents
    ;; Org crypt
    #:org-crypt-error #:org-crypt-error-reason #:org-crypt-error-cause
    #:crypt-encrypt-entry #:crypt-decrypt-entry
