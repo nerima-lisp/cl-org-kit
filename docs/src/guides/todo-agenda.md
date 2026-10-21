@@ -194,7 +194,8 @@ built-in checks.
 When the provider is absent or returns `nil`, the built-in rules return `"t"`
 only for an unfinished TODO heading that is blocked; otherwise `BLOCKED` is
 missing. The example uses `query-list`'s default context, which runs the built-in
-rules without a provider:
+rules without a provider. Pass a custom context through `query-list`'s `:context`
+argument to use a provider:
 
 ~~~lisp
 (require :asdf)
@@ -324,7 +325,7 @@ headline node. In the example, `node-property` with `:raw-value` reads that
 node's raw title, and `agenda-match-entry-line` returns its source line.
 
 `agenda` has signature
-`(agenda documents start-date end-date &key time-context (warning-days 14) (scheduled-delay 0) (future-repeats :all) sorting-strategy user-defined-sorter)`.
+`(agenda documents start-date end-date &key time-context callback-registry (warning-days 14) (scheduled-delay 0) (future-repeats :all) sorting-strategy user-defined-sorter)`.
 
 `query-match-now` has the signature
 `(query-match-now document match &key time-context context)` and returns
@@ -361,7 +362,10 @@ diary timestamp nodes for that date. Its optional `:callback-registry` defaults
 to an empty registry; an unknown diary form signals
 `org-elisp-evaluator-error` with reason `:unregistered` unless an evaluator is
 registered with `(register-callback registry :evaluator :emacs-lisp function)`
-and that registry is passed as `:callback-registry`.
+and that registry is passed as `:callback-registry`. `query-match-now` remains
+an Org headline matcher. Relative query dates use its explicit
+`:time-context` reference time. For structured `query-list`, relative query
+dates use the match's explicit `:reference-time`, not the machine clock.
 
 Agenda rows for a scheduled habit also expose `agenda-entry-habit-consistency`.
 Each scheduled row for a habit carries one list spanning the full agenda date
@@ -782,11 +786,13 @@ descendants for refile and archive. Repeated agenda rows for the same headline
 are applied once. The `:max-agenda-bulk-actions` limit defaults to 100,000
 selected rows per call.
 
-Edits are staged across documents. If applying one selection fails, the call
-signals `org-agenda-error` with reason `:bulk-action-failed`; its context
-identifies the document and headline path. The call returns results only after
-every selected action succeeds, so earlier staged edits are not returned when
-a later selection fails.
+Edits are staged in memory across documents. If applying a selection or
+checking an edited document's output limit fails, the call signals
+`org-agenda-error` with reason `:bulk-action-failed`. Its context identifies
+the source document by its one-based position in selection order, the
+selection's zero-based source offset, and its heading path. The call returns
+edit results only after every selected action succeeds. If a later selection
+fails, it returns no results and the original documents remain unchanged.
 
 ~~~lisp
 (require :asdf)
@@ -809,7 +815,18 @@ a later selection fails.
          (org-kit:agenda-bulk-action
           view :schedule :schedule-date (org-kit:make-org-time-value "2025-01-03")))
        (edit (cdr (assoc document results))))
-  (org-kit:document-text (org-kit:edit-result-updated-document edit)))
+  (format t "~A"
+          (org-kit:document-text
+           (org-kit:edit-result-updated-document edit))))
+~~~
+
+The script prints:
+
+~~~text
+#+TODO: TODO | DONE
+
+* TODO Publish release
+DEADLINE: <2025-01-02 Thu> SCHEDULED: <2025-01-03 Fri>
 ~~~
 
 See [Clock](clock.md) for clock aggregation and
