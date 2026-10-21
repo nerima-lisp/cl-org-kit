@@ -112,6 +112,7 @@
                ;; Unit E5 LaTeX export
                (:file "export-latex")
                (:file "agenda")
+               (:file "export-icalendar")
                (:file "table-radio")
                (:file "crypt")
                (:file "refile-targets")
@@ -254,6 +255,8 @@
                (:file "export-ascii-test")
                ;; Unit E5 LaTeX export
                (:file "export-latex-test")
+               ;; FR-100 iCalendar export
+               (:file "export-icalendar-test")
                ;; FR-120 Org lint checker tests
                (:file "lint-document-a-test")
                (:file "lint-document-b-test")
