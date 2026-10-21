@@ -924,29 +924,88 @@
           (expect (org-resource-limit-error-actual condition) :to-be 1008)))))
 
   (it-sequential "limits long ASCII table cookies before padded output allocation"
-    (let* ((cookie (make-string 32 :initial-element #\9))
-           (source
-             (format nil "| <~A> |~%~{~A~%~}"
-                     cookie (make-list 20 :initial-element "| x |")))
-           (document
-             (parse-org source
-                        :limits (make-limits :max-output-length 1000)))
-           (public-condition
-             (handler-case
-                 (progn (export-org document :ascii) nil)
-               (org-resource-limit-error (condition) condition))))
-      (with-soft-assertions
-        (expect (search (format nil "<~A>" cookie) source)
-                :to-be-truthy)
-        (expect (> (length source) 100) :to-be t)
-        (expect (= (count #\Newline source) 21) :to-be t)
-        (expect (typep public-condition 'org-resource-limit-error)
-                :to-be t)
-        (when (typep public-condition 'org-resource-limit-error)
-          (expect (org-resource-limit-error-limit-name public-condition)
-                  :to-be :max-output-length)
-          (expect (org-resource-limit-error-limit public-condition)
-                  :to-be 1000)))))
+    (labels ((find-table-view (views)
+               (loop for view in views
+                     for found =
+                       (if (eq (node-type (org-kit::export-view-node view))
+                               :table)
+                           view
+                           (find-table-view
+                            (org-kit::export-view-children view)))
+                     when found return found)))
+      (let* ((cookie (make-string 32 :initial-element #\9))
+             (row-count 20)
+             (output-limit 1000000)
+             (padded-output-bytes (* row-count output-limit))
+             (source
+               (format nil "| <~A> |~%~{~A~%~}"
+                       cookie (make-list row-count :initial-element "| x |")))
+             (document
+               (parse-org source
+                          :limits (make-limits :max-output-length 1000)))
+             (allocation-document
+               (parse-org source
+                          :limits (make-limits :max-output-length output-limit)))
+             (preparation (org-kit::export-prepare allocation-document :ascii))
+             (table-view
+               (find-table-view
+                (org-kit::export-preparation-root-views preparation)))
+             (public-condition
+               (handler-case
+                   (progn (export-org document :ascii) nil)
+                 (org-resource-limit-error (condition) condition)))
+             (warmup-output
+               (export-ascii-test-output-state preparation))
+             (warmup-condition
+               (catch 'ascii-table-limit
+                 (handler-bind
+                     ((org-resource-limit-error
+                        (lambda (condition)
+                          (throw 'ascii-table-limit condition))))
+                   (org-kit::export-ascii-output-write-table
+                    warmup-output table-view preparation))))
+             (table-output
+               (progn
+                 (sb-ext:gc :full t)
+                 (export-ascii-test-output-state preparation)))
+             (at-signal nil)
+             (initial-capacity
+               (array-total-size
+                (org-kit::export-ascii-output-output table-output)))
+             (before (progn (sb-ext:gc :full t) (sb-ext:get-bytes-consed)))
+             (table-condition
+               (catch 'ascii-table-limit
+                 (handler-bind
+                     ((org-resource-limit-error
+                        (lambda (condition)
+                          (setf at-signal (- (sb-ext:get-bytes-consed) before))
+                          (throw 'ascii-table-limit condition))))
+                   (org-kit::export-ascii-output-write-table
+                    table-output table-view preparation))))
+             (buffer (org-kit::export-ascii-output-output table-output)))
+        (with-soft-assertions
+          (expect (search (format nil "<~A>" cookie) source)
+                  :to-be-truthy)
+          (expect (> (length source) 100) :to-be t)
+          (expect (= (count #\Newline source) (1+ row-count)) :to-be t)
+          (expect (eq (node-type (org-kit::export-view-node table-view))
+                      :table)
+                  :to-be t)
+          (expect (typep public-condition 'org-resource-limit-error) :to-be t)
+          (expect (typep warmup-condition 'org-resource-limit-error) :to-be t)
+          (expect (typep table-condition 'org-resource-limit-error) :to-be t)
+          (when (typep public-condition 'org-resource-limit-error)
+            (expect (org-resource-limit-error-limit-name public-condition)
+                    :to-be :max-output-length)
+            (expect (org-resource-limit-error-limit public-condition)
+                    :to-be 1000))
+          (expect (= (fill-pointer buffer) 0) :to-be t)
+          (expect (<= (array-total-size buffer) output-limit) :to-be t)
+          (expect (> at-signal 0) :to-be t)
+          (unless *coverage-run-p*
+            ;; The focused run measured 68,608 bytes; 20,000,000 padded bytes give a 1,000,000-byte ceiling.
+            (expect (< at-signal (floor padded-output-bytes 20)) :to-be t))
+          (expect (= (array-total-size buffer) initial-capacity) :to-be t)))))
 
   (it-sequential "preflights long ASCII table cookies before writing padded rows"
     (let ((result
