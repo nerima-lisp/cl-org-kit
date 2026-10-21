@@ -3327,39 +3327,78 @@
   (it "rejects non-NIL native sink renderer results during sink traversal"
     (let ((renderer-result nil))
       (export-registry-test-with-builtin-backend
-       :api-registry-native-sink-renderer-result
+       :html
        (list :renderer
              (lambda (context)
                (let ((sink (make-export-registry-test-native-sink)))
-                 (dolist (view (export-render-context-root-views context))
-                   (org-kit::export-render-view-to-sink context sink view))
+                 (org-kit::export-render-view-to-sink
+                  context sink
+                  (make-export-view (make-node :paragraph :post-blank 2)))
                  (export-registry-test-native-sink-string sink nil)))
              :native-sink-renderer
              (lambda (sink node view frame context)
                (declare (ignore node view frame))
-               (export-registry-test-native-sink-write-string sink "native" context)
+               (export-registry-test-native-sink-write-string
+                sink "native" context)
                renderer-result)
              :native-sink-scratch
-             #'export-registry-test-native-sink-scratch
+             (function export-registry-test-native-sink-scratch)
              :native-sink-string
-             #'export-registry-test-native-sink-string
+             (function export-registry-test-native-sink-string)
              :native-sink-write-string
-             #'export-registry-test-native-sink-write-string
+             (function export-registry-test-native-sink-write-string)
              :native-sink-append-node-result
-             #'export-registry-test-native-sink-append-node-result
+             (function export-registry-test-native-sink-append-node-result)
              :native-sink-output-offset
-             #'export-registry-test-native-sink-output-offset)
+             (function export-registry-test-native-sink-output-offset))
        (lambda ()
-         (let ((document (parse-org "Registered native sink.")))
+         (let ((document (parse-org "")))
            (with-soft-assertions
-             (expect (export-org document :api-registry-native-sink-renderer-result)
-                     :to-equal "native")
+             (expect (export-org document :html) :to-equal "native")
              (setf renderer-result :unexpected)
              (expect
               (export-registry-test-signals-type-error-p
-               (lambda ()
-                 (export-org document :api-registry-native-sink-renderer-result)))
+               (lambda () (export-org document :html)))
               :to-be t)))))))
+  (it "omits HTML post-blank before native sink element filters"
+    (let ((filtered-value nil)
+          (output nil))
+      (export-registry-test-with-builtin-backend
+       :html
+       (list :renderer
+             (lambda (context)
+               (let ((sink (make-export-registry-test-native-sink)))
+                 (org-kit::export-render-view-to-sink
+                  context sink
+                  (make-export-view (make-node :paragraph :post-blank 2)))
+                 (export-registry-test-native-sink-string sink nil)))
+             :native-sink-renderer
+             (lambda (sink node view frame context)
+               (declare (ignore node view frame))
+               (export-registry-test-native-sink-write-string
+                sink "native" context)
+               nil)
+             :native-sink-scratch
+             (function export-registry-test-native-sink-scratch)
+             :native-sink-string
+             (function export-registry-test-native-sink-string)
+             :native-sink-write-string
+             (function export-registry-test-native-sink-write-string)
+             :native-sink-append-node-result
+             (function export-registry-test-native-sink-append-node-result)
+             :native-sink-output-offset
+             (function export-registry-test-native-sink-output-offset)
+             :filters
+             (list (cons (list :element :paragraph)
+                         (list (lambda (value context)
+                                 (declare (ignore context))
+                                 (setf filtered-value value)
+                                 value)))))
+       (lambda ()
+         (setf output (export-org (parse-org "") :html))
+         (with-soft-assertions
+           (expect filtered-value :to-equal "native")
+           (expect output :to-equal "native"))))))
   (it "rejects invalid native sink offsets through registered callbacks"
     (let ((offset-results nil)
           (offset-calls 0))
