@@ -172,38 +172,40 @@
     staged))
 (defun agenda-bulk-archive-target-document
     (source-document target-document original-target-document)
-  (let ((source-name (document-source-name source-document)))
-    (if (or (eq source-document original-target-document)
-            (not (stringp source-name))
-            (not (string= (document-text original-target-document) "")))
-        target-document
-        (let* ((source (document-text target-document))
-               (newline
-                 (edit-subtree-line-ending target-document (length source)))
-               (archive-header
-                 (format nil "Archived entries from file ~A~A~A~A"
-                         source-name newline newline newline))
-               (header
-                 (if (string= source "")
-                     (format nil "#    -*- mode: org -*-~A~A~A~A"
-                             newline newline newline archive-header)
-                     (concatenate 'string
-                                  (if (document-final-newline-p target-document)
-                                      newline
-                                      (concatenate 'string newline newline))
-                                  archive-header)))
-               (updated-source (concatenate 'string source header))
-               (expected
-                 (edit-canonical-document
-                  (edit-reparse-source target-document
-                                       updated-source
-                                       :archive-header))))
-          (edit-result-updated-document
-           (edit-apply-patches-result
+  (if (eq source-document original-target-document)
+      target-document
+      (let* ((source-name (document-source-name source-document))
+             (source (document-text target-document))
+             (original-target-empty-p
+               (string= (document-text original-target-document) ""))
+             (empty-target-p (string= source ""))
+             (newline (edit-subtree-line-ending target-document (length source)))
+             (archive-header
+               (if (and original-target-empty-p empty-target-p
+                        (stringp source-name))
+                   (format nil "Archived entries from file ~A~A~A~A"
+                           source-name newline newline newline)
+                   ""))
+             (header
+               (if (string= archive-header "")
+                   ""
+                   (format nil "#    -*- mode: org -*-~A~A~A~A"
+                           newline newline newline archive-header)))
+             (separator (if empty-target-p "" newline))
+             (insertion (concatenate 'string header separator)))
+        (if (string= insertion "")
             target-document
-            (list (edit-make-patch (length source) (length source) header
-                                   :archive-header))
-            :target :archive-header :expected expected))))))
+            (let* ((updated-source (concatenate 'string source insertion))
+                   (expected
+                     (edit-canonical-document
+                      (edit-reparse-source target-document updated-source
+                                           :archive-header))))
+              (edit-result-updated-document
+               (edit-apply-patches-result
+                target-document
+                (list (edit-make-patch (length source) (length source) insertion
+                                       :archive-header))
+                :target :archive-header :expected expected)))))))
 (defun agenda-bulk-align-heading-tags (document path)
   (let ((heading (agenda-bulk-resolve-heading-path document path)))
     (multiple-value-bind (tag-start tag-end)

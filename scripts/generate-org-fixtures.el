@@ -3362,6 +3362,14 @@
            (target-marker nil)
            (source-markers nil)
            (archive-location (plist-get options :archive-location))
+           ;; Save to a temporary file so Org sees the first write and later appends.
+           (archive-buffer-directory
+            (and archive-location
+                 (make-temp-file "org-fixture-agenda-bulk-" t)))
+           (archive-buffer-location
+            (and archive-buffer-directory
+                 (concat (expand-file-name "archive" archive-buffer-directory)
+                         "::")))
            (archive-file nil)
            (archive-buffer nil)
            (completion-choice (plist-get options :completion-choice))
@@ -3396,9 +3404,10 @@
               (setq source-markers (nreverse source-markers))
               (setq fixed-time-string
                     (format-time-string fixed-format fixed-time "UTC"))
-              (when archive-location
+              (when archive-buffer-location
                 (setq archive-file
-                      (car (org-archive--compute-location archive-location))))
+                      (car (org-archive--compute-location
+                            archive-buffer-location))))
               (when target-buffer
                 (with-current-buffer target-buffer
                   (insert target-input)
@@ -3433,8 +3442,8 @@
                   (org-refile-use-outline-path nil)
                   (org-reverse-note-order nil)
                   (org-refile-allow-creating-parent-nodes t)
-                  (org-archive-location archive-location)
-                  (org-archive-subtree-save-file-p nil)
+                  (org-archive-location archive-buffer-location)
+                  (org-archive-subtree-save-file-p 'from-agenda)
                   (org-archive-save-context-info '(time file olpath category todo itags))
                   (org-archive-subtree-add-inherited-tags 'infile)
                   (org-archive-mark-done nil)
@@ -3502,10 +3511,14 @@
                   :target-expected target-expected
                   :archive-location archive-location
                   :archive-time (and archive-location fixed-time-string))))
-        (dolist (buffer (list source-buffer agenda-buffer target-buffer archive-buffer))
-          (when (buffer-live-p buffer)
-            (with-current-buffer buffer (set-buffer-modified-p nil))
-            (kill-buffer buffer))))))
+        (progn
+          (dolist (buffer (list source-buffer agenda-buffer target-buffer archive-buffer))
+            (when (buffer-live-p buffer)
+              (with-current-buffer buffer (set-buffer-modified-p nil))
+              (kill-buffer buffer)))
+          (when (and archive-buffer-directory
+                     (file-directory-p archive-buffer-directory))
+            (delete-directory archive-buffer-directory t))))))
 
   (defun org-fixture--e-agenda-bulk-update-manifest
       (oracle-directory names)

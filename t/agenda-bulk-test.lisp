@@ -689,19 +689,20 @@
         (expect (search "Archived entries from file source.org"
                         updated-new-target)
                 :to-be-truthy)
-        (expect (search (format nil "Archived entries from file source.org~C~C"
-                                #\Return #\Newline)
-                        line-ending-updated)
-                :to-be-truthy)
+        (expect line-ending-updated
+                :to-equal (concatenate 'string
+                                       (document-text line-ending-target)
+                                       (format nil "~C~%" #\Return)))
         (expect (not (null (search "Archive" local-updated))) :to-be t)
         (expect (not (null (search "ARCHIVE_TIME" same-document-updated)))
                 :to-be t)
         (expect (org-kit::agenda-bulk-archive-target-document
                  source-with-name source-with-name source-with-name)
                 :to-be source-with-name)
-        (expect (org-kit::agenda-bulk-archive-target-document
-                 unnamed-source existing-target existing-target)
-                :to-be existing-target)
+        (expect (document-text
+                (org-kit::agenda-bulk-archive-target-document
+                 unnamed-source existing-target existing-target))
+                :to-equal (format nil "* Existing~%"))
         (dolist (condition (list self-cycle descendant-cycle))
           (expect (typep condition 'org-agenda-error) :to-be t)
           (when (typep condition 'org-agenda-error)
@@ -714,6 +715,44 @@
                             (cdr (assoc tabbed-document tabbed-results
                                         :test #'eq)))))))
                 :to-be t))))
+  (it "writes one archive header for multiple selected entries"
+    (let* ((source
+             (parse-org (format nil "* First~%* Second~%")
+                        :source-name "source.org"))
+           (entries (agenda-bulk-test-entries source (list "First" "Second")))
+           (target (parse-org ""))
+           (results
+             (agenda-bulk-action
+              entries :archive :target-document target
+              :time-context (agenda-bulk-test-time-context)))
+           (updated-target
+             (document-text
+              (edit-result-updated-document
+               (cdr (assoc target results :test (function eq))))))
+           (header "Archived entries from file source.org")
+           (header-position (search header updated-target))
+           (duplicate-header-position
+             (and header-position
+                  (search header updated-target
+                          :start2 (+ header-position (length header))))))
+      (with-soft-assertions
+        (expect header-position :to-be-truthy)
+        (expect duplicate-header-position :to-be nil)
+        (expect (search "* First" updated-target) :to-be-truthy)
+        (expect (search "* Second" updated-target) :to-be-truthy))))
+  (it "requires a document for a target heading path"
+    (let* ((document (parse-org "* Destination"))
+           (heading (agenda-bulk-test-headline document "Destination"))
+           (condition
+             (agenda-bulk-test-error
+              (lambda ()
+                (org-kit::agenda-bulk-target-path nil heading)))))
+      (with-soft-assertions
+        (expect (typep condition (find-class
+                                  (find-symbol "ORG-AGENDA-ERROR" "ORG-KIT")))
+                :to-be t)
+        (when condition
+          (expect (org-agenda-error-reason condition) :to-be :invalid-option)))))
   (it "rejects non-boolean TODO blocker inhibition"
     (let* ((document
              (parse-org (format nil "#+TODO: TODO | DONE~%* TODO Task~%")))

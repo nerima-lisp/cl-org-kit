@@ -34,9 +34,6 @@ Archived entries from file t/fixtures/e/oracle/agenda-bulk/archive-parent-child-
 :END:
 ** TODO Child :CHILD:
 
-Archived entries from file t/fixtures/e/oracle/agenda-bulk/archive-parent-child-source.org
-
-
 * TODO Other
 :PROPERTIES:
 :ARCHIVE_TIME: 2024-02-19 Mon 12:34
