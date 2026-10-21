@@ -858,6 +858,31 @@
           (expect (org-resource-limit-error-actual condition) :to-be 1008)))))
 
   (it-sequential "limits long ASCII table cookies before padded output allocation"
+    (let* ((cookie (make-string 32 :initial-element #\9))
+           (source
+             (format nil "| <~A> |~%~{~A~%~}"
+                     cookie (make-list 20 :initial-element "| x |")))
+           (document
+             (parse-org source
+                        :limits (make-limits :max-output-length 1000)))
+           (public-condition
+             (handler-case
+                 (progn (export-org document :ascii) nil)
+               (org-resource-limit-error (condition) condition))))
+      (with-soft-assertions
+        (expect (search (format nil "<~A>" cookie) source)
+                :to-be-truthy)
+        (expect (> (length source) 100) :to-be t)
+        (expect (= (count #\Newline source) 21) :to-be t)
+        (expect (typep public-condition 'org-resource-limit-error)
+                :to-be t)
+        (when (typep public-condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name public-condition)
+                  :to-be :max-output-length)
+          (expect (org-resource-limit-error-limit public-condition)
+                  :to-be 1000)))))
+
+  (it-sequential "measures long ASCII table cookie allocation before padded output allocation"
     (labels ((find-table-view (views)
                (loop for view in views
                      for found =
@@ -878,10 +903,6 @@
              (table-view
                (find-table-view
                 (org-kit::export-preparation-root-views preparation)))
-             (public-condition
-               (handler-case
-                   (progn (export-org document :ascii) nil)
-                 (org-resource-limit-error (condition) condition)))
              (warmup-output
                (export-ascii-test-output-state preparation))
              (warmup-condition
@@ -919,20 +940,17 @@
           (expect (eq (node-type (org-kit::export-view-node table-view))
                       :table)
                   :to-be t)
-          (expect (typep public-condition 'org-resource-limit-error) :to-be t)
-          (expect (typep warmup-condition 'org-resource-limit-error) :to-be t)
-          (expect (typep table-condition 'org-resource-limit-error) :to-be t)
-          (when (typep public-condition 'org-resource-limit-error)
-            (expect (org-resource-limit-error-limit-name public-condition)
-                    :to-be :max-output-length)
-            (expect (org-resource-limit-error-limit public-condition)
-                    :to-be 1000))
+          (expect (typep warmup-condition 'org-resource-limit-error)
+                  :to-be t)
+          (expect (typep table-condition 'org-resource-limit-error)
+                  :to-be t)
           (expect (= (fill-pointer buffer) 0) :to-be t)
           (expect (<= (array-total-size buffer) 1000) :to-be t)
           (expect (> at-signal 0) :to-be t)
           (unless *coverage-run-p*
             (expect (< at-signal (* 48 1000)) :to-be t))
-          (expect (= (array-total-size buffer) initial-capacity) :to-be t)))))
+          (expect (= (array-total-size buffer) initial-capacity)
+                  :to-be t)))))
 
   (it "preflights all ASCII table rows before writing padded output"
     (let* ((source
