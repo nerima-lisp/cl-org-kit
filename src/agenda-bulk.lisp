@@ -113,27 +113,27 @@
                    (copy-list selected))
                   #'<
                   :key #'agenda-bulk-selection-position))))
-(defun agenda-bulk-adjust-path-for-selections (path document selections before-position)
-  (let* ((last-segment (car (last path)))
-         (title (getf last-segment :title))
-         (parent-path (butlast path))
-         (removed-count
-           (count-if
-            (lambda (selection)
-              (let* ((candidate-path
-                       (agenda-bulk-selection-path selection))
-                     (candidate-segment (car (last candidate-path))))
-                (and (eq (agenda-bulk-selection-document selection) document)
-                     (< (agenda-bulk-selection-position selection)
-                        before-position)
-                     (equal (butlast candidate-path) parent-path)
-                     (equal (getf candidate-segment :title) title))))
-            selections)))
-    (if (zerop removed-count)
-        path
-        (let ((adjusted-path (copy-tree path)))
-          (decf (getf (car (last adjusted-path)) :index) removed-count)
-          adjusted-path))))
+(defun agenda-bulk-adjust-path-for-selections
+    (path document processed-selections)
+  (let ((adjusted-path (copy-tree path)))
+    (loop for segment in path
+          for index from 0
+          for removed-count =
+            (count-if
+             (lambda (selection)
+               (let ((candidate-path
+                       (agenda-bulk-selection-path selection)))
+                 (and (eq (agenda-bulk-selection-document selection) document)
+                      (= (length candidate-path) (1+ index))
+                      (equal (subseq candidate-path 0 index)
+                             (subseq path 0 index))
+                      (equal (getf (nth index candidate-path) :title)
+                             (getf segment :title)))))
+             processed-selections)
+          when (plusp removed-count)
+            do (decf (getf (nth index adjusted-path) :index)
+                     removed-count))
+    adjusted-path))
 
 (defun agenda-bulk-resolve-heading-path (document path)
   (loop with parent = (document-root document)
@@ -566,62 +566,64 @@ is the original document and whose CDR is its combined EDIT-RESULT."
       (when (member action '(:refile :archive))
         (agenda-bulk-check-target selections target-document target-heading))
       (let* ((documents (agenda-bulk-selected-documents selections target-document))
-           (staged (agenda-bulk-stage-documents documents))
-           (ordered-selections (agenda-bulk-order-selections selections action)))
-      (dolist (selection ordered-selections)
-        (let* ((source-document
-                 (agenda-bulk-selection-document selection))
-               (current-document
-                 (agenda-bulk-current-document staged source-document))
-               (selection-path
-                 (if (member action '(:refile :archive))
-                     (agenda-bulk-adjust-path-for-selections
-                      (agenda-bulk-selection-path selection) source-document
-                      ordered-selections
-                      (agenda-bulk-selection-position selection))
-                     (agenda-bulk-selection-path selection)))
-               (current-target-heading-path
-                 (if (and target-heading-path
-                          (member action '(:refile :archive))
-                          (member target-document documents :test #'eq))
-                     (agenda-bulk-adjust-path-for-selections
-                      target-heading-path target-document ordered-selections
-                      (agenda-bulk-selection-position selection))
-                     target-heading-path))
-               (heading
-                 (agenda-bulk-resolve-heading-path current-document selection-path))
-               (result
-                 (agenda-bulk-edit-entry
-                  staged source-document current-document heading action
-                  state at tag schedule-date target-document
-                  current-target-heading-path time-context)))
-          (cond
-            ((member action '(:todo :add-tag :schedule))
-             (setf staged
-                   (agenda-bulk-stage-document
-                    staged source-document
-                    (edit-result-updated-document result))))
-            ((and (eq action :archive) (null target-document))
-             (setf staged
-                   (agenda-bulk-stage-document
-                    staged source-document
-                    (edit-result-updated-document result))))
-            (t
-             (let* ((source-edit (relocation-result-source-edit result))
-                    (target-edit (relocation-result-target-edit result))
-                    (source-updated (edit-result-updated-document source-edit))
-                    (target-updated
-                      (if (eq action :refile)
-                          (agenda-bulk-align-moved-subtree-tags
-                           (edit-result-updated-document target-edit)
-                           (relocation-result-target-path result))
-                          (edit-result-updated-document target-edit))))
+             (staged (agenda-bulk-stage-documents documents))
+             (ordered-selections (agenda-bulk-order-selections selections action))
+             (processed-selections nil))
+        (dolist (selection ordered-selections)
+          (let* ((source-document
+                   (agenda-bulk-selection-document selection))
+                 (current-document
+                   (agenda-bulk-current-document staged source-document))
+                 (selection-path
+                   (if (member action '(:refile :archive))
+                       (agenda-bulk-adjust-path-for-selections
+                        (agenda-bulk-selection-path selection) source-document
+                        processed-selections)
+                       (agenda-bulk-selection-path selection)))
+                 (current-target-heading-path
+                   (if (and target-heading-path
+                            (member action '(:refile :archive))
+                            (member target-document documents :test #'eq))
+                       (agenda-bulk-adjust-path-for-selections
+                        target-heading-path target-document processed-selections)
+                       target-heading-path))
+                 (heading
+                   (agenda-bulk-resolve-heading-path
+                    current-document selection-path))
+                 (result
+                   (agenda-bulk-edit-entry
+                    staged source-document current-document heading action
+                    state at tag schedule-date target-document
+                    current-target-heading-path time-context)))
+            (cond
+              ((member action '(:todo :add-tag :schedule))
                (setf staged
-                     (agenda-bulk-stage-document staged source-document
-                                                 source-updated))
-               (when target-document
+                     (agenda-bulk-stage-document
+                      staged source-document
+                      (edit-result-updated-document result))))
+              ((and (eq action :archive) (null target-document))
+               (setf staged
+                     (agenda-bulk-stage-document
+                      staged source-document
+                      (edit-result-updated-document result))))
+              (t
+               (let* ((source-edit (relocation-result-source-edit result))
+                      (target-edit (relocation-result-target-edit result))
+                      (source-updated
+                        (edit-result-updated-document source-edit))
+                      (target-updated
+                        (if (eq action :refile)
+                            (agenda-bulk-align-moved-subtree-tags
+                             (edit-result-updated-document target-edit)
+                             (relocation-result-target-path result))
+                            (edit-result-updated-document target-edit))))
                  (setf staged
-                       (agenda-bulk-stage-document staged target-document
-                                                   target-updated))))))))
+                       (agenda-bulk-stage-document staged source-document
+                                                   source-updated))
+                 (when target-document
+                   (setf staged
+                         (agenda-bulk-stage-document staged target-document
+                                                     target-updated))))))
+            (push selection processed-selections)))
         (agenda-bulk-check-output-limit staged)
         (agenda-bulk-results staged)))))

@@ -111,7 +111,7 @@
                         :to-equal (getf fixture :target-expected))
                 (expect (length results) :to-be 2))
               (expect (length results) :to-be 1))))))
-  (it "deduplicates rows and preserves duplicate-title order"
+  (it "deduplicates rows and adjusts nested paths after earlier moves"
     (let* ((first-source "* Move~%First~%* Move~%Second~%")
            (second-source "* Also~%")
            (first-document (parse-org (format nil first-source)))
@@ -144,7 +144,46 @@
                 :to-equal "")
         (expect (document-text (edit-result-updated-document target-edit))
                 :to-equal
-                (format nil "* Move~%First~%* Move~%Second~%* Also~%")))))
+                (format nil "* Move~%First~%* Move~%Second~%* Also~%"))))
+    (let* ((nested-source
+             (format nil
+                     "* A~%** B~%first subtree marker~%* A~%** B~%selected child marker~%* A~%** B~%unselected child marker~%"))
+           (nested-document (parse-org nested-source))
+           (parent-headings
+             (remove-if-not
+              (lambda (node) (eq (node-type node) :headline))
+              (node-children (document-root nested-document))))
+           (first-parent (first parent-headings))
+           (second-parent (second parent-headings))
+           (selected-child
+             (find-if (lambda (node)
+                        (and (eq (node-type node) :headline)
+                             (string= "B" (node-property node :raw-value))))
+                      (node-children second-parent)))
+           (nested-target (parse-org "* Destination~%"))
+           (target-heading
+             (agenda-bulk-test-headline nested-target "Destination"))
+           (nested-results
+             (agenda-bulk-action
+              (list (make-agenda-entry :source-node first-parent)
+                    (make-agenda-entry :source-node selected-child))
+              :refile :target-document nested-target
+              :target-heading target-heading))
+           (source-edit
+             (cdr (assoc nested-document nested-results :test #'eq)))
+           (target-edit
+             (cdr (assoc nested-target nested-results :test #'eq)))
+           (updated-source
+             (document-text (edit-result-updated-document source-edit)))
+           (updated-target
+             (document-text (edit-result-updated-document target-edit))))
+      (with-soft-assertions
+        (expect updated-source
+                :to-equal
+                (format nil "* A~%* A~%** B~%unselected child marker~%"))
+        (expect (search "first subtree marker" updated-target) :to-be-truthy)
+        (expect (search "selected child marker" updated-target) :to-be-truthy)
+        (expect (search "unselected child marker" updated-target) :to-be nil))))
   (it "matches agenda bulk TODO blocker inhibition while preserving direct checks"
     (let* ((source-text
              (format nil "#+TODO: TODO | DONE~%* TODO Parent~%** TODO Child~%"))
