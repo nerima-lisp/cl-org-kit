@@ -14,9 +14,10 @@ are implementation details. Symbols from runtime dependencies are not part of
 the `cl-org-kit` API. The 0.2.0 exports have no separately designated
 experimental subset.
 
-TODO workflow changes are part of the 0.2.0 public API. Use
-`cycle-heading-todo` to advance or reverse through a configured sequence, or
-`transition-heading-todo` to select a state directly. The [TODO and Agenda
+`cycle-heading-todo` and `transition-heading-todo` were already public in
+0.1.0. Version 0.2.0 adds dependency checks: a transition to DONE with an
+unfinished dependency signals `org-edit-error` with reason `:blocked`. These
+changes are part of this release's public API. The [TODO and Agenda
 guide](../guides/todo-agenda.md) documents their return values, conditions, and
 repeater limit.
 
@@ -25,21 +26,24 @@ The 0.1.0 agenda and query APIs include `agenda` for date-range agendas,
 
 ## Agenda APIs added after 0.2.0
 
-The current source adds these agenda APIs after the 0.2.0 release. They are not
-part of the released 0.2.0 public API. They include `agenda-search-view` and
-`agenda-stuck-projects`; sorting options (`:sorting-strategy` and
-`:user-defined-sorter`) and category access through `agenda-entry-category`;
-`agenda-time-grid`; custom view definitions through `agenda-custom`; and text,
-Org-document, and edit output through `agenda-format-text`, `agenda-to-org`,
-`agenda-write-into`; and bulk actions through `agenda-bulk-action`. The
-[TODO and Agenda guide](../guides/todo-agenda.md) documents their result types,
-time-context requirements, output formats, and bulk-action behavior.
+The source tree containing this page adds these agenda APIs after release
+commit `6b33b6f5e182`. They are not part of the released 0.2.0 public API; this
+page does not assign them to a later release version. They include
+`agenda-search-view` and
+`agenda-stuck-projects`; sorting via `:sorting-strategy` and
+`:user-defined-sorter`, plus category access through `agenda-entry-category`;
+`agenda-time-grid`; custom views through `agenda-custom`; text, Org-document,
+and edit output through `agenda-format-text`, `agenda-to-org`, and
+`agenda-write-into`; and bulk actions through `agenda-bulk-action`. The [TODO and Agenda guide](../guides/todo-agenda.md)
+covers their result types, time-context requirements, output formats, and
+bulk-action behavior.
 ## Compatibility
 
-Version 0.2.0 defines the supported interface for this release. While the
-project remains at 0.x, a later 0.x release may change, add, or remove public
-API. Release notes identify user-visible API changes. Pin a release tag and
-review its notes when upgrading.
+While the project remains at 0.x, a later 0.x release may change, add, or remove
+public API. `CHANGELOG.md` identifies user-visible API changes. Pin a release
+tag and review its release notes when upgrading.
 
-This policy does not guarantee compatibility for undocumented behavior or data
-formats beyond the contracts stated in the reference pages.
+This policy covers documented contracts for exported symbols, including those
+described in the guides. An exported symbol without a documented contract has
+no compatibility guarantee. The policy also does not cover undocumented
+behavior.

@@ -186,9 +186,6 @@ signals `org-clock-error` with reason `:invalid-range`.
               (org-kit:edit-result-updated-document edit)))))))
 ~~~
 
-This follows Org's description-list timer item syntax from the
-[Org manual's timer section](https://orgmode.org/manual/Timers.html).
-
 ## Effort estimates
 
 `effort-duration-minutes` parses an Org duration and returns exact minutes.
@@ -260,7 +257,7 @@ cutoff.
 `clocktable-data` returns a `clocktable-result` for a heading subtree. It
 requires a `:range`, a `:time-context`, and accepts optional Org `:match`
 syntax, such as `TODO="TODO"` to select TODO headings; see the
-[agenda match example](todo-agenda.md#build-a-todo-list-and-agenda). It also
+[agenda match example](todo-agenda.md#agenda-and-query-apis). It also
 accepts `:max-depth` (default 30), which filters by absolute logical
 heading level, not distance from the starting heading. Level 1 is a top-level
 heading; for example, a clocktable rooted at a level-2 heading with
@@ -335,18 +332,23 @@ latter. Register a custom handler with the parameter names it accepts:
 ~~~
 
 The handler receives the parsed parameter plist and optional document resolver
-and time context. It can return replacement body text, an `edit-result`, or a
-list of table rows. Each row is a list of string cells; the first row, when
-present, provides the header. `update-dynamic-block` returns an `edit-result`;
-unregistered names and undeclared parameters signal `org-dynamic-block-error`.
+and time context. `update-dynamic-block` accepts the resolver as its
+`:document-resolver` keyword and passes it to the handler. It can return
+replacement body text, an `edit-result`, or a list of table rows. Each row is a
+list of string cells; the first row, when present, provides the header.
+`update-dynamic-block` returns an `edit-result`; unregistered names and
+undeclared parameters signal `org-dynamic-block-error`.
 
 For the built-in clocktable handler, `:scope` accepts `file`, `nil`, `subtree`,
 `tree`, and `treeN`. `file` and `nil` select the current document. `subtree`
 selects the nearest enclosing heading and its descendants. `tree` selects the
-top-level heading containing the block; `treeN`, for positive N, selects the
-nearest enclosing heading at absolute level N and its subtree. If no such
-heading encloses the block, `update-dynamic-block` signals
-`org-clocktable-parameter-error`. Other string selectors are
+top-level heading containing the block; `treeN`, such as `tree2`, for positive
+N, selects the nearest enclosing heading at absolute level N and its subtree.
+If no such heading encloses the block, `update-dynamic-block` signals
+`org-clocktable-parameter-error`. In a block header, use a bare token such as
+`#+BEGIN: clocktable :scope subtree`; a quoted value such as
+`#+BEGIN: clocktable :scope "subtree"` is also parsed as the string
+`"subtree"`. Other string selectors are
 passed unchanged to the `document-resolver`; a list of strings is resolved one
 selector at a time. `agenda`, `agenda-with-archives`, and `file-with-archives`
 map to `:agenda`, `:agenda-with-archives`, and `:file-with-archives`,
