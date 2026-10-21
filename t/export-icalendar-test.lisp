@@ -1701,7 +1701,7 @@
                      (when diary-node
                        (setf (node-property diary-node :value)
                              "%%(unknown 1)"))
-                     0))))))
+                     0)))))))
       (with-soft-assertions
         (expect (node-p diary-node) :to-be t)
         (expect (plusp random-calls) :to-be t)
@@ -1710,4 +1710,4 @@
                          :icalendar)
                      (eq (org-export-unsupported-syntax-feature unsupported)
                          :diary-sexp))
-                :to-be t))))))
+                :to-be t)))))
