@@ -426,10 +426,12 @@ The context accessors are
 `export-render-context-root-views`, `export-render-context-toc`,
 `export-render-context-footnotes`, `export-render-context-state`,
 `export-render-context-raw-output-p`, and `export-render-context-extension`.
-The backend accessor returns the requested backend; the owner accessor returns
-the backend that defined the active callback. The state accessor returns state
-for that callback owner, and the raw-output accessor checks whether a raw output
-kind is allowed. Frame accessors are `export-render-frame-mode`,
+During a node-transcoder call, the owner accessor returns the backend that
+defined that transcoder, its state accessor returns that backend's render
+state, and the frame describes the current node render. Function-macro
+evaluators receive the separate plist described above. The backend accessor
+returns the requested backend, and the raw-output accessor checks whether a
+raw output kind is allowed. Frame accessors are `export-render-frame-mode`,
 `export-render-frame-table-cell-p`,
 `export-render-frame-preserve-source-breaks-p`, and
 `export-render-frame-output-offset`; the last reports the current output
