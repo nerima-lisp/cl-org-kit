@@ -121,7 +121,7 @@
                    (unit-end (1+ digits-end)))
               (when unit
                 (if (= unit-end end)
-                    (values adjustment-type mode value unit nil nil t)
+                    (values adjustment-type mode value unit t nil nil)
                     (when (and (eq adjustment-type :repeater)
                                (char= (char text unit-end) #\/))
                       (let* ((window-start (1+ unit-end))
@@ -138,10 +138,10 @@
                                    (member window-unit
                                            '(:day :week :month :year)
                                            :test #'eq))
-                          (values adjustment-type mode value unit
+                          (values adjustment-type mode value unit t
                                   (%timestamp-number text window-start
                                                      window-digits-end)
-                                  window-unit t)))))))))))))
+                                  window-unit)))))))))))))
 
 (defun %timestamp-whitespace-p (character)
   (member character '(#\Space #\Tab)))
@@ -190,9 +190,8 @@
             ((or (char= (char text token-start) #\+)
                  (char= (char text token-start) #\-)
                  (char= (char text token-start) #\.))
-             (multiple-value-bind (kind mode value unit
-                                   window-value window-unit
-                                   valid-adjustment-p)
+             (multiple-value-bind (kind mode value unit valid-adjustment-p
+                                   window-value window-unit)
                  (%timestamp-adjustment-token text token-start token-end)
                (unless valid-adjustment-p
                  (return-from %timestamp-parse-suffix

@@ -140,6 +140,10 @@
            (target (edit-subtree-clone-test-headline document "Repeat"))
            (result (clone-subtree-with-time-shift document target 0 0 :week)))
       (with-soft-assertions
+        (multiple-value-bind (kind mode amount unit valid-p)
+            (org-kit::%timestamp-adjustment-token "+1w" 0 3)
+          (expect (list kind mode amount unit valid-p)
+                  :to-equal '(:repeater :cumulate 1 :week t)))
         (expect (document-text (edit-result-updated-document result))
                 :to-equal expected)
         (expect (document-text document) :to-equal source))))

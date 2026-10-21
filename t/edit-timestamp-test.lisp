@@ -170,6 +170,13 @@
      (lambda (document timestamp)
        (org-kit::adjust-timestamp document timestamp :warning-amount 1))))
 
+  (it "edits a repeater amount without losing its window"
+    (edit-timestamp-test-check-edit
+     "<2024-01-31 Wed +1w/2d>"
+     "<2024-01-31 Wed +2w/2d>"
+     (lambda (document timestamp)
+       (org-kit::adjust-timestamp document timestamp :repeater-amount 1))))
+
   (it "adjusts repeater and warning suffixes on the selected range endpoint"
     (let ((source "<2024-01-31 Wed +1d -2d>--<2024-02-05 Mon +1w -3w>"))
       (edit-timestamp-test-check-edit

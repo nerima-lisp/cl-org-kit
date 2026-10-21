@@ -306,9 +306,10 @@
         (when (>= cursor close-position)
           (return))
         (let ((token-end (%timestamp-token-end source cursor close-position)))
-          (multiple-value-bind (kind mode amount unit valid-p)
+          (multiple-value-bind (kind mode amount unit valid-p
+                                window-value window-unit)
               (%timestamp-adjustment-token source cursor token-end)
-            (declare (ignore mode))
+            (declare (ignore mode window-value window-unit))
             (when (and valid-p (eq kind adjustment-kind))
               (let* ((prefix-length
                        (if (or (and (eq adjustment-kind :repeater)
@@ -322,7 +323,10 @@
                            2
                            1))
                      (digits-start (+ cursor prefix-length))
-                     (digits-end (1- token-end)))
+                     (digits-end
+                       (loop for position from digits-start below token-end
+                             while (%timestamp-digit-p (char source position))
+                             finally (return position))))
                 (return (list cursor digits-start digits-end token-end
                               amount unit))))
           (setf cursor token-end)))))))
