@@ -1,0 +1,9 @@
+#+TITLE: Alarm
+#+AUTHOR: Oracle Fixture
+
+* Doctor appointment
+:PROPERTIES:
+:ID: alarm-appointment
+:APPT_WARNTIME: 15
+:END:
+<2024-03-15 Fri 14:00-14:30>

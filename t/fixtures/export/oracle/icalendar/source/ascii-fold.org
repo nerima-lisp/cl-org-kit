@@ -1,0 +1,8 @@
+#+TITLE: ASCII folding
+#+AUTHOR: Oracle Fixture
+
+* This ASCII headline is intentionally long enough to exercise folding at the RFC line limit
+:PROPERTIES:
+:ID: ascii-fold
+:END:
+<2024-03-17 Sun 11:00-12:00>

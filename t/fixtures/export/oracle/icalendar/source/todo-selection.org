@@ -1,0 +1,17 @@
+#+TITLE: Selected TODO keywords
+#+AUTHOR: Oracle Fixture
+#+BIND: org-icalendar-include-todo ("TODO")
+#+TODO: TODO WAIT | DONE
+
+* TODO Selected task
+:PROPERTIES:
+:ID: selected-todo
+:END:
+* WAIT Excluded state
+:PROPERTIES:
+:ID: selected-wait
+:END:
+* DONE Excluded done task
+:PROPERTIES:
+:ID: selected-done
+:END:

@@ -1,0 +1,5 @@
+#+TITLE: Date-only point timestamp
+#+AUTHOR: Oracle Fixture
+
+* All-day event
+  <2026-03-07 Sat>

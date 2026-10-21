@@ -1,0 +1,32 @@
+#+TITLE: Unblocked TODO selection
+#+AUTHOR: Oracle Fixture
+#+BIND: org-icalendar-include-todo unblocked
+#+TODO: TODO | DONE
+
+* TODO Parent blocked by child
+:PROPERTIES:
+:ID: unblocked-parent
+:END:
+** TODO Available child
+:PROPERTIES:
+:ID: unblocked-child
+:END:
+
+* TODO Ordered parent
+:PROPERTIES:
+:ID: ordered-parent
+:ORDERED: t
+:END:
+** TODO First ordered step
+:PROPERTIES:
+:ID: ordered-first
+:END:
+** TODO Second ordered step
+:PROPERTIES:
+:ID: ordered-second
+:END:
+
+* TODO Independent task
+:PROPERTIES:
+:ID: unblocked-independent
+:END:

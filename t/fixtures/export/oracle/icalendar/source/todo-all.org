@@ -1,0 +1,13 @@
+#+TITLE: All TODO states
+#+AUTHOR: Oracle Fixture
+#+BIND: org-icalendar-include-todo all
+#+TODO: TODO | DONE
+
+* TODO Open task
+:PROPERTIES:
+:ID: all-open
+:END:
+* DONE Finished task
+:PROPERTIES:
+:ID: all-done
+:END:

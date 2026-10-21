@@ -1,0 +1,10 @@
+#+TITLE: Recurring deadline start
+#+AUTHOR: Oracle Fixture
+#+BIND: org-icalendar-include-todo t
+#+TODO: TODO | DONE
+
+* TODO Renew subscription
+DEADLINE: <2024-04-12 Fri +1w>
+:PROPERTIES:
+:ID: recurring-deadline
+:END:

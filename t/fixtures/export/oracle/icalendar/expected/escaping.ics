@@ -1,0 +1,19 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+X-WR-CALNAME:escaping
+PRODID:-//Oracle Fixture//Emacs with Org mode//EN
+X-WR-TIMEZONE:UTC
+X-WR-CALDESC:Escaping
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+DTSTAMP:20000101T000000Z
+UID:TS1-escaping-event
+DTSTART:20240316T080000
+DTEND:20240316T090000
+SUMMARY:Comma\, semicolon\; and backslash\\path
+LOCATION:Room 1\, wing B\; east
+DESCRIPTION:Description has comma\, semicolon\; and backslash\\path.  Secon
+ d\nparagraph remains in the description.  <2024-03-16 Sat 08:00-09:00>
+CATEGORIES:escaping
+END:VEVENT
+END:VCALENDAR

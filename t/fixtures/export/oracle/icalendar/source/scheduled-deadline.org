@@ -1,0 +1,10 @@
+#+TITLE: Scheduled and deadline
+#+AUTHOR: Oracle Fixture
+#+BIND: org-icalendar-include-todo t
+#+TODO: TODO | DONE
+
+* TODO Prepare release
+SCHEDULED: <2024-03-18 Mon 09:00> DEADLINE: <2024-03-22 Fri>
+:PROPERTIES:
+:ID: scheduled-deadline
+:END:

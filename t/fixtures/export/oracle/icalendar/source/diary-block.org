@@ -1,0 +1,6 @@
+#+TITLE: Static diary block
+#+AUTHOR: Oracle Fixture
+#+BIND: org-icalendar-include-sexps t
+
+* Literal date range
+  <%%(diary-block 1 2 2025 1 4 2025)>

@@ -1,0 +1,8 @@
+#+TITLE: Date-only point timestamp in UTC
+#+AUTHOR: Oracle Fixture
+
+* UTC all-day event
+:PROPERTIES:
+:TIMEZONE: UTC
+:END:
+  <2026-03-07 Sat>

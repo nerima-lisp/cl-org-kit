@@ -1,0 +1,11 @@
+#+TITLE: Escaping
+#+AUTHOR: Oracle Fixture
+
+* Comma, semicolon; and backslash\path
+:PROPERTIES:
+:ID: escaping-event
+:LOCATION: Room 1, wing B; east
+:END:
+Description has comma, semicolon; and backslash\path.
+Second paragraph remains in the description.
+<2024-03-16 Sat 08:00-09:00>

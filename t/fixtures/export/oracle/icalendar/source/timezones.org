@@ -1,0 +1,16 @@
+#+TITLE: Time zones
+#+AUTHOR: Oracle Fixture
+
+* New York event
+:PROPERTIES:
+:ID: timezone-new-york
+:TIMEZONE: America/New_York
+:END:
+<2024-03-14 Thu 09:00-10:00>
+
+* UTC event
+:PROPERTIES:
+:ID: timezone-utc
+:TIMEZONE: UTC
+:END:
+<2024-03-14 Thu 12:00-13:00>

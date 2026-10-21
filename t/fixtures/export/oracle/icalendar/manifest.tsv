@@ -1,0 +1,17 @@
+case	source	expected
+plain-active	source/plain-active.org	expected/plain-active.ics
+scheduled-deadline	source/scheduled-deadline.org	expected/scheduled-deadline.ics
+todo-selection	source/todo-selection.org	expected/todo-selection.ics
+todo-all	source/todo-all.org	expected/todo-all.ics
+repeater	source/repeater.org	expected/repeater.ics
+timezones	source/timezones.org	expected/timezones.ics
+alarm	source/alarm.org	expected/alarm.ics
+escaping	source/escaping.org	expected/escaping.ics
+ascii-fold	source/ascii-fold.org	expected/ascii-fold.ics
+inbuffer-overrides	source/inbuffer-overrides.org	expected/inbuffer-overrides.ics
+todo-unblocked	source/todo-unblocked.org	expected/todo-unblocked.ics
+recurring-deadline-start	source/recurring-deadline-start.org	expected/recurring-deadline-start.ics
+date-time-format	source/date-time-format.org	expected/date-time-format.ics
+diary-block	source/diary-block.org	expected/diary-block.ics
+point-date-only	source/point-date-only.org	expected/point-date-only.ics
+point-date-only-utc	source/point-date-only-utc.org	expected/point-date-only-utc.ics

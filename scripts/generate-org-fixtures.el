@@ -6,6 +6,7 @@
 (require 'org-inlinetask)
 (require 'cl-lib)
 (require 'subr-x)
+(defvar icalendar-uid-format "%h")
 
 (defconst org-fixture--selected-properties
   '((headline :title :level :todo-keyword :todo-type :priority :tags :commentedp :archivedp
@@ -3650,7 +3651,186 @@
         (funcall original))))
 
   (advice-add 'org-fixture--dispatch-main :around
-              #'org-fixture--e-agenda-bulk-dispatch)
-  (org-fixture--dispatch-main))
+              #'org-fixture--e-agenda-bulk-dispatch))
+(defconst org-fixture--icalendar-uid-octets
+  (number-sequence 0 15))
+
+(defun org-fixture--icalendar-stable-uid ()
+  (let ((octets (vconcat org-fixture--icalendar-uid-octets))
+        (hex "0123456789abcdef"))
+    (aset octets 6 (logior #x40 (logand #x0f (aref octets 6))))
+    (aset octets 8 (logior #x80 (logand #x3f (aref octets 8))))
+    (with-output-to-string
+      (cl-loop for index from 0 below 16
+            for octet = (aref octets index)
+            do (when (member index '(4 6 8 10))
+                 (write-char ?-))
+               (write-char (aref hex (ash octet -4)))
+               (write-char (aref hex (logand octet #x0f)))))))
+
+(defun org-fixture--icalendar-metadata
+    (case-name source source-sha output-sha uid-calls)
+  (let ((purpose
+         (pcase case-name
+           ("plain-active" "active timestamp without source ID; deterministic UID fallback")
+           ("scheduled-deadline" "TODO SCHEDULED and DEADLINE planning timestamps")
+           ("todo-selection" "BIND-selected TODO keyword inclusion")
+           ("todo-all" "BIND inclusion of unfinished and done TODO entries")
+           ("repeater" "active timestamp repeater converted to RRULE")
+           ("timezones" "per-entry America/New_York TZID and UTC timestamps")
+           ("alarm" "APPT_WARNTIME converted to VALARM")
+           ("escaping" "ASCII text escaping for summary, location, and description")
+           ("ascii-fold" "ASCII SUMMARY folded at Org's character limit")
+           ("inbuffer-overrides" "exclude-tags, ICAL-TTL, active-timestamp, and TIMEZONE overrides")
+           ("todo-unblocked" "unblocked TODO: child blocks parent; ORDERED blocks later sibling")
+           ("recurring-deadline-start" "unscheduled TODO recurring DEADLINE; default 14-day warning DTSTART")
+           ("date-time-format" "BIND custom date-time format and Europe/Paris timezone")
+           ("diary-block" "literal diary-block dates use the static non-evaluating diary-sexp whitelist")
+           ("point-date-only" "active point timestamp with date-only DTSTART and exclusive next-day DTEND")
+           ("point-date-only-utc" "heading-local UTC point date; exclusive next-day DTEND converted to UTC")
+           (_ (error "Unknown iCalendar oracle case: %s" case-name)))))
+    (format (concat
+             "case=%s\npurpose=%s\nemacs=%s\norg=%s\ngenerator-mode=icalendar-oracle-v1\n"
+             "backend=icalendar\nencoding=UTF-8\nline-endings=CRLF\n"
+             "fixed-time=2000-01-01T00:00:00Z\ndtstamp=20000101T000000Z\n"
+             "timezone=UTC\nlocale=LC_ALL:C,LANG:C,system-time-locale:C\n"
+             (if (equal case-name "diary-block")
+                 "uid-strategy=icalendar-uid-format (source shorthand ical:uid-format) bound to deterministic UUIDv4\n"
+               "uid-strategy=org-id-new with deterministic UUIDv4 octets\n")
+             "uid-source=deterministic octet sequence 00 through 0f\n"
+             "uid-octets=00,01,02,03,04,05,06,07,08,09,0a,0b,0c,0d,0e,0f\n"
+             "generated-uid=%s\nuid-fallback-calls=%d\n"
+             "source=%s\nsource-sha256=%s\noutput-sha256=%s\n")
+            case-name purpose emacs-version (org-version)
+            (org-fixture--icalendar-stable-uid) uid-calls
+            source source-sha output-sha)))
+
+(defun org-fixture--read-icalendar-manifest (manifest root)
+  (unless (file-exists-p manifest)
+    (error "iCalendar oracle manifest does not exist"))
+  (let ((coding-system-for-read 'utf-8-unix)
+        (auto-coding-functions nil)
+        (enable-local-variables nil)
+        (inhibit-local-variables t)
+        (seen-header nil)
+        (seen-cases (make-hash-table :test #'equal))
+        (rows nil))
+    (with-temp-buffer
+      (insert-file-contents manifest)
+      (dolist (line (split-string (buffer-string) "\n" t))
+        (cond
+         ((string-prefix-p "#" line) nil)
+         ((not seen-header)
+          (unless (equal line "case\tsource\texpected")
+            (error "iCalendar manifest must begin with case/source/expected columns"))
+          (setq seen-header t))
+         (t
+          (let* ((fields (split-string line "\t" nil))
+                 (case-name (nth 0 fields))
+                 (source (nth 1 fields))
+                 (expected (nth 2 fields)))
+            (unless (and (= (length fields) 3)
+                         (string-match-p "\\`[a-z0-9][a-z0-9-]*\\'" case-name)
+                         (equal source (format "source/%s.org" case-name))
+                         (equal expected (format "expected/%s.ics" case-name))
+                         (org-fixture--export-relative-path-p source)
+                         (org-fixture--export-relative-path-p expected))
+              (error "Invalid iCalendar oracle manifest row"))
+            (when (gethash case-name seen-cases)
+              (error "Duplicate iCalendar oracle case: %s" case-name))
+            (puthash case-name t seen-cases)
+            (let* ((source-root
+                    (file-name-as-directory
+                     (file-truename (expand-file-name "source" root))))
+                   (source-file (expand-file-name source root)))
+              (unless (and (file-exists-p source-file)
+                           (string-prefix-p source-root (file-truename source-file)))
+                (error "iCalendar oracle source is missing or escapes source/")))
+            (push (list case-name source expected) rows))))))
+    (unless seen-header
+      (error "iCalendar oracle manifest has no header"))
+    (unless rows
+      (error "iCalendar oracle manifest contains no cases"))
+    (nreverse rows)))
+
+(defun org-fixture--icalendar-export-case (case root)
+  (let* ((case-name (nth 0 case))
+         (source-relative (nth 1 case))
+         (expected-relative (nth 2 case))
+         (source (expand-file-name source-relative root))
+         (source-text (org-fixture--read-export-source source)))
+    (unless (null (org-fixture--export-include-directives source-text))
+      (error "iCalendar oracle does not support include directives"))
+    (let* ((temporary-directory
+            (file-name-as-directory (make-temp-file "org-fixture-icalendar-" t)))
+           (temporary-source
+            (org-fixture--copy-export-input source-relative root temporary-directory))
+           (source-sha (org-fixture--file-sha256 source))
+           (output-file (expand-file-name expected-relative root))
+           (metadata-file
+            (concat (file-name-sans-extension output-file) ".meta"))
+           (fixed-time (encode-time 0 0 0 1 1 2000 t))
+           (uid-calls 0)
+           (icalendar-uid-format
+            (if (equal case-name "diary-block")
+                (org-fixture--icalendar-stable-uid)
+              "%h")))
+      (unwind-protect
+          (let* ((process-environment (copy-sequence process-environment))
+                 (org-export-allow-bind-keywords t)
+                 (org-icalendar-timezone "UTC")
+                 (system-time-locale "C"))
+            (setenv "TZ" "UTC")
+            (setenv "LC_ALL" "C")
+            (setenv "LANG" "C")
+            (cl-letf (((symbol-function 'current-time)
+                       (lambda () fixed-time))
+                      ((symbol-function 'current-time-zone)
+                       (lambda (&optional _time _now) (list 0 "UTC")))
+                      ((symbol-function 'org-icalendar-dtstamp)
+                       (lambda () "DTSTAMP:20000101T000000Z"))
+                      ((symbol-function 'org-id-new)
+                       (lambda (&optional _prefix)
+                         (cl-incf uid-calls)
+                         (org-fixture--icalendar-stable-uid))))
+              (let ((text (org-fixture--export-buffer temporary-source 'icalendar)))
+                (org-fixture--write-export-file output-file text)
+                (org-icalendar--post-process-file output-file)
+                (org-fixture--write-export-file
+                 metadata-file
+                 (org-fixture--icalendar-metadata case-name source-relative source-sha (org-fixture--file-sha256 output-file) uid-calls))))
+            (princ (format "Wrote %s and %s\n"
+                           expected-relative
+                           (concat (file-name-sans-extension expected-relative) ".meta"))))
+        (delete-directory temporary-directory t)))))
+
+(defun org-fixture-generate-icalendar-oracle ()
+  "Generate the checked-in Org 9.8.10 iCalendar oracle corpus."
+  (require 'ox-icalendar)
+  (require 'org-id)
+  (let* ((root (expand-file-name "t/fixtures/export/oracle/icalendar"
+                                 default-directory))
+         (manifest (expand-file-name "manifest.tsv" root))
+         (cases (org-fixture--read-icalendar-manifest manifest root)))
+    (make-directory (expand-file-name "expected" root) t)
+    (dolist (case cases)
+      (org-fixture--icalendar-export-case case root))
+    (princ (format "Generated %d iCalendar oracle cases.\n" (length cases)))
+    (princ (format "Emacs %s; Org %s; timezone UTC; fixed time 2000-01-01T00:00:00Z\n"
+                   emacs-version (org-version)))))
+
+(defun org-fixture--icalendar-oracle-dispatch (original)
+  (if (equal (car command-line-args-left) "--icalendar-oracle")
+      (progn
+        (unless (= (length command-line-args-left) 1)
+          (error "Usage: emacs --batch -Q --script scripts/generate-org-fixtures.el --icalendar-oracle"))
+        (setq command-line-args-left nil)
+        (org-fixture-generate-icalendar-oracle))
+    (funcall original)))
+
+(advice-add 'org-fixture--dispatch-main :around
+            #'org-fixture--icalendar-oracle-dispatch)
+
+(org-fixture--dispatch-main)
 
 ;;; generate-org-fixtures.el ends here

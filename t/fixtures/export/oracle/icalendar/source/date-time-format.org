@@ -1,0 +1,10 @@
+#+TITLE: Custom date-time format
+#+AUTHOR: Oracle Fixture
+#+BIND: org-icalendar-date-time-format ";TZID=%Z:%Y%m%dT%H%M%S"
+#+BIND: org-icalendar-timezone "Europe/Paris"
+
+* Local event with custom format
+:PROPERTIES:
+:ID: custom-date-time-format
+:END:
+<2024-04-01 Mon 09:30-10:30>

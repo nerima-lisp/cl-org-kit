@@ -1,0 +1,17 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+X-WR-CALNAME:date-time-format
+PRODID:-//Oracle Fixture//Emacs with Org mode//EN
+X-WR-TIMEZONE:Europe/Paris
+X-WR-CALDESC:Custom date-time format
+CALSCALE:GREGORIAN
+BEGIN:VEVENT
+DTSTAMP:20000101T000000Z
+UID:TS1-custom-date-time-format
+DTSTART;TZID=Europe/Paris:20240401T093000
+DTEND;TZID=Europe/Paris:20240401T103000
+SUMMARY:Local event with custom format
+DESCRIPTION:<2024-04-01 Mon 09:30-10:30>
+CATEGORIES:date-time-format
+END:VEVENT
+END:VCALENDAR
