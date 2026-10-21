@@ -1312,8 +1312,6 @@ WORK-BUDGET across assignments in one table recalculation."
                                   (let* ((call (second form))
                                          (arguments
                                           (and (proper-list-p call)
-                                               (consp call)
-                                               (symbolp (first call))
                                                (string-equal (symbol-name (first call)) "org-sbe")
                                                (rest call))))
                                     (unless arguments
