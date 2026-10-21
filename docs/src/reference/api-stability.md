@@ -25,16 +25,15 @@ The 0.1.0 agenda and query APIs include `agenda` for date-range agendas,
 
 ## Agenda APIs added after 0.2.0
 
-The agenda APIs in this source tree were added after the 0.2.0 release and are
-not part of the released public API. They include `agenda-search-view` and
+The current source adds these agenda APIs after the 0.2.0 release. They are not
+part of the released 0.2.0 public API. They include `agenda-search-view` and
 `agenda-stuck-projects`; sorting options (`:sorting-strategy` and
 `:user-defined-sorter`) and category access through `agenda-entry-category`;
 `agenda-time-grid`; custom view definitions through `agenda-custom`; and text,
 Org-document, and edit output through `agenda-format-text`, `agenda-to-org`,
-and `agenda-write-into`. The [TODO and Agenda guide](../guides/todo-agenda.md)
-documents each result type, its time-context requirements, and the supported
-output formats.
-
+`agenda-write-into`; and bulk actions through `agenda-bulk-action`. The
+[TODO and Agenda guide](../guides/todo-agenda.md) documents their result types,
+time-context requirements, output formats, and bulk-action behavior.
 ## Compatibility
 
 Version 0.2.0 defines the supported interface for this release. While the
