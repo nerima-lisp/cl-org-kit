@@ -178,16 +178,19 @@
             (not (string= (document-text original-target-document) "")))
         target-document
         (let* ((source (document-text target-document))
+               (newline
+                 (edit-subtree-line-ending target-document (length source)))
                (archive-header
-                 (format nil "Archived entries from file ~A~%~%~%" source-name))
+                 (format nil "Archived entries from file ~A~A~A~A"
+                         source-name newline newline newline))
                (header
                  (if (string= source "")
-                     (format nil "#    -*- mode: org -*-~%~%~%~A"
-                             archive-header)
+                     (format nil "#    -*- mode: org -*-~A~A~A~A"
+                             newline newline newline archive-header)
                      (concatenate 'string
                                   (if (document-final-newline-p target-document)
-                                      (format nil "~%")
-                                      (format nil "~%~%"))
+                                      newline
+                                      (concatenate 'string newline newline))
                                   archive-header)))
                (updated-source (concatenate 'string source header))
                (expected
@@ -502,9 +505,12 @@
 
 (defun agenda-bulk-validate-action
     (action state state-supplied-p at-supplied-p tag tag-supplied-p
-     schedule-date-supplied-p target-document time-context)
+     schedule-date-supplied-p target-heading target-document time-context)
   (unless (member action '(:todo :add-tag :schedule :refile :archive))
     (agenda-bulk-signal-invalid action "Unknown agenda bulk action"))
+  (when (and target-heading (not (member action '(:refile :archive))))
+    (agenda-bulk-signal-invalid
+     target-heading ":TARGET-HEADING is only valid for :REFILE or :ARCHIVE"))
   (case action
     (:todo
      (unless (and state-supplied-p at-supplied-p)
@@ -546,8 +552,9 @@ and archive destinations are supplied as documents; an archive without a
 target document moves entries below an Archive sibling. The function stages
 all changes in memory and never writes files. Each result is a pair whose CAR
 is the original document and whose CDR is its combined EDIT-RESULT."
-  (agenda-bulk-validate-action action state state-supplied-p at-supplied-p
-                                tag tag-supplied-p schedule-date-supplied-p
+  (agenda-bulk-validate-action action state state-supplied-p
+                                at-supplied-p tag tag-supplied-p
+                                schedule-date-supplied-p target-heading
                                 target-document time-context)
   (let ((entries (agenda-bulk-view-entries view)))
     (agenda-bulk-check-limit entries target-document)

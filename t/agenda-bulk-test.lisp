@@ -354,12 +354,23 @@
            (invalid-todo-state
              (agenda-bulk-test-error
               (lambda () (agenda-bulk-action nil :todo :state 7 :at at))))
+           (invalid-todo-target-heading
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list entry) :todo
+                                    :state "DONE" :at at
+                                    :target-heading heading))))
            (missing-tag
              (agenda-bulk-test-error
               (lambda () (agenda-bulk-action nil :add-tag))))
            (invalid-tag
              (agenda-bulk-test-error
               (lambda () (agenda-bulk-action nil :add-tag :tag 7))))
+           (invalid-tag-target-heading
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action (list entry) :add-tag
+                                    :tag "bulk" :target-heading heading))))
            (missing-schedule-date
              (agenda-bulk-test-error
               (lambda () (agenda-bulk-action nil :schedule))))
@@ -368,6 +379,12 @@
               (lambda ()
                 (agenda-bulk-action (list entry) :schedule
                                     :schedule-date "not-a-date"))))
+           (invalid-schedule-target-heading
+             (agenda-bulk-test-error
+              (lambda ()
+                (agenda-bulk-action
+                 (list entry) :schedule :schedule-date "2024-02-20"
+                 :target-heading heading))))
            (time-schedule-date
              (agenda-bulk-test-error
               (lambda ()
@@ -435,8 +452,10 @@
       (with-soft-assertions
         (dolist (condition
                  (list invalid-action missing-todo-state missing-todo-at
-                       invalid-todo-state missing-tag invalid-tag
+                       invalid-todo-state invalid-todo-target-heading
+                       missing-tag invalid-tag invalid-tag-target-heading
                        missing-schedule-date invalid-schedule-date
+                       invalid-schedule-target-heading
                        time-schedule-date integer-schedule-date
                        missing-refile-target missing-archive-context
                        invalid-archive-target missing-heading-document
@@ -599,6 +618,12 @@
            (source-with-name (parse-org "* Task" :source-name "source.org"))
            (unnamed-source (parse-org "* Task"))
            (existing-target (parse-org "* Existing"))
+           (line-ending-target
+             (parse-org (format nil "* Existing~C~%" #\Return)))
+           (line-ending-updated
+             (document-text
+              (org-kit::agenda-bulk-archive-target-document
+               source-with-name line-ending-target (parse-org ""))))
            (cycle-document
              (parse-org (format nil "* Parent~%** Child~%* Elsewhere~%")))
            (parent (agenda-bulk-test-headline cycle-document "Parent"))
@@ -629,6 +654,10 @@
         (expect (search "* Task" updated-target) :to-be-truthy)
         (expect (search "Archived entries from file source.org"
                         updated-new-target)
+                :to-be-truthy)
+        (expect (search (format nil "Archived entries from file source.org~C~C"
+                                #\Return #\Newline)
+                        line-ending-updated)
                 :to-be-truthy)
         (expect (not (null (search "Archive" local-updated))) :to-be t)
         (expect (not (null (search "ARCHIVE_TIME" same-document-updated)))
