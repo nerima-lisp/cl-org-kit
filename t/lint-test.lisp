@@ -483,7 +483,7 @@ body
                (lint-test-babel-header-context t))
               :to-equal
               (list "Unknown header argument \":bogus\""))))
-  (it "accepts any values within an allowed group and reports empty values"
+  (it "accepts :any or absent allowed-value specs and reports invalid values"
     (let ((context
             (list :babel-header-specifications
                   (list :complete t
@@ -496,6 +496,12 @@ body
 ")
                "wrong-header-value" context)
               :to-equal nil))
+    (expect (org-kit::%lint-context-header-value-messages
+             ":results" "unrestricted" :any)
+            :to-equal nil)
+    (expect (org-kit::%lint-context-header-value-messages
+             ":exports" "unrestricted" nil)
+            :to-equal nil)
     (expect (org-kit::%lint-context-header-value-messages
              ":exports" "" (list (list "code")))
             :to-equal
@@ -558,4 +564,241 @@ body
              (list (list "empty-checker" nil :document-only nil))))
       (expect (org-lint document :checkers '("empty-checker"))
               :to-equal nil))))
+
+(describe "Org lint Babel and named-result boundary cases"
+  (it "rejects incomplete or malformed Babel header registries"
+    (flet ((complete-registry-context (common languages)
+             (list :complete t :common common :languages languages))
+           (validated-specifications (specifications)
+             (org-kit::%lint-context-header-specification-data
+              (list :babel-header-specifications specifications))))
+      (dolist
+          (common
+           (list 42
+                 (list 42)
+                 (list (cons 42 nil))
+                 (list (cons "exports" :invalid))
+                 (list (cons "exports" (cons "code" :tail)))
+                 (list (cons "exports" (list "not-a-group")))
+                 (list (cons "exports" (list (list 42))))))
+        (expect
+         (validated-specifications (complete-registry-context common nil))
+         :to-equal
+         nil))
+      (dolist
+          (languages
+           (list 42
+                 (list 42)
+                 (list (cons 42 nil))
+                 (list (cons "python" :invalid))))
+        (expect
+         (validated-specifications (complete-registry-context nil languages))
+         :to-equal
+         nil))
+      (expect
+       (validated-specifications '(:complete nil :common nil :languages nil))
+       :to-equal
+       nil)
+      (expect (validated-specifications '(:complete t . malformed))
+              :to-equal
+              nil)
+      (expect
+       (validated-specifications
+        (complete-registry-context (list (cons "empty" nil)) nil))
+       :to-equal
+       (list :complete t :common (list (cons "empty" nil)) :languages nil))
+      (let ((circular-values (list "code")))
+        (setf (cdr circular-values) circular-values)
+        (expect
+         (validated-specifications
+          (complete-registry-context (list (cons "exports" circular-values))
+                                     nil))
+         :to-equal
+         nil))))
+  (it "checks missing colons and source blocks without a language"
+    (let ((context (lint-test-babel-header-context t)))
+      (expect
+       (lint-test-selected-messages
+        (parse-org "#+BEGIN_SRC emacs-lisp results
+body
+#+END_SRC
+")
+        "wrong-header-argument"
+        context)
+       :to-equal
+       (list "Missing colon in header argument \"RESULTS\""))
+      (let* ((document (parse-org "#+BEGIN_SRC
+body
+#+END_SRC
+"))
+             (block (first (org-kit::%lint-nodes document :src-block))))
+        (setf (org-kit::node-property block :parameters) ":bogus yes")
+        (expect
+         (lint-test-selected-messages document "wrong-header-argument" context)
+         :to-equal
+         (list "Unknown header argument \":bogus\"")))))
+  (it "ignores non-PROPERTY keywords and empty property names"
+    (let ((context (lint-test-babel-header-context t)))
+      (expect
+       (lint-test-selected-messages (parse-org "#+TITLE: A title
+")
+        "wrong-header-argument"
+        context)
+       :to-equal
+       nil)
+      (expect
+       (multiple-value-list
+        (org-kit::%lint-context-header-property-language ""))
+       :to-equal
+       (list nil nil))))
+  (it "returns no header text for source blocks and calls without headers"
+    (let* ((document (parse-org "#+BEGIN_SRC emacs-lisp
+body
+#+END_SRC
+"))
+           (block (first (org-kit::%lint-nodes document :src-block))))
+      (expect (org-kit::%lint-context-babel-header-texts document block)
+              :to-equal
+              nil))
+    (let* ((document (parse-org "src_emacs-lisp{(+ 1 2)}"))
+           (node (first (org-kit::%lint-nodes document :inline-src-block))))
+      (expect (org-kit::%lint-context-babel-header-texts document node)
+              :to-equal
+              nil))
+    (let* ((document (parse-org "#+CALL: target()"))
+           (node (first (org-kit::%lint-nodes document :babel-call))))
+      (expect (org-kit::%lint-context-babel-header-texts document node)
+              :to-equal
+              nil))
+    (let* ((document (parse-org "call_target(1)"))
+           (node (first (org-kit::%lint-nodes document :inline-babel-call))))
+      (expect (org-kit::%lint-context-babel-header-texts document node)
+              :to-equal
+              nil)))
+  (it "preserves each malformed source switch in extracted header text"
+    (let* ((document (parse-org "#+BEGIN_SRC emacs-lisp
+body
+#+END_SRC
+"))
+           (block (first (org-kit::%lint-nodes document :src-block))))
+      (dolist
+          (switch
+           '("-n 4x" "-nx"
+                     "-ix"
+                     "-l"
+                     "-l x"
+                     "-l \"\""
+                     "-l \"label\"x"
+                     "+i"
+                     "-x"))
+        (setf (org-kit::node-property block :parameters) nil
+              (org-kit::node-property block :switches) switch)
+        (expect (org-kit::%lint-context-babel-header-texts document block)
+                :to-equal
+                (list (list "emacs-lisp" switch nil))))))
+  (it "looks up string exports by source position"
+    (let* ((source-block (make-node :src-block :begin 10))
+           (unlocated-block (make-node :src-block)))
+      (expect (org-kit::%lint-context-effective-exports nil unlocated-block)
+              :to-equal
+              nil)
+      (expect
+       (org-kit::%lint-context-effective-exports (cons (cons 10 "code") :tail)
+                                                 source-block)
+       :to-equal
+       nil)
+      (expect
+       (org-kit::%lint-context-effective-exports (list 42 (cons 10 "code"))
+                                                 source-block)
+       :to-equal
+       "code")
+      (expect
+       (org-kit::%lint-context-effective-exports (list (cons 10 42))
+                                                 source-block)
+       :to-equal
+       nil)))
+  (it "skips unresolved or ambiguous names and non-string :results values"
+    (let* ((document
+            (parse-org
+             "#+NAME: block
+#+BEGIN_SRC emacs-lisp
+(+ 1 2)
+#+END_SRC
+#+NAME: result
+#+RESULTS: missing
+: 3
+"))
+           (source-block (first (org-kit::%lint-nodes document :src-block)))
+           (begin (org-kit::node-begin source-block)))
+      (expect
+       (lint-test-selected-messages document
+                                    "named-result"
+                                    (list :babel-effective-exports
+                                          (list (cons begin "code"))))
+       :to-equal
+       nil))
+    (let* ((document
+            (parse-org
+             "#+NAME: duplicate
+#+BEGIN_SRC emacs-lisp
+(+ 1 2)
+#+END_SRC
+#+NAME: duplicate
+#+BEGIN_SRC emacs-lisp
+(+ 2 3)
+#+END_SRC
+#+NAME: result
+#+RESULTS: duplicate
+: 5
+")))
+      (expect
+       (lint-test-selected-messages document
+                                    "named-result"
+                                    (list :babel-effective-exports
+                                          (mapcar
+                                           (lambda (block)
+                                             (cons (org-kit::node-begin block)
+                                                   "code"))
+                                           (org-kit::%lint-nodes document
+                                                                 :src-block))))
+       :to-equal
+       nil))
+    (let* ((document
+            (parse-org
+             "#+NAME: block
+#+BEGIN_SRC emacs-lisp
+(+ 1 2)
+#+END_SRC
+#+NAME: result
+#+RESULTS: block
+: 3
+"))
+           (result-node
+            (find-if
+             (lambda (node)
+               (nth-value 1 (org-kit::node-property node :results)))
+             (org-kit::%lint-nodes document))))
+      (setf (org-kit::node-property result-node :results) 42)
+      (expect
+       (lint-test-selected-messages document
+                                    "named-result"
+                                    (list :babel-effective-exports
+                                          (list
+                                           (cons
+                                            (org-kit::node-begin
+                                             (first
+                                              (org-kit::%lint-nodes document
+                                                                    :src-block)))
+                                            "code"))))
+       :to-equal
+       nil)))
+  (it "ignores detached empty results without a parent"
+    (expect
+     (org-kit::%lint-context-named-result-origin (make-document "")
+                                                 (make-node :keyword
+                                                            :properties
+                                                            '(:results ""))
+                                                 "")
+     :to-equal
+     nil)))
 )
