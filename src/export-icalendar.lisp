@@ -249,8 +249,7 @@
                        :icalendar
                        :reason
                        :invalid-option))))
-          (when (member key +icalendar-option-keys+ :test #'eq)
-            (values key
+          (values key
                     (cond
                       ((and (plusp (length raw)) (char= (char raw 0) #\())
                        (let ((end (position #\) raw :from-end t)))
@@ -278,7 +277,7 @@
                                  :reason
                                  :invalid-option))
                         (subseq raw 1 (1- (length raw))))
-                      (t raw)))))))))
+                      (t raw))))))))
 
 (defun %icalendar-option-kind (key)
   (cond
@@ -789,8 +788,7 @@
                      for character = (char text index)
                      do (cond
                           ((char= character #\Return)
-                           (when (and (< (1+ index) (length text))
-                                      (char= (char text (1+ index)) #\Newline))
+                           (when (char= (char text (1+ index)) #\Newline)
                              (incf index))
                            (write-string "  " output))
                           ((char= character #\Newline)
@@ -803,9 +801,8 @@
                (with-output-to-string (output)
                  (loop while (< position (length text))
                        for spaces-start = position
-                       do (loop while (and (< position (length text))
-                                           (or (char= (char text position) #\Space)
-                                               (char= (char text position) #\Tab)))
+                       do (loop while (or (char= (char text position) #\Space)
+                                          (char= (char text position) #\Tab))
                                 do (incf position))
                           (let ((word-start position))
                             (loop while (and (< position (length text))
@@ -819,8 +816,7 @@
                                      (export-ascii-output-text-width spaces))
                                    (word-width
                                      (export-ascii-output-text-width word)))
-                              (when (plusp (length word))
-                                (if (and (plusp line-width)
+                              (if (and (plusp line-width)
                                          (> (+ line-width spaces-width word-width)
                                             width))
                                     (progn
@@ -830,7 +826,7 @@
                                     (progn
                                       (write-string spaces output)
                                       (write-string word output)
-                                      (incf line-width (+ spaces-width word-width))))))))))
+                                      (incf line-width (+ spaces-width word-width)))))))))
     ))
     (let ((section (find :section (node-children heading) :key #'node-type)))
       (when (and section (%icalendar-option options :include-body))
@@ -890,7 +886,7 @@
            (let ((state (node-property heading :todo-keyword)))
              (when state
                (setf values (append values (list state))))))
-          ((string= name "all-tags")
+          (t
            (multiple-value-bind (tags found-p)
                (effective-property document heading "TAGS" :inherit t)
              (when found-p
@@ -947,14 +943,14 @@
              (or (org-todo-unfinished-child-p heading)
                  (org-todo-ordered-sibling-blocked-p heading))))
            ((eq include t) (eq todo-type :todo))
-           ((listp include) (member todo-keyword include :test #'string-equal))))))
+           (t (member todo-keyword include :test #'string-equal))))))
 
 (defun %icalendar-entry-event-enabled-p (todo-type modes)
   (cond
     ((null todo-type) (member :event-if-not-todo modes))
     ((eq todo-type :todo)
      (or (member :event-if-todo modes) (member :event-if-todo-not-done modes)))
-    ((eq todo-type :done) (member :event-if-todo modes))))
+    (t (member :event-if-todo modes))))
 
 (defun %icalendar-planning-events (heading options time-context)
   (labels ((timestamp-for-local (local)
@@ -1285,7 +1281,7 @@
                                           nil))))
           (t
            (let* ((separator
-                   (and (stringp format-string) (position #\: format-string)))
+                   (position #\: format-string))
                   (prefix (and separator (subseq format-string 0 separator)))
                   (pattern
                    (and separator (subseq format-string (1+ separator))))

@@ -1711,3 +1711,148 @@
                      (eq (org-export-unsupported-syntax-feature unsupported)
                          :diary-sexp))
                 :to-be t)))))
+
+(describe "iCalendar branch boundary cases"
+  (it "validates documents and parses quoted and unrelated BIND options"
+    (let* ((invalid-document
+             (export-icalendar-test-catch-error
+              (lambda ()
+                (export-icalendar-documents
+                 (list :not-a-document)
+                 :context (export-icalendar-test-context)))))
+           (document
+             (parse-org
+              (format nil "#+BIND: org-html-postamble nil~%#+BIND: org-icalendar t~%#+BIND: org-icalendar-description \"Quoted calendar\"~%")))
+           (options (org-kit::%icalendar-keyword-options document)))
+      (with-soft-assertions
+        (expect (typep invalid-document 'org-export-error) :to-be t)
+        (when (typep invalid-document 'org-export-error)
+          (expect (org-export-error-reason invalid-document)
+                  :to-be :invalid-documents))
+        (expect options
+                :to-equal '((:description . "Quoted calendar"))))))
+
+  (it "escapes carriage returns in text and trims headline whitespace"
+    (let* ((builder (org-kit::%make-icalendar-builder :limits (make-limits)))
+           (heading
+             (make-node
+              :headline
+              :children
+              (list
+               (make-node
+                :section
+                :children
+                (list
+                 (make-node :paragraph
+                            :properties
+                            (list :value (format nil "one two~Cthree~Cfour~C~C~C"
+                                      #\Tab #\Return #\Space #\Return #\Tab))))))))
+           (body
+             (org-kit::%icalendar-headline-body
+              heading '((:include-body . t)) (make-limits))))
+      (org-kit::%icalendar-append-line
+       builder
+       (list (cons "TEXT:" nil)
+             (cons (format nil "tail~C" #\Return) t)))
+      (with-soft-assertions
+        (expect (search "TEXT:tail\\n"
+                        (coerce (org-kit::%icalendar-builder-buffer builder)
+                                'string))
+                :to-be-truthy)
+        (expect body :to-equal (format nil "one two~Cthree  four" #\Tab)))))
+
+  (it "omits inherited all-tags when no TAGS property exists"
+    (let* ((document (parse-org (format nil "* Untagged~%")))
+           (heading nil))
+      (org-kit::map-nodes
+       (lambda (node)
+         (when (eq (node-type node) :headline)
+           (setf heading node)))
+       (document-root document))
+      (with-soft-assertions
+        (expect (org-kit::%icalendar-categories
+                 document heading '((:categories . ("all-tags"))))
+                :to-be nil))))
+
+  (it "rejects invalid alarm, timezone, and diary inputs and checks zone names"
+    (let* ((invalid-alarm
+             (export-icalendar-test-catch-error
+              (lambda ()
+                (export-icalendar-documents
+                 nil
+                 :context (export-icalendar-test-context)
+                 :options '(:alarm-time 1.5)))))
+           (bad-zone-document
+             (parse-org
+              (format nil
+                      "* Event~%:PROPERTIES:~%:ID: unicode-zone~%:TIMEZONE: 東京~%:END:~%<2024-03-14 Thu 09:00>~%")))
+           (bad-zone
+             (export-icalendar-test-catch-error
+              (lambda ()
+                (export-icalendar-documents
+                 (list bad-zone-document)
+                 :context (export-icalendar-test-context)))))
+           (reversed-diary-document
+             (parse-org
+              (format nil
+                      "* Reversed diary range~%:PROPERTIES:~%:ID: reversed-range~%:END:~%<%%(diary-block 1 4 2025 1 2 2025)>~%")))
+           (reversed-diary
+             (export-icalendar-test-catch-error
+              (lambda ()
+                (export-icalendar-documents
+                 (list reversed-diary-document)
+                 :context (export-icalendar-test-context))))))
+      (with-soft-assertions
+        (expect (and (typep invalid-alarm 'org-export-error)
+                     (eq (org-export-error-reason invalid-alarm) :invalid-option))
+                :to-be t)
+        (expect (and (typep bad-zone 'org-export-error)
+                     (eq (org-export-error-reason bad-zone) :invalid-timezone))
+                :to-be t)
+        (expect (and (typep reversed-diary 'org-export-unsupported-syntax)
+                     (eq (org-export-unsupported-syntax-feature reversed-diary)
+                         :diary-sexp))
+                :to-be t)
+        (expect (org-kit::%icalendar-safe-zone-name-p nil) :to-be t)
+        (expect (org-kit::%icalendar-safe-zone-name-p 42) :to-be nil))))
+
+  (it "accepts numeric priority codes in the priority helper"
+    (with-soft-assertions
+      (expect (org-kit::%icalendar-org-priority
+               (make-node :headline :properties '(:priority 66)))
+              :to-equal "5")))
+  (it "covers absent and malformed BIND values and ordinary keywords"
+    (let* ((empty-bind
+             (multiple-value-list
+              (org-kit::%icalendar-bind-option
+               "org-icalendar-description ")))
+           (short-quote
+             (export-icalendar-test-catch-error
+              (lambda ()
+                (org-kit::%icalendar-bind-option
+                 (concatenate 'string "org-icalendar-description "
+                              (string #\"))))))
+           (ordinary-options
+             (org-kit::%icalendar-keyword-options
+              (parse-org (format nil "#+TITLE: Plain~%")))))
+      (with-soft-assertions
+        (expect (org-kit::%icalendar-bind-option nil) :to-be nil)
+        (expect empty-bind :to-equal '(:description ""))
+        (expect (and (typep short-quote 'org-export-error)
+                     (eq (org-export-error-reason short-quote) :invalid-option))
+                :to-be t)
+        (expect ordinary-options :to-be nil))))
+  (it "skips non-string keyword keys and defaults export output to a string"
+    (let* ((document (make-document ""))
+           (keyword
+             (make-node :keyword :properties '(:key 7 :value "unused")))
+           (root (make-node :org-data :children (list keyword)))
+           (output
+             (export-icalendar-documents
+              (list (parse-org (format nil "* Default output~%")))
+              :context (export-icalendar-test-context))))
+      (setf (document-root document) root)
+      (with-soft-assertions
+        (expect (org-kit::%icalendar-keyword-options document) :to-be nil)
+        (expect (stringp output) :to-be t)
+        (expect (search "BEGIN:VCALENDAR" output) :to-be-truthy)))))
