@@ -150,8 +150,9 @@ Without `LOGGING`, state-change lines follow the `#+TODO` markers. Done and
 repeat logging each come from the `:log-done` or `:log-repeat` argument given
 to `make-org-workflow-options`, and otherwise from the last `logdone`-family
 word of `#+STARTUP` (see `startup-options` in the
-[node model](../reference/node-model.md)). `LOG_DONE` and `LOG_REPEAT`
-properties have no effect.
+[node model](../reference/node-model.md)). Pass the resulting value as
+`:workflow-options` to `transition-heading-todo` or `cycle-heading-todo`.
+`LOG_DONE` and `LOG_REPEAT` properties have no effect.
 
 As in Org, removing a TODO keyword writes no state-change line, and a
 `lognotedone` closing note is written only when no state-change line is.
@@ -339,9 +340,7 @@ diary timestamp nodes for that date. Its optional `:callback-registry` defaults
 to an empty registry; an unknown diary form signals
 `org-elisp-evaluator-error` with reason `:unregistered` unless an evaluator is
 registered with `(register-callback registry :evaluator :emacs-lisp function)`
-and that registry is passed as `:callback-registry`. `query-match-now` remains
-an Org headline matcher. Relative query dates use its explicit `:time-context`
-reference time rather than the machine clock.
+and that registry is passed as `:callback-registry`.
 
 Agenda rows for a scheduled habit also expose `agenda-entry-habit-consistency`.
 Each scheduled row for a habit carries one list spanning the full agenda date
@@ -415,4 +414,4 @@ document without an override contributes the default. Pass a limits object to
 `:limits (org-kit:make-limits :max-agenda-range-days 90 :max-future-repeats 500)`.
 
 See [Clock](clock.md) for clock aggregation and
-[API Stability](../reference/api-stability.md) for the 0.1.0 public API scope.
+[API Stability](../reference/api-stability.md) for the 0.2.0 public API scope.
