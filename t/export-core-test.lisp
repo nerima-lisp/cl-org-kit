@@ -999,8 +999,9 @@
              (export-core-test-catch-error
               (lambda ()
                 (export-core-test-preparation
-                 (export-core-test-lines "#+MACRO: choose(x) $1"
-                                         "{{{choose(value)}}}")))))
+                 (export-core-test-lines
+                  "#+MACRO: choose (eval (+ 1 2))"
+                  "{{{choose(value)}}}")))))
            (invalid-macro-name
              (export-core-test-catch-error
               (lambda ()
@@ -1040,10 +1041,11 @@
         (when (typep unknown-macro 'org-export-unsupported-syntax)
           (expect (org-export-unsupported-syntax-feature unknown-macro)
                   :to-be :unknown-macro))
-        (expect (typep function-macro 'org-export-unsupported-syntax) :to-be t)
-        (when (typep function-macro 'org-export-unsupported-syntax)
-          (expect (org-export-unsupported-syntax-feature function-macro)
-                  :to-be :function-macro))
+        (expect (typep function-macro 'org-elisp-evaluator-error) :to-be t)
+        (when (typep function-macro 'org-elisp-evaluator-error)
+          (expect (org-callback-error-kind function-macro) :to-equal "EVALUATOR")
+          (expect (org-callback-error-name function-macro) :to-equal "emacs-lisp")
+          (expect (org-callback-error-reason function-macro) :to-be :unregistered))
         (expect (typep invalid-macro-name 'org-export-unsupported-syntax)
                 :to-be t)
         (when (typep invalid-macro-name 'org-export-unsupported-syntax)
@@ -1053,6 +1055,147 @@
         (expect nondigit-parameter :to-equal "$x")
         (expect multiple-digit-parameters
                 :to-equal "[three][twelve][][][][$x]"))))
+  (it "passes function macro templates and parsed arguments to a caller evaluator"
+    (let* ((context (make-export-context :title "Caller"))
+           (registry (make-callback-registry))
+           (calls nil)
+           (source
+             (export-core-test-lines
+              "#+MACRO: echo (eval (format \"%s\" $1))"
+              "{{{echo(first,second,)}}}"
+              "{{{echo}}}"
+              "{{{echo(nil)}}}"
+              "{{{echo(number)}}}"
+              "{{{echo(string)}}}"))
+           (document (parse-org source)))
+      (register-callback
+       registry :evaluator :emacs-lisp
+       (lambda (expression evaluator-context)
+         (push (list expression evaluator-context) calls)
+         (let ((arguments (getf evaluator-context :arguments)))
+           (cond
+             ((equal arguments '("first" "second" ""))
+              (format nil "[~{~A~^|~}]" arguments))
+             ((null arguments) "no-args")
+             ((equal arguments '("nil")) nil)
+             ((equal arguments '("number")) 27)
+             ((equal arguments '("string")) "from evaluator")
+             (t "unexpected")))))
+      (let* ((preparation
+               (org-kit::export-prepare
+                document :html :context context :callback-registry registry))
+             (views (export-core-test-view-nodes preparation :macro))
+             (texts
+               (mapcar (lambda (view)
+                         (getf (org-kit::export-view-payload view) :expanded-text))
+                       views))
+             (source-arguments
+               (node-property (org-kit::export-view-node (first views)) :args))
+             (public-output
+               (org-kit:export-org
+                (parse-org
+                 (export-core-test-lines
+                  "#+MACRO: echo (eval (format \"%s\" $1))"
+                  "{{{echo(string)}}}"))
+                :ascii :context context :callback-registry registry))
+             (records (nreverse calls))
+             (arguments
+               (mapcar (lambda (record)
+                         (getf (second record) :arguments))
+                       records))
+             (expressions (mapcar #'first records)))
+        (with-soft-assertions
+          (expect texts
+                  :to-equal '("[first|second|]" "no-args" "" "27" "from evaluator"))
+          (expect (search "from evaluator" public-output) :to-be-truthy)
+          (expect
+           (typep
+            (export-core-test-catch-error
+             (lambda ()
+               (org-kit::export-prepare
+                document :html :callback-registry :invalid)))
+            'type-error)
+           :to-be t)
+          (expect expressions
+                  :to-equal
+                  (make-list 6 :initial-element "(eval (format \"%s\" $1))"))
+          (expect arguments
+                  :to-equal
+                  '(("first" "second" "") nil ("nil") ("number")
+                    ("string") ("string")))
+          (expect
+           (every (lambda (record)
+                    (equal (getf (second record) :macro-name) "echo"))
+                  records)
+           :to-be t)
+          (expect
+           (every (lambda (record)
+                    (eq (getf (second record) :export-context) context))
+                  records)
+           :to-be t)
+          (expect (eq (first arguments) source-arguments) :to-be nil)
+          (expect (eq (first (first arguments)) (first source-arguments))
+                  :to-be nil))
+      (let* ((condition
+               (make-condition 'simple-error
+                               :format-control "function macro callback failure"))
+             (throwing-registry (make-callback-registry))
+             (caught nil))
+        (register-callback
+         throwing-registry :evaluator :emacs-lisp
+         (lambda (expression evaluator-context)
+           (declare (ignore expression evaluator-context))
+           (error condition)))
+        (setf caught
+              (export-core-test-catch-error
+               (lambda ()
+                 (org-kit::export-prepare
+                  (parse-org
+                   (export-core-test-lines
+                    "#+MACRO: fail (eval (+ 1 2))"
+                    "{{{fail}}}"))
+                  :html :callback-registry throwing-registry))))
+        (expect (eq caught condition) :to-be t)))))
+  (it "keeps evaluator template mutations local to each call"
+    (let* ((registry (make-callback-registry))
+           (expressions nil)
+           (document
+             (parse-org
+              (export-core-test-lines
+               "#+MACRO: echo (eval (+ 1 2))"
+               "{{{echo(first)}}}"
+               "{{{echo(second)}}}"))))
+      (register-callback
+       registry :evaluator :emacs-lisp
+       (lambda (expression context)
+         (declare (ignore context))
+         (push (copy-seq expression) expressions)
+         (setf (char expression 0) #\x)
+         "ok"))
+      (let* ((preparation
+               (org-kit::export-prepare
+                document :html :callback-registry registry))
+             (texts
+               (mapcar (lambda (view)
+                         (getf (org-kit::export-view-payload view) :expanded-text))
+                       (export-core-test-view-nodes preparation :macro))))
+        (with-soft-assertions
+          (expect texts :to-equal (quote ("ok" "ok")))
+          (expect (nreverse expressions)
+                  :to-equal
+                  (quote ("(eval (+ 1 2))" "(eval (+ 1 2))")))))))
+  (it "uses the name prefix in parenthesized macro definitions"
+    (let* ((preparation
+             (export-core-test-preparation
+              (export-core-test-lines
+               "#+MACRO: legacy(args) $1"
+               "{{{legacy(value)}}}")))
+           (views (export-core-test-view-nodes preparation :macro))
+           (text (getf (org-kit::export-view-payload (first views))
+                       :expanded-text)))
+      (with-soft-assertions
+        (expect (length views) :to-be 1)
+        (expect text :to-equal "value"))))
 
   (it "rejects long numeric options and expands oversized macro indices to empty"
     (let* ((digits (make-string 4096 :initial-element #\9))

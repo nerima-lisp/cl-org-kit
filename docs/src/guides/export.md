@@ -303,6 +303,41 @@ RFC 5545; Org 9.8.10 counts characters instead. For example, 74 ASCII bytes
 followed by a two-byte UTF-8 character may make Org's first physical line 76
 octets, while this backend folds before that character to stay within 75.
 
+## Function macros
+
+Org function macros use a template beginning with `(eval`, for example
+`#+MACRO: greet (eval (concat "Hello, " $1))`. `export-org` passes the full
+template and a context plist to the registered `:evaluator` / `:emacs-lisp`
+callback. The plist contains the lowercase macro name, a copied list of parsed
+argument strings, and the effective export context under `:macro-name`,
+`:arguments`, and `:export-context`. The library does not parse or evaluate the
+expression or substitute arguments into its body; the callback owns those
+steps.
+
+Register an evaluator explicitly and pass its registry to `export-org`:
+
+~~~lisp
+(let ((registry (org-kit:make-callback-registry)))
+  (org-kit:register-callback
+   registry :evaluator :emacs-lisp
+   (lambda (expression macro-context)
+     (if (string= expression "(eval (concat \"Hello, \" $1))")
+         (format nil "Hello, ~A"
+                 (first (getf macro-context :arguments)))
+         (error "Unsupported function macro template"))))
+  (org-kit:export-org
+   (org-kit:parse-org
+    (format nil "#+MACRO: greet (eval (concat \"Hello, \" $1))~%~%{{{greet(World)}}}"))
+   :ascii :callback-registry registry))
+~~~
+
+The callback receives the full template unchanged and the call's arguments in
+order; an omitted argument list is `nil`, and an explicit empty argument is an
+empty string. A `nil` callback result expands to an empty string, strings pass
+through, and other values are converted with Common Lisp `~A`. If no evaluator
+is registered, expansion signals `org-elisp-evaluator-error`. Conditions
+signaled by a registered callback propagate unchanged.
+
 ## Registering backends and filters
 
 `register-export-backend` adds a root backend with a body renderer.

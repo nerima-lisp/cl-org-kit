@@ -536,10 +536,15 @@
   (destructuring-bind (node key value) record
     (declare (ignore key))
     (let* ((value (export-trim value))
-           (separator (position-if #'export-whitespace-p value))
+           (separator (position-if (function export-whitespace-p) value))
            (name (if separator (subseq value 0 separator) value))
            (template (if separator (export-trim (subseq value separator)) ""))
-           (function-p (find #\( name)))
+           (function-p
+             (and (<= 5 (length template))
+                  (string= template "(eval" :end1 5)
+                  (or (= (length template) 5)
+                      (export-whitespace-p (char template 5))
+                      (char= (char template 5) #\))))))
       (unless (and (plusp (length name))
                    (every (lambda (character)
                             (or (alphanumericp character)
@@ -548,9 +553,26 @@
         (export-unsupported-syntax backend node (export-source-position node)
                                    :invalid-macro
                                    "Invalid macro definition"))
-      (values (string-downcase (subseq name 0 (or (position #\( name)
-                                                   (length name))))
+      (values (string-downcase (subseq name 0 (or (position #\( name) (length name))))
               template function-p node))))
+(defun export-evaluate-function-macro
+    (definition macro-name arguments export-context callback-registry)
+  (let* ((callback-arguments
+           (mapcar (lambda (argument)
+                     (if (stringp argument)
+                         (copy-seq argument)
+                         argument))
+                   arguments))
+         (result
+           (evaluate-elisp
+            callback-registry
+            (copy-seq (getf definition :template))
+            (list :macro-name macro-name
+                  :arguments callback-arguments
+                  :export-context export-context))))
+    (cond ((null result) "")
+          ((stringp result) result)
+          (t (format nil "~A" result)))))
 
 (defun export-build-macro-table (records backend metadata extensions)
   (let ((macros (make-hash-table :test #'equal)))
@@ -1467,7 +1489,9 @@
                       (not (export-option-selects-name-p selection todo-keyword)))
                      (t nil)))))))
 
-(defun export-prepare (document backend &key include-resolver allow-raw-html allow-raw-latex context filter-context)
+(defun export-prepare (document backend &key
+                          include-resolver allow-raw-html allow-raw-latex
+                          context filter-context callback-registry)
   "Prepare a private export view without serializing or modifying DOCUMENT."
   (unless (document-p document)
     (error 'type-error :datum document :expected-type 'document))
@@ -1479,8 +1503,15 @@
     (unless (member allow-raw-html '(nil t))
       (error 'type-error :datum allow-raw-html :expected-type 'boolean))
     (unless (member allow-raw-latex '(nil t))
-      (error 'type-error :datum allow-raw-latex :expected-type 'boolean)))
-  (let* ((root (document-root document))
+      (error 'type-error :datum allow-raw-latex :expected-type 'boolean))
+    (unless (or (null callback-registry)
+                (callback-registry-p callback-registry))
+      (error 'type-error :datum callback-registry
+             :expected-type '(or null callback-registry))))
+  (let* ((effective-context (or context (make-export-context)))
+         (effective-callback-registry
+          (or callback-registry (make-callback-registry)))
+         (root (document-root document))
          (ancestry (if filter-context
                        (%export-render-context-ancestry filter-context)
                        (nth-value 1 (export-registry-snapshot backend))))
@@ -1494,7 +1525,7 @@
       (check-limit limits :max-export-expanded-nodes expanded-node-count)
         (multiple-value-bind (metadata options select-active-p select-tags exclude-tags
                               macros)
-          (export-document-settings document backend context filter-context)
+          (export-document-settings document backend effective-context filter-context)
         (labels
             ((account-tree (tree-root)
                (map-nodes
@@ -1573,20 +1604,18 @@
                                 (export-unsupported-syntax
                                  backend node (export-source-position node) :unknown-macro
                                  "Unknown macro"))
-                              (when (getf definition :function-p)
-                                (export-unsupported-syntax
-                                 backend node (export-source-position node) :function-macro
-                                 "Function macros are unsupported"))
                               (when (member key active-macros :test #'string=)
                                 (export-unsupported-syntax
                                  backend node (export-source-position node) :recursive-macro
                                  "Recursive macro expansion"))
                               (export-check-expansion-depth next-depth limits)
                               (let* ((arguments (node-property node :args))
-                                     (builtin (getf definition :builtin))
+                                     (builtin (if (getf definition :function-p)
+                                                  :function-macro
+                                                (getf definition :builtin)))
                                      (direct-p
                                       (member builtin
-                                              '(:keyword :time :modification-time :property :n)
+                                              '(:function-macro :keyword :time :modification-time :property :n)
                                               :test #'eq))
                                      (template
                                       (case builtin
@@ -1613,7 +1642,10 @@
                                           builtin arguments node source-document definition
                                           metadata macro-counters backend))
                                         (otherwise
-                                         (getf definition :template))))
+                                         (if (eq builtin :function-macro)
+                                             (export-evaluate-function-macro
+                                              definition key arguments effective-context effective-callback-registry)
+                                           (getf definition :template)))))
                                      (expanded-length
                                       (if direct-p
                                           (length template)
@@ -1942,9 +1974,9 @@
   (export-error backend :unsupported-backend nil
                 "No renderer is available for this export backend"))
 
-(defun export-org (document backend
-                            &key include-resolver allow-raw-html allow-raw-latex
-                            (output-type :string) stream context)
+(defun export-org (document backend &key
+                  include-resolver allow-raw-html allow-raw-latex
+                  (output-type :string) stream context callback-registry)
   "Export DOCUMENT with BACKEND and return its requested output representation."
   (let* ((*export-output-check-counts* (make-hash-table))
          (*export-current-export-phase* :input-validation)
@@ -1990,6 +2022,7 @@
                             :allow-raw-html allow-raw-html
                             :allow-raw-latex allow-raw-latex
                             :context caller-context
+                            :callback-registry callback-registry
                             :filter-context render-context)))
          (initialized-render-context
           (progn
