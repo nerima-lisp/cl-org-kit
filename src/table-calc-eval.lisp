@@ -1307,8 +1307,6 @@ WORK-BUDGET across assignments in one table recalculation."
                                                (table-calc-fail source end :org-sbe
                                                                 "Expected one complete org-sbe form"))
                                              form)
-                                         (org-resource-limit-error (condition)
-                                                                   (error condition))
                                          (error ()
                                                 (table-calc-fail source 0 :org-sbe "Malformed org-sbe form")))))
                                   (let* ((call (second form))
@@ -1357,18 +1355,20 @@ WORK-BUDGET across assignments in one table recalculation."
                                                             for literal-p in flags
                                                             collect
                                                             (if (and (stringp value) (not literal-p))
-                                                                (progn
-                                                                  (check-limit limits :max-input-length (length value))
-                                                                  (multiple-value-bind (object end)
-                                                                      (handler-case
-                                                                          (read-from-string value nil nil)
-                                                                        (org-resource-limit-error (condition)
-                                                                                                  (error condition))
-                                                                        (error ()
-                                                                               (table-calc-fail source 0 :org-sbe "Malformed org-sbe value")))
-                                                                    (unless (and (plusp end) (safe-data-p object 0))
-                                                                      (table-calc-fail source 0 :org-sbe "Unsupported org-sbe value"))
-                                                                    object))
+                                                                (handler-case
+                                                                  (progn
+                                                                    (check-limit limits :max-input-length (length value))
+                                                                    (multiple-value-bind (object end)
+                                                                      (read-from-string value nil nil)
+                                                                      (unless (and (plusp end) (safe-data-p object 0))
+                                                                        (table-calc-fail source 0 :org-sbe "Unsupported org-sbe value"))
+                                                                      object))
+                                                                  (org-resource-limit-error (condition)
+                                                                    (error condition))
+                                                                  (org-table-unsupported-syntax (condition)
+                                                                    (error condition))
+                                                                  (error ()
+                                                                    (table-calc-fail source 0 :org-sbe "Malformed org-sbe value")))
                                                               value))
                                                     raw-values))
                                                  (name (symbol-name (first variable)))

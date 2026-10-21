@@ -1135,14 +1135,14 @@
                (format nil "@1$1=~A(org-sbe sample)" quote-character)))
              (expression (org-kit::table-calc-assignment-expression assignment))
              (callbacks (make-callback-registry)))
-        (labels ((evaluate-source (source &optional org-sbe-function)
+        (labels ((evaluate-source (source &optional org-sbe-function (evaluation-limits limits))
                                   (setf (org-kit::table-calc-expression-value expression) source)
                                   (org-kit::table-calc-evaluate-assignment
                                    assignment
                                    (table-calc-eval-test-position-function 1 1 1 nil)
                                    (table-calc-eval-test-cell-value-function
                                     (table-calc-eval-test-cell-map))
-                                   :limits limits
+                                   :limits evaluation-limits
                                    :work-budget (org-kit::make-table-calc-work-budget)
                                    :callbacks callbacks
                                    :org-sbe-function org-sbe-function))
@@ -1156,7 +1156,7 @@
                           #\Newline #\Tab #\Page #\Backspace #\Return #\" #\\))
                  (source
                   (format nil
-                          "  ~A(org-sbe sample (bare $ \"literal text\") (number $ 7) (list $ (1 2)) (empty) (many 1 2) (escaped $ \"line\\nnext\\tpage\\fform\\bback\\rreturn quote\\\" slash\\\\end\"))"
+                          "  ~A(org-sbe sample (bare $ \"literal text\") (number $ 7) (list $ (1 2)) (empty) (many 1 2) (escaped $ \"line\\nnext\\tpage\\fform\\bback\\rreturn quote\\\" slash\\\\end\") (parsed-many \"3\" \"4\"))"
                           quote-character))
                  (received nil)
                  (result
@@ -1171,18 +1171,20 @@
              (expect received
                      :to-equal
                      (list "sample" nil
-                           (list (cons "bare" "literal text")
-                                 (cons "number" 7)
-                                 (cons "list" '(1 2))
-                                 (cons "empty" "")
-                                 (cons "many" '(1 2))
-                                 (cons "escaped" escaped-value))
-                           (list (list "bare" (list "literal text") (list t))
-                                 (list "number" (list 7) (list t))
-                                 (list "list" (list '(1 2)) (list t))
-                                 (list "empty" nil nil)
-                                 (list "many" (list 1 2) (list nil nil))
-                                 (list "escaped" (list escaped-value) (list t)))))))
+                          (list (cons "bare" "literal text")
+                                (cons "number" 7)
+                                (cons "list" '(1 2))
+                                (cons "empty" "")
+                                (cons "many" '(1 2))
+                                (cons "escaped" escaped-value)
+                                (cons "parsed-many" '(3 4)))
+                          (list (list "bare" (list "literal text") (list t))
+                                (list "number" (list 7) (list t))
+                                (list "list" (list '(1 2)) (list t))
+                                (list "empty" nil nil)
+                                (list "many" (list 1 2) (list nil nil))
+                                (list "escaped" (list escaped-value) (list t))
+                                (list "parsed-many" (list 3 4) (list nil nil)))))))
           (let ((evaluator-inputs nil)
                 (non-list (format nil "~Anon-list" quote-character)))
             (register-callback
@@ -1227,8 +1229,29 @@
                              :org-sbe)
                        (cons (format nil "~A(org-sbe 42)" quote-character)
                              :org-sbe)
+                       (cons (format nil
+                              "~A(org-sbe sample (many \"1\" \"(\"))"
+                              quote-character)
+                             :org-sbe)
+                       (cons (format nil
+                              "~A(org-sbe sample (many \"1\" \"\"))"
+                              quote-character)
+                             :org-sbe)
                        (cons (format nil "~A(org-sbe . sample)" quote-character)
                              :org-sbe)))
             (table-calc-eval-test-expect-unsupported-syntax
              (unsupported (car case))
-             (cdr case)))))))
+             (cdr case)))
+          (let* ((source
+                   (format nil
+                           "~A(org-sbe sample (many \"1\" \"(((1)))\"))"
+                           quote-character))
+                 (condition
+                   (handler-case
+                       (progn
+                         (evaluate-source source nil
+                                          (make-limits :max-formula-ast-depth 2))
+                         nil)
+                     (org-resource-limit-error (condition) condition))))
+            (table-calc-eval-test-expect-limit
+             condition :max-formula-ast-depth 2 3))))))

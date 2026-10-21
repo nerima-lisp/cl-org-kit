@@ -802,68 +802,48 @@
             (declare (ignore variable-overrides))
             (let* ((document (node-document target))
                    (name-index (babel-build-name-index document))
-                   (source-block (gethash block-name name-index))
-                   (active-results (make-hash-table :test #'equal)))
+                   (source-block (gethash block-name name-index)))
               (unless (and source-block (eq (node-type source-block) :src-block))
                 (babel-signal-error :unresolved-call-target
                                     "org-sbe target is not a named source block"
                                     block-name))
               (labels ((resolve-source-result (referenced-name resolved-variables)
                                               (let ((referenced-block (gethash referenced-name name-index)))
-                                                (unless (and referenced-block
-                                                             (eq (node-type referenced-block) :src-block))
-                                                  (babel-signal-error :unresolved-reference
-                                                                      "Babel source-block reference was not found"
-                                                                      referenced-name))
-                                                (when (gethash referenced-name active-results)
-                                                  (babel-signal-error :cyclic-reference
-                                                                      "Cyclic Babel source-block reference"
-                                                                      referenced-name))
-                                                (setf (gethash referenced-name active-results) t)
-                                                (unwind-protect
-                                                    (table-recalculate-execute-org-sbe-block
-                                                     document referenced-block callbacks
-                                                     :parameter-overrides
-                                                     (mapcar
-                                                      (lambda (variable)
-                                                       (table-recalculate-org-sbe-resolved-parameter-text
-                                                        (car variable) (cdr variable) limits))
-                                                      resolved-variables)
-                                                     :resolved-variables resolved-variables
-                                                     :result-resolver #'resolve-source-result)
-                                                  (remhash referenced-name active-results)))))
-                (when (gethash block-name active-results)
-                  (babel-signal-error :cyclic-reference
-                                      "Cyclic Babel source-block reference"
-                                      block-name))
-                (setf (gethash block-name active-results) t)
-                (unwind-protect
-                    (let* ((context
-                            (make-babel-resolution-context
-                             :document document
-                             :result-resolver #'resolve-source-result
-                             :names name-index))
-                           (overrides
-                            (mapcar
-                             (lambda (spec)
-                               (table-recalculate-org-sbe-override spec context))
-                             variable-parameters))
-                           (parameter-overrides
-                            (mapcar
-                             (lambda (spec)
-                               (table-recalculate-org-sbe-parameter-text
-                                (first spec) (second spec) (third spec) limits))
-                             variable-parameters))
-                           (value
-                            (table-recalculate-execute-org-sbe-block
-                             document source-block callbacks
-                             :header header
-                             :parameter-overrides parameter-overrides
-                             :variable-overrides overrides
-                             :result-resolver #'resolve-source-result))
-                           (text (if (stringp value) value (format nil "~S" value))))
-                      (string-trim '(#\Space #\Tab #\Newline #\Return) text))
-                  (remhash block-name active-results))))))
+                                                (table-recalculate-execute-org-sbe-block
+                                                 document referenced-block callbacks
+                                                 :parameter-overrides
+                                                 (mapcar
+                                                  (lambda (variable)
+                                                    (table-recalculate-org-sbe-resolved-parameter-text
+                                                     (car variable) (cdr variable) limits))
+                                                  resolved-variables)
+                                                 :resolved-variables resolved-variables
+                                                 :result-resolver (function resolve-source-result)))))
+                (let* ((context
+                        (make-babel-resolution-context
+                         :document document
+                         :result-resolver (function resolve-source-result)
+                         :names name-index))
+                       (overrides
+                        (mapcar
+                         (lambda (spec)
+                           (table-recalculate-org-sbe-override spec context))
+                         variable-parameters))
+                       (parameter-overrides
+                        (mapcar
+                         (lambda (spec)
+                           (table-recalculate-org-sbe-parameter-text
+                            (first spec) (second spec) (third spec) limits))
+                         variable-parameters))
+                       (value
+                        (table-recalculate-execute-org-sbe-block
+                         document source-block callbacks
+                         :header header
+                         :parameter-overrides parameter-overrides
+                         :variable-overrides overrides
+                         :result-resolver (function resolve-source-result)))
+                       (text (if (stringp value) value (format nil "~S" value))))
+                  (string-trim (list #\Space #\Tab #\Newline #\Return) text))))))
     (dolist (entry entries)
       (let* ((row (table-recalculate-entry-row entry))
              (column (table-recalculate-entry-column entry))

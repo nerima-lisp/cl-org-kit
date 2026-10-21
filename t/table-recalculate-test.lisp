@@ -1700,4 +1700,142 @@
              (expect (org-babel-error-reason condition)
                      :to-be :unresolved-call-target))
            (expect calls :to-be 3)))))
+  (it "formats Org-sbe arguments and resolved variables for supported value shapes"
+    (let ((limits (make-limits))
+          (symbol (make-symbol "sample")))
+      (with-soft-assertions
+        (expect (org-kit::table-recalculate-org-sbe-printed-data nil)
+                :to-equal "nil")
+        (expect (org-kit::table-recalculate-org-sbe-printed-data "text")
+                :to-equal "\"text\"")
+        (expect (org-kit::table-recalculate-org-sbe-printed-data :sample)
+                :to-equal ":SAMPLE")
+        (expect (org-kit::table-recalculate-org-sbe-printed-data symbol)
+                :to-equal "sample")
+        (expect (org-kit::table-recalculate-org-sbe-printed-data
+                 (list 1 :sample "text"))
+                :to-equal "(1 :SAMPLE \"text\")")
+        (expect (org-kit::table-recalculate-org-sbe-printed-data 7)
+                :to-equal "7")
+        (expect (org-kit::table-recalculate-org-sbe-argument-text nil nil)
+                :to-equal "nil")
+        (expect (org-kit::table-recalculate-org-sbe-argument-text "text" nil)
+                :to-equal "text")
+        (expect (org-kit::table-recalculate-org-sbe-argument-text "text" t)
+                :to-equal "\"text\"")
+        (expect (org-kit::table-recalculate-org-sbe-argument-text :sample nil)
+                :to-equal ":SAMPLE")
+        (expect (org-kit::table-recalculate-org-sbe-argument-text symbol nil)
+                :to-equal "sample")
+        (expect (org-kit::table-recalculate-org-sbe-argument-text
+                 (list 1 :sample) nil)
+                :to-equal "(1 :SAMPLE)")
+        (expect (org-kit::table-recalculate-org-sbe-argument-text 7 nil)
+                :to-equal "7")
+        (expect (org-kit::table-recalculate-org-sbe-parameter-text
+                 "empty" nil nil limits)
+                :to-equal "empty=")
+        (expect (org-kit::table-recalculate-org-sbe-parameter-text
+                 "single" (list "text") (list t) limits)
+                :to-equal "single=\"text\"")
+        (expect (org-kit::table-recalculate-org-sbe-parameter-text
+                 "multiple" (list 1 "text") (list nil t) limits)
+                :to-equal
+                (format nil "multiple=~A(1 \"text\")" (code-char 39)))
+        (expect (org-kit::table-recalculate-org-sbe-resolved-parameter-text
+                 "empty" nil limits)
+                :to-equal (format nil "empty=~A()" (code-char 39)))
+        (expect (org-kit::table-recalculate-org-sbe-resolved-parameter-text
+                 "multiple" (list "text" 7) limits)
+                :to-equal
+                (format nil "multiple=~A(\"text\" 7)" (code-char 39)))
+        (expect (org-kit::table-recalculate-org-sbe-resolved-parameter-text
+                 "string" "text" limits)
+                :to-equal "string=\"text\"")
+        (expect (org-kit::table-recalculate-org-sbe-resolved-parameter-text
+                 "number" 7 limits)
+                :to-equal "number=7"))))
+  (it "resolves Org-sbe overrides and reports missing or cyclic source references"
+    (let* ((document
+             (parse-org
+              (format nil "#+name: sample~%#+begin_src mock~%body~%#+end_src~%")))
+           (calls 0)
+           (context
+             (org-kit::make-babel-resolution-context
+              :document document
+              :names (org-kit::babel-build-name-index document)
+              :result-resolver
+              (lambda (name variables)
+                (declare (ignore name variables))
+                (incf calls)
+                "resolved")))
+           (symbol (make-symbol "sample"))
+           (quote-character (code-char 39))
+           (callbacks (make-callback-registry))
+           (executor-calls 0))
+      (register-babel-executor
+       callbacks "mock"
+       (lambda (body parameters variables)
+         (declare (ignore body parameters variables))
+         (incf executor-calls)
+         "value"))
+      (labels ((recalculate-reason (blocks)
+                 (let* ((source
+                          (format nil
+                                  "~A| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2=~A(org-sbe sample)~%"
+                                  blocks quote-character))
+                        (document (parse-org source))
+                        (table
+                          (table-recalculate-test-find-node
+                           (document-root document) :table)))
+                   (handler-case
+                       (progn
+                         (table-recalculate document table :callbacks callbacks)
+                         nil)
+                     (org-babel-error (condition)
+                       (org-babel-error-reason condition))))))
+        (with-soft-assertions
+          (expect (org-kit::table-recalculate-org-sbe-resolve-value
+                   "sample" nil context)
+                  :to-equal "resolved")
+          (expect (org-kit::table-recalculate-org-sbe-resolve-value
+                   symbol nil context)
+                  :to-equal "resolved")
+          (expect (org-kit::table-recalculate-org-sbe-resolve-value
+                   "sample" t context)
+                  :to-equal "sample")
+          (expect (org-kit::table-recalculate-org-sbe-resolve-value
+                   nil nil context)
+                  :to-equal nil)
+          (expect (org-kit::table-recalculate-org-sbe-resolve-value
+                   7 nil context)
+                  :to-equal 7)
+          (expect
+           (cdr (org-kit::table-recalculate-org-sbe-override
+                 (list "empty" nil nil) context))
+           :to-equal "")
+          (expect
+           (cdr (org-kit::table-recalculate-org-sbe-override
+                 (list "single" (list "sample") (list nil)) context))
+           :to-equal "resolved")
+          (expect
+           (cdr (org-kit::table-recalculate-org-sbe-override
+                 (list "literal" (list "sample") (list t)) context))
+           :to-equal "sample")
+          (expect
+           (cdr (org-kit::table-recalculate-org-sbe-override
+                 (list "multiple" (list "one" "two") (list nil nil)) context))
+           :to-equal (list "one" "two"))
+          (expect calls :to-be 3)
+          (expect
+           (recalculate-reason
+            (format nil
+                    "#+name: sample~%#+begin_src mock :var inner=missing~%body~%#+end_src~%"))
+           :to-be :unresolved-reference)
+          (expect
+           (recalculate-reason
+            (format nil
+                    "#+name: sample~%#+begin_src mock :var inner=dependency~%sample body~%#+end_src~%#+name: dependency~%#+begin_src mock :var inner=sample~%dependency body~%#+end_src~%"))
+           :to-be :circular-reference)
+          (expect executor-calls :to-be 0)))))
 )
