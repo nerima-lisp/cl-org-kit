@@ -1,0 +1,26 @@
+                            ________________
+
+                              MAN ESCAPES
+
+                             Fixture Author
+                            ________________
+
+
+Plain Text
+==========
+
+  .leading-dot remains plain.  'leading-apostrophe remains plain.  Plain
+  escapes: \foo, \\foo, \$, \{.  Code: `. ' \foo \\foo \$ \{' and
+  verbatim `. ' \foo \\foo \$ \{'.
+
+  ,----
+  | .example-dot
+  | 'example-apostrophe
+  | \foo \\foo \$ \{
+  `----
+
+  ,----
+  | .source-dot
+  | 'source-apostrophe
+  | \foo \\foo \$ \{
+  `----

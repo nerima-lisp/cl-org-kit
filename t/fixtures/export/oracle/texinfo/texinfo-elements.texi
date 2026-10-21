@@ -1,0 +1,94 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Texinfo Elements
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Texinfo Elements.
+@end direntry
+
+@finalout
+@titlepage
+@title Texinfo Elements
+@author Ada Example
+@end titlepage
+
+@ifnottex
+@node Top
+@top Texinfo Elements
+@end ifnottex
+
+@menu
+* Chapter One::
+
+@detailmenu
+--- The Detailed Node Listing ---
+
+Chapter One
+
+* Nested Section::
+
+@end detailmenu
+@end menu
+
+@node Chapter One
+@chapter Chapter One
+
+Plain text@comma{} @strong{bold}@comma{} @emph{italic}@comma{} @code{code}@comma{} @samp{verbatim}@comma{} strike@comma{} and underline.
+Text with a @uref{https://example.org/path, described link} and @uref{https://example.org}.
+@anchor{chapter-anchor} and @anchor{radio target}radio target.
+
+@itemize
+@item
+First item
+@item
+Second item
+
+@item
+Ordered first
+@item
+Ordered second
+@end itemize
+
+@quotation
+A quoted paragraph.
+
+@end quotation
+
+@center Centered text.
+
+@display
+First verse line
+Second verse line
+@end display
+
+@example
+An example block.
+@end example
+
+@example
+A source block.
+@end example
+
+@multitable {aaaaa} {aaaaaa}
+@headitem First
+@tab Second
+@item one
+@tab two
+@end multitable
+
+@subheading Raw export block
+
+@menu
+* Nested Section::
+@end menu
+
+@node Nested Section
+@section Nested Section
+
+Nested section text.
+
+@bye

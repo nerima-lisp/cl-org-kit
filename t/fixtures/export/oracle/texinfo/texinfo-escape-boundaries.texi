@@ -1,0 +1,35 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Escape @@ @{ @} comma@comma{} title
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Escape @@ @{ @} comma@comma{} title.
+@end direntry
+
+@finalout
+@titlepage
+@title Escape @@ @{ @} comma@comma{} title
+@author Fixture Author
+@end titlepage
+
+@ifnottex
+@node Top
+@top Escape @@ @{ @} comma@comma{} title
+
+Text boundary: @@ @{ @} comma@comma{} and @@@@ literal.
+Inline forms: @strong{bold @@ @{ @} comma@comma{}} @code{code @@ @{ @} comma} and @samp{sample @@ @{ @} comma}.
+First hard-break line@*
+Second hard-break line.
+
+@raw{,} @@literal
+
+@raw{,} snippet@@@@
+@end ifnottex
+
+
+
+@bye

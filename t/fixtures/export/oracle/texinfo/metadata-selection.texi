@@ -1,0 +1,53 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Export metadata and selection
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Export metadata and selection.
+@end direntry
+
+@finalout
+@titlepage
+@title Export metadata and selection
+@author Fixture Author
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Export metadata and selection
+@end ifnottex
+
+@menu
+* Selected heading::
+
+@detailmenu
+--- The Detailed Node Listing ---
+
+Selected heading
+
+* Retained descendant::
+
+@end detailmenu
+@end menu
+
+@node Selected heading
+@unnumbered Selected heading :keep:
+
+Visible selected body.
+
+@menu
+* Retained descendant::
+@end menu
+
+@node Retained descendant
+@unnumberedsec Retained descendant
+
+An untagged descendant remains with its selected parent.
+
+@bye

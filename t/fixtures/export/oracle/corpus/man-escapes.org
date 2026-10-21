@@ -1,0 +1,21 @@
+#+TITLE: Man Escapes
+#+AUTHOR: Fixture Author
+#+OPTIONS: toc:nil num:nil
+
+* Plain Text
+.leading-dot remains plain.
+'leading-apostrophe remains plain.
+Plain escapes: \foo, \\foo, \$, \{.
+Code: ~. ' \foo \\foo \$ \{~ and verbatim =. ' \foo \\foo \$ \{=.
+
+#+BEGIN_EXAMPLE
+.example-dot
+'example-apostrophe
+\foo \\foo \$ \{
+#+END_EXAMPLE
+
+#+BEGIN_SRC text
+.source-dot
+'source-apostrophe
+\foo \\foo \$ \{
+#+END_SRC

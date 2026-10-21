@@ -1,0 +1,48 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Man Escapes
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Man Escapes.
+@end direntry
+
+@finalout
+@titlepage
+@title Man Escapes
+@author Fixture Author
+@end titlepage
+
+@ifnottex
+@node Top
+@top Man Escapes
+@end ifnottex
+
+@menu
+* Plain Text::
+@end menu
+
+@node Plain Text
+@unnumbered Plain Text
+
+.leading-dot remains plain.
+'leading-apostrophe remains plain.
+Plain escapes: \foo@comma{} \\foo@comma{} \$@comma{} \@{.
+Code: @code{. ' \foo \\foo \$ \@{} and verbatim @samp{. ' \foo \\foo \$ \@{}.
+
+@example
+.example-dot
+'example-apostrophe
+\foo \\foo \$ \@{
+@end example
+
+@example
+.source-dot
+'source-apostrophe
+\foo \\foo \$ \@{
+@end example
+
+@bye

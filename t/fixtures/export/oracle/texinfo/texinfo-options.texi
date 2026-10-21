@@ -1,0 +1,63 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@setfilename texinfo-options.info
+@settitle Texinfo Options
+@documentencoding UTF-8
+@documentlanguage en
+@set x = header
+@c %**end of header
+
+@c post-header directive
+@dircategory User Manuals
+@direntry
+* Texinfo Directory: (texinfo-options). A directory description.
+@end direntry
+
+@finalout
+@titlepage
+@title Printed Texinfo Title
+@author Ada Example
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Texinfo Options
+
+@c raw Texinfo keyword
+
+@end ifnottex
+
+@menu
+* First Node::
+
+@detailmenu
+--- The Detailed Node Listing ---
+
+First Node
+
+* Child Node::
+
+@end detailmenu
+@end menu
+
+@node First Node
+@chapter First Node
+
+First node text.
+
+@menu
+* Child Node::
+@end menu
+
+@node Child Node
+@section Child Node
+
+Child node text.
+
+@c raw Texinfo block
+
+@code{raw, snippet}
+
+@bye

@@ -1,0 +1,3 @@
+Text boundary: @ { } comma, and @@ literal. Inline forms: **bold @ { } comma,** `code @ { } comma` and `sample @ { } comma`. First hard-break line Second hard-break line.
+
+snippet@@

@@ -1,0 +1,23 @@
+.TH "Man Escapes" "1" "" "" 
+.SH "Plain Text"
+.PP
+.leading-dot remains plain.
+'leading-apostrophe remains plain.
+Plain escapes: , $\, \$, \{.
+Code: \fC. ' \foo \\foo \$ \{\fP and verbatim \fI. ' \foo \\foo \$ \{\fP.
+.RS
+.nf
+.example-dot
+'example-apostrophe
+\efoo \e\efoo \e$ \e{
+
+.fi
+.RE
+.RS
+.nf
+\fC.source-dot
+'source-apostrophe
+\efoo \e\efoo \e$ \e{
+\fP
+.fi
+.RE

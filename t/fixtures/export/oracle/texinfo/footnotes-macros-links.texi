@@ -1,0 +1,52 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Footnotes@comma{} macros@comma{} and links
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Footnotes@comma{} macros@comma{} and links.
+@end direntry
+
+@finalout
+@titlepage
+@title Footnotes@comma{} macros@comma{} and links
+@author Fixture Author
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Footnotes@comma{} macros@comma{} and links
+@end ifnottex
+
+@menu
+* Overview::
+* Detail::
+@end menu
+
+@node Overview
+@unnumbered Overview
+
+Greetings@comma{} reader with a named footnote@footnote{One definition serves both references.} and another reference@footnote{One definition serves both references.}.
+Macro arguments: one|; extra arguments: [one].
+
+Safe links: @uref{https://example.test/path?q=a&b=c, A label with ]( and `backtick` | pipe} and @ref{Detail, , section link}.
+
+Raw HTML-like text in a literal block:
+
+@example
+<em>literal HTML</em>
+@end example
+
+This line has a tab between these words: before        and after.
+
+@node Detail
+@unnumbered Detail
+
+The local fragment destination is safe.
+
+@bye

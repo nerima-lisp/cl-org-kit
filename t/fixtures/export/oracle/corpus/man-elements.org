@@ -1,0 +1,65 @@
+#+TITLE: Man Backend Elements
+#+AUTHOR: Fixture Author
+#+DATE: 2026-10-21
+#+MAN_CLASS: ignored-class
+#+MAN_CLASS_OPTIONS: :section-id "5" :release "cl-org-kit"
+#+MAN_HEADER: ignored-header
+#+OPTIONS: toc:nil num:nil
+
+* Main Section
+Paragraph with *bold*, /italic/, +strike+, _underline_, ~code-value~, =verbatim-value=, H_2O and x^2.
+An entity \alpha{} and a [[https://example.test/guide][guide link]].
+
+- First bullet
+- Second bullet
+  - Nested bullet
+
+1. First numbered item
+2. Second numbered item
+
+| Name | Value |
+|------+-------|
+| One | *strong* |
+| Two | 2 |
+
+** Second Level
+Quoted material follows.
+
+#+BEGIN_QUOTE
+Quoted paragraph.
+#+END_QUOTE
+
+#+BEGIN_CENTER
+Centered line.
+#+END_CENTER
+
+#+BEGIN_NOTE
+Special block contents.
+#+END_NOTE
+
+#+BEGIN_VERSE
+Verse line one
+Verse line two
+#+END_VERSE
+
+#+BEGIN_EXAMPLE
+Example line.
+#+END_EXAMPLE
+
+#+BEGIN_SRC text
+Source line.
+#+END_SRC
+
+: fixed-width line
+
+#+BEGIN_EXPORT man
+.SS "Raw section"
+#+END_EXPORT
+
+@@man:.br@@
+#+MAN: .\" raw keyword output
+#+INDEX: ignored index
+#+TOC: headlines 2
+
+*** Third Level
+Final paragraph.

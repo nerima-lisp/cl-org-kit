@@ -1,0 +1,57 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Source block export modes
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Source block export modes.
+@end direntry
+
+@finalout
+@titlepage
+@title Source block export modes
+@author Fixture Author
+@end titlepage
+
+@ifnottex
+@node Top
+@top Source block export modes
+@end ifnottex
+
+@menu
+* Existing results are exported without execution::
+@end menu
+
+@node Existing results are exported without execution
+@unnumbered Existing results are exported without execution
+
+@lisp
+(error "Babel must remain disabled")
+@end lisp
+
+@example
+preexisting both result
+@end example
+
+@lisp
+(error "Code-only block was not evaluated")
+@end lisp
+
+@example
+preexisting results-only output
+@end example
+
+@lisp
+(error "Default source block was not evaluated")
+@end lisp
+
+The paragraph separates the following results from the source block.
+
+@example
+non-adjacent output
+@end example
+
+@bye

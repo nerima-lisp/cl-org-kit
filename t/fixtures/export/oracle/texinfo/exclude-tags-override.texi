@@ -1,0 +1,35 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Explicit exclude tags
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Explicit exclude tags.
+@end direntry
+
+@finalout
+@titlepage
+@title Explicit exclude tags
+@author Fixture Author
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Explicit exclude tags
+@end ifnottex
+
+@menu
+* Visible after replacing the default exclusion::
+@end menu
+
+@node Visible after replacing the default exclusion
+@chapter Visible after replacing the default exclusion :noexport:
+
+An explicit exclusion list replaces the default noexport tag.
+
+@bye

@@ -1,0 +1,47 @@
+                           __________________
+
+                            TEXINFO ELEMENTS
+
+                              Ada Example
+                           __________________
+
+
+1 Chapter One
+=============
+
+  Plain text, *bold*, /italic/, `code', `verbatim', +strike+, and
+  _underline_.  Text with a [described link] and <https://example.org>.
+  and radio target.
+
+  - First item
+  - Second item
+
+  1. Ordered first
+  2. Ordered second
+
+        A quoted paragraph.
+
+  			    Centered text.
+
+        First verse line
+        Second verse line
+
+  ,----
+  | An example block.
+  `----
+
+  ,----
+  | A source block.
+  `----
+
+   First  Second 
+  ---------------
+   one    two    
+
+
+[described link] <https://example.org/path>
+
+1.1 Nested Section
+~~~~~~~~~~~~~~~~~~
+
+  Nested section text.

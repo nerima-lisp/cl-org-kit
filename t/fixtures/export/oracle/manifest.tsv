@@ -5,3 +5,8 @@ exclude-tags-override	exclude-tags-override.org	-
 footnotes-macros-links	footnotes-macros-links.org	-
 include	include.org	included/fragment.org
 source-blocks	source-blocks.org	-
+texinfo-elements	texinfo-elements.org	-
+texinfo-options	texinfo-options.org	-
+texinfo-escape-boundaries	texinfo-escape-boundaries.org	-
+man-elements	man-elements.org	-
+man-escapes	man-escapes.org	-

@@ -1,0 +1,25 @@
+#+TITLE: Texinfo Options
+#+AUTHOR: Ada Example
+#+OPTIONS: toc:2 creator:nil
+#+TEXINFO_FILENAME: texinfo-options.info
+#+TEXINFO_CLASS: info
+#+TEXINFO_HEADER: @set x = header
+#+TEXINFO_POST_HEADER: @c post-header directive
+#+TEXINFO_DIR_CATEGORY: User Manuals
+#+TEXINFO_DIR_TITLE: Legacy Directory
+#+TEXINFO_DIR_NAME: Texinfo Directory
+#+TEXINFO_DIR_DESC: A directory description.
+#+TEXINFO_PRINTED_TITLE: Printed Texinfo Title
+#+TEXINFO: @c raw Texinfo keyword
+
+* First Node
+First node text.
+
+** Child Node
+Child node text.
+
+#+begin_export texinfo
+@c raw Texinfo block
+#+end_export
+
+@@texinfo:@code{raw, snippet}@@

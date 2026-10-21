@@ -1,0 +1,25 @@
+                           _________________
+
+                            TEXINFO OPTIONS
+
+                              Ada Example
+                           _________________
+
+
+Table of Contents
+_________________
+
+1. First Node
+.. 1. Child Node
+
+
+1 First Node
+============
+
+  First node text.
+
+
+1.1 Child Node
+~~~~~~~~~~~~~~
+
+  Child node text.

@@ -1,0 +1,13 @@
+emacs=31.1
+org=9.8.10
+generator-mode=export-oracle-v1
+backend=texinfo
+encoding=UTF-8
+reference-time=2000-01-01T00:00:00Z
+time-zone=UTC
+dst-policy=compatible
+unicode-width-data=Unicode-17.0.0
+source=texinfo-escape-boundaries.org
+source-sha256=dde043dd38559b9a280ac298abb336dece4cfb83f6c481af0417ffc449015985
+include-source=none
+include-source-sha256=none

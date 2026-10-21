@@ -62,7 +62,9 @@
 (defconst org-fixture--export-backends
   '((html . ("html" . html))
     (gfm . ("gfm" . gfm))
-    (ascii . ("txt" . ascii))))
+    (ascii . ("txt" . ascii))
+    (texinfo . ("texi" . texinfo))
+    (man . ("1" . man))))
 
 (defconst org-fixture--ox-gfm-version "20231215.1901")
 (defconst org-fixture--ox-gfm-repository "https://github.com/larstvei/ox-gfm")
@@ -1584,7 +1586,7 @@
             (when include-relative
               (org-fixture--copy-export-input
                include-relative corpus-directory temporary-directory))
-            (dolist (backend '(html gfm ascii))
+            (dolist (backend '(html gfm ascii texinfo man))
               (let* ((backend-name (symbol-name backend))
                      (backend-directory (expand-file-name backend-name expected-directory))
                      (output-file (expand-file-name
@@ -1615,11 +1617,13 @@
     (error "Export oracle corpus directory does not exist"))
   (require 'ox-html)
   (require 'ox-ascii)
+  (require 'ox-texinfo)
+  (require 'ox-man)
   (org-fixture--verify-ox-gfm-pin)
   (let ((cases (org-fixture--read-export-manifest manifest corpus-directory)))
     (dolist (case cases)
       (org-fixture--generate-export-case case corpus-directory expected-directory))
-    (princ (format "Generated %d export oracle cases for html/gfm/ascii.\n"
+    (princ (format "Generated %d export oracle cases for html/gfm/ascii/texinfo/man.\n"
                    (length cases)))
     (princ (format "Emacs %s; Org %s; ox-gfm %s\n"
                    emacs-version (org-version) org-fixture--ox-gfm-version))))

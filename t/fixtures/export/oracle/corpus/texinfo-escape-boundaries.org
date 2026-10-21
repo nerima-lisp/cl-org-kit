@@ -1,0 +1,14 @@
+#+TITLE: Escape @ { } comma, title
+#+AUTHOR: Fixture Author
+#+OPTIONS: toc:nil creator:nil num:nil
+
+Text boundary: @ { } comma, and @@ literal.
+Inline forms: *bold @ { } comma,* ~code @ { } comma~ and =sample @ { } comma=.
+First hard-break line\\
+Second hard-break line.
+
+#+begin_export texinfo
+@raw{,} @@literal
+#+end_export
+
+@@texinfo:@raw{,} @@snippet@@

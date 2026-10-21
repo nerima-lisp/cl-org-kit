@@ -1,0 +1,118 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Man Backend Elements
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Man Backend Elements.
+@end direntry
+
+@finalout
+@titlepage
+@title Man Backend Elements
+@author Fixture Author
+@end titlepage
+
+@ifnottex
+@node Top
+@top Man Backend Elements
+@end ifnottex
+
+@menu
+* Main Section::
+
+@detailmenu
+--- The Detailed Node Listing ---
+
+Main Section
+
+* Second Level::
+
+Second Level
+
+* Third Level::
+
+@end detailmenu
+@end menu
+
+@node Main Section
+@unnumbered Main Section
+
+Paragraph with @strong{bold}@comma{} @emph{italic}@comma{} strike@comma{} underline@comma{} @code{code-value}@comma{} @samp{verbatim-value}@comma{} H@math{_2O} and x@math{^2}.
+An entity α and a @uref{https://example.test/guide, guide link}.
+
+@itemize
+@item
+First bullet
+@item
+Second bullet
+@itemize
+@item
+Nested bullet
+@end itemize
+
+@item
+First numbered item
+@item
+Second numbered item
+@end itemize
+
+@multitable {aaaa} {aaaaaaaa}
+@headitem Name
+@tab Value
+@item One
+@tab @strong{strong}
+@item Two
+@tab 2
+@end multitable
+
+@menu
+* Second Level::
+@end menu
+
+@node Second Level
+@unnumberedsec Second Level
+
+Quoted material follows.
+
+@quotation
+Quoted paragraph.
+
+@end quotation
+
+@center Centered line.
+
+@NOTE
+Special block contents.
+@end NOTE
+
+@display
+Verse line one
+Verse line two
+@end display
+
+@example
+Example line.
+@end example
+
+@example
+Source line.
+@end example
+
+@example
+fixed-width line
+@end example
+
+@menu
+* Third Level::
+@end menu
+
+@node Third Level
+@unnumberedsubsec Third Level
+
+Final paragraph.
+
+@bye

@@ -1,0 +1,40 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Include oracle
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Include oracle.
+@end direntry
+
+@finalout
+@titlepage
+@title Include oracle
+@author Fixture Author
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Include oracle
+
+Before included content.
+
+@end ifnottex
+
+@menu
+* Included section::
+@end menu
+
+@node Included section
+@chapter Included section
+
+The include source is copied into the generator's temporary directory.
+
+After included content.
+
+@bye
