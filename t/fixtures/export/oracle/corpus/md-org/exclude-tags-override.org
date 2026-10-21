@@ -1,0 +1,13 @@
+#+TITLE: Explicit exclude tags
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+#+EXCLUDE_TAGS: secret
+
+* Visible after replacing the default exclusion :noexport:
+:PROPERTIES:
+:CUSTOM_ID: org-visible-after-replacing-the-default-exclusion
+:END:
+An explicit exclusion list replaces the default noexport tag.
+
+* Secret heading :secret:
+An explicitly excluded heading.

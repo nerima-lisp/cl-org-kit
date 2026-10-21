@@ -1,0 +1,25 @@
+#+options: toc:2 num:nil
+#+title: Footnotes, macros, and links
+#+date: 2024-02-03
+#+author: Fixture Author
+#+language: en
+#+macro: greet Greetings, $1
+#+macro: pair $1|$2
+#+macro: single [$1]
+* Overview
+Greetings, reader with a named footnote[fn:note] and another reference[fn:note].
+Macro arguments: one|; extra arguments: [one].
+
+Safe links: [[https://example.test/path?q=a&b=c][A label with ]( and `backtick` | pipe]] and [[#details][section link]].
+
+Raw HTML-like text in a literal block:
+
+#+begin_example
+  <em>literal HTML</em>
+#+end_example
+
+This line has a tab between these words: before	and after.
+
+[fn:note] One definition serves both references.
+* Detail
+The local fragment destination is safe.

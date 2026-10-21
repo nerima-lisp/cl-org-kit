@@ -1,0 +1,7 @@
+#+title: Export metadata and selection
+#+date: 2024-02-03
+#+author: Fixture Author
+* Selected heading                                                     :keep:
+Visible selected body.
+** Retained descendant
+An untagged descendant remains with its selected parent.

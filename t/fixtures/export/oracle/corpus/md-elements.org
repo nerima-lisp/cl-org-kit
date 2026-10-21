@@ -1,0 +1,73 @@
+#+TITLE: Markdown backend coverage
+#+OPTIONS: toc:nil num:nil inline:t
+
+* First heading :md:
+
+Paragraph with *bold*, /italic/, +strike-through+, =verbatim=, ~code~, _subscript_, ^superscript^, and [[https://example.test/path][a named link]].
+An Org file link points to [[file:guide.org][the guide]].
+
+Line before an explicit break\\
+Line after the break.
+
+- Unordered first item
+- Unordered second item with *markup*
+
+1. Ordered first item
+2. Ordered second item
+
+| Header one | Header two |
+|------------+------------|
+| table alpha | table beta |
+
+#+begin_src text
+source code <tag> & value
+#+end_src
+
+#+begin_example
+Example code <tag> & value
+#+end_example
+
+: Fixed-width example line
+
+#+begin_quote
+Quoted paragraph with a stable marker.
+#+end_quote
+
+#+ATTR_HTML: :id stable-special
+#+begin_note
+Special block fallback content.
+#+end_note
+
+#+begin_center
+Centered fallback content.
+#+end_center
+
+#+begin_export md
+Raw Markdown export block.
+#+end_export
+
+#+begin_export html
+<span class="raw-block">Raw HTML export block.</span>
+#+end_export
+
+#+HTML: <span class="raw-keyword">Raw HTML keyword.</span>
+
+Inline footnote reference[fn:markdown-note] and LaTeX fragment \(x + y\).
+
+\begin{equation}
+E = mc^2
+\end{equation}
+
+[fn:markdown-note] Footnote definition with *bold* content.
+
+:DETAILS:
+Drawer content with a stable marker.
+:END:
+
+#+begin: md-dynamic-block :arg stable
+Dynamic block body is preserved.
+#+end:
+
+*************** Inline task fallback
+Inline task body.
+*************** END

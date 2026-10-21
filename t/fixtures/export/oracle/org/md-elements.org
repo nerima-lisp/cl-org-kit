@@ -1,0 +1,64 @@
+#+options: toc:nil num:nil inline:t
+#+title: Markdown backend coverage
+#+author: Org export fixture
+* First heading                                                          :md:
+
+Paragraph with *bold*, /italic/, +strike-through+, =verbatim=, ~code~, _subscript_, ^superscript^, and [[https://example.test/path][a named link]].
+An Org file link points to [[file:guide.org][the guide]].
+
+Line before an explicit break\\
+Line after the break.
+
+- Unordered first item
+- Unordered second item with *markup*
+
+- Ordered first item
+- Ordered second item
+
+| Header one  | Header two |
+|-------------+------------|
+| table alpha | table beta |
+
+#+begin_src text
+  source code <tag> & value
+#+end_src
+
+#+begin_example
+  Example code <tag> & value
+#+end_example
+
+: Fixed-width example line
+
+#+begin_quote
+Quoted paragraph with a stable marker.
+#+end_quote
+
+#+begin_note
+Special block fallback content.
+#+end_note
+
+#+begin_center
+Centered fallback content.
+#+end_center
+
+#+html: <span class="raw-keyword">Raw HTML keyword.</span>
+
+Inline footnote reference[fn:markdown-note] and LaTeX fragment \(x + y\).
+
+\begin{equation}
+E = mc^2
+\end{equation}
+
+*************** Inline task fallback
+Inline task body.
+*************** end
+
+[fn:markdown-note] Footnote definition with *bold* content.
+
+:DETAILS:
+Drawer content with a stable marker.
+:END:
+
+#+begin: md-dynamic-block :arg stable
+Dynamic block body is preserved.
+#+end:

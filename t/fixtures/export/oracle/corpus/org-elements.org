@@ -1,0 +1,59 @@
+#+TITLE: Org backend oracle fixture
+#+AUTHOR: Export Fixture
+#+DATE: 2024-05-06
+#+EMAIL: export-fixture@example.test
+#+OPTIONS: toc:nil num:nil creator:nil email:t
+#+LANGUAGE: en
+#+PROPERTY: header-args :eval never
+
+* TODO [#A] Heading with inline objects
+SCHEDULED: <2024-05-06 Mon>
+:PROPERTIES:
+:CUSTOM_ID: org-fixture-heading
+:END:
+:LOGBOOK:
+CLOCK: [2024-05-06 Mon 09:00]--[2024-05-06 Mon 09:30] =>  0:30
+:END:
+
+Paragraph with *bold*, /italic/, =verbatim=, [[https://example.test/path][a link]],
+an active timestamp <2024-05-06 Mon>, a footnote reference[fn:detail], and citation [cite:@doe2024].
+
+
+- first list item
+- second list item with *emphasis*
+
+| Name  | Value |
+|-------+-------|
+| alpha | one   |
+| beta  | two   |
+
+#+begin_quote
+A quoted block.
+#+end_quote
+
+#+begin_src text
+source block body
+#+end_src
+
+#+begin_export org
+Org-only exported content.
+#+end_export
+
+#+begin_export html
+This block is omitted by the Org backend.
+#+end_export
+
+#+CAPTION: A retained keyword after the table
+#+RESULTS: fixture
+#+begin_example
+An example block.
+#+end_example
+
+[fn:detail] Footnote definition body with a [[https://example.test/footnote][link]].
+
+* Second heading
+DEADLINE: <2024-05-10 Fri>
+:NOTES:
+Drawer body.
+:END:
+The second section has a timestamp <2024-05-10 Fri>.

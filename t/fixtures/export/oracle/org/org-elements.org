@@ -1,0 +1,42 @@
+#+options: toc:nil num:nil creator:nil email:t
+#+title: Org backend oracle fixture
+#+date: 2024-05-06
+#+author: Export Fixture
+#+email: export-fixture@example.test
+#+language: en
+#+property: header-args :eval never
+* TODO Heading with inline objects
+Paragraph with *bold*, /italic/, =verbatim=, [[https://example.test/path][a link]],
+an active timestamp <2024-05-06 Mon>, a footnote reference[fn:detail], and citation [cite:@doe2024].
+
+
+- first list item
+- second list item with *emphasis*
+
+| Name  | Value |
+|-------+-------|
+| alpha | one   |
+| beta  | two   |
+
+#+begin_quote
+A quoted block.
+#+end_quote
+
+#+begin_src text
+  source block body
+#+end_src
+
+Org-only exported content.
+
+#+caption: A retained keyword after the table
+#+results: fixture
+#+begin_example
+  An example block.
+#+end_example
+
+[fn:detail] Footnote definition body with a [[https://example.test/footnote][link]].
+* Second heading
+:NOTES:
+Drawer body.
+:END:
+The second section has a timestamp <2024-05-10 Fri>.

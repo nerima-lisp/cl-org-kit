@@ -1,0 +1,13 @@
+emacs=31.1
+org=9.8.10
+generator-mode=export-oracle-v1
+backend=org
+encoding=UTF-8
+reference-time=2000-01-01T00:00:00Z
+time-zone=UTC
+dst-policy=compatible
+unicode-width-data=Unicode-17.0.0
+source=include-md-org.org
+source-sha256=5728d3ff62fc552b8635a2e0c5adcff88055e5791bdcbbac4b981fcdd2a86e8f
+include-source=md-org/included/fragment.org
+include-source-sha256=d1a966d9a8be2096e8d8dcbad50ebefc9ed390702ccdc1c7bf44b412b9cc9ed7

@@ -1,0 +1,6 @@
+#+title: Explicit exclude tags
+#+date: 2024-02-03
+#+author: Fixture Author
+#+exclude_tags: secret
+* Visible after replacing the default exclusion                    :noexport:
+An explicit exclusion list replaces the default noexport tag.

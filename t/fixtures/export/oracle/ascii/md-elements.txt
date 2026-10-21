@@ -1,0 +1,74 @@
+                      ___________________________
+
+                       MARKDOWN BACKEND COVERAGE
+
+                              takeo obara
+                      ___________________________
+
+
+First heading                                                       :md:
+=============
+
+  Paragraph with *bold*, /italic/, +strike-through+, `verbatim', `code',
+  _subscript_, ^superscript^, and [a named link].  An Org file link
+  points to [the guide].
+
+  Line before an explicit break
+  Line after the break.
+
+  - Unordered first item
+  - Unordered second item with *markup*
+
+  1. Ordered first item
+  2. Ordered second item
+
+   Header one   Header two 
+  -------------------------
+   table alpha  table beta 
+
+  ,----
+  | source code <tag> & value
+  `----
+
+  ,----
+  | Example code <tag> & value
+  `----
+
+  ,----
+  | Fixed-width example line
+  `----
+
+        Quoted paragraph with a stable marker.
+
+  Special block fallback content.
+
+  		      Centered fallback content.
+
+  Inline footnote reference[1] and LaTeX fragment \(x + y\).
+
+  \begin{equation}
+  E = mc^2
+  \end{equation}
+
+                                          ______________________________
+                              
+                                          Inline task fallback
+                                          ------------------------------
+                                          Inline task body.
+                                          ______________________________
+
+
+[a named link] <https://example.test/path>
+
+[the guide] <file:guide.org>
+
+
+
+Footnotes
+_________
+
+[1] Footnote definition with *bold* content.
+
+Drawer content with a stable marker.
+
+Dynamic block body is preserved.

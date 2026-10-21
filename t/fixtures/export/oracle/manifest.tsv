@@ -1,10 +1,12 @@
 # Export oracle cases are literal tab-separated data, never read as Lisp.
 case	source	include
-metadata-selection	metadata-selection.org	-
-exclude-tags-override	exclude-tags-override.org	-
-footnotes-macros-links	footnotes-macros-links.org	-
-include	include.org	included/fragment.org
+metadata-selection	md-org/metadata-selection.org	-
+exclude-tags-override	md-org/exclude-tags-override.org	-
+footnotes-macros-links	md-org/footnotes-macros-links.org	-
+include	include-md-org.org	md-org/included/fragment.org
 source-blocks	source-blocks.org	-
+md-elements	md-org/md-elements.org	-
+org-elements	org-elements.org	-
 texinfo-elements	texinfo-elements.org	-
 texinfo-options	texinfo-options.org	-
 texinfo-escape-boundaries	texinfo-escape-boundaries.org	-

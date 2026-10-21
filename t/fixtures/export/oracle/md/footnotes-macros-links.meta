@@ -1,0 +1,13 @@
+emacs=31.1
+org=9.8.10
+generator-mode=export-oracle-v1
+backend=md
+encoding=UTF-8
+reference-time=2000-01-01T00:00:00Z
+time-zone=UTC
+dst-policy=compatible
+unicode-width-data=Unicode-17.0.0
+source=md-org/footnotes-macros-links.org
+source-sha256=863bf353b66ace750d4429521a6be67a9dce7e19443c7ff0d5663a1db9c73319
+include-source=none
+include-source-sha256=none

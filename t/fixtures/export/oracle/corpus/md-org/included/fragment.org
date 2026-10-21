@@ -1,0 +1,5 @@
+* Included section
+:PROPERTIES:
+:CUSTOM_ID: org-included-section
+:END:
+The include source is copied into the generator's temporary directory.

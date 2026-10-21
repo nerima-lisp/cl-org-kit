@@ -1,0 +1,33 @@
+#+TITLE: Footnotes, macros, and links
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+#+LANGUAGE: en
+#+OPTIONS: toc:2 num:nil
+#+MACRO: greet Greetings, $1
+#+MACRO: pair $1|$2
+#+MACRO: single [$1]
+
+* Overview
+:PROPERTIES:
+:CUSTOM_ID: org-overview
+:END:
+{{{greet(reader)}}} with a named footnote[fn:note] and another reference[fn:note].
+Macro arguments: {{{pair(one)}}}; extra arguments: {{{single(one,two)}}}.
+
+Safe links: [[https://example.test/path?q=a&b=c][A label with ]( and `backtick` | pipe]] and [[#details][section link]].
+
+Raw HTML-like text in a literal block:
+
+#+begin_example
+<em>literal HTML</em>
+#+end_example
+
+This line has a tab between these words: before	and after.
+
+* Detail
+:PROPERTIES:
+:CUSTOM_ID: details
+:END:
+The local fragment destination is safe.
+
+[fn:note] One definition serves both references.

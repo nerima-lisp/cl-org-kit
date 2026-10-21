@@ -60,11 +60,13 @@
 (defvar org-fixture--include-effective-tags nil)
 
 (defconst org-fixture--export-backends
-  '((html . ("html" . html))
-    (gfm . ("gfm" . gfm))
-    (ascii . ("txt" . ascii))
-    (texinfo . ("texi" . texinfo))
-    (man . ("1" . man))))
+  (quote ((html . ("html" . html))
+          (gfm . ("gfm" . gfm))
+          (ascii . ("txt" . ascii))
+          (texinfo . ("texi" . texinfo))
+          (man . ("1" . man))
+          (md . ("md" . md))
+          (org . ("org" . org)))))
 
 (defconst org-fixture--ox-gfm-version "20231215.1901")
 (defconst org-fixture--ox-gfm-repository "https://github.com/larstvei/ox-gfm")
@@ -1564,7 +1566,8 @@
   (let ((coding-system-for-write 'utf-8-unix))
     (write-region text nil file nil 'silent)))
 
-(defun org-fixture--generate-export-case (case corpus-directory expected-directory)
+(defun org-fixture--generate-export-case
+    (case corpus-directory expected-directory &optional backends)
   (let* ((case-name (nth 0 case))
          (source-relative (nth 1 case))
          (include-relative (nth 2 case))
@@ -1586,7 +1589,7 @@
             (when include-relative
               (org-fixture--copy-export-input
                include-relative corpus-directory temporary-directory))
-            (dolist (backend '(html gfm ascii texinfo man))
+            (dolist (backend (or backends (quote (html gfm ascii md org texinfo man))))
               (let* ((backend-name (symbol-name backend))
                      (backend-directory (expand-file-name backend-name expected-directory))
                      (output-file (expand-file-name
@@ -1611,20 +1614,42 @@
                                backend-name case-name)))))
         (delete-directory temporary-directory t)))))
 
-(defun org-fixture-generate-export-oracle (corpus-directory manifest expected-directory)
-  "Generate full Org export outputs for the literal export oracle manifest."
+(defun org-fixture--export-backend-symbol (name)
+  (or (cdr (assoc name (quote (("html" . html)
+                               ("gfm" . gfm)
+                               ("ascii" . ascii)
+                               ("md" . md)
+                               ("org" . org)
+                               ("texinfo" . texinfo)
+                               ("man" . man)))))
+      (error "Unknown export oracle backend %S" name)))
+
+(defun org-fixture-generate-export-oracle
+    (corpus-directory manifest expected-directory &optional backends)
+  "Generate Org export outputs for the literal export oracle manifest.
+When BACKENDS is non-nil, generate only those backend outputs."
   (unless (file-directory-p corpus-directory)
     (error "Export oracle corpus directory does not exist"))
-  (require 'ox-html)
-  (require 'ox-ascii)
-  (require 'ox-texinfo)
-  (require 'ox-man)
+  (unless (and (equal emacs-version "31.1")
+               (equal (org-version) "9.8.10"))
+    (error "Export oracle fixtures require Emacs 31.1 and Org 9.8.10"))
+  (require (quote ox-html))
+  (require (quote ox-ascii))
+  (require (quote ox-md))
+  (require (quote ox-org))
+  (require (quote ox-texinfo))
+  (require (quote ox-man))
   (org-fixture--verify-ox-gfm-pin)
   (let ((cases (org-fixture--read-export-manifest manifest corpus-directory)))
     (dolist (case cases)
-      (org-fixture--generate-export-case case corpus-directory expected-directory))
-    (princ (format "Generated %d export oracle cases for html/gfm/ascii/texinfo/man.\n"
-                   (length cases)))
+      (org-fixture--generate-export-case case corpus-directory expected-directory
+                                         backends))
+    (princ (format "Generated %d export oracle cases for %s.\n"
+                   (length cases)
+                   (mapconcat (function symbol-name)
+                              (or backends
+                                  (quote (html gfm ascii md org texinfo man)))
+                              "/")))
     (princ (format "Emacs %s; Org %s; ox-gfm %s\n"
                    emacs-version (org-version) org-fixture--ox-gfm-version))))
 
@@ -1728,6 +1753,18 @@
        (expand-file-name (nth 1 arguments))
        (expand-file-name (nth 2 arguments))
        (expand-file-name (nth 3 arguments))))
+     ((and (>= (length arguments) 5)
+           (equal (car arguments) "--export-oracle-backends"))
+      (let* ((backend-names (nthcdr 4 arguments))
+             (backends (mapcar #'org-fixture--export-backend-symbol backend-names)))
+        (unless (= (length backends)
+                   (length (delete-dups (copy-sequence backends))))
+          (error "Export oracle backend list contains duplicates"))
+        (org-fixture-generate-export-oracle
+         (expand-file-name (nth 1 arguments))
+         (expand-file-name (nth 2 arguments))
+         (expand-file-name (nth 3 arguments))
+         backends)))
      ((and (= (length arguments) 3)
            (equal (car arguments) "--statistics-cookies"))
       (org-fixture-generate-statistics-cookies
@@ -1747,6 +1784,7 @@
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-calc CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --table-recalculate CORPUS-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --export-oracle CORPUS-DIR MANIFEST EXPECTED-DIR\n"
+              "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --export-oracle-backends CORPUS-DIR MANIFEST EXPECTED-DIR BACKEND...\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --statistics-cookies SOURCE-DIR EXPECTED-DIR\n"
               "   or: emacs --batch -Q --script scripts/generate-org-fixtures.el --check-types CORPUS-DIR EXPECTED-DIR"))))))
 
@@ -3313,8 +3351,7 @@
                                     "html" temporary-expected))
                    (expected-html (expand-file-name "html"
                                                      expected-directory)))
-              (org-fixture--generate-export-case
-               case corpus-directory temporary-expected)
+              (org-fixture--generate-export-case case corpus-directory temporary-expected '(html))
               (make-directory expected-html t)
               (dolist (extension '("html" "meta"))
                 (copy-file

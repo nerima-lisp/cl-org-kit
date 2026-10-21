@@ -1,0 +1,8 @@
+#+title: Include oracle
+#+date: 2024-02-03
+#+author: Fixture Author
+Before included content.
+* Included section
+The include source is copied into the generator's temporary directory.
+
+After included content.

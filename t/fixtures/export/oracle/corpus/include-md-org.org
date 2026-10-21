@@ -1,0 +1,9 @@
+#+TITLE: Include oracle
+#+AUTHOR: Fixture Author
+#+DATE: 2024-02-03
+
+Before included content.
+
+#+INCLUDE: "md-org/included/fragment.org"
+
+After included content.

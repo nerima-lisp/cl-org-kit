@@ -1,0 +1,55 @@
+                     _____________________________
+
+                       ORG BACKEND ORACLE FIXTURE
+
+                             Export Fixture
+                      export-fixture@example.test
+                     _____________________________
+
+
+                               2024-05-06
+
+
+TODO Heading with inline objects
+================================
+
+  Paragraph with *bold*, /italic/, `verbatim', [a link], an active
+  timestamp <2024-05-06 Mon>, a footnote reference[1], and citation (??,
+  ????).
+
+
+  - first list item
+  - second list item with *emphasis*
+
+   Name   Value 
+  --------------
+   alpha  one   
+   beta   two   
+
+        A quoted block.
+
+  ,----
+  | source block body
+  `----
+
+  ,----
+  | An example block.
+  `----
+
+
+[a link] <https://example.test/path>
+
+
+Second heading
+==============
+
+  Drawer body.
+  The second section has a timestamp <2024-05-10 Fri>.
+
+
+
+Footnotes
+_________
+
+[1] Footnote definition body with a [link]
+(<https://example.test/footnote>).

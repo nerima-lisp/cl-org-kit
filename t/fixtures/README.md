@@ -10,16 +10,17 @@ Japanese text, and emoji.
 - `corpus/` contains the `.org` source files.
 - `expected/` contains one Common Lisp-readable S-expression for each source. The source's relative
   path is retained and `.sexp` is appended to its filename.
-- `../scripts/generate-org-fixtures.el` generates the expected trees and reports type coverage.
+- From the repository root, `scripts/generate-org-fixtures.el` generates the expected trees and
+  reports type coverage.
 
-The generated data records Emacs 31.1 and Org 9.8.10. Regenerate and check coverage from the
-repository root with:
+The generated data records Emacs 31.1 and Org 9.8.10. Regenerate and check coverage with the same
+pinned environment:
 
 ```sh
-emacs --batch -Q --script scripts/generate-org-fixtures.el \
+nix develop --command emacs --batch -Q --script scripts/generate-org-fixtures.el \
   t/fixtures/corpus t/fixtures/expected
 
-emacs --batch -Q --script scripts/generate-org-fixtures.el \
+nix develop --command emacs --batch -Q --script scripts/generate-org-fixtures.el \
   --check-types t/fixtures/corpus t/fixtures/expected
 ```
 
@@ -32,15 +33,15 @@ CRLF, BOM, missing final newlines, and intentional trailing spaces are part of t
 `export/oracle/corpus/` contains Org documents for export cases, and `export/oracle/manifest.tsv`
 lists each case, its source, and its optional include source. Manifest paths are relative to the
 corpus directory; the generator rejects `.` and `..` path components, copies include inputs to a
-temporary directory, and removes that directory after export. The `html/`, `gfm/`, and `ascii/`
-directories contain full backend outputs and `.meta` sidecars recording versions, input hashes,
-backend settings, and export configuration. Kit tests use in-memory include resolvers and do not
-invoke Emacs.
+temporary directory, and removes that directory after export. The `html/`, `gfm/`, `md/`, `org/`,
+and `ascii/` directories contain full backend outputs and `.meta` sidecars recording versions,
+input hashes, backend settings, and export configuration. Kit tests use in-memory include resolvers
+and do not invoke Emacs.
 
 Regenerate the export oracle from the repository root with:
 
 ```sh
-emacs --batch -Q --script scripts/generate-org-fixtures.el \
+nix develop --command emacs --batch -Q --script scripts/generate-org-fixtures.el \
   --export-oracle t/fixtures/export/oracle/corpus \
   t/fixtures/export/oracle/manifest.tsv t/fixtures/export/oracle
 ```
@@ -50,8 +51,19 @@ The oracle pins Emacs 31.1, Org 9.8.10, and ox-gfm 20231215.1901. The generator 
 makes `org-babel-check-confirm-evaluate` refuse every block, so no code is evaluated. The
 `source-blocks` case records Org's output under that setting.
 
-The `export/oracle/gfm/compatibility/` manifest contains a GFM-only subset of the export oracle
-cases. Its four source copies preserve metadata and selection pruning, explicit `EXCLUDE_TAGS`,
+The Markdown and Org oracle sources add explicit heading IDs where Org's automatic export
+references would otherwise vary, and an explicit author where Org's default depends on the host.
+Their fixtures can be regenerated without rewriting the existing HTML, GFM, or ASCII oracle
+outputs:
+
+```sh
+nix develop --command emacs --batch -Q --script scripts/generate-org-fixtures.el \
+  --export-oracle-backends t/fixtures/export/oracle/corpus \
+  t/fixtures/export/oracle/manifest.tsv t/fixtures/export/oracle md org
+```
+
+The `export/oracle/gfm/compatibility/` directory contains a manifest for a GFM-only subset of the
+export oracle cases. Its four source files preserve metadata and selection pruning, explicit `EXCLUDE_TAGS`,
 includes, macros, footnotes, headings, and paragraphs. Each heading has an explicit `CUSTOM_ID`
 where needed. `toc:nil` keeps generated TOC links out of this compatibility subset. The source copies
 remove links, literal code, tables, and other constructs with deliberate GFM serializer differences;
@@ -77,9 +89,9 @@ and never launch Emacs.
 Export policy fixtures also record deliberate differences from Org: duplicate TITLE, AUTHOR, DATE,
 LANGUAGE, SELECT_TAGS, EXCLUDE_TAGS, and MACRO declarations are rejected, and global keywords in
 included or macro-expanded fragments are rejected even where Org accepts them. Multiple
-`#+OPTIONS` lines are combined. The exporter applies the `tasks` and `tex` options while pruning its view,
-including `tasks:nil`, `tasks:todo`, `tasks:done`, and `tex:nil`; the exporter recognizes these
-selection options although the [export guide](../../docs/src/guides/export.md) does not list them. The kit accepts only
+`#+OPTIONS` lines are combined. The exporter applies the `tasks` and `tex` options while pruning its
+view; see the [export guide](../../docs/src/guides/export.md) for their supported values, including
+`tasks:nil`, `tasks:todo`, `tasks:done`, and `tex:nil`. The kit accepts only
 `expand-links:nil`, because enabling link expansion would read environment variables from file
 links. It accepts only `broken-links:nil` and keeps its fail-closed broken-link policy.
 The exporter uses the source-block `:exports` setting: `code`, `results`, `both`, and `none` select
@@ -99,8 +111,8 @@ nix develop -c emacs --batch -Q --script scripts/generate-org-fixtures.el \
   t/fixtures/table-calc/oracle/expected
 ```
 
-The generated results record Emacs 31.1 and Org 9.8.10. The generator accepts only formulas in
-its literal allowlist.
+The generated results record Emacs 31.1 and Org 9.8.10. Before recalculating, the generator checks
+each formula against a fixed set of exact formula strings.
 
 `table-calc/policy/corpus/` and `table-calc/policy/expected/` pair Org results for range-vector
 formulas with tests that the kit rejects them as `:range-outside-vector-function`, outside its
@@ -124,7 +136,8 @@ nix develop -c emacs --batch -Q --script scripts/generate-org-fixtures.el \
   t/fixtures/table/expected/recalculate
 ```
 
-The oracle generator pins Emacs 31.1 and Org 9.8.10 and accepts only its literal formula allowlist.
+The oracle generator pins Emacs 31.1 and Org 9.8.10 and checks each formula against a fixed set of
+exact formula strings before recalculating.
 The existing `--table-calc` mode remains a TSV evaluator oracle. `table/policy/recalculate/` and
 `table/policy/expected/recalculate/` cover deliberate differences in the kit's recalculation rules:
 column formulas run in source order, so later formulas see earlier column updates; field formulas
@@ -159,7 +172,7 @@ default minimum level 15 so the level-14/level-15 boundary is stable.
 `statistics-cookies/expected/` contains the resulting text. Regenerate the oracle outputs with:
 
 ```sh
-emacs --batch -Q --script scripts/generate-org-fixtures.el \
+nix develop -c emacs --batch -Q --script scripts/generate-org-fixtures.el \
   --statistics-cookies t/fixtures/statistics-cookies/source \
   t/fixtures/statistics-cookies/expected
 ```

@@ -1,0 +1,34 @@
+
+# Table of Contents
+
+-   [Overview](#org-overview)
+-   [Detail](#details)
+
+
+
+<a id="org-overview"></a>
+
+# Overview
+
+Greetings, reader with a named footnote<sup><a id="fnr.note" class="footref" href="#fn.note" role="doc-backlink">1</a></sup> and another reference<sup><a id="fnr.note.1" class="footref" href="#fn.note" role="doc-backlink">1</a></sup>.
+Macro arguments: one|; extra arguments: [one].
+
+Safe links: [A label with ]( and \`backtick\` | pipe](https://example.test/path?q=a&b=c) and [section link](#details).
+
+Raw HTML-like text in a literal block:
+
+    <em>literal HTML</em>
+
+This line has a tab between these words: before	and after.
+
+
+<a id="details"></a>
+
+# Detail
+
+The local fragment destination is safe.
+
+
+# Footnotes
+
+<sup><a id="fn.1" href="#fnr.1">1</a></sup> One definition serves both references.

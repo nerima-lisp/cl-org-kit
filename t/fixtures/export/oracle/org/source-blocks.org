@@ -1,0 +1,29 @@
+#+options: toc:nil num:nil
+#+title: Source block export modes
+#+date: 2024-02-03
+#+author: Fixture Author
+#+property: header-args :eval never-export
+* Existing results are exported without execution
+
+#+begin_src emacs-lisp :exports both
+  (error "Babel must remain disabled")
+#+end_src
+
+#+results: 
+: preexisting both result
+
+#+begin_src emacs-lisp :exports code
+  (error "Code-only block was not evaluated")
+#+end_src
+
+#+results: 
+: preexisting results-only output
+
+#+begin_src emacs-lisp
+  (error "Default source block was not evaluated")
+#+end_src
+
+The paragraph separates the following results from the source block.
+
+#+results: 
+: non-adjacent output

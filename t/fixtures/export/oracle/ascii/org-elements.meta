@@ -1,0 +1,13 @@
+emacs=31.1
+org=9.8.10
+generator-mode=export-oracle-v1
+backend=ascii
+encoding=UTF-8
+reference-time=2000-01-01T00:00:00Z
+time-zone=UTC
+dst-policy=compatible
+unicode-width-data=Unicode-17.0.0
+source=org-elements.org
+source-sha256=8d8f5af2a0a0c3a5ea1218c41a498c856bf0399beb80eda6ba34f30ba68f5248
+include-source=none
+include-source-sha256=none

@@ -1,0 +1,17 @@
+emacs=31.1
+org=9.8.10
+generator-mode=export-oracle-v1
+backend=gfm
+encoding=UTF-8
+reference-time=2000-01-01T00:00:00Z
+time-zone=UTC
+dst-policy=compatible
+unicode-width-data=Unicode-17.0.0
+source=md-elements.org
+source-sha256=d85536f65290e7fb3d05c6f81ffb0e49173bcd4f4894255d2f4110133b0785b7
+include-source=none
+include-source-sha256=none
+ox-gfm-version=20231215.1901
+ox-gfm-repository=https://github.com/larstvei/ox-gfm
+ox-gfm-commit=4f774f13d34b3db9ea4ddb0b1edc070b1526ccbb
+ox-gfm-source-sha256=84c841f4204447eec317453ebab514741d22d4b65459a652eb87e04b29483771
