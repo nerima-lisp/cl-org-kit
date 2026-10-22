@@ -549,10 +549,6 @@
                      (setf first-p nil
                            previous-item item)))))))))
 
-(defun export-md-render-footnote-reference (state view)
-  (export-gfm-render-footnote-reference
-   (export-md-state-gfm-state state) view))
-
 (progn
   (progn
   (defun export-md-title-object-view (node)
@@ -861,7 +857,8 @@
                 (export-md-render-link-output label destination image-p)
                 label))))))
 
-(progn (declaim (ftype function export-md-render-list-item)) (defun export-md-render-node (state node view frame context)
+(declaim (ftype function export-md-render-list-item))
+(defun export-md-render-node (state node view frame context)
   (case (node-type node)
     ((:center-block :table)
      (let ((html (export-md-render-html-fallback state node view)))
@@ -1055,7 +1052,7 @@
           context node :mode (export-render-frame-mode frame)
           :table-cell-p (export-render-frame-table-cell-p frame)
           :preserve-source-breaks-p
-          (export-render-frame-preserve-source-breaks-p frame)))))))
+          (export-render-frame-preserve-source-breaks-p frame))))))
 
 (defun export-md-transcode-node (node view frame context)
   (let* ((state (export-render-context-state context))
@@ -1365,8 +1362,8 @@
    :make-state #'export-md-make-state
    :transcoders (export-md-node-transcoders)
    :node-policies '((:diary-sexp . :default))
-   :accepted-keywords '("HTML")
-   :retained-keywords '("HTML")
+   :accepted-keywords '("HTML" "MD" "MARKDOWN")
+   :retained-keywords '("HTML" "MD" "MARKDOWN")
    :raw-output-options '((:html . :allow-raw-html))
    :export-block-names '("md" "markdown")
    :export-snippet-names '("md" "markdown" "html")))
