@@ -103,10 +103,14 @@
                (:file "export-types")
                (:file "export-registry")
                (:file "export-core")
+               ;; FR-102 Org backend
+               (:file "export-org")
                ;; Unit E2 HTML export
                (:file "export-html")
                ;; Unit E3 GFM export
                (:file "export-gfm")
+               ;; FR-101 Markdown backend
+               (:file "export-md")
                ;; Unit E4 ASCII export
                (:file "export-ascii")
                ;; Unit E5 LaTeX export
@@ -251,10 +255,14 @@
                (:file "clocktable-test")
                (:file "export-core-test")
                (:file "export-registry-test")
+               ;; FR-102 Org backend
+               (:file "export-org-test")
                ;; Unit E2 HTML export
                (:file "export-html-test")
                ;; Unit E3 GFM export
                (:file "export-gfm-test")
+               ;; FR-101 Markdown backend
+               (:file "export-md-test")
                ;; Unit E4 ASCII export
                (:file "export-ascii-test")
                ;; Unit E5 LaTeX export

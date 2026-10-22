@@ -417,6 +417,11 @@ SHELL is passed to RUNNER with the expanded SCRIPT, optional STDIN, and raw CMDL
 RUNNER must return standard output as a string. This helper starts no process.
 Persistent shell sessions are unsupported; :stdin and :cmdline use one-shot scripts."))
 
+  (it "routes Markdown and Org through the public export API"
+    (let ((document (parse-org (format nil "* Backend API~%Text.~%"))))
+      (expect (stringp (export-org document :md)) :to-be t)
+      (expect (stringp (export-org document :org)) :to-be t)))
+
   (it "documents every exported symbol"
     (with-soft-assertions
       (dolist (name (sort (external-symbol-names) #'string<))
