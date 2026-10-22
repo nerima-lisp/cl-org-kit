@@ -224,11 +224,11 @@ The result is `1`: the parent headline is blocked by its unfinished child.
 The 0.1.0 agenda and query APIs include `agenda` for date-range
 agendas, `agenda-todo-list`, `agenda-match`, and `query-match-now`. This guide
 also covers TODO editing and priority APIs in the released 0.1.0 package.
-Agenda APIs added to the source after 0.2.0 are not part of that release:
-search and stuck-project views, sorting and category support, time grids,
-custom agenda views, and agenda text, Org, and edit output. To run those
-examples, use the working-checkout setup in [Development](../project/development.md),
-not the release-tag setup in [Getting Started](../getting-started.md).
+Version 0.2.0 added the dependency checks described above. Version 0.3.0 adds
+search and stuck-project views, category access and sorting, time grids and
+custom views, text and Org output, edit results, and bulk actions. These APIs
+are included in the `v0.3.0` release. Use the `v0.3.0` release-tag setup in
+[Getting Started](../getting-started.md#asdf) to run these examples.
 
 The date-range agenda, TODO-list, `agenda-match`, and `query-match-now` calls
 below require an explicit time context. This makes the reference time, time
@@ -866,4 +866,4 @@ DEADLINE: <2025-01-02 Thu> SCHEDULED: <2025-01-03 Fri>
 
 See [Clock](clock.md) for clock aggregation and
 [API Stability](../reference/api-stability.md), which defines the released
-0.2.0 API scope and identifies agenda APIs added after that release.
+0.3.0 API scope and records the agenda APIs added in that release.

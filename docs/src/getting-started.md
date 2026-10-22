@@ -14,7 +14,7 @@ Merge these entries with any existing inputs:
 inputs = {
   nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   cl-org-kit = {
-    url = "github:nerima-lisp/cl-org-kit/v0.2.0";
+    url = "github:nerima-lisp/cl-org-kit/v0.3.0";
     flake = false;
   };
   cl-parser-kit = {
@@ -92,7 +92,7 @@ check out the runtime dependencies at these tested tags:
 
 | System | Repository | Tag | Use |
 | --- | --- | --- | --- |
-| `cl-org-kit` | [GitHub](https://github.com/nerima-lisp/cl-org-kit) | `v0.2.0` | Project |
+| `cl-org-kit` | [GitHub](https://github.com/nerima-lisp/cl-org-kit) | `v0.3.0` | Project |
 | `cl-parser-kit` | [GitHub](https://github.com/nerima-lisp/cl-parser-kit) | `v1.1.1` | Runtime |
 | `cl-regex-kit` | [GitHub](https://github.com/nerima-lisp/cl-regex-kit) | `v2.1.1` | Runtime |
 | `cl-codec-kit` | [GitHub](https://github.com/nerima-lisp/cl-codec-kit) | `v0.6.0` | Runtime |

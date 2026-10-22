@@ -1,50 +1,64 @@
 # API Stability
 
-This page defines the public API scope for version 0.2.0.
+This page defines the public API scope for version 0.3.0.
 
 ## Public surface
 
 The public interface is the set of symbols exported from the `ORG-KIT`
-package. For version 0.2.0, the public symbols are those in the
-[`ORG-KIT` export list at release commit
-`6b33b6f5e182`](https://github.com/nerima-lisp/cl-org-kit/blob/6b33b6f5e18264cc194b4888df83bceebafbcfa5/src/package.lisp).
+package. For version 0.3.0, the public symbols are those in the
+[`ORG-KIT` export list at tag `v0.3.0`](https://github.com/nerima-lisp/cl-org-kit/blob/v0.3.0/src/package.lisp).
 The documented arguments, return values, conditions, and resource limits
 describe those exports.
 
 Symbols internal to `ORG-KIT`, including names written as `ORG-KIT::name`,
 are implementation details. Symbols from runtime dependencies are not part of
-the `cl-org-kit` API. The 0.2.0 exports have no separately designated
+the `cl-org-kit` API. The 0.3.0 exports have no separately designated
 experimental subset.
 
-`cycle-heading-todo` and `transition-heading-todo` were already public in
-0.1.0. Version 0.2.0 adds checks that block DONE when an unfinished descendant
-or an earlier unfinished TODO in an ordered sibling sequence remains. An
-unfinished TODO ancestor can also be blocked by an earlier unfinished TODO in
-its own ordered sequence. `:NOBLOCKING: t` on the target bypasses these checks.
-These changes are part of this release's public API. The [TODO and Agenda
-guide](../guides/todo-agenda.md) documents their return values, conditions, and
-repeater limit.
+See the [Export guide](../guides/export.md) for supported formats and backend
+details.
 
 The 0.1.0 agenda and query APIs include `agenda` for date-range agendas,
 `agenda-todo-list`, `agenda-match`, and `query-match-now`.
 
-## Agenda APIs added after 0.2.0
+## Version 0.2.0
 
-The source tree containing this page adds the following agenda APIs after
-release commit `6b33b6f5e182`. They are not part of the released 0.2.0 public
-API, and this page does not assign them to a later release version:
+`cycle-heading-todo` and `transition-heading-todo` were already public in
+0.1.0. Version 0.2.0 added checks that block DONE when an unfinished descendant
+or an earlier unfinished TODO in an ordered sibling sequence remains. An
+unfinished TODO ancestor can also be blocked by an earlier unfinished TODO in
+its own ordered sequence. `:NOBLOCKING: t` on the target bypasses these checks.
+These changes were part of the 0.2.0 release's public API. The [TODO and Agenda
+guide](../guides/todo-agenda.md) documents their return values, conditions, and
+repeater limit.
+
+## Agenda APIs added in 0.3.0
+
+The 0.3.0 release adds the following agenda APIs to the public interface:
 
 - Search and stuck-project views: `agenda-search-view` and
   `agenda-stuck-projects`.
-- Sorting through `:sorting-strategy` and `:user-defined-sorter`, and category
-  access through `agenda-entry-category`.
-- Time grids and custom views: `agenda-time-grid` and `agenda-custom`.
-- Text, Org-document, and edit output: `agenda-format-text`, `agenda-to-org`,
-  and `agenda-write-into`.
+- Category access through `agenda-entry-category` and sorting through
+  `:sorting-strategy` and `:user-defined-sorter`.
+- Time grids: `agenda-time-grid`, `agenda-time-grid-row`, and the row
+  predicate and accessors.
+- Custom views: `agenda-custom`, `agenda-custom-view`, and the view predicate
+  and accessors.
+- Text and Org output: `agenda-format-text` and `agenda-to-org`; edit results
+  through `agenda-write-into`.
 - Bulk actions: `agenda-bulk-action`.
 
-The [TODO and Agenda guide](../guides/todo-agenda.md) covers their result types,
-time-context requirements, output formats, and bulk-action behavior.
+The [TODO and Agenda guide](../guides/todo-agenda.md) documents their result
+types, time-context requirements, output formats, and bulk-action behavior.
+
+## Other APIs added in 0.3.0
+
+- Lint checker names: `wrong-header-argument`, `wrong-header-value`, and
+  `named-result`. See the [Lint guide](../guides/lint.md).
+- Babel detangling: `babel-detangle`. See the [Babel guide](../guides/babel.md).
+- Export entrypoints: `export-org-man`, `export-org-texinfo`, and
+  `export-icalendar-documents`. See the [Export guide](../guides/export.md).
+
 ## Compatibility
 
 While the project remains at 0.x, a later 0.x release may change, add, or remove
