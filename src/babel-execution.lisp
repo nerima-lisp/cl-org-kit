@@ -143,7 +143,7 @@ Persistent shell sessions are unsupported; :stdin and :cmdline use one-shot scri
                                 (unless separator-at-end-p
                                   (push (get-output-stream-string current)
                                         fields)))
-                       (or (nreverse fields) (list "")))))
+                       (nreverse fields))))
             (let* ((rows
                      (mapcar (lambda (line)
                                (case separator
@@ -203,19 +203,6 @@ Persistent shell sessions are unsupported; :stdin and :cmdline use one-shot scri
                (t (write-char character output)))
           finally (push (get-output-stream-string output) fields))
     (nreverse fields)))
-(defun babel-shell-split-whitespace (text)
-  (let ((start 0)
-        (length (length text))
-        (fields nil))
-    (loop while (< start length)
-          do (setf start (or (position-if-not #'babel-whitespace-p text
-                                              :start start)
-                             length))
-             (when (< start length)
-               (let ((end (position-if #'babel-whitespace-p text :start start)))
-                 (push (subseq text start (or end length)) fields)
-                 (setf start (or end length))))
-          finally (return (nreverse fields)))))
 (defun babel-shell-split-char (text delimiter)
   (let ((start 0))
     (loop for position = (position delimiter text :start start)

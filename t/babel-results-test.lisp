@@ -679,3 +679,19 @@
         (when (typep format-error 'org-kit:org-babel-error)
           (expect (org-kit:org-babel-error-reason format-error)
                   :to-be :unsupported-result-format))))))
+(describe "Babel vector table results"
+  (it "renders vectors of rows and string values as tables"
+    (let* ((document
+             (parse-org
+              (format nil "#+NAME: sample~%#+BEGIN_SRC text~%body~%#+END_SRC")))
+           (block (babel-results-test-source-block document))
+           (vector-rows
+             (org-kit::babel-results-render
+              document block #(#(1 2) #(3 4)) "value" "table" "text" 0))
+           (string-value
+             (org-kit::babel-results-render
+              document block "cells" "value" "table" "text" 0)))
+      (with-soft-assertions
+        (expect vector-rows :to-equal
+                (format nil "| 1 | 2 |~%| 3 | 4 |"))
+        (expect string-value :to-equal "| cells |")))))

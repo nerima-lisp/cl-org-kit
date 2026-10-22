@@ -903,3 +903,85 @@
                 :to-be
                 :executed)
         (expect runs :to-be 1)))))
+(describe "Babel shell reference executor boundaries"
+  (it "validates runner settings and result channels"
+    (let* ((shell-error
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit:make-babel-shell-reference-executor
+                 (lambda (shell script stdin cmdline)
+                   (declare (ignore shell script stdin cmdline))
+                   "ok")
+                 :shell 7))))
+           (output-error
+             (let ((executor
+                     (org-kit:make-babel-shell-reference-executor
+                      (lambda (shell script stdin cmdline)
+                        (declare (ignore shell script stdin cmdline))
+                        nil))))
+               (babel-execution-test-condition
+                (lambda () (funcall executor "body" nil nil)))))
+           (discard
+             (org-kit::babel-shell-import-result
+              "ignored" '(("RESULTS" . "discard"))))
+           (scalar
+             (org-kit::babel-shell-import-result
+              "plain text" '(("RESULTS" . "verbatim")))))
+      (with-soft-assertions
+        (expect (typep shell-error 'type-error) :to-be t)
+        (expect (typep output-error 'type-error) :to-be t)
+        (expect discard :to-be nil)
+        (expect scalar :to-equal "plain text"))))
+  (it "parses and serializes shell values at helper boundaries"
+    (let* ((csv
+             (org-kit::babel-shell-import-result
+              (format nil "key,value~%\"say \"\"hi\"\"\",1~%")
+              '(("RESULTS" . "output table"))))
+           (single-pipe
+             (org-kit::babel-shell-import-result
+              "|a|b|" '(("RESULTS" . "output table"))))
+           (whitespace
+             (org-kit::babel-shell-import-result
+              (format nil "   ~%a b ")
+              '(("RESULTS" . "output table"))))
+           (input-error
+             (babel-execution-test-condition
+              (lambda ()
+                (org-kit::babel-shell-check-inputs (make-document "") '(42)))))
+           (stdin
+             (let ((org-kit::*babel-execution-document* nil)
+                   (org-kit::*babel-execution-resolution-context* nil))
+               (org-kit::babel-shell-stdin-text '(("STDIN" . "\"input\"")))))
+           (short-shell-assignment
+             (org-kit::babel-shell-variable-assignment
+              "value" "x" nil "sh"))
+           (plain-table
+             (org-kit::babel-shell-table-text '(hline ("a" "b")) nil))
+           (hline-table
+             (org-kit::babel-shell-table-text
+              '(hline ("a" "b") hline) '(("HLINES" . "yes"))))
+           (custom-hline-table
+             (org-kit::babel-shell-table-text
+              '(hline ("a" "b"))
+              '(("HLINES" . "yes") ("HLINE-STRING" . "rule"))))
+           (object-text (org-kit::babel-shell-cell-text '(foo . bar))))
+      (with-soft-assertions
+        (expect csv :to-equal '(("key" "value") ("say \"hi\"" 1)))
+        (expect single-pipe :to-equal '(("" "a" "b")))
+        (expect whitespace :to-equal '(("" "") ("a" "b")))
+        (expect (typep input-error 'type-error) :to-be t)
+        (expect stdin :to-equal "input")
+        (expect (org-kit::babel-shell-output-lines "") :to-be nil)
+        (expect short-shell-assignment :to-equal "value='x'")
+        (expect (org-kit::babel-shell-cell-text nil) :to-equal "nil")
+        (expect (org-kit::babel-shell-cell-text :MiXeD) :to-equal "mixed")
+        (expect (org-kit::babel-shell-cell-text 17) :to-equal "17")
+        (expect (org-kit::babel-shell-cell-text #\A) :to-equal "A")
+        (expect (stringp object-text) :to-be t)
+        (expect plain-table :to-equal (format nil "a~Cb" #\Tab))
+        (expect hline-table :to-equal
+                (format nil "hline~%a~Cb~%hline" #\Tab))
+        (expect custom-hline-table :to-equal
+                (format nil "rule~%a~Cb" #\Tab))
+        (expect (org-kit::babel-shell-hline-p 'HLINE) :to-be t)
+        (expect (org-kit::babel-shell-hline-p "hline") :to-be nil)))))
