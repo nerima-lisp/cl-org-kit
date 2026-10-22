@@ -1,13 +1,13 @@
 # Clock
 
-`clock-in`, `clock-out`, `sum-clocks`, and `clocktable-data` use explicit time
-values and an explicit `org-time-context`, created with `make-time-context` from
-a reference time, time zone, and daylight-saving policy. The context anchors
-checks of running clocks; edit calls also take their own `:at` value. These
-calls do not consult the system clock. A daylight-saving transition can create
-a gap, where local date-times do not exist, or an overlap, where they occur
-twice. The `:dst-policy` key selects `:compatible` (the default), `:earlier`,
-`:later`, or `:strict`:
+`clock-in`, `clock-out`, `sum-clocks`, `check-clock-consistency`, and
+`clocktable-data` use explicit time values and an `org-time-context`, created
+with `make-time-context` from a reference time, time zone, and daylight-saving
+policy. The context anchors checks of running clocks; edit calls also take their
+own `:at` value. These calls do not consult the system clock. A daylight-saving
+transition can create a gap, where local date-times do not exist, or an overlap,
+where they occur twice. The `:dst-policy` key selects `:compatible` (the
+default), `:earlier`, `:later`, or `:strict`:
 
 Fixed-zone offsets passed to `make-fixed-time-zone` are in minutes, so an offset
 of `0` means UTC.
@@ -105,9 +105,9 @@ where it is. Both return edits without changing the input document.
 `check-clock-consistency` returns findings in source order. It reports clock
 ranges whose end precedes their start, overlapping ranges, clocks that have no
 clock-out, and intervals longer than `:max-duration-minutes` when that optional
-threshold is supplied. Touching ranges do not overlap. For a running clock,
-the required `org-time-context`'s reference instant is the endpoint used to
-measure its duration and check overlap with closed clocks. This check ignores
+threshold is supplied. Touching ranges do not overlap. Every call requires
+`:time-context`. For a running clock, its reference instant is the endpoint
+used to measure duration and check overlap with closed clocks. The check ignores
 duration-only CLOCK rows, such as `CLOCK: => 0:30`. Malformed CLOCK rows signal
 `org-clock-error` with reason `:malformed-clock`.
 
@@ -147,7 +147,9 @@ Invalid values signal `type-error`.
 
 Org timer items are description-list items with an elapsed `H:MM:SS` value, as
 in `- 0:01:23 :: Review`. The start time is supplied by the caller, and the
-reference instant in `org-time-context` supplies the current time.
+reference instant in `org-time-context` supplies the current time. Both
+functions require the context: pass it as the second argument to
+`timer-item-value` or through `insert-timer-item`'s `:time-context` keyword.
 `timer-item-value` returns the elapsed string. `insert-timer-item` inserts a
 single-line description at the start of the heading body, after its planning
 entries and property drawers, and after a leading LOGBOOK drawer if present. It
@@ -364,9 +366,9 @@ heading level. The default `:maxlevel` is 2. `:block` accepts a period such as
 literals, for example `:tstart "[2026-10-12 09:30]" :tend 2026-10-14`.
 `:step` requires one of these range forms. Without a range, the clocktable
 includes clocks from all dates and can be updated without a time context. Clock
-timestamps without an explicit offset use UTC in that case; pass
-`:time-context` to choose another zone. `:step` splits a selected range into
-`day`, `week`, `semimonth`, `month`, `quarter`, or `year` sections. `:match`
+timestamps without an explicit offset use UTC when no `:time-context` is
+provided; pass `:time-context` to choose another zone. `:step` splits the range
+into `day`, `week`, `semimonth`, `month`, `quarter`, or `year` sections. `:match`
 filters headings. `:tags`, `:emphasize`, and `:fileskip0` control table
 formatting. `:formula` accepts a table formula or `%` for time percentages.
 Unsupported or invalid clocktable parameters signal

@@ -64,8 +64,8 @@ pass `:previous-direction` to the second call. To wrap from A to C with `:up`:
 
 1. Call `(org-kit:adjust-heading-priority document heading :up)`. It removes
    `[#A]` and returns `updated-document` with the heading unmarked.
-2. Run the same `map-nodes` selection on `updated-document` to get
-   `updated-heading`. The original headline node belongs to the old parse.
+2. Run the `first-node-of-type` helper from the earlier example on
+   `updated-document` to get `updated-heading`.
 3. Call
    `(org-kit:adjust-heading-priority updated-document updated-heading :up :previous-direction :up)`.
    `:previous-direction` tells this call that the previous `:up` already
@@ -90,10 +90,6 @@ unchanged.
 
 ## Transition a TODO state
 
-Version 0.2.0 adds dependency checks to the transition APIs introduced in
-0.1.0. A transition to DONE is blocked when unfinished dependencies remain,
-unless the target heading has `:NOBLOCKING: t`.
-
 `transition-heading-todo` sets a heading to a configured state, while
 `cycle-heading-todo` advances or reverses through a configured TODO sequence.
 Pass `:direction :next` to advance or `:direction :previous` to reverse with
@@ -115,9 +111,9 @@ Both functions require an explicit `:at` value. Omitting it signals
 `org-edit-error` with reason `:invalid-value`; invalid or ambiguous time input
 signals `org-time-error`. `:at` accepts an `org-time-value`, a string accepted
 by `make-org-time-value`, or a `cl-date-kit` local date or local date-time.
-Date-time repeaters require `:time-context` to apply its time zone and
-daylight-saving policy. The example's offset-free datetime has no repeater, so
-the transition needs no time zone and stores the value as given.
+If the target heading has a date-time repeater, pass `:time-context` to apply
+its time zone and daylight-saving policy. The example's target has no repeater,
+so its offset-free `:at` value needs no time zone and is stored as given.
 
 ~~~lisp
 (require :asdf)
@@ -160,7 +156,8 @@ TODO keyword specs such as `WAIT(w@/!)`, which replace the markers on the
 In these markers, `!` records a state change and `@` requests a note; `/`
 separates the markers for unfinished and done states.
 When a logging mode requests a note, pass its text with `:note` to
-`transition-heading-todo` or `cycle-heading-todo`.
+`transition-heading-todo` or `cycle-heading-todo`. For a DONE transition,
+`lognotedone` writes the closing note only when no state-change line is written.
 
 Without `LOGGING`, state-change lines follow the `#+TODO` markers. Done and
 repeat logging each come from the `:log-done` or `:log-repeat` argument given
@@ -170,8 +167,7 @@ word of `#+STARTUP` (see `startup-options` in the
 `:workflow-options` to `transition-heading-todo` or `cycle-heading-todo`.
 `LOG_DONE` and `LOG_REPEAT` properties have no effect.
 
-As in Org, removing a TODO keyword writes no state-change line, and a
-`lognotedone` closing note is written only when no state-change line is.
+As in Org, removing a TODO keyword writes no state-change line.
 
 An unknown state, invalid heading, or conflicting edit signals
 `org-edit-error`. For `++` repeaters, which keep the original interval cadence
@@ -181,8 +177,9 @@ timestamps until they fall after the supplied `:at` time. The document's
 Set it with `:max-future-repeats` in a `make-limits` value passed as `:limits`
 to `parse-org`. Exceeding it signals `org-resource-limit-error`.
 
-Changing a heading to a DONE state is refused with `org-edit-error` reason
-`:blocked` in any of these cases:
+Version 0.2.0 added these dependency checks to the transition APIs introduced
+in 0.1.0. Changing a heading to a DONE state signals `org-edit-error` with
+reason `:blocked` in any of these cases:
 
 - A descendant TODO heading is unfinished.
 - The target is in an ordered sibling sequence and an earlier sibling in
