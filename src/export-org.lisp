@@ -799,13 +799,102 @@
 (defun export-org-backend-render-footnote-definition (node context)
   (declare (ignore node context))
   "")
+(defun export-org-backend-render-timestamp (node view context)
+  (let* ((type (node-property node :type))
+         (range-p (or (eq type :active-range)
+                      (eq type :inactive-range)))
+         (opening (if (or (eq type :inactive)
+                          (eq type :inactive-range))
+                      #\[
+                      #\<))
+         (closing (if (or (eq type :inactive)
+                          (eq type :inactive-range))
+                      #\]
+                      #\>))
+         (adjustments (emitter-object-timestamp-adjustments node)))
+    (if (eq type :diary)
+        (export-org-backend-render-identity node view context)
+        (labels ((date-string (year-key month-key day-key)
+                   (let* ((year (node-property node year-key))
+                          (month (node-property node month-key))
+                          (day (node-property node day-key))
+                          (weekday
+                            (case (cl-date-kit:day-of-week
+                                   (cl-date-kit:make-local-date
+                                    year month day))
+                              (:monday "Mon")
+                              (:tuesday "Tue")
+                              (:wednesday "Wed")
+                              (:thursday "Thu")
+                              (:friday "Fri")
+                              (:saturday "Sat")
+                              (:sunday "Sun"))))
+                     (format nil "~4,'0D-~2,'0D-~2,'0D ~A"
+                             year month day weekday)))
+                 (time-string (hour-key minute-key)
+                   (let ((hour (node-property node hour-key))
+                         (minute (node-property node minute-key)))
+                     (when (and hour minute)
+                       (format nil "~2,'0D:~2,'0D" hour minute))))
+                 (endpoint (year-key month-key day-key hour-key minute-key)
+                   (format nil "~C~A~@[ ~A~]~A~C"
+                           opening
+                           (date-string year-key month-key day-key)
+                           (time-string hour-key minute-key)
+                           adjustments
+                           closing)))
+          (let* ((start-date
+                   (date-string :year-start :month-start :day-start))
+                 (end-date
+                   (date-string :year-end :month-end :day-end))
+                 (start-time (time-string :hour-start :minute-start))
+                 (end-time (time-string :hour-end :minute-end)))
+            (cond
+              ((not range-p)
+               (endpoint :year-start :month-start :day-start
+                         :hour-start :minute-start))
+              ((and (string= start-date end-date) start-time end-time)
+               (format nil "~C~A ~A-~A~A~C"
+                       opening start-date start-time end-time
+                       adjustments closing))
+              (t
+               (format nil "~A--~A"
+                       (endpoint :year-start :month-start :day-start
+                                 :hour-start :minute-start)
+                       (endpoint :year-end :month-end :day-end
+                                 :hour-end :minute-end)))))))))
+(defun export-org-backend-render-link (node view frame context)
+  (let ((result
+          (export-call-link-type-handler-for-view
+           context node view frame)))
+    (if result
+        (let* ((destination (export-link-result-destination result))
+               (description (export-link-result-description result))
+               (children (%export-view-children view))
+               (rendered-description
+                 (if (string=
+                      description
+                      (export-view-plain-text-description view))
+                     (export-org-backend-capture
+                      context
+                      (lambda ()
+                        (export-org-backend-render-children context children)))
+                     description)))
+          (format nil
+                  "[[~A]~A]"
+                  (emitter-object-link-escape-path destination)
+                  (if children
+                      (format nil "[~A]" rendered-description)
+                      "")))
+        (export-org-backend-render-identity node view context))))
 
 (defun export-org-backend-transcode (node view frame context)
-  (declare (ignore frame))
   (case (node-type node)
     (:headline (export-org-backend-render-headline node view context))
     (:section (export-org-backend-render-section node view context))
     (:keyword (export-org-backend-render-keyword node view context))
+    (:link (export-org-backend-render-link node view frame context))
+    (:timestamp (export-org-backend-render-timestamp node view context))
     (:planning
      (if (export-org-backend-option-enabled-p context :planning nil)
          (export-org-backend-render-identity node view context)
@@ -843,7 +932,9 @@
            (export-org-backend-render-identity node view context)
            "")))
     (:export-block (export-org-backend-render-export-block node context))
-    (:footnote-definition (export-org-backend-render-footnote-definition node context))
+    (:footnote-definition
+     (export-org-backend-render-footnote-definition node context))
+    (:inline-src-block "")
     (otherwise (export-org-backend-render-identity node view context))))
 
 (defun export-org-backend-copy-view (view children)

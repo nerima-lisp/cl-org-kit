@@ -111,10 +111,52 @@
           (expect (search "<aside>policy marker</aside>" allowed)
                   :to-be-truthy)
           (expect (search "<u>snippet marker</u>" allowed)
+                  :to-be-truthy))))
+    (it "validates inline :exports while preserving default, code, and results behavior"
+      (let* ((default-source
+               (format nil "src_emacs-lisp{(+ 1 2)}~%"))
+             (results-source
+               (format nil "src_emacs-lisp[:results raw]{(+ 1 2)}~%"))
+             (code-source
+               (format nil "src_emacs-lisp[:results raw :exports code]{(+ 1 2)}~%"))
+             (results-then-code-source
+               (format nil
+                       "src_emacs-lisp[:exports results :exports code]{(+ 1 2)}~%"))
+             (code-then-results-source
+               (format nil
+                       "src_emacs-lisp[:exports code :exports results]{(+ 1 2)}~%"))
+             (invalid-source
+               (format nil "src_emacs-lisp[:exports foo]{(+ 1 2)}~%"))
+             (default-output
+               (export-org (parse-org default-source) :md))
+             (results-output
+               (export-org (parse-org results-source) :md))
+             (code-output
+               (export-org (parse-org code-source) :md))
+             (results-then-code-output
+               (export-org (parse-org results-then-code-source) :md))
+             (code-then-results-output
+               (export-org (parse-org code-then-results-source) :md))
+             (invalid-error
+               (handler-case
+                   (progn (export-org (parse-org invalid-source) :md) nil)
+                 (org-export-unsupported-syntax (condition)
+                   (list (org-export-unsupported-syntax-backend condition)
+                         (org-export-unsupported-syntax-feature condition))))))
+        (with-soft-assertions
+          (expect (search "`(+ 1 2)`" default-output) :to-be-truthy)
+          (expect (search "(+ 1 2)" results-output) :to-be nil)
+          (expect (search "`(+ 1 2)`" code-output) :to-be-truthy)
+          (expect (search "`(+ 1 2)`" results-then-code-output)
+                  :to-be-truthy)
+          (expect (search "`(+ 1 2)`" code-then-results-output) :to-be nil)
+          (expect (and (consp invalid-error)
+                       (eq (first invalid-error) :md)
+                       (eq (second invalid-error) :src-header-argument))
                   :to-be-truthy))))))
 
 (describe "Markdown export"
-  (it "matches all seven pinned Org 9.8.10 Markdown oracle cases byte for byte"
+  (it "matches all eight pinned Org 9.8.10 Markdown oracle cases byte for byte"
     (let* ((rows
              (mapcar
               (lambda (line)
@@ -127,8 +169,8 @@
                           (export-md-test-fixture-path "oracle/manifest.tsv")))))
            (case-names nil))
       (with-soft-assertions
-        (expect (length rows) :to-equal 7)
-        (expect (mapcar #'length rows) :to-equal '(3 3 3 3 3 3 3))
+        (expect (length rows) :to-equal 8)
+        (expect (mapcar #'length rows) :to-equal '(3 3 3 3 3 3 3 3))
         (expect (export-backend-derived-p :md :gfm) :to-be t)
         (dolist (row rows)
           (destructuring-bind (case source include) row
@@ -178,8 +220,12 @@
                               (list include))))))))
         (expect (reverse case-names)
                 :to-equal '("metadata-selection" "exclude-tags-override"
-                            "footnotes-macros-links" "include" "source-blocks"
-                            "md-elements" "org-elements")))))
+                       "footnotes-macros-links"
+                       "include"
+                       "source-blocks"
+                       "md-elements"
+                       "org-elements"
+                       "backend-extended-elements")))))
 
   (it "enforces output character and UTF-8 octet limits"
     (let* ((source "é")

@@ -859,7 +859,27 @@
     (:underline (export-md-render-html-fallback state node view))
     (:code (export-md-render-code-span node))
     (:verbatim (export-md-render-code-span node))
-    (:inline-src-block (export-md-render-code-span node))
+    (:inline-src-block
+     (let* ((parameters
+              (babel-parse-header-arguments
+               (node-property node :parameters)))
+            (exports (assoc "EXPORTS" (reverse parameters) :test #'string=))
+            (results (assoc "RESULTS" parameters :test #'string=))
+            (code-p
+              (if exports
+                  (let ((mode (string-downcase (or (cdr exports) ""))))
+                    (unless (or (string= mode "code")
+                                (string= mode "both")
+                                (string= mode "results")
+                                (string= mode "none"))
+                      (export-unsupported-syntax
+                       :md node (export-source-position node) :src-header-argument
+                       "Unsupported :exports inline source mode"))
+                    (or (string= mode "code") (string= mode "both")))
+                  (null results))))
+       (if code-p
+           (export-md-render-code-span node)
+           "")))
     (:strike-through
      (let ((contents (export-md-inline-contents state view frame context)))
        (export-gfm-check-total-output-length (+ 11 (length contents)))
@@ -959,6 +979,13 @@
     ((:citation :citation-reference)
      (export-gfm-check-total-output-length 10)
      "(??, ????)")
+    (:statistics-cookie
+     (export-md-capture-html-output
+      state
+      (lambda (html-state)
+        (export-html-write html-state "<code>")
+        (export-html-write-raw-text html-state node)
+        (export-html-write html-state "</code>"))))
     (:timestamp
      (export-md-capture-html-output
       state
@@ -1000,6 +1027,9 @@
           (format nil "$$~A$$" (subseq value 2 (- (length value) 2))))
          (t value))))
     (:latex-environment (export-md-node-value node))
+    (:entity (export-md-render-html-fallback state node view))
+    (:verse-block (export-md-render-html-fallback state node view))
+    (:diary-sexp "")
     (otherwise
      (if view
          (export-render-parent-view
@@ -1039,12 +1069,12 @@
 (defun export-md-node-transcoders ()
   (mapcar (lambda (type) (cons type #'export-md-transcode-node))
           '(:center-block :citation :citation-reference :code :drawer
-            :dynamic-block :example-block :export-block :export-snippet
+            :dynamic-block :diary-sexp :entity :example-block :export-block :export-snippet
             :fixed-width :headline :inlinetask :item :keyword
             :latex-environment :latex-fragment :line-break :link
             :node-property :paragraph :plain-list :plain-text
-            :property-drawer :quote-block :section :special-block :src-block
-            :strike-through :table :timestamp :underline :verbatim
+            :property-drawer :quote-block :section :special-block :src-block :statistics-cookie
+            :strike-through :table :timestamp :underline :verse-block :verbatim
             :inline-src-block)))
 
 (defun export-md-render-footnote-definitions (state output-prefix)
@@ -1320,6 +1350,7 @@
    :renderer #'export-md-render-body
    :make-state #'export-md-make-state
    :transcoders (export-md-node-transcoders)
+   :node-policies '((:diary-sexp . :default))
    :accepted-keywords '("HTML")
    :retained-keywords '("HTML")
    :raw-output-options '((:html . :allow-raw-html))

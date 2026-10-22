@@ -1,0 +1,22 @@
+#+options: author:nil
+#+title: Extended backend elements
+Entity: \alpha.
+
+[[mailto:editor@example.test][contact]] and [[file:notes.org][notes]].
+
+#+begin_verse
+First verse line
+Second verse line
+#+end_verse
+
+%%(diary-anniversary 1 1 2000)
+
+| !        | special row |
+|----------+-------------|
+| ordinary | row         |
+* Heading with explicit id [1/2]
+Heading body.
+<2026-10-22 Thu 09:00-10:00>
+[[#backend-heading-id][heading link]]
+** Child heading
+Child body.

@@ -1,0 +1,31 @@
+#+TITLE: Extended backend elements
+#+OPTIONS: author:nil
+
+Entity: \alpha.
+
+[[mailto:editor@example.test][contact]] and [[file:notes.org][notes]].
+
+#+begin_verse
+First verse line
+Second verse line
+#+end_verse
+
+%%(diary-anniversary 1 1 2000)
+src_emacs-lisp[:results raw]{(+ 1 2)}
+|!| special row |
+|---+---|
+| ordinary | row |
+
+* Heading with explicit id [1/2]
+:PROPERTIES:
+:CUSTOM_ID: backend-heading-id
+:END:
+Heading body.
+<2026-10-22 Thu 09:00-10:00>
+[[#backend-heading-id][heading link]]
+
+** Child heading
+:PROPERTIES:
+:CUSTOM_ID: backend-child-id
+:END:
+Child body.

@@ -22,7 +22,7 @@
     (error (condition) condition)))
 
 (describe "E4 Org backend export"
-  (it "matches all seven Org 9.8.10 oracle outputs byte for byte"
+  (it "matches all eight Org 9.8.10 oracle outputs byte for byte"
     (let* ((rows
              (mapcar
               (lambda (line)
@@ -37,8 +37,8 @@
                  "oracle/manifest.tsv")))))
            (case-names nil))
       (with-soft-assertions
-        (expect (length rows) :to-equal 7)
-        (expect (mapcar #'length rows) :to-equal '(3 3 3 3 3 3 3))
+        (expect (length rows) :to-equal 8)
+        (expect (mapcar #'length rows) :to-equal '(3 3 3 3 3 3 3 3))
         (expect (org-kit::export-backend-registered-p :org) :to-be t)
         (dolist (row rows)
           (destructuring-bind (case source include) row
@@ -96,7 +96,7 @@
          :to-equal
          '("metadata-selection" "exclude-tags-override"
            "footnotes-macros-links" "include" "source-blocks"
-           "md-elements" "org-elements")))))
+           "md-elements" "org-elements" "backend-extended-elements")))))
 
   (it "retains only selected properties in a property drawer"
     (let* ((source
@@ -109,6 +109,27 @@
                 :to-be-truthy)
         (expect (search ":PRIVATE: hidden-value" output) :to-be nil)
         (expect (search ":END:" output) :to-be-truthy))))
+
+  (it "distinguishes same-day time ranges with warning adjustments from date ranges"
+    (let* ((time-range
+             (export-org
+              (parse-org "<2026-10-22 10:00-11:00 --2d>")
+              :org))
+           (date-range
+             (export-org
+              (parse-org "<2026-10-22>--<2026-10-24>")
+              :org))
+           (warning-date-range
+             (export-org
+              (parse-org "<2026-10-22 --2d>--<2026-10-24>")
+              :org)))
+      (with-soft-assertions
+        (expect time-range :to-equal
+                (format nil "<2026-10-22 Thu 10:00-11:00 --2d>~%"))
+        (expect date-range :to-equal
+                (format nil "<2026-10-22 Thu>--<2026-10-24 Sat>~%"))
+        (expect warning-date-range :to-equal
+                (format nil "<2026-10-22 Thu --2d>--<2026-10-24 Sat --2d>~%")))))
 
   (it "enforces output character and UTF-8 octet limits"
     (let* ((source "é output")
