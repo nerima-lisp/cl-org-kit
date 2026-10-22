@@ -1,0 +1,7 @@
+#+TITLE: Man options
+#+OPTIONS: title:nil author:nil date:nil ':t \n:t
+
+* Smart quotes and preserved breaks
+A "quoted phrase" and don't use quotes.
+First source line
+Second source line.

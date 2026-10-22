@@ -12,4 +12,5 @@ source-sha256=f4069d92e747e11b083d1a5d34e452c99012facc13b94326a2408b809b079d5c
 include-source=none
 include-source-sha256=none
 html-source-fontification=disabled
+html-htmlize-output-type=disabled
 html-babel-evaluation=disabled

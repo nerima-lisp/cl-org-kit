@@ -1,10 +1,15 @@
-# Main Section
+Unheaded prose before the first section.
 
-Paragraph with **bold**, *italic*, ~~strike~~, <span class="underline">underline</span>, `code-value`, `verbatim-value`, H<sub>2O</sub> and x<sup>2</sup>. An entity &alpha; and a [guide link](https://example.test/guide).
+
+# Main Section *italic* *macro* tail
+
+Paragraph with **bold**, *italic*, ~~strike~~, <span class="underline">underline</span>, `code-value`, `verbatim-value`, H<sub>2O</sub> and x<sup>2</sup>. An entity &alpha; and a [guide link](https://example.test/guide). Progress <code>[1/2]</code>, dated <span class="timestamp-wrapper"><span class="timestamp">&lt;2024-01-01 Mon&gt;</span></span>.
 
 -   First bullet
 -   Second bullet
     -   Nested bullet
+    -   Star bullet
+-   **Term:** Descriptive definition
 
 -   First numbered item
 -   Second numbered item
@@ -27,7 +32,11 @@ Centered line.
 </p>
 </div>
 
-<div class="NOTE" id="org86bb9e1">
+Drawer body.
+
+Dynamic block body.
+
+<div class="NOTE" id="orgcecaf5f">
 <p>
 Special block contents.
 </p>
@@ -47,6 +56,8 @@ Example line.
 Source line.
 ```
 
+Inline source . Inline source code `visible`. First hard-break Second hard-break.
+
     fixed-width line
 
 
@@ -54,10 +65,18 @@ Source line.
 
 # Table of Contents
 
--   [Main Section](#orgab0437f)
-    -   [Second Level](#orga37f9c1)
+-   [Main Section *italic* *macro* tail](#org942836d)
+    -   [Second Level](#org6491132)
 
 
-### Third Level
+### Third Level <code>[0/2]</code>
 
 Final paragraph.
+
+-   Fourth Level
+
+    Deep headline body.
+
+-   Properties
+
+        CUSTOM_ID: property-value

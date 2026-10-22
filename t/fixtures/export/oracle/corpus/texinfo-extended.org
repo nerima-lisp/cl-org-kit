@@ -1,0 +1,23 @@
+#+TITLE: Texinfo Extended
+#+AUTHOR: Fixture Author
+#+OPTIONS: toc:t creator:nil
+
+* Parent *bold*
+:PROPERTIES:
+:ID: texinfo-parent
+:END:
+Parent contents.
+
+** Child /italic/
+Child contents.
+
+*** Deep ~code~
+Deep contents.
+
+* (Alpha)
+Node-name normalization.
+
+* Links and entities
+Local reference: [[id:texinfo-parent][the local target]].
+
+Pound \pound{}, registered \reg{}, euro \EUR{}.

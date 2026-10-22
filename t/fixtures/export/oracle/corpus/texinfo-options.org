@@ -1,7 +1,7 @@
 #+TITLE: Texinfo Options
 #+AUTHOR: Ada Example
 #+OPTIONS: toc:2 creator:nil
-#+TEXINFO_FILENAME: texinfo-options.info
+#+TEXINFO_FILENAME: "handbook"
 #+TEXINFO_CLASS: info
 #+TEXINFO_HEADER: @set x = header
 #+TEXINFO_POST_HEADER: @c post-header directive

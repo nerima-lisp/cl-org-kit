@@ -9,9 +9,10 @@
 Plain Text
 ==========
 
-  .leading-dot remains plain.  'leading-apostrophe remains plain.  Plain
-  escapes: \foo, \\foo, \$, \{.  Code: `. ' \foo \\foo \$ \{' and
-  verbatim `. ' \foo \\foo \$ \{'.
+  \\foo at the start of a paragraph.  .leading-dot remains plain.
+  'leading-apostrophe remains plain.  Plain escapes: \foo, \\foo, \$,
+  \{.  This paragraph ends with a backslash \ Code: `. ' \foo \\foo \$
+  \{' and verbatim `. ' \foo \\foo \$ \{'.
 
   ,----
   | .example-dot

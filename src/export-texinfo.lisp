@@ -471,8 +471,7 @@
          (text (export-texinfo-concat context offset
                                       *export-current-export-phase*
                                       prefix contents)))
-    (if (and (plusp (length text))
-             (not (char= (char text (1- (length text))) (code-char 10))))
+    (if (not (char= (char text (1- (length text))) (code-char 10)))
         (export-texinfo-concat context (+ offset (length text))
                                *export-current-export-phase*
                                text (string (code-char 10)))

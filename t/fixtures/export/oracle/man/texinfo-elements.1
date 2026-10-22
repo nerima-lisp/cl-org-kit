@@ -1,9 +1,12 @@
 .TH "Texinfo Elements" "1" "" "" 
 .SH "Chapter One"
 .PP
-Plain text, \fBbold\fP, \fIitalic\fP, \fCcode\fP, \fIverbatim\fP, \fIstrike\fP, and \fIunderline\fP.
+Plain text, \fBbold\fP, \fIitalic\fP, \fCcode\fP, \fIverbatim\fP, \fIstrike\fP, \fIunderline\fP, H\d\s-22O\s+2\u, x\u\s-22\s+2\d, and α.
 Text with a https://example.org/path \fBat\fP \fIdescribed link\fP and \fIhttps://example.org\fP.
-\fIorg030975c\fP and radio target.
+\fIorg818e881\fP and radio target.
+Email mailto:author@example.test \fBat\fP \fIauthor\fP and \fImailto:plain@example.test\fP.
+File manual.pdf \fBat\fP \fImanual\fP and fuzzy fuzzy:Fuzzy target \fBat\fP \fIsection\fP.
+Inline footnote, timestamp , and progress [1/2].
 .IP \(em 4
 First item
 .IP \(em 4
@@ -49,6 +52,37 @@ _
 one	two
 .TE
 .TB ""
+A named special block.
+Drawer contents.
+Dynamic block contents.
 .SS "Nested Section"
 .PP
 Nested section text.
+.SH "Ordered Only"
+.IP 1.  4
+Ordered first.
+.IP 2.  4
+Ordered second.
+.SH "Descriptive List"
+.TP
+\fBTerm\fP
+Definition.
+.SH "Fuzzy target"
+.PP
+Target section.
+.SH "Top"
+.PP
+Reserved node name.
+.SH "Alpha, Beta."
+.PP
+Punctuation in a node title.
+.SH "Alpha, Beta."
+.PP
+Duplicate node title.
+.SH "Scheduled and clocked"
+.PP
+Timing metadata.
+.PP
+Inline task body.
+.PP
+Inline math .

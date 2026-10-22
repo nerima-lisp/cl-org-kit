@@ -1,6 +1,6 @@
 \input texinfo    @c -*- texinfo -*-
 @c %**start of header
-@setfilename texinfo-options.info
+@setfilename handbook
 @settitle Texinfo Options
 @documentencoding UTF-8
 @documentlanguage en
@@ -10,7 +10,7 @@
 @c post-header directive
 @dircategory User Manuals
 @direntry
-* Texinfo Directory: (texinfo-options). A directory description.
+* Texinfo Directory: (handbook). A directory description.
 @end direntry
 
 @finalout

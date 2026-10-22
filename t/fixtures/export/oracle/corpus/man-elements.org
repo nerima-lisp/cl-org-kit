@@ -2,17 +2,23 @@
 #+AUTHOR: Fixture Author
 #+DATE: 2026-10-21
 #+MAN_CLASS: ignored-class
-#+MAN_CLASS_OPTIONS: :section-id "5" :release "cl-org-kit"
+#+MAN_CLASS_OPTIONS: :section-id "5" :release "release\nline\twith \\slash" :header "Header \"quoted\"" :extra plain
 #+MAN_HEADER: ignored-header
-#+OPTIONS: toc:nil num:nil
+#+OPTIONS: toc:nil num:nil title:nil date:nil prop:t
+#+MACRO: emph /$1/
 
-* Main Section
+Unheaded prose before the first section.
+
+* Main Section /italic/ {{{emph(macro)}}} tail
 Paragraph with *bold*, /italic/, +strike+, _underline_, ~code-value~, =verbatim-value=, H_2O and x^2.
 An entity \alpha{} and a [[https://example.test/guide][guide link]].
+Progress [1/2], dated <2024-01-01 Mon>.
 
 - First bullet
 - Second bullet
   - Nested bullet
+  * Star bullet
+- Term :: Descriptive definition
 
 1. First numbered item
 2. Second numbered item
@@ -29,9 +35,18 @@ Quoted material follows.
 Quoted paragraph.
 #+END_QUOTE
 
+#+NAME: centered-label
 #+BEGIN_CENTER
 Centered line.
 #+END_CENTER
+
+:NOTE:
+Drawer body.
+:END:
+
+#+BEGIN: fixture-block
+Dynamic block body.
+#+END:
 
 #+BEGIN_NOTE
 Special block contents.
@@ -50,6 +65,11 @@ Example line.
 Source line.
 #+END_SRC
 
+Inline source src_text{C:\\tmp}.
+Inline source code src_text[:exports code]{visible}.
+First hard-break\\
+Second hard-break.
+
 : fixed-width line
 
 #+BEGIN_EXPORT man
@@ -61,5 +81,13 @@ Source line.
 #+INDEX: ignored index
 #+TOC: headlines 2
 
-*** Third Level
+*** Third Level [0/2]
 Final paragraph.
+
+**** Fourth Level
+Deep headline body.
+
+**** Properties
+:PROPERTIES:
+:CUSTOM_ID: property-value
+:END:

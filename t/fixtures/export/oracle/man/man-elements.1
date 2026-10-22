@@ -1,14 +1,23 @@
-.TH "Man Backend Elements" "5" "2026-10-21" "cl-org-kit" 
-.SH "Main Section"
+.TH " " "5" "" "release
+line	with \slash" "Header "quoted"" 
+.PP
+Unheaded prose before the first section.
+.SH "Main Section \fIitalic\fP \fImacro\fP tail"
 .PP
 Paragraph with \fBbold\fP, \fIitalic\fP, \fIstrike\fP, \fIunderline\fP, \fCcode\-value\fP, \fIverbatim\-value\fP, H\d\s-22O\s+2\u and x\u\s-22\s+2\d.
 An entity α and a https://example.test/guide \fBat\fP \fIguide link\fP.
+Progress [1/2], dated .
 .IP \(em 4
 First bullet
 .IP \(em 4
 Second bullet
 .IP \(em 4
 Nested bullet
+.IP \(bu 4
+Star bullet
+.TP
+\fBTerm\fP
+Descriptive definition
 .IP \(dg 4
 First numbered item
 .IP \(dg 4
@@ -30,11 +39,15 @@ Quoted material follows.
 Quoted paragraph.
 
 .RE
+centered-label
+.br
 .ce 1
 .nf
 Centered line.
 
 .fi
+Drawer body.
+Dynamic block body.
 Special block contents.
 .RS
 .ft I
@@ -55,6 +68,19 @@ Example line.
 \fP
 .fi
 .RE
+.PP
+Inline source .
+Inline source code .RS
+.nf
+\fC
+visible
+\fP
+.fi
+.RE
+.
+First hard-break
+.br
+Second hard-break.
 \fC
 fixed-width line
 \fP
@@ -62,6 +88,25 @@ fixed-width line
 .PP
 .br
 .\" raw keyword output
-.SS "Third Level"
+.SS "Third Level [0/2]"
 .PP
 Final paragraph.
+.RS
+.TP
+.ft I
+Fourth Level
+.ft
+.PP
+Deep headline body.
+.RE
+.TP
+.ft I
+Properties
+.ft
+.RS
+.nf
+CUSTOM_ID: property-value
+
+.fi
+.RE
+.RE

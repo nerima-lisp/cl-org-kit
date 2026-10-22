@@ -4,9 +4,10 @@
 (defstruct (export-man-output (:constructor %make-export-man-output))
   buffer
   context
-  (base-offset 0 :type (integer 0)))
+  (base-offset 0))
 
 (defun export-man-make-output (context)
+  (check-type *export-current-output-offset* (integer 0))
   (%make-export-man-output
    :buffer (make-array 0 :element-type 'character :adjustable t :fill-pointer 0)
    :context context
@@ -741,30 +742,33 @@
     (export-man-output-string output)))
 
 (defun export-man-clone-node-and-view (view root-document)
-  (let* ((source-node (export-view-node view))
-         (source-document (or (export-view-source-document view)
-                              (node-document source-node)
-                              root-document))
-         (children (mapcar (lambda (child)
-                             (export-man-clone-node-and-view child root-document))
-                           (export-view-children view)))
-         (node (make-node
-                (node-type source-node)
-                :begin (node-begin source-node) :end (node-end source-node)
-                :contents-begin (node-contents-begin source-node)
-                :contents-end (node-contents-end source-node)
-                :post-affiliated (node-post-affiliated source-node)
-                :post-blank (if (member (node-type-category (node-type source-node))
-                                        (quote (:greater-element :lesser-element)))
-                                0
-                                (node-post-blank source-node))
-                :properties (node-properties source-node)
-                :children (mapcar (function export-view-node) children))))
-    (when (null (node-parent node))
-      (setf (%node-document node) source-document))
-    (%make-export-view :node node :children children
-                       :payload (export-view-payload view)
-                       :source-document source-document)))
+  (labels ((clone-view (view)
+             (let* ((source-node (export-view-node view))
+                    (source-document (or (export-view-source-document view)
+                                         (node-document source-node)
+                                         root-document))
+                    (children (mapcar #'clone-view (export-view-children view)))
+                    (node (make-node
+                           (node-type source-node)
+                           :begin (node-begin source-node)
+                           :end (node-end source-node)
+                           :contents-begin (node-contents-begin source-node)
+                           :contents-end (node-contents-end source-node)
+                           :post-affiliated (node-post-affiliated source-node)
+                           :post-blank
+                           (if (member (node-type-category (node-type source-node))
+                                       '(:greater-element :lesser-element))
+                               0
+                               (node-post-blank source-node))
+                           :properties (node-properties source-node)
+                           :children (mapcar #'export-view-node children))))
+               (%make-export-view :node node :children children
+                                  :payload (export-view-payload view)
+                                  :source-document source-document))))
+    (let ((cloned-view (clone-view view)))
+      (setf (%node-document (export-view-node cloned-view))
+            (export-view-source-document cloned-view))
+      cloned-view)))
 
 (defun export-man-remove-post-blank (views context)
   (let ((document (export-render-context-document context)))

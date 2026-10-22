@@ -196,13 +196,16 @@
 </head>
 <body>
 <div id="content" class="content">
-<h1 class="title">Man Backend Elements</h1>
-<div id="outline-container-org1baaa24" class="outline-2">
-<h2 id="org1baaa24">Main Section</h2>
-<div class="outline-text-2" id="text-org1baaa24">
+<p>
+Unheaded prose before the first section.
+</p>
+<div id="outline-container-org74f297c" class="outline-2">
+<h2 id="org74f297c">Main Section <i>italic</i> <i>macro</i> tail</h2>
+<div class="outline-text-2" id="text-org74f297c">
 <p>
 Paragraph with <b>bold</b>, <i>italic</i>, <del>strike</del>, <span class="underline">underline</span>, <code>code-value</code>, <code>verbatim-value</code>, H<sub>2O</sub> and x<sup>2</sup>.
 An entity &alpha; and a <a href="https://example.test/guide">guide link</a>.
+Progress <code>[1/2]</code>, dated <span class="timestamp-wrapper"><span class="timestamp">&lt;2024-01-01 Mon&gt;</span></span>.
 </p>
 
 <ul class="org-ul">
@@ -210,7 +213,9 @@ An entity &alpha; and a <a href="https://example.test/guide">guide link</a>.
 <li>Second bullet
 <ul class="org-ul">
 <li>Nested bullet</li>
+<li>Star bullet</li>
 </ul></li>
+<li id="Term">Descriptive definition</li>
 
 <li>First numbered item</li>
 <li>Second numbered item</li>
@@ -243,9 +248,9 @@ An entity &alpha; and a <a href="https://example.test/guide">guide link</a>.
 </tbody>
 </table>
 </div>
-<div id="outline-container-org7c282b4" class="outline-3">
-<h3 id="org7c282b4">Second Level</h3>
-<div class="outline-text-3" id="text-org7c282b4">
+<div id="outline-container-org0066028" class="outline-3">
+<h3 id="org0066028">Second Level</h3>
+<div class="outline-text-3" id="text-org0066028">
 <p>
 Quoted material follows.
 </p>
@@ -262,7 +267,15 @@ Centered line.
 </p>
 </div>
 
-<div class="NOTE" id="orgb5fd574">
+<p>
+Drawer body.
+</p>
+
+<p>
+Dynamic block body.
+</p>
+
+<div class="NOTE" id="org87ae51a">
 <p>
 Special block contents.
 </p>
@@ -274,7 +287,7 @@ Verse line one<br />
 Verse line two<br />
 </p>
 
-<pre class="example" id="orga8a77e4">
+<pre class="example" id="org4eecce3">
 Example line.
 </pre>
 
@@ -282,6 +295,13 @@ Example line.
 <pre class="src src-text"><code>Source line.
 </code></pre>
 </div>
+
+<p>
+Inline source .
+Inline source code <code class="src src-text">visible</code>.
+First hard-break<br />
+Second hard-break.
+</p>
 
 <pre class="example">
 fixed-width line
@@ -294,28 +314,43 @@ fixed-width line
 <h2>Table of Contents</h2>
 <div id="text-table-of-contents" role="doc-toc">
 <ul>
-<li><a href="#org1baaa24">Main Section</a>
+<li><a href="#org74f297c">Main Section <i>italic</i> <i>macro</i> tail</a>
 <ul>
-<li><a href="#org7c282b4">Second Level</a></li>
+<li><a href="#org0066028">Second Level</a></li>
 </ul>
 </li>
 </ul>
 </div>
 </div>
 </div>
-<div id="outline-container-org2138d0d" class="outline-4">
-<h4 id="org2138d0d">Third Level</h4>
-<div class="outline-text-4" id="text-org2138d0d">
+<div id="outline-container-org6d3873e" class="outline-4">
+<h4 id="org6d3873e">Third Level <code>[0/2]</code></h4>
+<div class="outline-text-4" id="text-org6d3873e">
 <p>
 Final paragraph.
 </p>
 </div>
+<ul class="org-ul">
+<li><a id="org2bfa88a"></a>Fourth Level<br />
+<div class="outline-text-5" id="text-org2bfa88a">
+<p>
+Deep headline body.
+</p>
+</div>
+</li>
+<li><a id="property-value"></a>Properties<br />
+<div class="outline-text-5" id="text-property-value">
+<pre class="example">
+CUSTOM_ID: property-value
+</pre>
+</div>
+</li>
+</ul>
 </div>
 </div>
 </div>
 </div>
 <div id="postamble" class="status">
-<p class="date">Date: 2026-10-21</p>
 <p class="author">Author: Fixture Author</p>
 <p class="validation"><a href="https://validator.w3.org/check?uri=referer">Validate</a></p>
 </div>

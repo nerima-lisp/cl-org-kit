@@ -1,11 +1,14 @@
 #+TITLE: Texinfo Elements
 #+AUTHOR: Ada Example
-#+OPTIONS: toc:nil creator:nil
+#+OPTIONS: toc:nil creator:nil ^:t tex:t prop:t c:t p:t inline:t
 
 * Chapter One
-Plain text, *bold*, /italic/, ~code~, =verbatim=, +strike+, and _underline_.
+Plain text, *bold*, /italic/, ~code~, =verbatim=, +strike+, _underline_, H_2O, x^2, and \alpha{}.
 Text with a [[https://example.org/path][described link]] and [[https://example.org]].
 <<chapter-anchor>> and <<<radio target>>>.
+Email [[mailto:author@example.test][author]] and [[mailto:plain@example.test]].
+File [[file:manual.pdf][manual]] and fuzzy [[Fuzzy target][section]].
+Inline footnote[fn::an inline note], timestamp <2024-01-01 Mon>, and progress [1/2].
 
 - First item
 - Second item
@@ -38,9 +41,54 @@ A source block.
 |-------+--------|
 | one   | two    |
 
+#+BEGIN_warning
+A named special block.
+#+END_warning
+
+:NOTE:
+Drawer contents.
+:END:
+
+#+BEGIN: fixture-block
+Dynamic block contents.
+#+END:
+
 #+begin_export texinfo
 @subheading Raw export block
 #+end_export
 
 ** Nested Section
 Nested section text.
+
+* Ordered Only
+1. Ordered first.
+2. Ordered second.
+
+* Descriptive List
+- Term :: Definition.
+
+* Fuzzy target
+Target section.
+
+* Top
+Reserved node name.
+
+* Alpha, Beta.
+Punctuation in a node title.
+
+* Alpha, Beta.
+Duplicate node title.
+
+* Scheduled and clocked
+SCHEDULED: <2024-01-01 Mon>
+CLOCK: [2024-01-01 Mon 09:00]--[2024-01-01 Mon 10:00] => 1:00
+Timing metadata.
+
+*************** TODO Inline task
+Inline task body.
+
+Inline math \(\alpha + \beta\).
+
+\begin{equation}
+x = y
+\end{equation}

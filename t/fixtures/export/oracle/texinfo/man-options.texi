@@ -1,0 +1,35 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Man options
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Man options.
+@end direntry
+
+@finalout
+@titlepage
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Man options
+@end ifnottex
+
+@menu
+* Smart quotes and preserved breaks::
+@end menu
+
+@node Smart quotes and preserved breaks
+@chapter Smart quotes and preserved breaks
+
+A ``quoted phrase'' and don't use quotes. @*
+First source line @*
+Second source line. @*
+
+@bye

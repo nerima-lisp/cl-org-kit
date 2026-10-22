@@ -1,0 +1,51 @@
+                           __________________
+
+                            TEXINFO EXTENDED
+
+                             Fixture Author
+                           __________________
+
+
+Table of Contents
+_________________
+
+1. Parent *bold*
+.. 1. Child /italic/
+..... 1. Deep `code'
+2. (Alpha)
+3. Links and entities
+
+
+1 Parent *bold*
+===============
+
+  Parent contents.
+
+
+1.1 Child /italic/
+~~~~~~~~~~~~~~~~~~
+
+  Child contents.
+
+
+1.1.1 Deep `code'
+-----------------
+
+  Deep contents.
+
+
+2 (Alpha)
+=========
+
+  Node-name normalization.
+
+
+3 Links and entities
+====================
+
+  Local reference: [the local target].
+
+  Pound pound, registered (r), euro EUR.
+
+
+[the local target] See section 1

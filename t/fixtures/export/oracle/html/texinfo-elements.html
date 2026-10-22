@@ -193,17 +193,52 @@
     { background-color: #ffff00; color: #000000; font-weight: bold; }
   .org-svg { }
 </style>
+<script>
+  window.MathJax = {
+    tex: {
+      ams: {
+        multlineWidth: '85%'
+      },
+      tags: 'ams',
+      tagSide: 'right',
+      tagIndent: '.8em'
+    },
+    chtml: {
+      scale: 1.0,
+      displayAlign: 'center',
+      displayIndent: '0em'
+    },
+    svg: {
+      scale: 1.0,
+      displayAlign: 'center',
+      displayIndent: '0em'
+    },
+    output: {
+      font: 'mathjax-modern',
+      displayOverflow: 'overflow'
+    }
+  };
+</script>
+
+<script
+  id="MathJax-script"
+  async
+  src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+</script>
 </head>
 <body>
 <div id="content" class="content">
 <h1 class="title">Texinfo Elements</h1>
-<div id="outline-container-orgf8b4b7c" class="outline-2">
-<h2 id="orgf8b4b7c"><span class="section-number-2">1.</span> Chapter One</h2>
+<div id="outline-container-org58490b8" class="outline-2">
+<h2 id="org58490b8"><span class="section-number-2">1.</span> Chapter One</h2>
 <div class="outline-text-2" id="text-1">
 <p>
-Plain text, <b>bold</b>, <i>italic</i>, <code>code</code>, <code>verbatim</code>, <del>strike</del>, and <span class="underline">underline</span>.
+Plain text, <b>bold</b>, <i>italic</i>, <code>code</code>, <code>verbatim</code>, <del>strike</del>, <span class="underline">underline</span>, H<sub>2O</sub>, x<sup>2</sup>, and &alpha;.
 Text with a <a href="https://example.org/path">described link</a> and <a href="https://example.org">https://example.org</a>.
-<a id="orgfb5d93d"></a> and <a id="orgd94694f">radio target</a>.
+<a id="org5422f2d"></a> and <a id="org1d2b4c5">radio target</a>.
+Email <a href="mailto:author@example.test">author</a> and <a href="mailto:plain@example.test">mailto:plain@example.test</a>.
+File <a href="manual.pdf">manual</a> and fuzzy <a href="#org848f32f">section</a>.
+Inline footnote<sup><a id="fnr.1" class="footref" href="#fn.1" role="doc-backlink">1</a></sup>, timestamp <span class="timestamp-wrapper"><span class="timestamp">&lt;2024-01-01 Mon&gt;</span></span>, and progress <code>[1/2]</code>.
 </p>
 
 <ul class="org-ul">
@@ -231,7 +266,7 @@ First verse line<br />
 Second verse line<br />
 </p>
 
-<pre class="example" id="orgde5a762">
+<pre class="example" id="orgb532b89">
 An example block.
 </pre>
 
@@ -261,9 +296,24 @@ An example block.
 </tr>
 </tbody>
 </table>
+
+<div class="warning" id="orge82c1bd">
+<p>
+A named special block.
+</p>
+
 </div>
-<div id="outline-container-orgc9c30d8" class="outline-3">
-<h3 id="orgc9c30d8"><span class="section-number-3">1.1.</span> Nested Section</h3>
+
+<p>
+Drawer contents.
+</p>
+
+<p>
+Dynamic block contents.
+</p>
+</div>
+<div id="outline-container-orgdeb4e66" class="outline-3">
+<h3 id="orgdeb4e66"><span class="section-number-3">1.1.</span> Nested Section</h3>
 <div class="outline-text-3" id="text-1-1">
 <p>
 Nested section text.
@@ -271,7 +321,93 @@ Nested section text.
 </div>
 </div>
 </div>
+<div id="outline-container-org2524fe7" class="outline-2">
+<h2 id="org2524fe7"><span class="section-number-2">2.</span> Ordered Only</h2>
+<div class="outline-text-2" id="text-2">
+<ol class="org-ol">
+<li>Ordered first.</li>
+<li>Ordered second.</li>
+</ol>
 </div>
+</div>
+<div id="outline-container-org9109501" class="outline-2">
+<h2 id="org9109501"><span class="section-number-2">3.</span> Descriptive List</h2>
+<div class="outline-text-2" id="text-3">
+<dl class="org-dl">
+<dt>Term</dt><dd>Definition.</dd>
+</dl>
+</div>
+</div>
+<div id="outline-container-org848f32f" class="outline-2">
+<h2 id="org848f32f"><span class="section-number-2">4.</span> Fuzzy target</h2>
+<div class="outline-text-2" id="text-4">
+<p>
+Target section.
+</p>
+</div>
+</div>
+<div id="outline-container-org187562f" class="outline-2">
+<h2 id="org187562f"><span class="section-number-2">5.</span> Top</h2>
+<div class="outline-text-2" id="text-5">
+<p>
+Reserved node name.
+</p>
+</div>
+</div>
+<div id="outline-container-orgd9bbefe" class="outline-2">
+<h2 id="orgd9bbefe"><span class="section-number-2">6.</span> Alpha, Beta.</h2>
+<div class="outline-text-2" id="text-6">
+<p>
+Punctuation in a node title.
+</p>
+</div>
+</div>
+<div id="outline-container-org691ff0a" class="outline-2">
+<h2 id="org691ff0a"><span class="section-number-2">7.</span> Alpha, Beta.</h2>
+<div class="outline-text-2" id="text-7">
+<p>
+Duplicate node title.
+</p>
+</div>
+</div>
+<div id="outline-container-orgaff721f" class="outline-2">
+<h2 id="orgaff721f"><span class="section-number-2">8.</span> Scheduled and clocked</h2>
+<div class="outline-text-2" id="text-8">
+<p><span class="timestamp-wrapper"><span class="timestamp-kwd">SCHEDULED:</span> <span class="timestamp">&lt;2024-01-01 Mon&gt;</span></span></p>
+<p>
+<span class="timestamp-wrapper">
+<span class="timestamp-kwd">CLOCK:</span> <span class="timestamp">[2024-01-01 Mon 09:00]&ndash;[2024-01-01 Mon 10:00] </span> <span class="timestamp">(1:00)</span>
+</span>
+</p>
+<p>
+Timing metadata.
+</p>
+
+<div class="inlinetask">
+<b><span class="todo TODO">TODO</span> Inline task</b><br />
+</div>
+<p>
+Inline task body.
+</p>
+
+<p>
+Inline math \(\alpha + \beta\).
+</p>
+
+\begin{equation}
+x = y
+\end{equation}
+</div>
+</div>
+<div id="footnotes">
+<h2 class="footnotes">Footnotes: </h2>
+<div id="text-footnotes">
+
+<div class="footdef"><sup><a id="fn.1" class="footnum" href="#fnr.1" role="doc-backlink">1</a></sup> <div class="footpara" role="doc-footnote"><p class="footpara">an inline note</p></div></div>
+
+
+</div>
+</div></div>
 <div id="postamble" class="status">
 <p class="author">Author: Ada Example</p>
 <p class="validation"><a href="https://validator.w3.org/check?uri=referer">Validate</a></p>

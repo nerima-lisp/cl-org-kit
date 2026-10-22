@@ -1,23 +1,21 @@
-                         ______________________
-
-                          MAN BACKEND ELEMENTS
-
-                             Fixture Author
-                         ______________________
+Fixture Author
 
 
-                               2026-10-21
+Unheaded prose before the first section.
 
 
-Main Section
-============
+Main Section /italic/ /macro/ tail
+==================================
 
   Paragraph with *bold*, /italic/, +strike+, _underline_, `code-value',
   `verbatim-value', H_2O and x^2.  An entity alpha and a [guide link].
+  Progress [1/2], dated <2024-01-01 Mon>.
 
   - First bullet
   - Second bullet
     - Nested bullet
+    * Star bullet
+  - Descriptive definition
 
   1. First numbered item
   2. Second numbered item
@@ -39,6 +37,10 @@ Second Level
 
   			    Centered line.
 
+  Drawer body.
+
+  Dynamic block body.
+
   Special block contents.
 
         Verse line one
@@ -52,6 +54,9 @@ Second Level
   | Source line.
   `----
 
+  Inline source .  Inline source code `visible'.  First hard-break
+  Second hard-break.
+
   ,----
   | fixed-width line
   `----
@@ -60,11 +65,21 @@ Second Level
   Table of Contents
   _________________
 
-  Main Section
+  Main Section /italic/ /macro/ tail
   .. Second Level
 
 
-Third Level
------------
+Third Level [0/2]
+-----------------
 
   Final paragraph.
+
+
+* Fourth Level
+
+  Deep headline body.
+
+
+* Properties
+
+  CUSTOM_ID: property-value

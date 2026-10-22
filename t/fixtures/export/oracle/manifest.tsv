@@ -8,5 +8,7 @@ source-blocks	source-blocks.org	-
 texinfo-elements	texinfo-elements.org	-
 texinfo-options	texinfo-options.org	-
 texinfo-escape-boundaries	texinfo-escape-boundaries.org	-
+texinfo-extended	texinfo-extended.org	-
 man-elements	man-elements.org	-
 man-escapes	man-escapes.org	-
+man-options	man-options.org	-

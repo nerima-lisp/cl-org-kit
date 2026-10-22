@@ -28,9 +28,11 @@
 @node Plain Text
 @unnumbered Plain Text
 
+\\foo at the start of a paragraph.
 .leading-dot remains plain.
 'leading-apostrophe remains plain.
 Plain escapes: \foo@comma{} \\foo@comma{} \$@comma{} \@{.
+This paragraph ends with a backslash \
 Code: @code{. ' \foo \\foo \$ \@{} and verbatim @samp{. ' \foo \\foo \$ \@{}.
 
 @example

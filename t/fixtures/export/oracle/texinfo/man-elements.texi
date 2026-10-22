@@ -12,37 +12,40 @@
 
 @finalout
 @titlepage
-@title Man Backend Elements
 @author Fixture Author
 @end titlepage
 
 @ifnottex
 @node Top
 @top Man Backend Elements
+
+Unheaded prose before the first section.
+
 @end ifnottex
 
 @menu
-* Main Section::
+* Main Section @emph{italic} @emph{macro} tail::
 
 @detailmenu
 --- The Detailed Node Listing ---
 
-Main Section
+Main Section @emph{italic} @emph{macro} tail
 
 * Second Level::
 
 Second Level
 
-* Third Level::
+* Third Level [0/2]::
 
 @end detailmenu
 @end menu
 
-@node Main Section
-@unnumbered Main Section
+@node Main Section @emph{italic} @emph{macro} tail
+@unnumbered Main Section @emph{italic} @emph{macro} tail
 
 Paragraph with @strong{bold}@comma{} @emph{italic}@comma{} strike@comma{} underline@comma{} @code{code-value}@comma{} @samp{verbatim-value}@comma{} H@math{_2O} and x@math{^2}.
 An entity α and a @uref{https://example.test/guide, guide link}.
+Progress [1/2]@comma{} dated @emph{<2024-01-01 Mon>}.
 
 @itemize
 @item
@@ -52,7 +55,11 @@ Second bullet
 @itemize
 @item
 Nested bullet
+@item
+Star bullet
 @end itemize
+@item Term
+Descriptive definition
 
 @item
 First numbered item
@@ -83,7 +90,12 @@ Quoted paragraph.
 
 @end quotation
 
+@anchor{centered-label}
 @center Centered line.
+
+Drawer body.
+
+Dynamic block body.
 
 @NOTE
 Special block contents.
@@ -102,17 +114,38 @@ Example line.
 Source line.
 @end example
 
+Inline source .
+Inline source code @code{visible}.
+First hard-break@*
+Second hard-break.
+
 @example
 fixed-width line
 @end example
 
 @menu
-* Third Level::
+* Third Level [0/2]::
 @end menu
 
-@node Third Level
-@unnumberedsubsec Third Level
+@node Third Level [0/2]
+@unnumberedsubsec Third Level [0/2]
 
 Final paragraph.
+
+@itemize
+@item
+@anchor{Fourth Level}Fourth Level
+
+
+Deep headline body.
+
+@item
+@anchor{Properties}Properties
+
+
+@verbatim
+CUSTOM_ID: property-value
+@end verbatim
+@end itemize
 
 @bye

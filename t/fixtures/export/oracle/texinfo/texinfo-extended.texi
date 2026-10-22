@@ -1,0 +1,80 @@
+\input texinfo    @c -*- texinfo -*-
+@c %**start of header
+@settitle Texinfo Extended
+@documentencoding UTF-8
+@documentlanguage en
+@c %**end of header
+
+@dircategory Misc
+@direntry
+* (nil).                Texinfo Extended.
+@end direntry
+
+@finalout
+@titlepage
+@title Texinfo Extended
+@author Fixture Author
+@end titlepage
+
+@contents
+
+@ifnottex
+@node Top
+@top Texinfo Extended
+@end ifnottex
+
+@menu
+* Parent @strong{bold}::
+* (Alpha): [Alpha). 
+* Links and entities::
+
+@detailmenu
+--- The Detailed Node Listing ---
+
+Parent @strong{bold}
+
+* Child @emph{italic}::
+
+Child @emph{italic}
+
+* Deep @code{code}::
+
+@end detailmenu
+@end menu
+
+@node Parent @strong{bold}
+@chapter Parent @strong{bold}
+
+Parent contents.
+
+@menu
+* Child @emph{italic}::
+@end menu
+
+@node Child @emph{italic}
+@section Child @emph{italic}
+
+Child contents.
+
+@menu
+* Deep @code{code}::
+@end menu
+
+@node Deep @code{code}
+@subsection Deep @code{code}
+
+Deep contents.
+
+@node [Alpha)
+@chapter (Alpha)
+
+Node-name normalization.
+
+@node Links and entities
+@chapter Links and entities
+
+Local reference: @ref{Parent @strong{bold}, , the local target}.
+
+Pound @pound{}@comma{} registered @registeredsymbol{}@comma{} euro @euro{}.
+
+@bye
