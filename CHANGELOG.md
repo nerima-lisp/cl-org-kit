@@ -5,8 +5,8 @@
 ### Added
 
 - Add `wrong-header-argument`, `wrong-header-value`, and `named-result` checks
-  to `org-kit:org-lint`, completing coverage of all 61 active Org 9.8.10 checker
-  names. See the [lint guide](docs/src/guides/lint.md).
+  to `org-kit:org-lint`, completing support for all 61 checker names defined
+  in Org 9.8.10. See the [lint guide](docs/src/guides/lint.md).
 - Add agenda search (`agenda-search-view`), stuck-project and custom views
   (`agenda-stuck-projects`, `agenda-custom`), time grids, sorting that preserves
   order on ties, text/Org output, and bulk actions (`agenda-bulk-action`). See
@@ -14,8 +14,8 @@
 - Add `org-kit:babel-detangle` to update source blocks from tangle output and
   return the change as an `edit-result`. See the
   [Babel guide](docs/src/guides/babel.md).
-- Export one parsed document as iCalendar with `org-kit:export-org` and
-  `:icalendar`, or combine documents into one calendar with
+- Export one parsed document as iCalendar with `org-kit:export-org` using the
+  `:icalendar` backend, or combine documents into one calendar with
   `org-kit:export-icalendar-documents`. See the
   [export guide](docs/src/guides/export.md).
 - Add `org-kit:export-org-texinfo` and `org-kit:export-org-man` for Texinfo and
@@ -24,16 +24,16 @@
 
 ### Changed
 
-- Change `org-kit:make-babel-shell-reference-executor` from a pass-through to
-  a runner adapter; caller-provided callbacks accept `(shell script stdin cmdline)`
-  and return stdout as a string. Babel `:results output table` preserves empty
-  fields as `""`; consumers must handle them. See the [Babel guide](docs/src/guides/babel.md).
+- Update runners passed to `org-kit:make-babel-shell-reference-executor` to
+  accept `(shell script stdin cmdline)` and return stdout as a string. Babel
+  `:results output table` preserves empty fields as `""`; consumers must handle
+  them. See the [Babel guide](docs/src/guides/babel.md).
 
 ### Public API
 
 The agenda API adds category access through `agenda-entry-category` and source
 editing through `agenda-write-into`, which returns an `edit-result` for
-replacing a caller-selected range with rendered output.
+replacing a range in the input document with rendered output.
 
 The new exports in this release are `org-kit:babel-detangle`,
 `org-kit:agenda-entry-category`, `org-kit:agenda-bulk-action`,
@@ -49,7 +49,7 @@ The new exports in this release are `org-kit:babel-detangle`,
 `org-kit:export-org-man`, `org-kit:export-org-texinfo`, and
 `org-kit:export-icalendar-documents`.
 
-No exported names were removed from 0.2.0.
+This release removes no names exported in 0.2.0.
 
 ## [0.2.0]
 
