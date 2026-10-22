@@ -74,7 +74,7 @@
   (it "executes restricted org-sbe calls through the registered Babel executor"
   (labels ((source-for (formula)
              (format nil
-                     "#+name: sample~%#+begin_src mock :cache no~%body~%#+end_src~%| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2=~A~%"
+                     "#+name: sample~%#+begin_src mock :cache no~%body~%#+end_src~%| value | result |~%|-------+--------|~%| alpha | old |~%#+TBLFM: @2$2=~A~%#+name: nil~%| 42 |~%"
                      formula))
            (recalculate (formula executor)
              (let* ((source (source-for formula))
@@ -97,7 +97,7 @@
                          received-parameters received-variables)))))
     (multiple-value-bind (text parameters variables)
         (recalculate
-         "'(org-sbe sample \":cache yes\" (one 7) (many 1 2) (literal $ \"a b\"))"
+         "'(org-sbe sample \":cache yes\" (one 7) (many \"1\" \"2\") (literal $ \"a b\") (empty))"
          (lambda (body parameters variables)
            (declare (ignore body parameters variables))
            "  trimmed result  "))
@@ -107,14 +107,18 @@
                 :to-equal "yes")
         (expect (cdr (assoc "one" variables :test #'string=)) :to-equal 7)
         (progn
-  (expect (cdr (assoc "many" variables :test #'string=))
-          :to-equal '(1 2))
-  (let ((var-parameters
-          (remove-if-not (lambda (parameter)
-                           (string= (car parameter) "VAR"))
-                         parameters)))
-    (expect (cdr (second var-parameters))
-            :to-equal "many='(1 2)")))
+          (expect (cdr (assoc "many" variables :test #'string=))
+                  :to-equal '(1 2))
+          (expect (cdr (assoc "empty" variables :test #'string=))
+                  :to-equal '((42)))
+          (let ((var-parameters
+                  (remove-if-not (lambda (parameter)
+                                   (string= (car parameter) "VAR"))
+                                 parameters)))
+            (expect (cdr (second var-parameters))
+                    :to-equal "many='(1 2)")
+            (expect (cdr (fourth var-parameters))
+                    :to-equal "empty=nil")))
         (expect (cdr (assoc "literal" variables :test #'string=))
                 :to-equal "a b")))
     (multiple-value-bind (text parameters variables)
@@ -1734,7 +1738,7 @@
                 :to-equal "7")
         (expect (org-kit::table-recalculate-org-sbe-parameter-text
                  "empty" nil nil limits)
-                :to-equal "empty=")
+                :to-equal "empty=nil")
         (expect (org-kit::table-recalculate-org-sbe-parameter-text
                  "single" (list "text") (list t) limits)
                 :to-equal "single=\"text\"")
@@ -1758,7 +1762,7 @@
   (it "resolves Org-sbe overrides and reports missing or cyclic source references"
     (let* ((document
              (parse-org
-              (format nil "#+name: sample~%#+begin_src mock~%body~%#+end_src~%")))
+              (format nil "#+name: sample~%#+begin_src mock~%body~%#+end_src~%#+name: nil~%| 42 |~%")))
            (calls 0)
            (context
              (org-kit::make-babel-resolution-context
@@ -1813,7 +1817,7 @@
           (expect
            (cdr (org-kit::table-recalculate-org-sbe-override
                  (list "empty" nil nil) context))
-           :to-equal "")
+           :to-equal '((42)))
           (expect
            (cdr (org-kit::table-recalculate-org-sbe-override
                  (list "single" (list "sample") (list nil)) context))

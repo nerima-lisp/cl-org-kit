@@ -598,7 +598,7 @@
     (name values literal-flags limits)
   (let* ((value-text
            (cond
-             ((null values) "")
+             ((null values) "nil")
              ((rest values)
               (format nil "'(~{~A~^ ~})"
                       (loop for value in values
@@ -627,7 +627,9 @@
   (destructuring-bind (name values literal-flags) spec
     (cons name
           (cond
-            ((null values) "")
+            ((null values)
+             (table-recalculate-org-sbe-resolve-value
+              "nil" nil context))
             ((null (rest values))
              (table-recalculate-org-sbe-resolve-value
               (first values) (first literal-flags) context))
