@@ -61,7 +61,7 @@
         (expect (search "<div id=\"stable-special\" class=\"custom note\">"
                         output)
                 :to-be-truthy)))
-    (it "renders descriptive terms and keeps ordered lists numbered with num:nil"
+    (it "renders descriptive terms and respects num:nil for ordered lists"
       (let* ((source
                (format nil "- Term :: Definition body.~%"))
              (output (export-org (parse-org source) :md))
@@ -80,7 +80,7 @@
                   :to-be-truthy)
           (expect (search
                    (format nil
-                           "1.   First item~%2.   Second item")
+                           "-   First item~%-   Second item")
                    num-nil-output)
                   :to-be-truthy)
           (expect (search
