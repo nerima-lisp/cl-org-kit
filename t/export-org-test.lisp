@@ -248,7 +248,7 @@
            (keywords
              (export-org
               (parse-org
-               (format nil "#+RESULTS:~%#+RESULTS: Value~%#+CUSTOM_KEY: Visible~%"))
+               (format nil "#+RESULTS:~%~%#+RESULTS: Value~%~%#+CUSTOM_KEY: Visible~%"))
               :org))
            (timestamps
              (export-org

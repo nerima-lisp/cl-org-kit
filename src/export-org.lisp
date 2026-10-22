@@ -664,7 +664,7 @@
                                          (setf heading (concatenate 'string heading " "
                                                                     (export-org-backend-title-text node)))
                                          (when (and tags
-                                                    (export-org-backend-option-enabled-p context :tag-mode t))
+                                                    (export-org-backend-option-enabled-p context :tags t))
                                            (let ((tag-text (format nil ":~{~A~^:~}:" tags)))
                                              (setf heading
                                                    (concatenate
