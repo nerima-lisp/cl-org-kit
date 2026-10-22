@@ -64,3 +64,4 @@ coverage.dat
 # Working directory of the agent tooling used during development. Not project
 # content, and not specific to any one contributor.
 /.omo/
+/scripts/cl-org-kit-coverage/
