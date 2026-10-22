@@ -1903,7 +1903,10 @@
                (string= key "SETUPFILE")
                (reader-heading-setting-kind key)
                (and referenced-keywords
-                    (gethash key referenced-keywords)))
+                    (gethash key referenced-keywords))
+               (some (lambda (descriptor)
+                       (eq (%export-backend-descriptor-name descriptor) :org))
+                     (or ancestry (export-backend-ancestry backend))))
            (when (and fragment-p
                       (export-global-keyword-p key)
                       (not (string= key "STARTUP")))
@@ -2399,12 +2402,20 @@
                                     :referenced-keywords
                                     (export-macro-keyword-reference-set
                                      source-document macros keyword-reference-cache))
-                                   (if (member
-                                        key
-                                        (export-resolved-string-set
-                                         ancestry
-                                         #'%export-backend-descriptor-retained-keywords)
-                                        :test #'string-equal)
+                                   (if (or
+                                        (member key
+                                                (export-resolved-string-set
+                                                 ancestry
+                                                 #'%export-backend-descriptor-retained-keywords)
+                                                :test #'string-equal)
+                                        (and (some (lambda (descriptor)
+                                                     (eq (%export-backend-descriptor-name descriptor) :org))
+                                                   (or ancestry (export-backend-ancestry backend)))
+                                             (not (member key
+                                                          (export-resolved-string-set
+                                                           ancestry
+                                                           #'%export-backend-descriptor-accepted-keywords)
+                                                          :test #'string-equal))))
                                        (values
                                         (list (%make-export-view
                                                :node node :children nil
@@ -2423,7 +2434,9 @@
                                   nil)))
                               (t
                                (let ((children
-                                      (unless (eq policy :prune-children)
+                                      (unless (and (eq policy :prune-children)
+                                                   (not (and (eq type :property-drawer)
+                                                             (cdr (assoc :properties options)))))
                                         (nth-value
                                          0 (prepare-siblings
                                             (node-children node) source-document

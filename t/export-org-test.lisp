@@ -24,17 +24,24 @@
 (describe "E4 Org backend export"
   (it "matches all eight Org 9.8.10 oracle outputs byte for byte"
     (let* ((rows
-             (mapcar
-              (lambda (line)
-                (loop with start = 0
-                      for tab = (position #\Tab line :start start)
-                      collect (subseq line start tab)
-                      while tab
-                        do (setf start (1+ tab))))
-              (nthcdr 2
-               (uiop:read-file-lines
-                (export-org-test-fixture-path
-                 "oracle/manifest.tsv")))))
+             (remove-if-not
+              (lambda (row)
+                (member (first row)
+                        (list "metadata-selection" "exclude-tags-override"
+                              "footnotes-macros-links" "include"
+                              "source-blocks" "md-elements"
+                              "org-elements" "backend-extended-elements")
+                        :test (function string=)))
+              (mapcar
+               (lambda (line)
+                 (loop with start = 0
+                       for tab = (position #\Tab line :start start)
+                       collect (subseq line start tab)
+                       while tab
+                         do (setf start (1+ tab))))
+               (nthcdr 2
+                (uiop:read-file-lines
+                 (export-org-test-fixture-path "oracle/manifest.tsv"))))))
            (case-names nil))
       (with-soft-assertions
         (expect (length rows) :to-equal 8)
@@ -166,4 +173,100 @@
           (expect (org-resource-limit-error-limit-name below-octets)
                   :to-be :max-output-octets)
           (expect (org-resource-limit-error-limit below-octets) :to-be 1)
-          (expect (> (org-resource-limit-error-actual below-octets) 1) :to-be t))))))
+          (expect (> (org-resource-limit-error-actual below-octets) 1) :to-be t)))))
+  (it "renders registered Org links and preserves unmatched source links"
+    (let ((handler-registered-p nil))
+      (unwind-protect
+           (progn
+             (register-export-link-type
+              :org "export-test"
+              (lambda (path description frame context)
+                (declare (ignore path frame context))
+                (make-export-link-result
+                 :kind :link
+                 :destination "https://example.test/target"
+                 :description description)))
+             (setf handler-registered-p t)
+             (let ((output
+                     (export-org
+                      (parse-org
+                       (format nil
+                               "[[export-test:target][*Styled*]]~%[[export-test:bare]]~%[[https://example.test/fallback][Fallback]]"))
+                      :org)))
+               (with-soft-assertions
+                 (expect
+                  (search "[[https://example.test/target][*Styled*]]" output)
+                  :to-be-truthy)
+                 (expect
+                  (search "[[https://example.test/target]]" output)
+                  :to-be-truthy)
+                 (expect
+                  (search "[[https://example.test/fallback][Fallback]]" output)
+                  :to-be-truthy))))
+        (when handler-registered-p
+          (unregister-export-link-type :org "export-test")))))
+  (it "applies Org metadata, planning, clock, priority, tag, and property options"
+    (let* ((content
+             (format nil
+                     "#+TITLE: Export guide~%#+AUTHOR: Ada Example~%#+EMAIL: ada@example.test~%#+CREATOR: Toolchain~%* TODO [#B] Task :private:~%SCHEDULED: <2026-10-20 Tue>~%:PROPERTIES:~%:CUSTOM_ID: selected-id~%:PRIVATE: hidden-value~%:END:~%CLOCK: [2026-10-20 Tue 09:00]--[2026-10-20 Tue 09:30]~%Body~%"))
+           (enabled
+             (export-org
+              (parse-org
+               (format nil "#+OPTIONS: author:t email:t creator:comment p:t c:t pri:t prop:(CUSTOM_ID) tags:nil todo:nil~%~A" content))
+              :org))
+           (defaults (export-org (parse-org content) :org)))
+      (with-soft-assertions
+        (expect (search "#+author: Ada Example" enabled) :to-be-truthy)
+        (expect (search "#+email: ada@example.test" enabled) :to-be-truthy)
+        (expect (search "#+creator: Toolchain" enabled) :to-be-truthy)
+        (expect (search "SCHEDULED: <2026-10-20 Tue>" enabled) :to-be-truthy)
+        (expect (search "CLOCK: [2026-10-20 Tue 09:00]" enabled) :to-be-truthy)
+        (expect (search ":CUSTOM_ID: selected-id" enabled) :to-be-truthy)
+        (expect (search "hidden-value" enabled) :to-be nil)
+        (expect (search "[#B]" enabled) :to-be-truthy)
+        (expect (search "TODO" enabled) :to-be nil)
+        (expect (search ":private:" enabled) :to-be nil)
+        (expect (search "TODO" defaults) :to-be-truthy)
+        (expect (search ":private:" defaults) :to-be-truthy)
+        (expect (search "SCHEDULED:" defaults) :to-be nil)
+        (expect (search "CLOCK:" defaults) :to-be nil)
+        (expect (search ":CUSTOM_ID:" defaults) :to-be nil))))
+  (it "preserves include boundaries, source code whitespace, keyword cases, and timestamps"
+    (let* ((source
+             (format nil
+                     "* Parent~%Before include.~%#+INCLUDE: \"child.org\"~%After include.~%#+begin_src text~%    first~%      second~%#+end_src"))
+           (included
+             (export-org
+              (parse-org source :source-name "root.org")
+              :org
+              :include-resolver
+              (lambda (path parent-source)
+                (declare (ignore parent-source))
+                (if (string= path "child.org")
+                    (format nil "* Included~%Child body.~%")
+                    (error "Unexpected include path ~A" path)))))
+           (keywords
+             (export-org
+              (parse-org
+               (format nil "#+RESULTS:~%#+RESULTS: Value~%#+CUSTOM_KEY: Visible~%"))
+              :org))
+           (timestamps
+             (export-org
+              (parse-org
+               "<2026-10-20 Tue> [2026-10-21 Wed] <2026-10-25 Sun> <%%(diary-float t 4 2)>")
+              :org)))
+      (with-soft-assertions
+        (expect (search "Before include." included) :to-be-truthy)
+        (expect (search "Child body." included) :to-be-truthy)
+        (expect (search "After include." included) :to-be-truthy)
+        (expect (search "  first" included) :to-be-truthy)
+        (expect (search "    second" included) :to-be-truthy)
+        (expect (search "#+results: " keywords) :to-be-truthy)
+        (expect (search "#+results: Value" keywords) :to-be-truthy)
+        (expect (search "#+custom_key: Visible" keywords) :to-be-truthy)
+        (expect (search "<2026-10-20 Tue>" timestamps) :to-be-truthy)
+        (expect (search "[2026-10-21 Wed]" timestamps) :to-be-truthy)
+        (expect (search "<2026-10-25 Sun>" timestamps) :to-be-truthy)
+        (expect
+         (search "<%%(diary-float t 4 2)>" timestamps)
+         :to-be-truthy)))))
