@@ -505,8 +505,16 @@
         (loop for item in items
               for number from 1
               for item-node = (export-view-node item)
-              for marker = (if numbered-p
-                               (or (node-property item-node :counter) number)
+              for marker = (or (node-property item-node :counter)
+                               (let* ((bullet (node-property item-node :bullet))
+                                      (digits-end (and (stringp bullet)
+                                                       (position-if-not (function digit-char-p) bullet))))
+                                 (when (and digits-end
+                                            (plusp digits-end)
+                                            (< digits-end (length bullet))
+                                            (find (char bullet digits-end) ".)"))
+                                   (parse-integer bullet :end digits-end)))
+                               (and numbered-p number)
                                "-")
               for separator-length =
                 (if first-p

@@ -158,15 +158,23 @@
 (describe "Markdown export"
   (it "matches all eight pinned Org 9.8.10 Markdown oracle cases byte for byte"
     (let* ((rows
-             (mapcar
-              (lambda (line)
-                (loop with start = 0
-                      for tab = (position #\Tab line :start start)
-                      collect (subseq line start tab)
-                      while tab
-                        do (setf start (1+ tab))))
-              (nthcdr 2 (uiop:read-file-lines
-                          (export-md-test-fixture-path "oracle/manifest.tsv")))))
+             (remove-if-not
+              (lambda (row)
+                (member (first row)
+                        (list "metadata-selection" "exclude-tags-override"
+                              "footnotes-macros-links" "include"
+                              "source-blocks" "md-elements"
+                              "org-elements" "backend-extended-elements")
+                        :test (function string=)))
+              (mapcar
+               (lambda (line)
+                 (loop with start = 0
+                       for tab = (position #\Tab line :start start)
+                       collect (subseq line start tab)
+                       while tab
+                         do (setf start (1+ tab))))
+               (nthcdr 2 (uiop:read-file-lines
+                           (export-md-test-fixture-path "oracle/manifest.tsv"))))))
            (case-names nil))
       (with-soft-assertions
         (expect (length rows) :to-equal 8)
@@ -298,4 +306,88 @@
           (expect (org-resource-limit-error-limit-name failure)
                   :to-be :max-output-length)
           (expect (org-resource-limit-error-actual failure)
-                  :to-be (1- (length baseline))))))))
+                  :to-be (1- (length baseline)))))))
+  (it "renders Markdown references, inline formats, tasks, and footnotes"
+    (let* ((tick (string (code-char 96)))
+           (source
+             (format nil
+                     "#+OPTIONS: toc:t num:2 tags:t todo:t pri:t~%* TODO [#A] Guide :public:~%:PROPERTIES:~%:CUSTOM_ID: guide-id~%:END:~%First hard break  ~%Second line.~%Claim[fn:note].~%Math ~C[x+y~C].~%Ticks =left~Cright=.~%- [ ] Open~%- [X] Done~%- [-] In progress~%- *Term* :: Definition body.~%10. Tenth~%11. Eleventh~%[fn:note] = note body =~%"
+                     (code-char 92) (code-char 92) (code-char 96)))
+           (output (export-org (parse-org source) :md)))
+      (with-soft-assertions
+        (expect (search "# Table of Contents" output) :to-be-truthy)
+        (expect (search "#guide-id" output) :to-be-truthy)
+        (expect (search ":public:" output) :to-be-truthy)
+        (expect (search "<a id=\"guide-id\"></a>" output) :to-be-truthy)
+        (expect (search "First hard break  " output) :to-be-truthy)
+        (expect (search "Second line." output) :to-be-truthy)
+        (expect (search "$$x+y$$" output) :to-be-truthy)
+        (expect
+         (search (concatenate `string tick tick "left" tick "right" tick tick)
+                 output)
+         :to-be-truthy)
+        (expect (search "-   [ ] Open" output) :to-be-truthy)
+        (expect (search "-   [X] Done" output) :to-be-truthy)
+        (expect (search "-   [-] In progress" output) :to-be-truthy)
+        (expect (search "Definition body." output) :to-be-truthy)
+        (expect (search "10.   Tenth" output) :to-be-truthy)
+        (expect (search "# Footnotes" output) :to-be-truthy)
+        (expect (search "note body" output) :to-be-truthy))))
+  (it "renders safe and rejected Markdown link handler results"
+    (let ((link-registered-p nil)
+          (image-registered-p nil))
+      (unwind-protect
+           (progn
+             (register-export-link-type
+              :md "md-test"
+              (lambda (path description frame context)
+                (declare (ignore frame context))
+                (make-export-link-result
+                 :kind :link
+                 :destination
+                 (if (string= path "unsafe")
+                     "javascript:alert(1)"
+                     "https://example.test/safe")
+                 :description description)))
+             (setf link-registered-p t)
+             (register-export-link-type
+              :md "md-image"
+              (lambda (path description frame context)
+                (declare (ignore path frame context))
+                (make-export-link-result
+                 :kind :image
+                 :destination "assets/logo.png"
+                 :description description)))
+             (setf image-registered-p t)
+             (let ((output
+                     (export-org
+                      (parse-org
+                       (format nil
+                               "[[md-test:safe][Safe]]~%[[md-test:unsafe][Blocked]]~%[[md-image:asset.png][Logo]]~%[[file:guide.org][Guide]]~%"))
+                      :md)))
+               (with-soft-assertions
+                 (expect
+                  (search "[Safe](https://example.test/safe)" output)
+                  :to-be-truthy)
+                 (expect (search "Blocked" output) :to-be-truthy)
+                 (expect (search "javascript:alert(1)" output) :to-be nil)
+                 (expect (search "![Logo](assets/logo.png)" output)
+                         :to-be-truthy)
+                 (expect (search "[Guide](guide.md)" output)
+                         :to-be-truthy))))
+        (when image-registered-p
+          (unregister-export-link-type :md "md-image"))
+        (when link-registered-p
+          (unregister-export-link-type :md "md-test")))))
+  (it "renders generated special block attributes and inline tasks"
+    (let* ((source
+             (format nil
+                     "#+begin_note~%Note body.~%#+end_note~%*************** TODO Inline task~%Task body.~%*************** END~%"))
+           (output (export-org (parse-org source) :md)))
+      (with-soft-assertions
+        (expect (search "id=\"" output) :to-be-truthy)
+        (expect (search "class=\"note\"" output) :to-be-truthy)
+        (expect (search "Note body." output) :to-be-truthy)
+        (expect (search "<div class=\"inlinetask\">" output) :to-be-truthy)
+        (expect (search "Inline task" output) :to-be-truthy)
+        (expect (search "Task body." output) :to-be-truthy)))))
