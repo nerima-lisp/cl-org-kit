@@ -1345,7 +1345,7 @@
               (export-gfm-state-output-offset gfm-state) parent-offset)))))
 
 (eval-when (:load-toplevel :execute)
-  (register-derived-export-backend
+  (%register-builtin-derived-export-backend
    :md :gfm
    :renderer #'export-md-render-body
    :make-state #'export-md-make-state

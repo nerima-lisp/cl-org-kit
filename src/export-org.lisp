@@ -1032,7 +1032,7 @@
     "PRINT_BIBLIOGRAPHY"))
 
 (eval-when (:load-toplevel :execute)
-  (register-export-backend :org
+  (%register-builtin-export-backend :org
                            :renderer
                            #'export-org-backend-render-body
                            :make-state

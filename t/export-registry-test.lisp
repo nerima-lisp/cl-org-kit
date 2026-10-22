@@ -1071,6 +1071,15 @@
              "x")
             :to-equal "x"))))))
   (it "initializes built-in backends idempotently"
+    (with-soft-assertions
+      (expect
+       (org-kit::%export-backend-descriptor-builtin-p
+        (org-kit::export-registry-descriptor :md))
+       :to-be t)
+      (expect
+       (org-kit::%export-backend-descriptor-builtin-p
+        (org-kit::export-registry-descriptor :org))
+       :to-be t))
     (let ((org-kit::*export-backend-registry* (make-hash-table :test #'eq)))
       (org-kit::export-initialize-builtin-backends)
       (let ((html (gethash :html org-kit::*export-backend-registry*)))
@@ -1093,7 +1102,72 @@
            :to-be t)
           (org-kit::export-initialize-builtin-backends)
           (expect (eq html (gethash :html org-kit::*export-backend-registry*))
-                  :to-be t)))))
+                  :to-be t))))
+    (let ((org-kit::*export-backend-registry* (make-hash-table :test #'eq))
+          (parent :api-registry-builtin-derived-parent)
+          (child :api-registry-builtin-derived-child))
+      (org-kit::%register-builtin-export-backend
+       parent :renderer #'identity)
+      (org-kit::%register-builtin-derived-export-backend
+       child parent
+       :renderer #'identity
+       :link-type-handlers
+       (list
+        (cons "built-in"
+              (lambda (path description frame context)
+                (declare (ignore path description frame context))
+                "old-built-in"))))
+      (register-export-link-type
+       child "runtime"
+       (lambda (path description frame context)
+         (declare (ignore path description frame context))
+         "runtime"))
+      (with-soft-assertions
+        (expect
+         (org-kit::%export-backend-descriptor-builtin-p
+          (org-kit::export-registry-descriptor child))
+         :to-be t)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda () (unregister-export-backend child))))
+         :to-be :builtin-backend)
+        (expect
+         (org-export-error-reason
+          (export-registry-test-registration-error
+           (lambda ()
+             (register-derived-export-backend child parent))))
+         :to-be :duplicate-backend))
+      (dotimes (iteration 2)
+        (declare (ignore iteration))
+        (org-kit::%register-builtin-derived-export-backend
+         child parent
+         :renderer #'string-upcase
+         :link-type-handlers
+         (list
+          (cons "built-in"
+                (lambda (path description frame context)
+                  (declare (ignore path description frame context))
+                  "new-built-in")))))
+      (let* ((descriptor (org-kit::export-registry-descriptor child))
+             (handlers
+               (org-kit::%export-backend-descriptor-link-type-handlers
+                descriptor)))
+        (with-soft-assertions
+          (expect
+           (funcall
+            (org-kit::%export-backend-descriptor-renderer descriptor)
+            "reloaded")
+           :to-equal "RELOADED")
+          (expect (length handlers) :to-be 2)
+          (expect
+           (funcall (cdr (assoc "built-in" handlers :test #'string-equal))
+                    "path" "description" nil nil)
+           :to-equal "new-built-in")
+          (expect
+           (funcall (cdr (assoc "runtime" handlers :test #'string-equal))
+                    "path" "description" nil nil)
+           :to-equal "runtime")))))
   (it "registers the pinned HTML and LaTeX keyword and option surface"
   (let* ((html (gethash :html org-kit::*export-backend-registry*))
          (latex (gethash :latex org-kit::*export-backend-registry*))

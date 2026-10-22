@@ -48,6 +48,7 @@
   (sb-thread:make-mutex :name "cl-org-kit export backend registry"))
 (defvar *export-builtin-link-type-handlers* (make-hash-table :test #'eq))
 (defvar *export-registration-backend* nil)
+(defvar *export-registration-builtin-derived-p* nil)
 (defvar *export-creating-state* nil)
 (defvar *export-current-output-offset* 0)
 (defvar *export-current-native-sink* nil)
@@ -748,27 +749,49 @@
              raw-output-options export-block-names export-snippet-names
              link-type-handlers filters)))
       (sb-thread:with-mutex (*export-backend-registry-lock*)
-        (when (gethash name *export-backend-registry*)
-          (export-registration-error name :duplicate-backend
-                                     "Export backend is already registered"))
-        (unless (gethash parent *export-backend-registry*)
-          (export-registration-error name :unknown-parent
-                                     "Parent export backend is not registered"))
-        (export-merge-option-specifications
-         (export-resolved-option-specifications
-          (%export-backend-ancestry-unlocked parent))
-         (getf fields :option-specifications))
-        (setf (gethash name *export-backend-registry*)
-              (export-make-descriptor
-               name parent
-               (append fields (list :renderer renderer
-                                    :preamble-renderer preamble-renderer
-                                    :trailer-renderer trailer-renderer
-                                    :template template :make-state make-state
-                                    :document-class document-class
-                                    :node-wrapper node-wrapper))
-               nil)))
+        (let* ((existing (gethash name *export-backend-registry*))
+               (existing-handlers
+                 (and existing
+                      (%export-backend-descriptor-link-type-handlers
+                       existing))))
+          (when (and existing
+                     (not (and *export-registration-builtin-derived-p*
+                               (%export-backend-descriptor-builtin-p
+                                existing))))
+            (export-registration-error name :duplicate-backend
+                                       "Export backend is already registered"))
+          (unless (gethash parent *export-backend-registry*)
+            (export-registration-error name :unknown-parent
+                                       "Parent export backend is not registered"))
+          (export-merge-option-specifications
+           (export-resolved-option-specifications
+            (%export-backend-ancestry-unlocked parent))
+           (getf fields :option-specifications))
+          (when (and *export-registration-builtin-derived-p*
+                     existing-handlers)
+            (let ((registered-handlers (getf fields :link-type-handlers)))
+              (setf (getf fields :link-type-handlers)
+                    (append
+                     registered-handlers
+                     (remove-if
+                      (lambda (handler)
+                        (assoc (car handler) registered-handlers
+                               :test #'string-equal))
+                      existing-handlers)))))
+          (setf (gethash name *export-backend-registry*)
+                (export-make-descriptor
+                 name parent
+                 (append fields (list :renderer renderer
+                                      :preamble-renderer preamble-renderer
+                                      :trailer-renderer trailer-renderer
+                                      :template template :make-state make-state
+                                      :document-class document-class
+                                      :node-wrapper node-wrapper))
+                 *export-registration-builtin-derived-p*))))
       name)))
+(defun %register-builtin-derived-export-backend (name parent &rest arguments)
+  (let ((*export-registration-builtin-derived-p* t))
+    (apply (function register-derived-export-backend) name parent arguments)))
 
 (defun export-backend-descendants (backend)
   (let (result)
