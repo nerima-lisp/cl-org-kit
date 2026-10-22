@@ -1,10 +1,12 @@
 # Export
 
 `export-org` renders a parsed document as HTML, GitHub Flavored Markdown (GFM),
-ASCII, LaTeX, iCalendar, Texinfo, or man output. The backend selects the
-document format. `:output-type` selects its representation: a string by default,
-UTF-8 octets, or a stream. `export-org-texinfo` and `export-org-man` are
-convenience entrypoints for the Texinfo and man backends.
+Markdown, Org, ASCII, LaTeX source, iCalendar, Texinfo, or man output. Use
+`:gfm` for GitHub Flavored Markdown, `:md` for Org's `ox-md`-compatible
+Markdown, and `:org` for Org output. The backend selects the document format.
+`:output-type` selects its representation: a string by default, UTF-8 octets,
+or a stream. `export-org-texinfo` and `export-org-man` are convenience
+entrypoints for the Texinfo and man backends.
 
 In this repository, `nix develop --command sbcl` opens a REPL with the pinned
 dependencies available. For another ASDF setup, make `cl-org-kit` and its
@@ -16,15 +18,15 @@ dependencies available as described in [Getting Started](../getting-started.md).
 
 (let* ((document
          (org-kit:parse-org
-          (format nil "#+TITLE: Project release notes~%~%* Version 0.1.0~%A *small* release.~%")))
+          (format nil "#+TITLE: Release notes~%~%* Version 0.1.0~%A *small* release.~%")))
        (context (org-kit:make-export-context :title "Project release notes")))
   (list
    (org-kit:export-org document :html :context context)
    (org-kit:export-org document :gfm :context context)
+   (org-kit:export-org document :md :context context)
+   (org-kit:export-org document :org :context context)
    (org-kit:export-org document :ascii :context context)
    (org-kit:export-org document :latex :context context)
-   (org-kit:export-org-texinfo document :context context)
-   (org-kit:export-org-man document :context context)
    (org-kit:export-org document :gfm
                        :context context :output-type :octets)))
 ~~~
@@ -134,6 +136,11 @@ HTML, LaTeX, and ASCII render headline TOCs, local headline TOCs, table lists,
 and listing lists. GFM renders headline and local headline TOCs; Org 9.8.10
 emits no output for its table and listing modes. An unsupported mode signals
 `org-export-error` with reason `:toc-mode`.
+`#+OPTIONS: tasks:...` selects headings by TODO state. `tasks:nil` removes
+headings with a TODO keyword; `tasks:todo` removes DONE headings; `tasks:done`
+removes TODO headings; and a list such as `tasks:(TODO WAIT)` keeps only those
+TODO keywords. Headings without a TODO keyword are not filtered by this
+option.
 
 ## LaTeX
 
@@ -168,6 +175,8 @@ differ from the destination. Internal links use `\hyperref` when their target
 resolves and otherwise render their label.
 `ATTR_LATEX` values are comments, so `:options` and `:environment` do not affect
 rendering.
+`#+OPTIONS: tex:nil` removes LaTeX fragments and environments from the export
+view; the default and `tex:t` retain them.
 
 ## Footnotes
 
@@ -201,8 +210,8 @@ rejected, and a successful call returns the stream.
 value in effect. `:time-context` accepts an `org-time-context` value and is
 separate from Org keyword metadata. It carries an explicit reference time, time
 zone, and daylight-saving policy into callback metadata under `:time-context`.
-A renderer or filter callback can read it with
-`(getf (org-kit:export-render-context-metadata render-context) :time-context)`. See
+A callback can read it with
+`(getf (org-kit:export-render-context-metadata context) :time-context)`. See
 [Clock](clock.md) for an example of constructing a time context.
 
 Pass per-export extension data with `:extensions` when a callback needs
@@ -271,12 +280,13 @@ omitted-argument conditions match Org 9.8.10's required first argument.
 ## iCalendar
 
 Use `:icalendar` with `export-org` for one parsed document. Supply a time
-context for `DTSTAMP`. A heading uses the `ID` in its own `:PROPERTIES:` drawer
-for its UID; otherwise, it needs a random source through the context extension
-`:icalendar-random-source`. Keep IDs unique across documents combined into one
-calendar. The source is a zero-argument function that returns one octet from 0
-through 255. This example supplies a deterministic source that returns
-successive octets:
+context for `DTSTAMP`. An event heading uses the `ID` in its own
+`:PROPERTIES:` drawer for its UID. If it has no `ID`, supply a random source
+through the context extension `:icalendar-random-source`; without one, export
+signals `org-export-error` with reason `:missing-random-source`. Keep IDs
+unique across documents combined into one calendar. The source is a zero-argument
+function that returns one octet from 0 through 255. This example supplies a
+deterministic source that returns successive octets:
 
 ~~~lisp
 (let* ((document
@@ -386,8 +396,9 @@ unscheduled TODO with a recurring deadline starts at its deadline warning date,
 reference instant in the supplied time context. The latter requires a time
 context. `nil` omits the generated start.
 
-`:timezone` sets `X-WR-TIMEZONE` and supplies `%Z` in a custom date-time
-format. The default `:date-time-format` is `:%Y%m%dT%H%M%S`. The colon
+`:timezone` sets the calendar's `X-WR-TIMEZONE` and supplies `%Z` in a custom
+date-time format; it does not set a time zone on each event. The default
+`:date-time-format` is `:%Y%m%dT%H%M%S`. The colon
 separates an optional property prefix from the timestamp pattern and is
 required even when the prefix is empty. Supported
 directives are `%Y`, `%y`, `%m`, `%d`, `%H`, `%M`, `%S`, `%Z`, and `%%`; for
@@ -518,8 +529,9 @@ returns the requested backend, and the raw-output accessor checks whether a
 raw output kind is allowed. Frame accessors are `export-render-frame-mode`,
 `export-render-frame-table-cell-p`,
 `export-render-frame-preserve-source-breaks-p`, and
-`export-render-frame-output-offset`; the last reports the current output
-position.
+`export-render-frame-output-offset`; the last reports the character offset
+when the frame is created and remains fixed for that frame. It does not count
+UTF-8 octets written to an octet stream.
 
 Set `:option-specifications` to add or override an Org `#+OPTIONS` token. Each
 specification is a plist with `:token`, `:key`, and `:parser` fields and an
@@ -593,15 +605,11 @@ context)`. Stages run in this order: `:options`, `:parse-tree`, `:plain-text`,
 | Stage | Value |
 |---|---|
 | `:options` | The explicit option alist; defaults are read separately with `export-option-value`. |
-| `:parse-tree` | The list of prepared root `export-view` values. |
+| `:parse-tree` | The list of prepared root `export-view` values. Use `org-kit:export-view-p` to test a value before calling `org-kit:export-view-node`, `org-kit:export-view-children`, or `org-kit:export-view-source-document`. |
 | `:plain-text` | The rendered string for a plain-text node. |
 | `(:element node-type)` | The rendered string for one node. |
 | `:body` | The body string after rendering. |
 | `:final-output` | The complete output string. |
-
-Check a parse-tree value with `org-kit:export-view-p` before calling
-`org-kit:export-view-node`, `org-kit:export-view-children`, or
-`org-kit:export-view-source-document`.
 
 A filter that returns `nil` leaves its input unchanged and lets the next
 callback run. An empty string is a valid result and stops the remaining
@@ -668,11 +676,11 @@ the backend, source excerpt, position, and feature. Other export failures,
 including an invalid backend or output configuration, signal
 `org-export-error`. Invalid context values can signal `type-error`.
 
-The document limits cap output at 64 Mi characters (`:max-output-length`) or
-256 Mi UTF-8 octets (`:max-output-octets`); Mi means 1,048,576. Export
-expansion is limited to
-depth 32 (`:max-export-expansion-depth`), 64 Mi expanded characters
+By default, document limits cap output at 64 Mi characters
+(`:max-output-length`) or 256 Mi UTF-8 octets (`:max-output-octets`); Mi means
+1,048,576. Export expansion is limited by default to depth 32
+(`:max-export-expansion-depth`), 64 Mi expanded characters
 (`:max-export-expanded-characters`), and 4 Mi expanded nodes
-(`:max-export-expanded-nodes`) by default. Set these options on
-`make-limits` and pass the result to `parse-org`. Exceeding a configured
-ceiling signals `org-resource-limit-error`.
+(`:max-export-expanded-nodes`). Set custom ceilings with `make-limits` and
+pass the result to `parse-org`. Exceeding a configured ceiling signals
+`org-resource-limit-error`.
