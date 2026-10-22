@@ -496,10 +496,7 @@
 (defun export-md-render-list (state view context)
   (declare (ignore state))
   (let* ((node (export-view-node view))
-         (numbered-p
-          (and (eq (node-property node :type) :ordered)
-               (not (and (export-option-explicit-p context :num)
-                         (not (export-option-value context :num))))))
+         (numbered-p (eq (node-property node :type) :ordered))
          (items (export-view-children view)))
     (with-output-to-string (output)
       (let ((output-length 0)
@@ -508,19 +505,23 @@
         (loop for item in items
               for number from 1
               for item-node = (export-view-node item)
-              for marker = (if numbered-p
-                  (or (node-property item-node :counter)
-                      (let* ((bullet (node-property item-node :bullet))
-                             (digits-end
-                               (and (stringp bullet)
-                                    (position-if-not (function digit-char-p) bullet))))
-                        (when (and digits-end
-                                   (plusp digits-end)
-                                   (< digits-end (length bullet))
-                                   (find (char bullet digits-end) ".)"))
-                          (parse-integer bullet :end digits-end)))
-                      number)
-                  "-")
+              for marker = (let* ((bullet (node-property item-node :bullet))
+                                   (digits-end
+                                     (and (stringp bullet)
+                                          (position-if-not (function digit-char-p) bullet))))
+                              (if (and (export-option-explicit-p context :num)
+                                       (not (export-option-value context :num)))
+                                  "-"
+                                  (or (node-property item-node :counter)
+                                      (when (and digits-end
+                                                 (plusp digits-end)
+                                                 (< digits-end (length bullet))
+                                                 (find (char bullet digits-end) ".)"))
+                                        (parse-integer bullet :end digits-end))
+                                      (and numbered-p
+                                           (not (and (stringp bullet) (plusp (length bullet))))
+                                           number)
+                                      "-")))
               for separator-length =
                 (if first-p
                     0
