@@ -963,49 +963,72 @@
                         (lambda (condition)
                           (throw 'ascii-table-limit condition))))
                    (org-kit::export-ascii-output-write-table
-                    warmup-output table-view preparation))))
-             (table-output
-               (progn
-                 (sb-ext:gc :full t)
-                 (export-ascii-test-output-state preparation)))
-             (at-signal nil)
-             (initial-capacity
-               (array-total-size
-                (org-kit::export-ascii-output-output table-output)))
-             (before (progn (sb-ext:gc :full t) (sb-ext:get-bytes-consed)))
-             (table-condition
-               (catch 'ascii-table-limit
-                 (handler-bind
-                     ((org-resource-limit-error
-                        (lambda (condition)
-                          (setf at-signal (- (sb-ext:get-bytes-consed) before))
-                          (throw 'ascii-table-limit condition))))
-                   (org-kit::export-ascii-output-write-table
-                    table-output table-view preparation))))
-             (buffer (org-kit::export-ascii-output-output table-output)))
-        (with-soft-assertions
-          (expect (search (format nil "<~A>" cookie) source)
-                  :to-be-truthy)
-          (expect (> (length source) 100) :to-be t)
-          (expect (= (count #\Newline source) (1+ row-count)) :to-be t)
-          (expect (eq (node-type (org-kit::export-view-node table-view))
-                      :table)
-                  :to-be t)
-          (expect (typep public-condition 'org-resource-limit-error) :to-be t)
-          (expect (typep warmup-condition 'org-resource-limit-error) :to-be t)
-          (expect (typep table-condition 'org-resource-limit-error) :to-be t)
-          (when (typep public-condition 'org-resource-limit-error)
-            (expect (org-resource-limit-error-limit-name public-condition)
-                    :to-be :max-output-length)
-            (expect (org-resource-limit-error-limit public-condition)
-                    :to-be 1000))
-          (expect (= (fill-pointer buffer) 0) :to-be t)
-          (expect (<= (array-total-size buffer) output-limit) :to-be t)
-          (expect (> at-signal 0) :to-be t)
-          (unless *coverage-run-p*
-            ;; The focused run measured 68,608 bytes; 20,000,000 padded bytes give a 1,000,000-byte ceiling.
-            (expect (< at-signal (floor padded-output-bytes 20)) :to-be t))
-          (expect (= (array-total-size buffer) initial-capacity) :to-be t)))))
+                     warmup-output table-view preparation))))))
+        (multiple-value-bind
+            (minimum-allocation samples)
+            (measure-allocation-budget
+             (lambda ()
+               (let* ((table-output
+                        (export-ascii-test-output-state preparation))
+                      (buffer
+                        (org-kit::export-ascii-output-output table-output))
+                      (initial-capacity (array-total-size buffer)))
+                 (lambda ()
+                   (values
+                    (handler-case
+                        (progn
+                          (org-kit::export-ascii-output-write-table
+                           table-output table-view preparation)
+                          nil)
+                      (org-resource-limit-error (condition) condition))
+                    buffer initial-capacity)))))
+          (declare (ignore minimum-allocation))
+          (let* ((at-signals
+                   (mapcar #'allocation-budget-sample-at-signal samples))
+                 (minimum-at-signal
+                   (and (every #'numberp at-signals)
+                        (reduce #'min at-signals))))
+            (with-soft-assertions
+              (expect (search (format nil "<~A>" cookie) source)
+                      :to-be-truthy)
+              (expect (> (length source) 100) :to-be t)
+              (expect (= (count #\Newline source) (1+ row-count)) :to-be t)
+              (expect (eq (node-type (org-kit::export-view-node table-view))
+                          :table)
+                      :to-be t)
+              (expect (typep public-condition 'org-resource-limit-error)
+                      :to-be t)
+              (expect (typep warmup-condition 'org-resource-limit-error)
+                      :to-be t)
+              (loop for sample in samples
+                    for values =
+                      (allocation-budget-sample-values sample)
+                    for table-condition = (first values)
+                    for buffer = (second values)
+                    for initial-capacity = (third values)
+                    for at-signal =
+                      (allocation-budget-sample-at-signal sample)
+                    do (expect (typep table-condition
+                                      'org-resource-limit-error)
+                               :to-be t)
+                       (expect (= (fill-pointer buffer) 0) :to-be t)
+                       (expect (<= (array-total-size buffer) output-limit)
+                               :to-be t)
+                       (expect (and (numberp at-signal) (> at-signal 0))
+                               :to-be t)
+                       (expect (= (array-total-size buffer) initial-capacity)
+                               :to-be t))
+              (when (typep public-condition 'org-resource-limit-error)
+                (expect (org-resource-limit-error-limit-name public-condition)
+                        :to-be :max-output-length)
+                (expect (org-resource-limit-error-limit public-condition)
+                        :to-be 1000))
+              (unless *coverage-run-p*
+                ;; The focused run measured 68,608 bytes; 20,000,000 padded bytes give a 1,000,000-byte ceiling.
+                (expect (and minimum-at-signal
+                             (< minimum-at-signal
+                                (floor padded-output-bytes 20)))
+                        :to-be t)))))))
 
   (it-sequential "preflights long ASCII table cookies before writing padded rows"
     (let ((result
@@ -1238,38 +1261,38 @@
                      payload))
            (document
              (parse-org source :limits (make-limits :max-output-length 8)))
-           (input-length (length source)))
+           (input-length (length source))
+           (baseline-source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
+                     "x"))
+           (baseline-document
+             (parse-org baseline-source
+                        :limits (make-limits :max-output-length 8)))
+           (baseline-warmup
+             (let ((*export-baseline-current-test* nil))
+               (export-org baseline-document :ascii)))
+           (baseline-actual
+             (let ((*export-baseline-current-test* nil))
+               (export-org baseline-document :ascii)))
+           (baseline-input-length (length baseline-source)))
+      (declare (ignore baseline-warmup))
       (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
-      (let* ((before (progn (sb-ext:gc :full t)
-                            (sb-ext:get-bytes-consed)))
-             (actual (export-org document :ascii))
-             (allocated (- (sb-ext:get-bytes-consed) before)))
-        (let* ((baseline-source
-                 (format nil
-                         "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
-                         "x"))
-               (baseline-document
-                 (parse-org baseline-source
-                            :limits (make-limits :max-output-length 8)))
-               (baseline-warmup
-                 (let ((*export-baseline-current-test* nil))
-                   (export-org baseline-document :ascii)))
-               (baseline-before
-                 (progn (sb-ext:gc :full t) (sb-ext:get-bytes-consed)))
-               (baseline-actual
-                 (let ((*export-baseline-current-test* nil))
-                   (export-org baseline-document :ascii)))
-               (baseline-allocated
-                 (- (sb-ext:get-bytes-consed) baseline-before))
-               (baseline-input-length (length baseline-source)))
-          (declare (ignore baseline-warmup))
-          (with-soft-assertions
-            (expect actual :to-equal (format nil "[label]~%"))
-            (expect (> input-length (* 256 1024)) :to-be t)
-            (expect baseline-actual :to-equal (format nil "[label]~%"))
-            (expect (< (- allocated baseline-allocated)
-                       (floor (- input-length baseline-input-length) 2))
-                    :to-be t))))))
+      (multiple-value-bind (minimum-allocation samples)
+          (measure-allocation-budget
+           (lambda ()
+             (lambda ()
+               (export-org document :ascii))))
+        (with-soft-assertions
+          (expect (> input-length (* 256 1024)) :to-be t)
+          (expect baseline-actual :to-equal (format nil "[label]~%"))
+          (loop for sample in samples
+                for actual =
+                  (first (allocation-budget-sample-values sample))
+                do (expect actual :to-equal (format nil "[label]~%")))
+          (expect (< minimum-allocation
+                     (floor (- input-length baseline-input-length) 2))
+                  :to-be t)))))
 
   (it "checks an ASCII abbreviation without a placeholder before discarding it"
     (let* ((source
@@ -1435,39 +1458,31 @@
              (parse-org source
                         :limits (make-limits :max-output-length 128)))
            (preparation (org-kit::export-prepare document :ascii))
-           (check-counts (make-hash-table))
-           (input-length (length source))
-           (before
-             (progn
-               (let ((org-kit::*export-output-check-counts* check-counts)
-                     (org-kit::*export-current-export-phase* :body))
-                 (handler-case
-                     (progn
-                       (org-kit::export-ascii-render-preparation preparation)
-                       nil)
-                   (org-resource-limit-error (condition) condition)))
-               (sb-ext:gc :full t)
-               (setf check-counts (make-hash-table))
-               (sb-ext:get-bytes-consed)))
-           (condition
-             (let ((org-kit::*export-output-check-counts* check-counts)
-                   (org-kit::*export-current-export-phase* :body))
-               (handler-case
-                   (progn
-                     (org-kit::export-ascii-render-preparation preparation)
-                     nil)
-                 (org-resource-limit-error (condition) condition))))
-           (allocated (- (sb-ext:get-bytes-consed) before)))
-      (with-soft-assertions
-        (expect (> input-length (* 256 1024)) :to-be t)
-        (expect (typep condition 'org-resource-limit-error) :to-be t)
-        (when (typep condition 'org-resource-limit-error)
-          (expect (org-resource-limit-error-limit-name condition)
-                  :to-be :max-output-length)
-          (expect (org-resource-limit-error-limit condition) :to-be 128)
-          (expect (> (org-resource-limit-error-actual condition) 128)
-                  :to-be t))
-        (expect (< allocated (floor input-length 2)) :to-be t))))
+           (input-length (length source)))
+      (multiple-value-bind (minimum-allocation samples)
+          (measure-allocation-budget
+           (lambda ()
+             (let ((check-counts (make-hash-table)))
+               (lambda ()
+                 (let ((org-kit::*export-output-check-counts* check-counts)
+                       (org-kit::*export-current-export-phase* :body))
+                   (org-kit::export-ascii-render-preparation preparation))))))
+        (with-soft-assertions
+          (expect (> input-length (* 256 1024)) :to-be t)
+          (loop for sample in samples
+                for condition =
+                  (allocation-budget-sample-condition sample)
+                do (expect (typep condition 'org-resource-limit-error)
+                           :to-be t)
+                   (when (typep condition 'org-resource-limit-error)
+                     (expect (org-resource-limit-error-limit-name condition)
+                             :to-be :max-output-length)
+                     (expect (org-resource-limit-error-limit condition)
+                             :to-be 128)
+                     (expect (> (org-resource-limit-error-actual condition)
+                                128)
+                             :to-be t)))
+          (expect (< minimum-allocation (floor input-length 2)) :to-be t)))))
 
   (it "uses explicit metadata defaults without consulting ambient values"
     (let* ((empty-output
