@@ -964,30 +964,27 @@
                           (throw 'ascii-table-limit condition))))
                    (org-kit::export-ascii-output-write-table
                      warmup-output table-view preparation)))))
-        (multiple-value-bind
-            (minimum-allocation samples)
-            (measure-allocation-budget
-             (lambda ()
-               (let* ((table-output
-                        (export-ascii-test-output-state preparation))
-                      (buffer
-                        (org-kit::export-ascii-output-output table-output))
-                      (initial-capacity (array-total-size buffer)))
-                 (lambda ()
-                   (values
-                    (handler-case
-                        (progn
-                          (org-kit::export-ascii-output-write-table
-                           table-output table-view preparation)
-                          nil)
-                      (org-resource-limit-error (condition) condition))
-                    buffer initial-capacity)))))
-          (declare (ignore minimum-allocation))
-          (let* ((at-signals
-                   (mapcar #'allocation-budget-sample-at-signal samples))
-                 (minimum-at-signal
-                   (and (every #'numberp at-signals)
-                        (reduce #'min at-signals))))
+        (let ((sample-states nil))
+          (multiple-value-bind
+              (minimum-allocation samples)
+              (measure-allocation-budget
+               (lambda ()
+                 (let* ((table-output
+                          (export-ascii-test-output-state preparation))
+                        (buffer
+                          (org-kit::export-ascii-output-output table-output))
+                        (initial-capacity (array-total-size buffer)))
+                   (push (list buffer initial-capacity) sample-states)
+                   (lambda ()
+                     (org-kit::export-ascii-output-write-table
+                      table-output table-view preparation)))))
+            (declare (ignore minimum-allocation))
+            (let* ((sample-states (nthcdr 1 (reverse sample-states)))
+                   (at-signals
+                     (mapcar #'allocation-budget-sample-at-signal samples))
+                   (minimum-at-signal
+                     (and (every #'numberp at-signals)
+                          (reduce #'min at-signals))))
             (with-soft-assertions
               (expect (search (format nil "<~A>" cookie) source)
                       :to-be-truthy)
@@ -1001,11 +998,11 @@
               (expect (typep warmup-condition 'org-resource-limit-error)
                       :to-be t)
               (loop for sample in samples
-                    for values =
-                      (allocation-budget-sample-values sample)
-                    for table-condition = (first values)
-                    for buffer = (second values)
-                    for initial-capacity = (third values)
+                    for state in sample-states
+                    for table-condition =
+                      (allocation-budget-sample-condition sample)
+                    for buffer = (first state)
+                    for initial-capacity = (second state)
                     for at-signal =
                       (allocation-budget-sample-at-signal sample)
                     do (expect (typep table-condition
@@ -1028,7 +1025,7 @@
                 (expect (and minimum-at-signal
                              (< minimum-at-signal
                                 (floor padded-output-bytes 20)))
-                        :to-be t))))))))
+                        :to-be t)))))))))
 
   (it-sequential "preflights long ASCII table cookies before writing padded rows"
     (let ((result
@@ -1254,13 +1251,14 @@
       (expect at-limit :to-equal (format nil "[l]~%"))))
 
   (it-sequential "rejects an unsafe large ASCII abbreviation before copying its path"
-    (let* ((payload (make-string (* 256 1024) :initial-element #\x))
+    (let* ((payload (make-string (* 4 1024 1024) :initial-element #\x))
            (source
              (format nil
                      "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
                      payload))
            (document
              (parse-org source :limits (make-limits :max-output-length 8)))
+           (preparation (org-kit::export-prepare document :ascii))
            (input-length (length source))
            (baseline-source
              (format nil
@@ -1269,6 +1267,8 @@
            (baseline-document
              (parse-org baseline-source
                         :limits (make-limits :max-output-length 8)))
+           (baseline-preparation
+             (org-kit::export-prepare baseline-document :ascii))
            (baseline-warmup
              (let ((*export-baseline-current-test* nil))
                (export-org baseline-document :ascii)))
@@ -1278,21 +1278,41 @@
            (baseline-input-length (length baseline-source)))
       (declare (ignore baseline-warmup))
       (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
-      (multiple-value-bind (minimum-allocation samples)
+      (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
+      (multiple-value-bind (target-minimum target-samples)
           (measure-allocation-budget
            (lambda ()
              (lambda ()
-               (export-org document :ascii))))
-        (with-soft-assertions
-          (expect (> input-length (* 256 1024)) :to-be t)
-          (expect baseline-actual :to-equal (format nil "[label]~%"))
-          (loop for sample in samples
-                for actual =
-                  (first (allocation-budget-sample-values sample))
-                do (expect actual :to-equal (format nil "[label]~%")))
-          (expect (< minimum-allocation
-                     (floor (- input-length baseline-input-length) 2))
-                  :to-be t)))))
+               (org-kit::export-ascii-render-preparation preparation))))
+        (multiple-value-bind (baseline-minimum baseline-samples)
+            (measure-allocation-budget
+             (lambda ()
+               (lambda ()
+                 (org-kit::export-ascii-render-preparation
+                  baseline-preparation))))
+          (let ((allocation-delta (- target-minimum baseline-minimum))
+                (ceiling (floor (- input-length baseline-input-length) 2))
+                (fixed-overhead-range
+                  (+ (- (reduce #'max target-samples
+                                :key #'allocation-budget-sample-bytes)
+                        target-minimum)
+                     (- (reduce #'max baseline-samples
+                                :key #'allocation-budget-sample-bytes)
+                        baseline-minimum))))
+            (with-soft-assertions
+              (expect (> input-length (* 4 1024 1024)) :to-be t)
+              (expect baseline-actual :to-equal (format nil "[label]~%"))
+              (loop for sample in target-samples
+                    for actual =
+                      (first (allocation-budget-sample-values sample))
+                    do (expect actual :to-equal (format nil "[label]~%")))
+              (loop for sample in baseline-samples
+                    for actual =
+                      (first (allocation-budget-sample-values sample))
+                    do (expect actual :to-equal (format nil "[label]~%")))
+              (expect (< fixed-overhead-range ceiling) :to-be t)
+              (expect (>= allocation-delta (- fixed-overhead-range)) :to-be t)
+              (expect (< allocation-delta ceiling) :to-be t)))))))
 
   (it "checks an ASCII abbreviation without a placeholder before discarding it"
     (let* ((source

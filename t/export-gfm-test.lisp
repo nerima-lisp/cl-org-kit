@@ -1324,17 +1324,19 @@
       (expect actual :to-equal "x")))
 
   (it-sequential "rejects an unsafe large GFM abbreviation before copying its path"
-    (let* ((payload (make-string (* 256 1024) :initial-element #\x))
+    (let* ((payload (make-string (* 4 1024 1024) :initial-element #\x))
            (source
              (format nil
                      "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][x]]"
                      payload))
            (document
              (parse-org source :limits (make-limits :max-output-length 1)))
+           (preparation (org-kit::export-prepare document :gfm))
            (link
              (find-if (lambda (node) (eq (node-type node) :link))
                       (export-gfm-test-nodes document)))
            (input-length (length source)))
+      (expect (export-org document :gfm) :to-equal "x")
       (expect (export-org document :gfm) :to-equal "x")
       (let* ((baseline-source
                (format nil
@@ -1343,27 +1345,50 @@
              (baseline-document
                (parse-org baseline-source
                           :limits (make-limits :max-output-length 1)))
+             (baseline-preparation
+               (org-kit::export-prepare baseline-document :gfm))
              (baseline-actual
                (let ((*export-baseline-current-test* nil))
                  (export-org baseline-document :gfm)))
              (baseline-input-length (length baseline-source)))
-        (multiple-value-bind (allocated samples)
+        (multiple-value-bind (target-minimum target-samples)
             (measure-allocation-budget
-             (lambda () (lambda () (export-org document :gfm))))
-          (with-soft-assertions
-            (dolist (sample samples)
-              (expect (first (allocation-budget-sample-values sample))
-                      :to-equal "x"))
-            (expect (node-property link :type) :to-equal "fuzzy")
-            (expect (node-property link :format) :to-be :bracket)
-            (expect (>= (length (node-property link :path))
-                        (* 256 1024))
-                    :to-be t)
-            (expect (> input-length (* 256 1024)) :to-be t)
-            (expect baseline-actual :to-equal "x")
-            (expect (< allocated
-                       (floor (- input-length baseline-input-length) 2))
-                    :to-be t))))))
+             (lambda ()
+               (lambda ()
+                 (org-kit::export-render-preparation preparation :gfm))))
+          (multiple-value-bind (baseline-minimum baseline-samples)
+              (measure-allocation-budget
+               (lambda ()
+                 (lambda ()
+                   (org-kit::export-render-preparation
+                    baseline-preparation :gfm))))
+            (let ((allocation-delta (- target-minimum baseline-minimum))
+                  (ceiling (floor (- input-length baseline-input-length) 2))
+                  (fixed-overhead-range
+                    (+ (- (reduce #'max target-samples
+                                  :key #'allocation-budget-sample-bytes)
+                          target-minimum)
+                       (- (reduce #'max baseline-samples
+                                  :key #'allocation-budget-sample-bytes)
+                          baseline-minimum))))
+              (with-soft-assertions
+                (dolist (sample target-samples)
+                  (expect (first (allocation-budget-sample-values sample))
+                          :to-equal "x"))
+                (dolist (sample baseline-samples)
+                  (expect (first (allocation-budget-sample-values sample))
+                          :to-equal "x"))
+                (expect (node-property link :type) :to-equal "fuzzy")
+                (expect (node-property link :format) :to-be :bracket)
+                (expect (>= (length (node-property link :path))
+                            (* 4 1024 1024))
+                        :to-be t)
+                (expect (> input-length (* 4 1024 1024)) :to-be t)
+                (expect baseline-actual :to-equal "x")
+                (expect (< fixed-overhead-range ceiling) :to-be t)
+                (expect (>= allocation-delta (- fixed-overhead-range))
+                        :to-be t)
+                (expect (< allocation-delta ceiling) :to-be t))))))))
 
   (it "preserves safe entity fragments and custom-id fuzzy links"
     (let ((fragment-cases
