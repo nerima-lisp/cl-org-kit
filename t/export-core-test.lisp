@@ -202,6 +202,31 @@
           (expect (org-resource-limit-error-actual condition)
                   :to-be (1+ export-limit)))))))
 
+(describe "FR-074 SETUPFILE per-document node limit"
+  (it "preserves the parser node limit when it is below the export budget"
+    (let* ((limits (make-limits :max-node-count 100
+                                :max-export-expanded-nodes 1000))
+           (document (parse-org "#+SETUPFILE: setup.org" :limits limits))
+           (condition
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-prepare
+                 document :html
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   (format nil
+                           "~{* Heading ~D~%~}"
+                           (loop for index from 1 to 101 collect index))))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-node-count)
+          (expect (org-resource-limit-error-limit condition) :to-be 100)
+          (expect (> (org-resource-limit-error-actual condition) 100)
+                  :to-be t))))))
+
 (defclass export-core-test-binary-output-stream
     (sb-gray:fundamental-binary-output-stream)
   ((element-type :initarg :element-type :reader export-core-test-element-type)
