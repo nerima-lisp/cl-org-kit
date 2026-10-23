@@ -128,12 +128,16 @@
            "md-elements" "org-elements" "backend-extended-elements")))))
 
   (it "renders expanded macros in heading titles"
-    (let* ((source (format nil "#+MACRO: foo Expanded~%* {{{foo}}}"))
-           (output (export-org (parse-org source) :org)))
-      (with-soft-assertions
-        (expect (search "#+macro: foo Expanded" output) :to-be-truthy)
-        (expect (search "* Expanded" output) :to-be-truthy)
-        (expect (search "* {{{foo}}}" output) :to-be nil))))
+    (let* ((source
+             (format nil
+                     "#+MACRO: foo Expanded~%* {{{foo}}}~%* {{{foo}}} Heading~%* {{{foo}}}  "))
+           (output (export-org (parse-org source) :org))
+           (heading-output
+             (subseq output (1+ (position #\Newline output)))))
+      (expect heading-output
+              :to-equal
+              (format nil "* Expanded~%* Expanded Heading~%* Expanded~%"))
+      (expect (search "* {{{foo}}}" output) :to-be nil)))
 
   (it "retains only selected properties in a property drawer"
     (let* ((source

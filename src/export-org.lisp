@@ -616,10 +616,7 @@
                             context (cdr macro-entry))))
                         (node-text segment))))))
           (when text
-            (write-string text output))
-          (when macro-entry
-            (loop repeat (node-post-blank segment)
-                  do (write-char #\Space output))))))))
+            (write-string text output)))))))
 
 (defun export-org-backend-priority-string (priority)
   (if (<= 0 priority 64)
