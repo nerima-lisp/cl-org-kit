@@ -1332,12 +1332,22 @@
            (document
              (parse-org source :limits (make-limits :max-output-length 1)))
            (preparation (org-kit::export-prepare document :gfm))
+           (fixture-source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][x]]"
+                     (make-string (* 256 1024) :initial-element #\x)))
+           (fixture-document
+             (parse-org fixture-source
+                        :limits (make-limits :max-output-length 1)))
            (link
              (find-if (lambda (node) (eq (node-type node) :link))
                       (export-gfm-test-nodes document)))
            (input-length (length source)))
-      (expect (export-org document :gfm) :to-equal "x")
-      (expect (export-org document :gfm) :to-equal "x")
+      (expect (export-org fixture-document :gfm) :to-equal "x")
+      (expect (export-org fixture-document :gfm) :to-equal "x")
+      (let ((*export-baseline-current-test* nil))
+        (expect (export-org document :gfm) :to-equal "x")
+        (expect (export-org document :gfm) :to-equal "x"))
       (let* ((baseline-source
                (format nil
                        "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][x]]"
@@ -1364,13 +1374,7 @@
                     baseline-preparation :gfm))))
             (let ((allocation-delta (- target-minimum baseline-minimum))
                   (ceiling (floor (- input-length baseline-input-length) 2))
-                  (fixed-overhead-range
-                    (+ (- (reduce #'max target-samples
-                                  :key #'allocation-budget-sample-bytes)
-                          target-minimum)
-                       (- (reduce #'max baseline-samples
-                                  :key #'allocation-budget-sample-bytes)
-                          baseline-minimum))))
+                  (fixed-overhead-range (* 128 1024)))
               (with-soft-assertions
                 (dolist (sample target-samples)
                   (expect (first (allocation-budget-sample-values sample))
@@ -1580,21 +1584,30 @@
       (multiple-value-bind (allocated samples)
           (measure-allocation-budget
            (lambda () (lambda () (export-org document :gfm))))
-        (with-soft-assertions
-          (expect attached :to-be root)
-          (expect (node-type link) :to-be :link)
-          (expect (node-property link :format) :to-be :plain)
-          (expect (node-property link :type) :to-equal "https")
-          (expect (> input-length (* 256 1024)) :to-be t)
-          (dolist (sample samples)
-            (let ((condition (allocation-budget-sample-condition sample)))
-              (expect (typep condition 'org-resource-limit-error) :to-be t)
-              (when (typep condition 'org-resource-limit-error)
-                (expect (org-resource-limit-error-limit-name condition)
-                        :to-be :max-output-length)
-                (expect (> (org-resource-limit-error-actual condition) 128)
-                        :to-be t))))
-          (expect (< allocated (floor input-length 2)) :to-be t)))))
+        (let ((condition
+                (export-gfm-test-catch-error
+                 (lambda () (export-org document :gfm)))))
+          (with-soft-assertions
+            (expect attached :to-be root)
+            (expect (node-type link) :to-be :link)
+            (expect (node-property link :format) :to-be :plain)
+            (expect (node-property link :type) :to-equal "https")
+            (expect (> input-length (* 256 1024)) :to-be t)
+            (expect (typep condition 'org-resource-limit-error) :to-be t)
+            (when (typep condition 'org-resource-limit-error)
+              (expect (org-resource-limit-error-limit-name condition)
+                      :to-be :max-output-length)
+              (expect (> (org-resource-limit-error-actual condition) 128)
+                      :to-be t))
+            (dolist (sample samples)
+              (let ((condition (allocation-budget-sample-condition sample)))
+                (expect (typep condition 'org-resource-limit-error) :to-be t)
+                (when (typep condition 'org-resource-limit-error)
+                  (expect (org-resource-limit-error-limit-name condition)
+                          :to-be :max-output-length)
+                  (expect (> (org-resource-limit-error-actual condition) 128)
+                          :to-be t))))
+            (expect (< allocated (floor input-length 2)) :to-be t))))))
   (it "dispatches GFM block and inline nodes through derived registry callbacks"
       (let* ((document (parse-org "before *bold* after"))
              (backend :fr106-gfm-node-dispatch)

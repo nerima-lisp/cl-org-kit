@@ -1273,6 +1273,10 @@ paragraph" table-list) :not :to-be nil))))
                             :properties (list :type "https" :path path)))
            (root (make-node :org-data :children (list link)))
            (attached (setf (document-root document) root)))
+      (export-html-test-catch-error
+       (lambda () (export-org document :html)))
+      (export-html-test-catch-error
+       (lambda () (export-org document :html)))
       (multiple-value-bind (allocated samples)
           (measure-allocation-budget
            (lambda ()

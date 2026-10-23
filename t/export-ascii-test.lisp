@@ -1260,6 +1260,13 @@
              (parse-org source :limits (make-limits :max-output-length 8)))
            (preparation (org-kit::export-prepare document :ascii))
            (input-length (length source))
+           (fixture-source
+             (format nil
+                     "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
+                     (make-string (* 256 1024) :initial-element #\x)))
+           (fixture-document
+             (parse-org fixture-source
+                        :limits (make-limits :max-output-length 8)))
            (baseline-source
              (format nil
                      "#+OPTIONS: toc:nil num:nil~%#+LINK: danger javascript:%s~%[[danger:~A][label]]"
@@ -1277,8 +1284,15 @@
                (export-org baseline-document :ascii)))
            (baseline-input-length (length baseline-source)))
       (declare (ignore baseline-warmup))
-      (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
-      (expect (export-org document :ascii) :to-equal (format nil "[label]~%"))
+      (expect (export-org fixture-document :ascii)
+              :to-equal (format nil "[label]~%"))
+      (expect (export-org fixture-document :ascii)
+              :to-equal (format nil "[label]~%"))
+      (let ((*export-baseline-current-test* nil))
+        (expect (export-org document :ascii)
+                :to-equal (format nil "[label]~%"))
+        (expect (export-org document :ascii)
+                :to-equal (format nil "[label]~%")))
       (multiple-value-bind (target-minimum target-samples)
           (measure-allocation-budget
            (lambda ()
@@ -1292,13 +1306,7 @@
                   baseline-preparation))))
           (let ((allocation-delta (- target-minimum baseline-minimum))
                 (ceiling (floor (- input-length baseline-input-length) 2))
-                (fixed-overhead-range
-                  (+ (- (reduce #'max target-samples
-                                :key #'allocation-budget-sample-bytes)
-                        target-minimum)
-                     (- (reduce #'max baseline-samples
-                                :key #'allocation-budget-sample-bytes)
-                        baseline-minimum))))
+                (fixed-overhead-range (* 128 1024)))
             (with-soft-assertions
               (expect (> input-length (* 4 1024 1024)) :to-be t)
               (expect baseline-actual :to-equal (format nil "[label]~%"))
