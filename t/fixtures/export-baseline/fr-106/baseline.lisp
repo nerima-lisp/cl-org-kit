@@ -944,13 +944,24 @@
          *export-baseline-target-files*))
 
 (defun export-baseline-unique-plist-ids-p (records)
-  (let ((seen (make-hash-table :test #'equal)))
-    (every (lambda (record)
-             (let ((id (getf record :id)))
-               (and (stringp id)
-                    (not (gethash id seen))
-                    (setf (gethash id seen) t))))
-           records)))
+  (let ((counts (make-hash-table :test (function equal))))
+    (dolist (record records)
+      (let ((id (getf record :id)))
+        (when (stringp id)
+          (setf (gethash id counts)
+                (1+ (gethash id counts 0))))))
+    (let ((problems
+            (loop for record in records
+                  for id = (getf record :id)
+                  when (or (not (stringp id))
+                           (> (gethash id counts 0) 1))
+                    collect (list :id id
+                                  :test-file (getf record :test-file)
+                                  :test-name (getf record :test-name)
+                                  :invocation-ordinal
+                                  (getf record :invocation-ordinal)
+                                  :role (getf record :role)))))
+      (values (null problems) problems))))
 
 (defun export-baseline-record-order (left right)
   (let* ((left-file (getf left :test-file))
@@ -1045,9 +1056,12 @@
     (export-baseline-check
      (every #'export-baseline-fixture-shape-p fixtures)
      "FR-106 frozen manifest has an invalid fixture")
-    (export-baseline-check
-     (export-baseline-unique-plist-ids-p ordered-live-fixtures)
-     "FR-106 live capture has duplicate fixture IDs")
+    (multiple-value-bind (unique-p problems)
+      (export-baseline-unique-plist-ids-p ordered-live-fixtures)
+      (export-baseline-check
+       unique-p
+       "FR-106 live capture has duplicate fixture IDs: ~S"
+       problems))
     (export-baseline-check
      (every #'export-baseline-fixture-shape-p ordered-live-fixtures)
      "FR-106 live capture has an invalid fixture")
