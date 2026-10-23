@@ -1748,10 +1748,38 @@
                                      (check-limit
                                       limits :max-export-expanded-characters total)
                                      (setf expanded-character-count total))
-                                   (let* ((setup-document
-                                            (parse-org contents
-                                                       :source-name (copy-seq path)
-                                                       :limits limits))
+                                   (let* ((remaining-nodes
+                                            (- (limit-value
+                                                limits :max-export-expanded-nodes)
+                                               expanded-node-count))
+                                          (source-node-limit
+                                            (limit-value limits :max-node-count))
+                                          (export-node-limit-p
+                                            (<= remaining-nodes source-node-limit))
+                                          (setup-limits
+                                            (export-limits-with-node-budget
+                                             limits
+                                             (min remaining-nodes source-node-limit)))
+                                          (setup-document
+                                            (handler-case
+                                                (parse-org contents
+                                                           :source-name (copy-seq path)
+                                                           :limits setup-limits)
+                                              (org-resource-limit-error (condition)
+                                                (if (and export-node-limit-p
+                                                         (eq (org-resource-limit-error-limit-name
+                                                              condition)
+                                                             :max-node-count))
+                                                    (error 'org-resource-limit-error
+                                                           :message "Resource limit exceeded"
+                                                           :limit-name :max-export-expanded-nodes
+                                                           :limit (limit-value
+                                                                   limits :max-export-expanded-nodes)
+                                                           :actual
+                                                           (+ expanded-node-count
+                                                              (org-resource-limit-error-actual
+                                                               condition)))
+                                                    (error condition)))))
                                           (total
                                             (+ expanded-node-count
                                                (export-node-count

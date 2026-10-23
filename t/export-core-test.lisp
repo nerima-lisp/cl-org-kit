@@ -168,6 +168,40 @@
                   :to-be :setupfile-form))))))
 (describe "FR-074 SETUPFILE depth handling" (it "FR-074 applies the expansion depth limit" (let* ((depth (export-core-test-catch-error (lambda () (org-kit::export-prepare (parse-org "#+SETUPFILE: a.org" :source-name "main.org" :limits (make-limits :max-export-expansion-depth 1)) :html :include-resolver (lambda (path parent-source) (declare (ignore parent-source)) (if (string= path "a.org") "#+SETUPFILE: b.org" "#+TITLE: Beyond limit"))))))) (with-soft-assertions (expect (typep depth (intern "ORG-RESOURCE-LIMIT-ERROR" "ORG-KIT")) :to-be t) (when (typep depth (intern "ORG-RESOURCE-LIMIT-ERROR" "ORG-KIT")) (expect (org-resource-limit-error-limit-name depth) :to-be :max-export-expansion-depth) (expect (org-resource-limit-error-actual depth) :to-be 2))))))
 
+(describe "FR-074 SETUPFILE expansion budget"
+  (it "charges setupfile nodes before parsing"
+    (let* ((source "#+SETUPFILE: setup.org")
+           (root-count
+             (org-kit::export-node-count
+              (document-root (parse-org source))))
+           (export-limit (1+ root-count))
+           (document
+             (parse-org
+              source
+              :limits (make-limits :max-node-count 100
+                                   :max-export-expanded-nodes export-limit)))
+           (condition
+             (export-core-test-catch-error
+              (lambda ()
+                (org-kit::export-prepare
+                 document :html
+                 :include-resolver
+                 (lambda (path parent-source)
+                   (declare (ignore path parent-source))
+                   (export-core-test-lines
+                    "* One"
+                    "* Two"
+                    "* Three")))))))
+      (with-soft-assertions
+        (expect (typep condition 'org-resource-limit-error) :to-be t)
+        (when (typep condition 'org-resource-limit-error)
+          (expect (org-resource-limit-error-limit-name condition)
+                  :to-be :max-export-expanded-nodes)
+          (expect (org-resource-limit-error-limit condition)
+                  :to-be export-limit)
+          (expect (org-resource-limit-error-actual condition)
+                  :to-be (1+ export-limit)))))))
+
 (defclass export-core-test-binary-output-stream
     (sb-gray:fundamental-binary-output-stream)
   ((element-type :initarg :element-type :reader export-core-test-element-type)
