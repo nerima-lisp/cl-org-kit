@@ -134,15 +134,13 @@
                  (buffer (export-org-backend-state-buffer state))
                  (end (fill-pointer buffer)))
             (cond
-              ((and (eq previous-document source-document)
-                    (not (eq view-document source-document)))
+              ((eq previous-document source-document)
                (loop while (and (> end 1)
                                 (char= (char buffer (1- end)) #\Newline)
                                 (char= (char buffer (- end 2)) #\Newline))
                      do (decf end)
                         (setf (fill-pointer buffer) end)))
-              ((and (not (eq previous-document source-document))
-                    (eq view-document source-document))
+              ((eq view-document source-document)
                (let ((trailing-newlines
                        (loop for index downfrom (1- end) to 0
                              while (char= (char buffer index) #\Newline)
@@ -415,10 +413,8 @@
               (export-org-backend-render-element
                context
                (lambda ()
-                 (let ((rendered
-                         (export-org-backend-render-source-contents node view context)))
-                   (when rendered
-                     (export-org-backend-append context rendered)))))))))
+                 (export-org-backend-render-source-contents
+                  node view context)))))))
     (export-org-backend-normalize-identity-text
      node
      (if (and expanded-p (plusp (length rendered))
