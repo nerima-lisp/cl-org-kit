@@ -372,22 +372,23 @@
                   (expect (< (median allocation-ratios) 3) :to-be t))))))))
   (it-sequential "checks initial expansion limits before copying large text"
     (let* ((initial (make-string 262144 :initial-element #\x))
-           (time-context (capture-template-test-time-context))
-           (before (progn (sb-ext:gc :full t)
-                          (sb-ext:get-bytes-consed)))
-           (condition
-             (capture-template-test-condition
-              (lambda ()
-                (expand-capture-template
-                 "%i" :initial initial
-                 :time-context time-context
-                 :limits (make-limits :max-output-length 128)))))
-           (allocated (- (sb-ext:get-bytes-consed) before)))
-      (with-soft-assertions
-        (expect (typep condition 'org-resource-limit-error) :to-be t)
-        (when (typep condition 'org-resource-limit-error)
-          (expect (org-resource-limit-error-limit-name condition)
-                  :to-be :max-output-length)
-          (expect (org-resource-limit-error-actual condition)
-                  :to-be (length initial)))
-        (expect (< allocated (floor (length initial) 2)) :to-be t)))))
+           (time-context (capture-template-test-time-context)))
+      (multiple-value-bind
+            (allocated samples)
+          (measure-allocation-budget
+           (lambda ()
+             (lambda ()
+               (expand-capture-template
+                "%i" :initial initial
+                :time-context time-context
+                :limits (make-limits :max-output-length 128)))))
+        (with-soft-assertions
+          (dolist (sample samples)
+            (let ((condition (allocation-budget-sample-condition sample)))
+              (expect (typep condition 'org-resource-limit-error) :to-be t)
+              (when (typep condition 'org-resource-limit-error)
+                (expect (org-resource-limit-error-limit-name condition)
+                        :to-be :max-output-length)
+                (expect (org-resource-limit-error-actual condition)
+                        :to-be (length initial)))))
+          (expect (< allocated (floor (length initial) 2)) :to-be t))))))
