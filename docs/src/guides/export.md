@@ -7,6 +7,8 @@ Markdown, and `:org` for Org output. The backend selects the document format.
 `:output-type` selects its representation: a string by default, UTF-8 octets,
 or a stream. `export-org-texinfo` and `export-org-man` are convenience
 entrypoints for the Texinfo and man backends.
+The `:md` backend inserts the values of `#+MD` and `#+MARKDOWN` keyword lines as
+raw Markdown at their positions in the document body.
 
 In this repository, `nix develop --command sbcl` opens a REPL with the pinned
 dependencies available. For another ASDF setup, make `cl-org-kit` and its
@@ -175,8 +177,8 @@ differ from the destination. Internal links use `\hyperref` when their target
 resolves and otherwise render their label.
 `ATTR_LATEX` values are comments, so `:options` and `:environment` do not affect
 rendering.
-`#+OPTIONS: tex:nil` removes LaTeX fragments and environments from the export
-view; the default and `tex:t` retain them.
+`#+OPTIONS: tex:nil` removes LaTeX fragments and environments from the
+prepared node tree passed to the backend; the default and `tex:t` keep them.
 
 ## Footnotes
 
@@ -391,7 +393,8 @@ zero.
 
 `:todo-unscheduled-start` defaults to `:recurring-deadline-warning`: an
 unscheduled TODO with a recurring deadline starts at its deadline warning date,
-14 days earlier unless the timestamp supplies a warning interval. Set it to
+14 days earlier unless the deadline timestamp includes a warning cookie such as
+`-2d`, which sets a two-day lead time. Set it to
 `:deadline-warning` to use any deadline, or `:current-datetime` to use the
 reference instant in the supplied time context. The latter requires a time
 context. `nil` omits the generated start.
@@ -413,7 +416,7 @@ to a UTC date-time.
 Org's `include-sexps` default is enabled. This backend recognizes literal
 `diary-block` date ranges as data, without evaluating the expression. For
 example, `%%(diary-block 1 2 2025 1 4 2025) Literal block` uses arguments in
-day, month, year, day, month, year order and emits a daily recurrence from
+month, day, year, month, day, year order and emits a daily recurrence from
 January 2 through January 4, 2025. Other diary sexps outside
 this supported subset signal `org-export-unsupported-syntax` with the
 `:diary-sexp` feature. Set `:include-sexps nil` to omit all diary sexps.
