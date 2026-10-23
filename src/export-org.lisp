@@ -597,15 +597,29 @@
      context (export-render-context-root-views context) document)
     (coerce (export-org-backend-state-buffer state) 'string)))
 
-(defun export-org-backend-title-text (node)
-  (with-output-to-string (output)
-    (dolist (segment (node-property node :title))
-      (cond
-        ((stringp segment) (write-string segment output))
-        ((node-p segment)
-         (let ((text (node-text segment)))
-           (when text
-             (write-string text output))))))))
+(defun export-org-backend-title-text (node view context)
+  (let ((title-macros (getf (%export-view-payload view) :title-macros)))
+    (with-output-to-string (output)
+      (dolist (segment (node-property node :title))
+        (let* ((macro-entry
+                 (and (node-p segment)
+                      (assoc segment title-macros :test (function eq))))
+               (text
+                 (cond
+                   ((stringp segment) segment)
+                   ((node-p segment)
+                    (if macro-entry
+                        (export-org-backend-capture
+                         context
+                         (lambda ()
+                           (export-org-backend-render-children
+                            context (cdr macro-entry))))
+                        (node-text segment))))))
+          (when text
+            (write-string text output))
+          (when macro-entry
+            (loop repeat (node-post-blank segment)
+                  do (write-char #\Space output))))))))
 
 (defun export-org-backend-priority-string (priority)
   (if (<= 0 priority 64)
@@ -658,7 +672,8 @@
                                          (when commented-p
                                            (setf heading (concatenate 'string heading " COMMENT")))
                                          (setf heading (concatenate 'string heading " "
-                                                                    (export-org-backend-title-text node)))
+                                                                    (export-org-backend-title-text
+                                                                     node view context)))
                                          (when (and tags
                                                     (export-org-backend-option-enabled-p context :tags t))
                                            (let ((tag-text (format nil ":~{~A~^:~}:" tags)))

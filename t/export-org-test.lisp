@@ -127,6 +127,14 @@
            "footnotes-macros-links" "include" "source-blocks"
            "md-elements" "org-elements" "backend-extended-elements")))))
 
+  (it "renders expanded macros in heading titles"
+    (let* ((source (format nil "#+MACRO: foo Expanded~%* {{{foo}}}"))
+           (output (export-org (parse-org source) :org)))
+      (with-soft-assertions
+        (expect (search "#+macro: foo Expanded" output) :to-be-truthy)
+        (expect (search "* Expanded" output) :to-be-truthy)
+        (expect (search "* {{{foo}}}" output) :to-be nil))))
+
   (it "retains only selected properties in a property drawer"
     (let* ((source
              (format nil
