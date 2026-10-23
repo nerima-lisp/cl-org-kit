@@ -9,8 +9,8 @@ The examples require the runtime dependencies listed in
 
 ## Format, insert, and sort
 
-`table-align` formats cell widths. Row and column indices are one-based.
-`table-sort-rows` uses a stable sort; its defaults are ascending lexical order.
+`table-align` formats cell widths. `table-sort-rows` uses a stable sort; its
+defaults are ascending lexical order.
 
 ~~~lisp
 (require :asdf)
@@ -79,20 +79,15 @@ has one row section; multiple sections are ambiguous. If either bound is
 supplied on a table with hlines, supply both. An explicit range must stay
 within one hline-delimited section.
 
-Expressions accepted by `table-recalculate` support decimal arithmetic, comparisons, duration and
-string literals, field and range references, parentheses, and the built-in
-functions listed below. A range can be used as a vector-function argument or
-as an assignment target.
-
 Structural edits preserve source outside the changed table rows or cells and
 any `TBLFM` formula segments that need remapping. For formula remapping, one
 `TBLFM` directive can be parsed. The remapper shifts absolute row and column
 coordinates in assignment targets and references; current-row, relative,
 named-column, and hline-anchor references are left as written, even if an edit
-changes which cells they resolve to. Other Org formula
-syntax may be unsupported. Multiple directives or syntax that cannot be
-remapped signal `org-table-error`. This structural-edit limit is separate from
-recalculation, which follows Org's first-directive rule below.
+changes which cells they resolve to. Other Org formula syntax may be
+unsupported. Structural edits signal `org-table-error` if several `TBLFM`
+directives are present or a formula cannot be remapped. Recalculation applies
+only the first directive, as described below.
 
 ## Recalculate formulas
 
@@ -106,10 +101,16 @@ spans. If several `#+TBLFM` directives follow a table, recalculation applies
 only the first, as in Org. Assignments within that directive are separated by
 `::`.
 
+Expressions accepted by `table-recalculate` support decimal arithmetic,
+comparisons, duration and string literals, field and range references,
+parentheses, and the built-in functions listed below. A range can be used as a
+vector-function argument or as an assignment target.
+
 Row and column coordinates are one-based. Row numbers count standard rows,
-including the header, and ignore hline rows. `@I`, `@II`, and later Roman
-numerals select the first standard row after the matching hline. `@-I` and
-`@+I` select the row after the nearest hline above or below the current row.
+including the header, and ignore hline rows. Roman numerals such as `@I` and
+`@II` select the first standard row after the corresponding hline. `@-I`
+selects the row after the nearest hline above the current row; `@+I` selects
+the row after the nearest hline below it.
 For example, `@-I$2` selects column 2 in the row below the hline above.
 `@I..II` spans from the row after the first hline through the row before the
 second; omitting the second `@` is Org shorthand for `@I..@II`. `@III+1`
@@ -125,12 +126,11 @@ A row formula such as `@3=...` assigns across the selected standard row. A
 rectangular range formula such as `@2$2..@4$3=...` assigns across that range. A
 column formula such as `$3=...` applies to the data rows. When a table has
 hlines, rows before its first hline are treated as the header section and are
-skipped by column formulas. Column formulas run first; field, row, and range
-formulas then read their results and replace them for any field both formulas
-target. The column formula still runs and can signal an error. If two field,
-row, or range formulas target
-the same field, recalculation signals `org-table-error` with reason
-`:duplicate-target`.
+skipped by column formulas. Column formulas run first. A field, row, or range
+formula later replaces a value assigned to the same field by a column formula.
+Column formulas still run, so their errors signal. If two field, row, or range
+formulas target the same field, recalculation signals `org-table-error` with
+reason `:duplicate-target`.
 
 An expression can read a field or range from another named table in the same
 document with `remote(name, ref)`. Give the source table a `#+NAME:` immediately
@@ -225,25 +225,24 @@ Add flags after a semicolon in a formula. Supported flags are `pN`,
 `nN`/`sN`/`eN`/`fN`, `D`/`R`, `F`/`S`, `u`, `T`/`t`/`U`, `E`/`N`, and `L`.
 `pN` sets calculation precision, bounded by the document's
 `max-formula-precision` limit; this is separate from the default result display
-precision, so `exp(1);p20` still displays `2.7182818`. `nN`, `sN`, and `eN`
-format numeric results as normal, scientific, or engineering output with the
-selected significant digits. `fN` formats a fixed number of decimal places;
+precision, so `exp(1);p20` still displays `2.7182818`. Lowercase `nN`, `sN`, and
+`eN` format numeric results as normal, scientific, or engineering output with
+the selected significant digits. `fN` formats a fixed number of decimal places;
 the special `f-1` format emits blank output for `nan` and uses one decimal place
 for other numbers. For example, `1/3;n3` gives `0.333`, `12345.0;s3` gives
 `1.23e4`, `12345.0;e2` gives `12e3`, and `1/3;f4` gives `0.3333`. `D` selects
 degrees and is the default angle mode; `R` selects radians for `sin` and `tan`.
-Upper-case `E` and `N` control empty and non-numeric fields; lower-case `eN`
-and `nN` select number formats. `E` interprets empty fields as `nan`. `N` treats
-empty and non-numeric fields as zero, including when `E` is also present. For
-example, `vmean($1..$7);EN` combines the two field modes. `F` formats numeric
+Uppercase `E` and `N` are field modes: `E` interprets empty fields as `nan`, and
+`N` treats empty and non-numeric fields as zero, even when `E` is also present.
+For example, `vmean($1..$7);EN` combines the two field modes. `F` formats numeric
 results as Calc fractions, so `1/3;F` produces `1:3`. `S` emits ordinary
 numeric output for exact values supported by decimal arithmetic; symbolic
-algebra is not implemented. `u` leaves unit-free numeric results unchanged;
-unit literals and conversion are not implemented. Unsupported symbolic or
-unit-bearing operations signal `org-table-error` with reason
-`:unsupported-mode`. `T`, `t`, and `U` enable duration handling. `L` selects Lisp
-reference insertion for quoted Lisp expressions; the evaluator callback
-behavior is described below.
+algebra is not implemented. `u` selects unit mode: numeric operands remain
+unchanged, while unit-bearing operations signal `org-table-error` with reason
+`:unsupported-mode` because unit literals and conversion are not implemented.
+Unsupported symbolic operations signal the same condition. `T`, `t`, and `U`
+enable duration handling. `L` selects Lisp reference insertion for quoted Lisp
+expressions; the evaluator callback behavior is described below.
 
 Formula literals accept `HH:MM` or `HH:MM:SS` and represent seconds. Referenced
 table cells are read as durations when the assignment has `T`, `t`, or `U`;
@@ -287,12 +286,11 @@ Emacs Lisp. A missing evaluator signals `org-elisp-evaluator-error` with reason
 
 ### Calling Babel blocks from formulas
 
-A quoted Lisp formula can call a named source block with `org-sbe`. Pass the
-table recalculation `:callbacks` registry with an executor registered for the
-block's language. The executor receives the expanded body, resolved header
-parameters, and resolved variables; the library does not start a process.
-Recalculation recognizes `org-sbe` directly and routes it to the Babel
-executor; it does not call the quoted-Lisp formula evaluator for this form.
+The `org-sbe` form calls a named source block's registered Babel executor, not
+the quoted-Lisp formula evaluator described above. Pass the table recalculation
+`:callbacks` registry with an executor registered for the block's language.
+The executor receives the expanded body, resolved header parameters, and
+resolved variables; the library does not start a process.
 
 ```org
 #+NAME: subtotal
@@ -305,9 +303,6 @@ body passed to the registered executor
 | old   | old    |
 #+TBLFM: @2$2='(org-sbe subtotal ":session one" (limit $ "4"))
 ```
-
-This complete example registers the executor, recalculates the table, and
-prints its updated document:
 
 ```lisp
 (require :asdf)
@@ -346,17 +341,23 @@ Resolved parameter keys are uppercase strings such as `"SESSION"`. The
 looks up `"limit"` as written. The result cell contains
 `session=one; limit=4`.
 
-The block name can be a symbol or string. The optional second string supplies
-header arguments, as `":session one"` does above. It is followed by zero or
-more `(variable value...)` groups. Babel resolves a single value as a variable,
-so `(count "4")` passes the number `4`. Prefix `$` to pass the next value
-through Lisp's `%S` formatting: `(limit $ "4")` passes the string `"4"`.
+The block name can be a symbol or string. After it, an optional string supplies
+header arguments, such as `":session one"`. Follow that string with zero or
+more `(variable value...)` groups. If there are no header arguments, put the
+groups directly after the block name, as in
+`(org-sbe subtotal (limit $ "4"))`. Babel resolves a single value as a
+variable, so `(count "4")` passes the number `4`. Prefix `$` to pass the next
+value through Emacs Lisp's `%S` formatting: `(limit $ "4")` passes the string
+`"4"`.
 Multiple values are read as Lisp data and combined into a list, as in
 `(many 1 2)`, which passes `'(1 2)`. Org's `org-sbe` behavior returns an empty
 string for an empty block name and trims whitespace from the executor result.
-A non-string result is formatted as a Lisp value. If the block's language has
-no registered executor, recalculation signals `org-elisp-evaluator-error`
-without calling the Emacs Lisp evaluator.
+An empty value group such as `(empty)` resolves to `nil`; use `(empty $ "")`
+to pass an empty string explicitly.
+A real-number result from the Babel executor is written to the result cell
+using Common Lisp's `~S` directive. If the block's language has no registered
+executor, recalculation signals `org-elisp-evaluator-error` without calling
+the Emacs Lisp evaluator.
 
 ## Plot write plans
 
@@ -403,13 +404,15 @@ name, it replaces the body between matching `BEGIN RECEIVE ORGTBL` and
 `END RECEIVE ORGTBL` markers; names match without regard to case. It returns an
 `edit-result`; text outside the receive bodies is preserved. The supported
 formats are `orgtbl`, `generic`, `csv`, `tsv`, `latex`, `html`, and `texinfo`.
+`generic` accepts `:backend` values `org`, `html`, `latex`, or `texinfo` to
+select the corresponding renderer; other formats do not use this option.
 SEND parameters accept these common keys: `:sep`, `:hsep`, `:hline`, `:splice`,
 `:skip`, `:tstart`, `:tend`, `:lstart`, `:lend`, `:llstart`, `:llend`, `:hlstart`,
 `:hlend`, `:hllstart`, `:hllend`, `:fmt`, `:hfmt`, `:lfmt`, `:llfmt`, `:hlfmt`,
-`:hllfmt`, `:backend`, and `:raw`. The `latex` transformation also accepts
+`:hllfmt` and `:raw`. The `latex` transformation also accepts
 `:booktabs` and `:environment`; `texinfo` also accepts `:columns`. Values must
 be strings, integers, `t`, or `nil`; executable and list-valued parameters are
-rejected. `:raw` is accepted but currently has no effect. `:fmt` and `:hfmt`
+rejected. `:raw` is accepted but has no effect. `:fmt` and `:hfmt`
 templates apply to `generic` without `:backend`, `csv`, and `tsv`; the other
 transformations ignore them. For example,
 `#+ORGTBL: SEND summary generic :sep "," :skip 1` uses commas between cells and

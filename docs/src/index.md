@@ -19,8 +19,10 @@ The 0.3.0 public API includes:
   detangling, and `:exports` modes
 - Org table formatting, row and column editing, sorting, formula recalculation,
   import and export, and transposition
-- HTML, GitHub Flavored Markdown, ASCII, LaTeX, iCalendar, Texinfo, and man
-  exports, with support for registered backends; see the
+- Export preprocessing for built-in and evaluator-backed function macros,
+  caller-resolved `#+INCLUDE` sources and targets, and supported `#+OPTIONS`
+- HTML, GitHub Flavored Markdown, Markdown, Org, ASCII, LaTeX, iCalendar,
+  Texinfo, and man exports, with support for registered backends; see the
   [Export](guides/export.md) guide
 - Org ID and link resolution, capture and refile helpers, archive and
   attachment operations, BibTeX support, Org crypt, and all built-in Org lint
