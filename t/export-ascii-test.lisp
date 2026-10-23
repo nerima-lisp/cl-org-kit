@@ -963,7 +963,7 @@
                         (lambda (condition)
                           (throw 'ascii-table-limit condition))))
                    (org-kit::export-ascii-output-write-table
-                     warmup-output table-view preparation))))))
+                     warmup-output table-view preparation)))))
         (multiple-value-bind
             (minimum-allocation samples)
             (measure-allocation-budget
@@ -1028,7 +1028,7 @@
                 (expect (and minimum-at-signal
                              (< minimum-at-signal
                                 (floor padded-output-bytes 20)))
-                        :to-be t)))))))
+                        :to-be t))))))))
 
   (it-sequential "preflights long ASCII table cookies before writing padded rows"
     (let ((result

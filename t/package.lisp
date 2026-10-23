@@ -12,6 +12,7 @@
 (in-package #:cl-org-kit/test)
 
 (defvar *coverage-run-p* nil)
+(defvar *export-baseline-current-test* nil)
 
 (defstruct allocation-budget-sample
   bytes
@@ -35,7 +36,8 @@
                                              (setf at-signal
                                                    (- (sb-ext:get-bytes-consed)
                                                       before))))))
-                                     (funcall thunk))))
+                                     (let ((*export-baseline-current-test* nil))
+                                       (funcall thunk)))))
                           (org-resource-limit-error (condition)
                             (list :condition condition))))
                       (bytes (- (sb-ext:get-bytes-consed) before)))
