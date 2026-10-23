@@ -1571,7 +1571,7 @@
           (expect (< allocated (floor input-length 2)) :to-be t)))))
 
   (it-sequential "checks GFM plain link output before concatenating its destination"
-    (let* ((path (make-string (* 256 1024) :initial-element #\x))
+    (let* ((path (make-string (* 4 1024 1024) :initial-element #\x))
            (source (concatenate 'string "https://budget.test/" path))
            (limits (make-limits :max-output-length 128))
            (document (make-document source :limits limits))
@@ -1580,19 +1580,35 @@
                                               :format :plain)))
            (root (make-node :org-data :children (list link)))
            (attached (setf (document-root document) root))
+           (fixture-path (make-string (* 256 1024) :initial-element #\x))
+           (fixture-source
+             (concatenate 'string "https://budget.test/" fixture-path))
+           (fixture-document (make-document fixture-source :limits limits))
+           (fixture-link
+             (make-node :link :begin 0 :end (length fixture-source)
+                        :properties (list :type "https" :path fixture-path
+                                          :format :plain)))
+           (fixture-root (make-node :org-data :children (list fixture-link)))
+           (fixture-attached (setf (document-root fixture-document)
+                                   fixture-root))
            (input-length (length source)))
+      (declare (ignore fixture-attached))
+      (export-gfm-test-catch-error
+       (lambda () (export-org fixture-document :gfm)))
       (multiple-value-bind (allocated samples)
-          (measure-allocation-budget
-           (lambda () (lambda () (export-org document :gfm))))
+          (let ((*export-baseline-current-test* nil))
+            (measure-allocation-budget
+             (lambda () (lambda () (export-org document :gfm)))))
         (let ((condition
                 (export-gfm-test-catch-error
-                 (lambda () (export-org document :gfm)))))
+                 (lambda () (export-org fixture-document :gfm)))))
           (with-soft-assertions
             (expect attached :to-be root)
             (expect (node-type link) :to-be :link)
             (expect (node-property link :format) :to-be :plain)
             (expect (node-property link :type) :to-equal "https")
-            (expect (> input-length (* 256 1024)) :to-be t)
+            (expect (>= (length path) (* 4 1024 1024)) :to-be t)
+            (expect (> input-length (* 4 1024 1024)) :to-be t)
             (expect (typep condition 'org-resource-limit-error) :to-be t)
             (when (typep condition 'org-resource-limit-error)
               (expect (org-resource-limit-error-limit-name condition)
