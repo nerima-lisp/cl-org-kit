@@ -1089,9 +1089,12 @@
                              (if custom-id-p
                                  (string-equal
                                   (or (heading-property candidate "CUSTOM_ID") "") id)
-                                 (string-equal
-                                  (or (node-property candidate :raw-value) "")
-                                  location)))
+                                 (let ((raw-title
+                                         (or (node-property candidate :raw-value) "")))
+                                   (or (string-equal raw-title location)
+                                       (and (char= (char location 0) #\*)
+                                            (string-equal
+                                             raw-title (subseq location 1)))))))
                            (headings))
                           (current-heading))))
                (unless (or heading (null location) (zerop (length location)))

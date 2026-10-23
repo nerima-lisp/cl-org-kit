@@ -1716,6 +1716,33 @@
       (expect results-texts :to-equal '("value" ""))
       (expect overridden-texts :to-equal '("Local step")))))
 
+  (it "resolves Org heading locations for property macros"
+    (let* ((heading-preparation
+             (export-core-test-preparation
+              (export-core-test-lines
+               "* Heading"
+               ":PROPERTIES:"
+               ":KEY: value"
+               ":END:"
+               "{{{property(KEY,*Heading)}}}")))
+           (heading-values
+             (mapcar (lambda (view)
+                       (getf (org-kit::export-view-payload view) :expanded-text))
+                     (export-core-test-view-nodes heading-preparation :macro)))
+           (missing-location
+             (export-core-test-catch-error
+              (lambda ()
+                (export-core-test-preparation
+                 (export-core-test-lines
+                  "* Heading"
+                  "{{{property(KEY,*Missing)}}}"))))))
+      (with-soft-assertions
+        (expect heading-values :to-equal '("value"))
+        (expect (typep missing-location 'org-export-unsupported-syntax) :to-be t)
+        (when (typep missing-location 'org-export-unsupported-syntax)
+          (expect (org-export-unsupported-syntax-feature missing-location)
+                  :to-be :macro-property-location)))))
+
   (it "uses only the include callback and rejects missing, invalid, or cyclic includes"
     (let* ((source (parse-org "#+INCLUDE: \"part.org\"" :source-name "main.org"))
            (calls nil)
