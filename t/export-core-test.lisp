@@ -3474,10 +3474,28 @@
               (with-soft-assertions
                (expect (run-export) :to-equal "rendered")
                (expect acyclic-result :to-be t)
-               (let ((accepted-title-keyword-p
+               (let* ((accepted-title-keyword-p
                        (null (org-kit::export-validate-keywords
-                              (list (list nil "TITLE" "")) :html))))
-                 (expect accepted-title-keyword-p :to-be t))
+                              (list (list nil "TITLE" "")) :html)))
+                      (accepted-org-keyword-p
+                       (null (org-kit::export-validate-keywords
+                              (list (list nil "CUSTOM_KEY" "Visible")) :org)))
+                      (org-document (parse-org "#+CUSTOM_KEY: Retained"))
+                      (org-filter-context
+                       (org-kit::%make-export-render-context
+                        :backend :org :document org-document :owner-backend :org))
+                      (org-preparation
+                       (org-kit::export-prepare
+                        org-document :org :filter-context org-filter-context))
+                      (org-keywords
+                       (export-core-test-view-nodes org-preparation :keyword)))
+                 (expect accepted-title-keyword-p :to-be t)
+                 (expect accepted-org-keyword-p :to-be t)
+                 (expect
+                  (mapcar (lambda (view)
+                            (node-property (org-kit::export-view-node view) :key))
+                          org-keywords)
+                  :to-equal (list "CUSTOM_KEY")))
                (let* ((preparation
                        (org-kit::export-prepare
                         (parse-org "#+TITLE: Retained") backend))
