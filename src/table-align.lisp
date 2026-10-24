@@ -369,7 +369,7 @@
            (getf canonical-table :children)))
     expected))
 
-(defun table-align (document target)
+(defun table-align (document target &key numeric-alignment-p)
   "Align a pipe table and return its validated edit result."
   (let* ((table (edit-resolve-node document target '(:table)))
          (rows (node-children table)))
@@ -393,7 +393,8 @@
            (1+ (limit-value (document-limits document) :max-output-length))
            (lambda (row)
              (mapcar (lambda (cell) (node-property cell :value))
-                     (node-children row))))
+                     (node-children row)))
+           :numeric-alignment-p numeric-alignment-p)
         (let* ((source (document-text document))
                (first-row (first rows))
                (first-bar
