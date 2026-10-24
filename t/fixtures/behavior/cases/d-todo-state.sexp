@@ -243,10 +243,17 @@ third line")
    :heading-path ("Repeat cases" "Remove schedule before body repeater")
    :action :transition :state "DONE"
    :at "2025-03-20T09:00:00"
+   :preserve-scheduled-p t
    :log-repeat nil :log-into-drawer nil)
   (:id "cookie-child-completes"
    :source "d-todo-cookie.org"
    :heading-path ("Parent [0/1]" "Child")
    :action :transition :state "DONE"
    :at "2025-03-07T09:00:00"
-   :capture-document t)))
+   :capture-document t)
+  (:id "scheduled-preserved-on-done-mixed-eol"
+   :source "d-todo-scheduled-preserve-mixed-eol.org"
+   :heading-path ("設計	roadmap")
+   :action :transition :state "DONE"
+   :at "2026-10-19T09:00:00"
+   :preserve-scheduled-p t)))

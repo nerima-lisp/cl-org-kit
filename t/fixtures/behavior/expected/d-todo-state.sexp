@@ -232,4 +232,15 @@ Repeating body timestamp: <2025-03-08 Sat +1w>
 " :document-after "#+TODO: TODO | DONE
 * Parent [1/1]
 ** DONE Child
-" :log-events nil :rescheduled-timestamps nil :closed-timestamp nil))
+" :log-events nil :rescheduled-timestamps nil :closed-timestamp nil)
+ (:id "scheduled-preserved-on-done-mixed-eol" :previous-state "TODO" :new-state "DONE" :source-after nil :document-after "#+TODO: TODO | DONE
+* DONE 設計	roadmap
+SCHEDULED: <2026-10-20>
+:PROPERTIES:
+:OWNER: 佐藤	qa
+:TEAM: Org
+:END:
+| A | B |
+|---+---|
+| 1 | 2 |
+#+TBLFM: @2$2=2+1" :log-events nil :rescheduled-timestamps nil :closed-timestamp nil))

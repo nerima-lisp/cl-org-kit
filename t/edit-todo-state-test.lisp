@@ -49,6 +49,9 @@
                   :time-context (edit-todo-state-test-context (getf case :at)))
             (when (member :sequence-id case)
               (list :sequence-id (getf case :sequence-id)))
+            (when (member :preserve-scheduled-p case)
+              (list :preserve-scheduled-p
+                    (getf case :preserve-scheduled-p)))
             (when workflow-options
               (list :workflow-options workflow-options))
             (when (member :note case)
@@ -291,8 +294,8 @@
            (oracle (edit-todo-state-test-fixture "expected/d-todo-state.sexp"))
            (oracle-ids (mapcar (lambda (case) (getf case :id)) oracle)))
       (with-soft-assertions
-        (expect (length manifest) :to-be 41)
-        (expect (length oracle) :to-be 41)
+        (expect (length manifest) :to-be 42)
+        (expect (length oracle) :to-be 42)
         (expect (mapcar (lambda (case) (getf case :id)) manifest)
                 :to-equal oracle-ids))))
 
@@ -336,7 +339,8 @@
             ("repeat-last-repeat-with-clock")
             ("repeat-removes-nonrepeat-scheduled")
             ("repeat-removes-scheduled-before-body-repeater")
-            ("cookie-child-completes"))
+            ("cookie-child-completes")
+            ("scheduled-preserved-on-done-mixed-eol"))
       "matches pinned Org 9.8.10 transition case ~A"
       (case-id)
     (edit-todo-state-test-check-transition-case case-id))
@@ -444,6 +448,14 @@
               (lambda ()
                 (transition-heading-todo missing-time-document
                                          missing-time-heading nil))))
+           (invalid-preserve-scheduled
+             (edit-todo-state-test-error
+              (lambda ()
+                (transition-heading-todo
+                 missing-time-document missing-time-heading "DONE"
+                 :at (make-org-time-value at)
+                 :time-context context
+                 :preserve-scheduled-p :invalid))))
            (missing-note-source
              (format nil "#+TODO: TODO | DONE(d@)~%* TODO Target~%"))
            (missing-note-document (parse-org missing-note-source))
@@ -481,6 +493,7 @@
                                     :at (make-org-time-value at)
                                     :time-context context)))))
       (edit-todo-state-test-assert-error missing-time :invalid-value)
+      (edit-todo-state-test-assert-error invalid-preserve-scheduled :invalid-value)
       (edit-todo-state-test-assert-error missing-note :invalid-value)
       (edit-todo-state-test-assert-error wrong-sequence :invalid-value)
       (edit-todo-state-test-assert-error ambiguous :ambiguous-target)

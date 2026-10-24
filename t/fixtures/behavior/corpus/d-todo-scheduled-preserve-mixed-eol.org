@@ -1,0 +1,11 @@
+#+TODO: TODO | DONE
+* TODO 設計	roadmap
+SCHEDULED: <2026-10-20>
+:PROPERTIES:
+:OWNER: 佐藤	qa
+:TEAM: Org
+:END:
+| A | B |
+|---+---|
+| 1 | 2 |
+#+TBLFM: @2$2=2+1
