@@ -68,6 +68,20 @@
                   :to-equal expected)
           (expect (document-text document) :to-equal source)))))
 
+  (it "right-aligns numeric columns when requested"
+    (let* ((source (table-align-test-fixture
+                    "corpus/align/numeric-columns.org"))
+           (expected (table-align-test-fixture
+                      "expected/align/numeric-columns.org"))
+           (document (parse-org source))
+           (table (table-align-test-find-node (document-root document) :table))
+           (result (table-align document table :numeric-alignment-p t)))
+      (with-soft-assertions
+        (expect (edit-result-p result) :to-be t)
+        (expect (document-text (edit-result-updated-document result))
+                :to-equal expected)
+        (expect (document-text document) :to-equal source))))
+
   (it "uses left alignment by default while filling ragged rows across hlines"
     (let* ((source (table-align-test-fixture "corpus/align/ragged-hlines.org"))
            (document (parse-org source))
