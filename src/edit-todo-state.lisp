@@ -1447,11 +1447,14 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
     (document target state &key (at (values nil) at-supplied-p) time-context
                                workflow-options note
                                (log-drawer (values nil) log-drawer-supplied-p)
-                               inhibit-blocking)
+                               inhibit-blocking
+                               (preserve-scheduled-p nil))
   "Transition a headline to STATE and return its edit and transition results.
 AT is required for every transition; logging and repeat behavior use the
 document's normalized TODO sequence and the supplied workflow settings.
-INHIBIT-BLOCKING allows a transition to ignore TODO dependency blockers."
+INHIBIT-BLOCKING allows a transition to ignore TODO dependency blockers.
+PRESERVE-SCHEDULED-P keeps a non-repeating SCHEDULED timestamp on completion
+unless a repeater fires."
   (let* ((heading (edit-headline-resolve-target document target))
          (previous-state (node-property heading :todo-keyword)))
     (unless at-supplied-p
@@ -1467,6 +1470,9 @@ INHIBIT-BLOCKING allows a transition to ignore TODO dependency blockers."
     (unless (member inhibit-blocking '(nil t))
       (edit-todo-error heading :invalid-value
                        "INHIBIT-BLOCKING must be a boolean"))
+    (unless (member preserve-scheduled-p '(nil t))
+      (edit-todo-error heading :invalid-value
+                       "PRESERVE-SCHEDULED-P must be a boolean"))
     (let* ((at-value (edit-todo-normalize-at at))
            (sequence (and (or previous-state state)
                           (edit-todo-selected-sequence
@@ -1528,7 +1534,9 @@ INHIBIT-BLOCKING allows a transition to ignore TODO dependency blockers."
           (push (cons :closed (list :action :remove)) planning-changes)
           (setf closed-timestamp nil))
         (when (and (or repeating-p
-                       (and state-changed-p new-done-p))
+                       (and (not preserve-scheduled-p)
+                            state-changed-p
+                            new-done-p))
                    (let* ((planning
                             (edit-properties-section-planning
                              (edit-properties-headline-section heading)))
