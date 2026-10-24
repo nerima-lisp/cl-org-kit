@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.1]
+
+### Fixed
+
+- `org-kit:transition-heading-todo` can retain a non-repeating `SCHEDULED`
+  timestamp when completing a heading with `:preserve-scheduled-p t`. The keyword
+  defaults to `nil`; when a repeater fires, the existing schedule handling
+  still applies.
+- `org-kit:table-align` accepts `:numeric-alignment-p t` to right-align columns
+  whose non-empty data cells are all numeric. The keyword defaults to `nil`, so
+  callers keep the existing left-alignment behavior unless they opt in.
+
+Version 0.3.1 removes no names exported in 0.3.0.
+
 ## [0.3.0]
 
 ### Added
