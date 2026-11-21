@@ -409,19 +409,28 @@
         (expect (clock-summary-total-minutes month) :to-be 60)
         (expect (clock-summary-total-minutes year) :to-be 60)
         (expect (clock-summary-total-minutes dst) :to-be 240))))
-  (it "warns for invalid dates and minutes in extended-hour ranges"
-    (let ((context (clock-test-context "2026-10-12T12:00:00"))
-          (warnings nil))
-      (let ((summary
-              (handler-bind ((warning (lambda (condition)
-                                        (push (princ-to-string condition) warnings)
-                                        (muffle-warning condition))))
-                (clock-test-sum
-                 (format nil "* Scope~%CLOCK: [2026-13-99 Mon 24:00]--[2026-10-12 Mon 01:00]~%CLOCK: [2026-10-11 Sun 29:99]--[2026-10-12 Mon 06:00]")
-                 "Scope" "2026-10-12T00:00:00" "2026-10-12T06:00:00" context))))
-        (with-soft-assertions
-          (expect (clock-summary-total-minutes summary) :to-be 0)
-          (expect (length warnings) :to-be 2)))))
+  (it "normalizes overflowing date and time fields"
+    (let* ((context (clock-test-context "2026-10-12T12:00:00"))
+           (cases '(("CLOCK: [2026-10-01 Thu 10:00]--[2026-10-01 Thu 10:75] => 1:15"
+                     "2026-10-01T00:00:00" "2026-10-03T00:00:00" 75)
+                    ("CLOCK: [2026-02-31 Tue 10:00]--[2026-02-31 Tue 11:00] => 1:00"
+                     "2026-03-03T00:00:00" "2026-03-04T00:00:00" 60)
+                    ("CLOCK: [2026-02-31 Tue 10:00]--[2026-02-31 Tue 11:00] => 1:00"
+                     "2026-10-01T00:00:00" "2026-10-03T00:00:00" 0)
+                    ("CLOCK: [2026-10-11 Sun 29:99]--[2026-10-12 Mon 06:40]"
+                     "2026-10-12T00:00:00" "2026-10-12T07:00:00" 1))))
+      (dolist (case cases)
+        (destructuring-bind (line from to expected) case
+          (let ((warnings nil)
+                (summary nil))
+            (handler-bind ((warning
+                             (lambda (condition)
+                               (push condition warnings)
+                               (muffle-warning condition))))
+              (setf summary (clock-test-sum (format nil "* Scope~%~A" line)
+                                             "Scope" from to context)))
+            (expect (clock-summary-total-minutes summary) :to-be expected)
+            (expect warnings :to-equal nil))))))
 
   (it "ignores active, diary and incomplete timestamps with durations"
     (let* ((context (clock-test-context "2026-10-12T12:00:00"))

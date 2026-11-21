@@ -532,20 +532,26 @@ instant supplies the timer's current time."
                      (when (> start after-arrow)
                        (clock-parse-duration line start))))))
              (range-endpoint (timestamp end-p)
-               (let* ((hour (node-property timestamp (if end-p :hour-end :hour-start)))
-                      (minute (node-property timestamp (if end-p :minute-end :minute-start))))
-                 (if (and (integerp hour) (> hour 23)
-                          (typep minute '(integer 0 59)))
-                     (handler-case
-                         (let* ((date (cl-date-kit:make-local-date
-                                       (node-property timestamp (if end-p :year-end :year-start))
-                                       (node-property timestamp (if end-p :month-end :month-start))
-                                       (node-property timestamp (if end-p :day-end :day-start)))))
-                           (cl-date-kit:make-local-date-time
-                            (cl-date-kit:local-date-plus-days date (floor hour 24))
-                            (cl-date-kit:make-local-time (mod hour 24) minute 0)))
-                       (cl-date-kit:invalid-date () nil))
-                     (if end-p (timestamp-end timestamp) (timestamp-start timestamp)))))
+               (let ((hour (node-property timestamp
+                                          (if end-p :hour-end :hour-start))))
+                 (when hour
+                   (let* ((year (node-property timestamp
+                                               (if end-p :year-end :year-start)))
+                          (month (node-property timestamp
+                                                (if end-p :month-end :month-start)))
+                          (day (node-property timestamp
+                                              (if end-p :day-end :day-start)))
+                          (minute (node-property timestamp
+                                                 (if end-p :minute-end :minute-start)))
+                          (month-start (cl-date-kit:local-date-plus-months
+                                        (cl-date-kit:make-local-date year 1 1)
+                                        (1- month)))
+                          (date (cl-date-kit:local-date-plus-days
+                                 month-start (1- day)))
+                          (midnight (cl-date-kit:make-local-date-time
+                                     date (cl-date-kit:make-local-time 0 0 0))))
+                     (cl-date-kit:local-date-time-plus-minutes
+                      midnight (+ (* hour 60) minute))))))
              (collect-clock (node owner)
                (let* ((timestamp (node-property node :value))
                       (type (and timestamp (node-property timestamp :type)))
