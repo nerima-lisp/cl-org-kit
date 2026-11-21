@@ -1392,3 +1392,16 @@
                        nil)
                    (org-clocktable-parameter-error (error) error))))
           (expect condition :to-be-truthy))))))
+
+(describe "linked dynamic clocktables named current file"
+  (it "uses a local link when the report document has a source name"
+    (let* ((document
+             (parse-org
+              (format nil "* Current~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :link t~%#+END:~%")
+              :source-name "/reports/current.org"))
+           (updated
+             (edit-result-updated-document
+              (update-dynamic-block
+               document (edit-clocktable-test-dynamic-block document "clocktable")))))
+      (expect (search "[[*Current][Current]]" (document-text updated))
+              :to-be-truthy))))
