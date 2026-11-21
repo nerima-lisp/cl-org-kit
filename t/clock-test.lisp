@@ -431,6 +431,16 @@
                                       "2026-10-12T10:00:00" context))))
       (expect (clock-summary-total-minutes summary) :to-be 0)))
 
+  (it "reads naked durations like org-clock-sum"
+    (let ((context (clock-test-context "2026-10-12T12:00:00")))
+      (dolist (case '(("CLOCK: => 1:30" 90)
+                      ("CLOCK: => 1:5" 65)
+                      ("CLOCK: => 1:30 trailing" 90)))
+        (destructuring-bind (line expected) case
+          (let ((summary (clock-test-sum (format nil "* Scope~%~A" line)
+                                         "Scope" "2026-10-12T09:00:00"
+                                         "2026-10-12T10:00:00" context)))
+            (expect (clock-summary-unscoped-minutes summary) :to-be expected))))))
   (it "warns and skips invalid CLOCK data"
     (let* ((context (clock-test-context "2026-10-12T12:00:00"))
            (source (format nil "* Scope~%CLOCK: => x:10~%CLOCK: invalid~%CLOCK:"))

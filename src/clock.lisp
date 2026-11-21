@@ -148,22 +148,30 @@
              for code = (char-code (char text position))
              always (<= 48 code 57))))
 
-(defun clock-row-duration-minutes (line arrow-position)
-  (let* ((start (clock-skip-horizontal-space line (+ arrow-position 2)))
-         (colon (position #\: line :start start))
+(defun clock-parse-duration (line start)
+  "Read H:M digits at START of LINE.
+Return total minutes, the minutes field, its digit count and the end position,
+or NIL when the text is not digits, a colon and digits."
+  (let* ((colon (position #\: line :start start))
          (minute-start (and colon (1+ colon)))
-         (minute-end (and minute-start (+ minute-start 2)))
-         (end (and minute-end (clock-skip-horizontal-space line minute-end))))
-    (unless (and colon minute-start minute-end (= end (length line))
-                 (clock-ascii-digits-p line start colon)
-                 (= (- minute-end minute-start) 2)
-                 (clock-ascii-digits-p line minute-start minute-end))
-      (%org-clock-error :malformed-clock line))
-    (let ((hours (parse-integer line :start start :end colon))
-          (minutes (parse-integer line :start minute-start :end minute-end)))
-      (unless (< minutes 60)
+         (minute-end (and minute-start
+                          (loop for index from minute-start below (length line)
+                                while (clock-ascii-digits-p line index (1+ index))
+                                finally (return index)))))
+    (when (and colon (clock-ascii-digits-p line start colon)
+               (clock-ascii-digits-p line minute-start minute-end))
+      (let ((minutes (parse-integer line :start minute-start :end minute-end)))
+        (values (+ (* 60 (parse-integer line :start start :end colon)) minutes)
+                minutes (- minute-end minute-start) minute-end)))))
+
+(defun clock-row-duration-minutes (line arrow-position)
+  (let ((start (clock-skip-horizontal-space line (+ arrow-position 2))))
+    (multiple-value-bind (duration minutes width end)
+        (clock-parse-duration line start)
+      (unless (and duration (= width 2) (< minutes 60)
+                   (= (clock-skip-horizontal-space line end) (length line)))
         (%org-clock-error :malformed-clock line))
-      (+ (* 60 hours) minutes))))
+      duration)))
 
 (defun clock-row-timestamp-view (clock)
   (timestamp-view (node-property clock :value)))
@@ -516,24 +524,13 @@ instant supplies the timer's current time."
                      (add-heading-minutes owner minutes)))))
              (naked-duration (line)
                (let* ((clock (search "CLOCK:" line :test #'char-equal))
-                      (arrow (and clock
-                                  (clock-skip-horizontal-space line (+ clock 6)))))
-                 (when (and arrow (<= (+ arrow 2) (length line))
+                      (arrow (clock-skip-horizontal-space line (+ clock 6))))
+                 (when (and (<= (+ arrow 2) (length line))
                             (string= "=>" line :start2 arrow :end2 (+ arrow 2)))
                    (let* ((after-arrow (+ arrow 2))
-                          (start (clock-skip-horizontal-space line after-arrow))
-                          (colon (position #\: line :start start))
-                          (minute-start (and colon (1+ colon)))
-                          (minute-end (and minute-start
-                                           (position-if-not #'digit-char-p line
-                                                            :start minute-start))))
-                     (when (and (> start after-arrow) colon
-                                (clock-ascii-digits-p line start colon)
-                                (clock-ascii-digits-p line minute-start
-                                                      (or minute-end (length line))))
-                       (+ (* 60 (parse-integer line :start start :end colon))
-                          (parse-integer line :start minute-start
-                                             :end (or minute-end (length line)))))))))
+                          (start (clock-skip-horizontal-space line after-arrow)))
+                     (when (> start after-arrow)
+                       (clock-parse-duration line start))))))
              (range-endpoint (timestamp end-p)
                (let* ((hour (node-property timestamp (if end-p :hour-end :hour-start)))
                       (minute (node-property timestamp (if end-p :minute-end :minute-start))))
