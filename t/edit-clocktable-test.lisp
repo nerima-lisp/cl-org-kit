@@ -1261,6 +1261,8 @@
   (it "links headings in another file relative to the block document"
     (dolist (case '(("/reports/journal/month.org" #p"/reports/tasks/notes.org"
                     "../tasks/notes.org")
+                   ("/a/b/report.org" "/a/b/sub/./n.org"
+                    "sub/n.org")
                    ("/reports/journal/month.org" "/reports/notes.org"
                     "../notes.org")
                    ("reports/month.org" "reports/sub/notes.org"
@@ -1373,6 +1375,9 @@
 (describe "linked dynamic clocktables path errors"
   (it "rejects missing report names and incompatible path types"
     (dolist (case '((nil "notes.org")
+                    ("/reports/month.org" nil)
+                    ("reports/month.org" nil)
+                    (nil nil)
                     ("/reports/month.org" "notes.org")
                     ("reports/month.org" "/notes.org")
                     ("../reports/month.org" "notes.org")))
@@ -1393,6 +1398,8 @@
                                              source))
                        nil)
                    (org-clocktable-parameter-error (error) error))))
+          (when condition
+            (expect (org-clocktable-parameter-error-parameter condition) :to-equal "link"))
           (expect condition :to-be-truthy))))))
 
 (describe "linked dynamic clocktables named current file"
@@ -1407,3 +1414,26 @@
                document (edit-clocktable-test-dynamic-block document "clocktable")))))
       (expect (search "[[*Current][Current]]" (document-text updated))
               :to-be-truthy))))
+
+(describe "linked dynamic clocktables dot paths"
+  (it "treats dot components as the same file"
+    (dolist (paths '(("./month.org" "month.org")
+                     ("journal/month.org" "journal/./month.org")))
+      (destructuring-bind (report-name source-name) paths
+        (let* ((document
+                 (parse-org
+                  (format nil "#+BEGIN: clocktable :scope agenda :link t~%#+END:~%")
+                  :source-name report-name))
+               (source
+                 (parse-org
+                  (format nil "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
+                  :source-name source-name))
+               (updated
+                 (edit-result-updated-document
+                  (update-dynamic-block
+                   document (edit-clocktable-test-dynamic-block document "clocktable")
+                   :document-resolver (lambda (selector)
+                                        (declare (ignore selector))
+                                        source)))))
+          (expect (search "[[*Work][Work]]" (document-text updated))
+                  :to-be-truthy))))))
