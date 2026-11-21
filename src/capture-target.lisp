@@ -168,17 +168,41 @@
                   (write-string (subseq source position) stream))))
           (values transformed (+ cursor inserted-before-cursor))))))
 
-(defun capture-target-ensure-path (document path)
+(defun capture-target-ensure-path (document path &optional datetree-p)
   (let ((parent nil)
-        (remaining (copy-list path)))
+        (remaining (copy-list path))
+        (before nil))
     (loop while remaining
           for title = (pop remaining)
-          for child = (capture-target-find-direct-child document parent title)
-          do (if child
-                 (setf parent child)
-                 (progn
-                   (push title remaining)
-                   (return))))
+          for level from 0
+          do (let ((child
+                     (if datetree-p
+                         (let* ((size (nth level '(4 7 10)))
+                                (pattern (nth level
+                                              '("[12][0-9]{3}"
+                                                "[12][0-9]{3}-[01][0-9] \\w+"
+                                                "[12][0-9]{3}-[01][0-9]-[0123][0-9] \\w+")))
+                                (regex (cl-regex-kit:compile-regex pattern))
+                                (target-match (cl-regex-kit:scan regex title))
+                                (target (and target-match (subseq title 0 size))))
+                           (when target
+                             (loop for node in (capture-target-direct-headlines document parent)
+                                   for name = (capture-target-title node)
+                                   for match = (cl-regex-kit:scan regex name)
+                                   for key = (and match
+                                                  (subseq name
+                                                          (cl-regex-kit:match-start match)
+                                                          (+ (cl-regex-kit:match-start match) size)))
+                                   when (and key (not (string< key target)))
+                                     do (if (string= key target)
+                                            (return node)
+                                            (progn (setf before node) (return nil))))))
+                         (capture-target-find-direct-child document parent title))))
+               (if child
+                   (setf parent child)
+                   (progn
+                     (push title remaining)
+                     (return)))))
     (if (null remaining)
         (values parent
                 (capture-target-parent-insertion-offset document parent)
@@ -186,7 +210,9 @@
                 (if parent
                     (capture-target-star-count document parent)
                     0))
-        (let* ((offset (capture-target-parent-insertion-offset document parent))
+        (let* ((offset (if before
+                           (node-post-affiliated before)
+                           (capture-target-parent-insertion-offset document parent)))
                (stars
                 (if parent
                     (capture-target-star-count document parent)
@@ -218,7 +244,12 @@
                    "December")))
 
 (defun capture-target-day-name (value)
-  (edit-todo-weekday-name value))
+  (cdr (assoc (edit-todo-weekday-name value)
+              '(("Mon" . "Monday") ("Tue" . "Tuesday")
+                ("Wed" . "Wednesday") ("Thu" . "Thursday")
+                ("Fri" . "Friday") ("Sat" . "Saturday")
+                ("Sun" . "Sunday"))
+              :test #'string=)))
 
 (defun capture-target-datetree-path (time-context)
   (let* ((value (org-time-context-reference-time time-context))
@@ -358,9 +389,7 @@
                                        :time-context
                                        "Datetree target requires an explicit time context"))
               (multiple-value-bind (parent offset prefix stars)
-                  (capture-target-ensure-path document
-                                              (capture-target-datetree-path
-                                               time-context))
+                  (capture-target-ensure-path document (capture-target-datetree-path time-context) t)
                 (values document parent offset prefix stars)))
             (t
              (let ((regexp (third target-spec)))

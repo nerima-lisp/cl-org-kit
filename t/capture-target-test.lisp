@@ -84,7 +84,7 @@
                 (format nil
                         "#+TITLE: Preserve~%* Area~%** Subarea~%*** Entry~%"))
         (expect (capture-target-result-cursor-offset result) :to-be 40))))
-  (it "creates the year, month and day datetree path from the time context"
+  (it "creates and reuses datetree headings in date order"
     (let* ((source (format nil "#+TITLE: Keep~%"))
            (document (parse-org source :source-name "daily.org"))
            (result
@@ -98,8 +98,59 @@
         (expect (document-text updated)
                 :to-equal
                 (format nil
-                        "#+TITLE: Keep~%* 2024~%** 2024-02 February~%*** 2024-02-19 Mon~%**** Entry~%"))
-        (expect (capture-target-result-cursor-offset result) :to-be 65))))
+                        "#+TITLE: Keep~%* 2024~%** 2024-02 February~%*** 2024-02-19 Monday~%**** Entry~%"))
+        (expect (capture-target-result-cursor-offset result) :to-be 68)))
+    (dolist (case
+              '(("* 2024~%** 2024-02 Feb~%*** 2024-02-19 Mon~%"
+                 "* 2024~%** 2024-02 Feb~%*** 2024-02-19 Mon~%**** Entry~%")
+                ("* year 2024 notes~%** 2024-02 February~%*** 2024-02-19 Monday~%"
+                 "* year 2024 notes~%** 2024-02 February~%*** 2024-02-19 Monday~%**** Entry~%")
+                ("* 2024~%** 2024-02 February~%*** 2024-02-20 Tuesday~%"
+                 "* 2024~%** 2024-02 February~%*** 2024-02-19 Monday~%**** Entry~%*** 2024-02-20 Tuesday~%")
+                ("* 2024~%** 2024-02 February~%*** 2024-02-18 Sunday~%*** 2024-02-20 Tuesday~%"
+                 "* 2024~%** 2024-02 February~%*** 2024-02-18 Sunday~%*** 2024-02-19 Monday~%**** Entry~%*** 2024-02-20 Tuesday~%")
+                ("* 2024~%** 2024-02 February~%*** 2024-02-18 Sunday~%"
+                 "* 2024~%** 2024-02 February~%*** 2024-02-18 Sunday~%*** 2024-02-19 Monday~%**** Entry~%")
+                ("* 2024~%** 2024-01 January~%** 2024-03 March~%"
+                 "* 2024~%** 2024-01 January~%** 2024-02 February~%*** 2024-02-19 Monday~%**** Entry~%** 2024-03 March~%")
+                ("* 2023~%* 2025~%"
+                 "* 2023~%* 2024~%** 2024-02 February~%*** 2024-02-19 Monday~%**** Entry~%* 2025~%")
+                ("* 2024~%** 2024-02~%"
+                 "* 2024~%** 2024-02~%** 2024-02 February~%*** 2024-02-19 Monday~%**** Entry~%")))
+      (let* ((source (format nil (first case)))
+             (document (parse-org source :source-name "daily.org"))
+             (result (capture-into-target
+                      document '(:file+olp+datetree "daily.org")
+                      (capture-target-test-template "Entry")
+                      :time-context (capture-target-test-time-context))))
+        (expect (document-text (capture-target-result-target-document result))
+                :to-equal (format nil (second case)))))
+    (dolist (case
+              '(("2024-03-01T12:34:00"
+                 "* 2024~%** 2024-02 February~%*** 2024-02-29 Thursday~%"
+                 "* 2024~%** 2024-02 February~%*** 2024-02-29 Thursday~%** 2024-03 March~%*** 2024-03-01 Friday~%**** Entry~%")
+                ("2024-02-29T12:34:00"
+                 "* 2024~%** 2024-03 March~%*** 2024-03-01 Friday~%"
+                 "* 2024~%** 2024-02 February~%*** 2024-02-29 Thursday~%**** Entry~%** 2024-03 March~%*** 2024-03-01 Friday~%")
+                ("2025-01-01T12:34:00"
+                 "* 2024~%** 2024-12 December~%*** 2024-12-31 Tuesday~%"
+                 "* 2024~%** 2024-12 December~%*** 2024-12-31 Tuesday~%* 2025~%** 2025-01 January~%*** 2025-01-01 Wednesday~%**** Entry~%")
+                ("2024-12-31T12:34:00"
+                 "* 2025~%** 2025-01 January~%*** 2025-01-01 Wednesday~%"
+                 "* 2024~%** 2024-12 December~%*** 2024-12-31 Tuesday~%**** Entry~%* 2025~%** 2025-01 January~%*** 2025-01-01 Wednesday~%")
+                ("2026-11-21T12:34:00"
+                 ""
+                 "* 2026~%** 2026-11 November~%*** 2026-11-21 Saturday~%**** Entry~%")))
+      (let* ((document (parse-org (format nil (second case)) :source-name "daily.org"))
+             (time-context (make-time-context
+                            :reference-time (make-org-time-value (first case))
+                            :zone (resolve-time-zone "UTC")))
+             (result (capture-into-target
+                      document '(:file+olp+datetree "daily.org")
+                      (capture-target-test-template "Entry")
+                      :time-context time-context)))
+        (expect (document-text (capture-target-result-target-document result))
+                :to-equal (format nil (third case))))))
   (it "signals ambiguity and missing-target reasons for ID targets"
     (let* ((first (capture-target-test-id-document "first.org" "First" "shared"))
            (second (capture-target-test-id-document "second.org" "Second" "shared"))
