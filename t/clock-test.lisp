@@ -374,6 +374,54 @@
         (expect (clock-summary-clipped-interval-count summary) :to-be 2)
         (expect (length warnings) :to-be 2)
         (expect (mapcar (lambda (warning) (not (null (search "line 10" warning)))) warnings) :to-equal (list nil t)))))
+  (it "normalizes extended hours before clipping intervals"
+    (let ((context (clock-test-context "2026-10-12T12:00:00")))
+      (dolist (case '(("CLOCK: [2026-10-11 Sun 24:00]--[2026-10-12 Mon 01:00]"
+                       "2026-10-12T00:00:00" "2026-10-12T06:00:00" 60)
+                      ("CLOCK: [2026-10-11 Sun 29:00]--[2026-10-12 Mon 06:00]"
+                       "2026-10-12T00:00:00" "2026-10-12T06:00:00" 60)
+                      ("CLOCK: [2026-10-11 Sun 23:30]--[2026-10-11 Sun 24:30]"
+                       "2026-10-12T00:00:00" "2026-10-12T01:00:00" 30)
+                      ("CLOCK: [2026-10-11 Sun 28:30]--[2026-10-11 Sun 29:30]"
+                       "2026-10-12T05:00:00" "2026-10-12T06:00:00" 30)))
+        (destructuring-bind (line from to expected) case
+          (let ((summary (clock-test-sum (format nil "* Scope~%~A" line)
+                                         "Scope" from to context)))
+            (expect (clock-summary-total-minutes summary) :to-be expected))))
+      (let* ((document (parse-org (format nil "* Scope~%CLOCK: [2026-10-11 Sun 24:00]--[2026-10-12 Mon 01:00]")))
+             (condition (clock-test-error
+                         (lambda () (check-clock-consistency document :time-context context)))))
+        (expect (typep condition 'org-time-error) :to-be t))))
+  (it "normalizes extended hours across month, year and DST boundaries"
+    (let* ((context (clock-test-context "2027-01-01T12:00:00"))
+           (month (clock-test-sum
+                   (format nil "* Scope~%CLOCK: [2026-10-31 Sat 29:00]--[2026-11-01 Sun 06:00]")
+                   "Scope" "2026-11-01T00:00:00" "2026-11-01T07:00:00" context))
+           (year (clock-test-sum
+                  (format nil "* Scope~%CLOCK: [2026-12-31 Thu 24:00]--[2027-01-01 Fri 01:00]")
+                  "Scope" "2027-01-01T00:00:00" "2027-01-01T02:00:00" context))
+           (dst-context (clock-test-context "2024-03-10T12:00:00"
+                                            (resolve-time-zone "America/New_York")))
+           (dst (clock-test-sum
+                 (format nil "* Scope~%CLOCK: [2024-03-09 Sat 24:00]--[2024-03-09 Sat 29:00]")
+                 "Scope" "2024-03-10T00:00:00" "2024-03-10T06:00:00" dst-context)))
+      (with-soft-assertions
+        (expect (clock-summary-total-minutes month) :to-be 60)
+        (expect (clock-summary-total-minutes year) :to-be 60)
+        (expect (clock-summary-total-minutes dst) :to-be 240))))
+  (it "warns for invalid dates and minutes in extended-hour ranges"
+    (let ((context (clock-test-context "2026-10-12T12:00:00"))
+          (warnings nil))
+      (let ((summary
+              (handler-bind ((warning (lambda (condition)
+                                        (push (princ-to-string condition) warnings)
+                                        (muffle-warning condition))))
+                (clock-test-sum
+                 (format nil "* Scope~%CLOCK: [2026-13-99 Mon 24:00]--[2026-10-12 Mon 01:00]~%CLOCK: [2026-10-11 Sun 29:99]--[2026-10-12 Mon 06:00]")
+                 "Scope" "2026-10-12T00:00:00" "2026-10-12T06:00:00" context))))
+        (with-soft-assertions
+          (expect (clock-summary-total-minutes summary) :to-be 0)
+          (expect (length warnings) :to-be 2)))))
 
   (it "ignores active, diary and incomplete timestamps with durations"
     (let* ((context (clock-test-context "2026-10-12T12:00:00"))

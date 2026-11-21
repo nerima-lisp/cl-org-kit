@@ -534,6 +534,21 @@ instant supplies the timer's current time."
                        (+ (* 60 (parse-integer line :start start :end colon))
                           (parse-integer line :start minute-start
                                              :end (or minute-end (length line)))))))))
+             (range-endpoint (timestamp end-p)
+               (let* ((hour (node-property timestamp (if end-p :hour-end :hour-start)))
+                      (minute (node-property timestamp (if end-p :minute-end :minute-start))))
+                 (if (and (integerp hour) (> hour 23)
+                          (typep minute '(integer 0 59)))
+                     (handler-case
+                         (let* ((date (cl-date-kit:make-local-date
+                                       (node-property timestamp (if end-p :year-end :year-start))
+                                       (node-property timestamp (if end-p :month-end :month-start))
+                                       (node-property timestamp (if end-p :day-end :day-start)))))
+                           (cl-date-kit:make-local-date-time
+                            (cl-date-kit:local-date-plus-days date (floor hour 24))
+                            (cl-date-kit:make-local-time (mod hour 24) minute 0)))
+                       (cl-date-kit:invalid-date () nil))
+                     (if end-p (timestamp-end timestamp) (timestamp-start timestamp)))))
              (collect-clock (node owner)
                (let* ((timestamp (node-property node :value))
                       (type (and timestamp (node-property timestamp :type)))
@@ -541,9 +556,7 @@ instant supplies the timer's current time."
                       (line (clock-row-source-line node)))
                  (cond
                    (range-p
-                    (let ((start (timestamp-start timestamp))
-                          (end (timestamp-end timestamp)))
-                      (unless (and start end (node-property timestamp :hour-start) (node-property timestamp :hour-end)) (%org-clock-error :malformed-clock line))
+                    (let ((start (range-endpoint timestamp nil)) (end (range-endpoint timestamp t))) (unless (and start end (node-property timestamp :hour-start) (node-property timestamp :hour-end)) (%org-clock-error :malformed-clock line))
                       (add-interval owner
                                     (clock-context-instant-seconds
                                      (%time-value-from-local-value start) time-context)
