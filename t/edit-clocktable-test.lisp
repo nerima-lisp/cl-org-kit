@@ -1256,3 +1256,111 @@
               (edit-result-updated-document
                (org-kit::update-dynamic-block document block)))))
       (expect (search "Repeated" updated) :to-be-truthy))))
+
+(describe "linked dynamic clocktables"
+  (it "links headings in another file relative to the block document"
+    (dolist (case '(("/reports/journal/month.org" #p"/reports/tasks/notes.org"
+                    "../tasks/notes.org")
+                   ("/reports/journal/month.org" "/reports/notes.org"
+                    "../notes.org")
+                   (nil "notes.org" "notes.org")))
+      (destructuring-bind (block-path source-path relative-path) case
+        (let* ((document
+                 (parse-org
+                  (format nil
+                          "#+BEGIN: clocktable :scope agenda :link t~%stale~%#+END:~%")
+                  :source-name block-path))
+               (source-document
+                 (parse-org
+                  (format nil
+                          "* Tracked~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
+                  :source-name source-path))
+               (block (edit-clocktable-test-dynamic-block document "clocktable"))
+               (updated
+                 (document-text
+                  (edit-result-updated-document
+                   (update-dynamic-block
+                    document block
+                    :document-resolver
+                    (lambda (selector)
+                      (expect selector :to-be :agenda)
+                      source-document))))))
+          (with-soft-assertions
+            (expect (search (format nil "[[file:~A::*Tracked][Tracked]]" relative-path)
+                            updated)
+                    :to-be-truthy)
+            (expect (search "*0:30*" updated) :to-be-truthy)
+            (expect (search "#+CAPTION" updated) :to-be nil))))))
+
+  (it "uses a local heading link for the same file"
+    (let* ((title "A title that stays complete even beyond the usual truncation")
+           (source
+             (format nil
+                     "* ~A~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :scope agenda :link t~%#+END:~%"
+                     title))
+           (document (parse-org source :source-name "journal/month.org"))
+           (same-file (parse-org source :source-name "journal/../journal/month.org"))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (table
+             (org-kit::edit-clocktable-find-table
+              (edit-result-updated-document
+               (update-dynamic-block
+                document block :document-resolver
+                (lambda (selector)
+                  (declare (ignore selector))
+                  same-file))))))
+      (expect (search (format nil "[[*~A][~A]]" title title) (node-text table))
+              :to-be-truthy)))
+
+  (it "uses distinct search and display text for angle and bracket objects"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* [Area]  [[https://example.test][Plan]] [[https://example.test/notes]] <2026-10-12 Mon> [2/7] [2026-10-12 Mon]~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable :link t~%#+END:~%")))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (table
+             (org-kit::edit-clocktable-find-table
+              (edit-result-updated-document
+               (update-dynamic-block document block))))
+           (expected
+             (format nil
+                     "[[*\\[Area\\] \\[\\[https://example.test\\]\\[Plan\\]\\] \\[\\[https://example.test/notes\\]\\] <2026-10-12 Mon> \\[2026-10-12 Mon\\]][[Area]  Plan https://example.test/notes <2026-10-12 Mon>  [2026-10-12 Mon]~C]]"
+                     (code-char #x200B))))
+      (expect (search expected (node-text table)) :to-be-truthy)))
+
+  (it "escapes closing brackets and backslashes and omits an empty description"
+    (let* ((document
+             (parse-org
+              (format nil
+                      "* Literal \\[x]] and tail\\~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%* [0%]~%CLOCK: [2026-10-12 Mon 09:30]--[2026-10-12 Mon 09:45] => 0:15~%#+BEGIN: clocktable :link yes~%#+END:~%")))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (table
+             (org-kit::edit-clocktable-find-table
+              (edit-result-updated-document
+               (update-dynamic-block document block))))
+           (expected
+             (format nil "[[*Literal ~A[x\\]\\] and tail\\\\][Literal \\[x]~C] and tail\\]]"
+                     (make-string 3 :initial-element #\\)
+                     (code-char #x200B))))
+      (with-soft-assertions
+        (expect (search expected (node-text table)) :to-be-truthy)
+        (expect (search "[[*]]" (node-text table)) :to-be-truthy))))
+
+  (it "renders :link nil identically to the omitted flag"
+    (flet ((render (flag)
+             (let* ((document
+                      (parse-org
+                       (format nil
+                               "* Tracked~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable~A~%#+END:~%"
+                               flag)))
+                    (block
+                      (edit-clocktable-test-dynamic-block document "clocktable")))
+               (node-text
+                (org-kit::edit-clocktable-find-table
+                 (edit-result-updated-document
+                  (update-dynamic-block document block)))))))
+      (let ((without-flag (render "")))
+        (with-soft-assertions
+          (expect (render " :link nil") :to-equal without-flag)
+          (expect (search "| Tracked" without-flag) :to-be-truthy)
+          (expect (search "[[" without-flag) :to-be nil))))))
