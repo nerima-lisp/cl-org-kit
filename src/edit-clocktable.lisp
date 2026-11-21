@@ -32,22 +32,101 @@
         (t text))
       text))
 
-(defun edit-clocktable-headline (row &optional emphasize-p)
-  (let ((level (clocktable-row-level row))
-        (title (clocktable-row-title row)))
-    (multiple-value-bind (end shortened-p)
-        (edit-clocktable-title-range title)
-      (let* ((shortened
-              (if shortened-p
-                  (concatenate 'string (subseq title 0 end) "...")
-                  title))
-             (display-title
-               (edit-clocktable-emphasize shortened level emphasize-p)))
-        (if (> level 1)
-            (concatenate 'string "\\_"
-                         (make-string (* 2 (1- level)) :initial-element #\Space)
-                         display-title)
-            display-title)))))
+(defparameter *clocktable-statistics-cookie-regex*
+  (cl-regex-kit:compile-regex "\\[[0-9]*(?:%|/[0-9]*)\\]"))
+
+(defun edit-clocktable-link-target (path)
+  ;; A run of backslashes needs doubling only before a bracket or at the end.
+  (cl-regex-kit:replace-all
+   (load-time-value
+    (cl-regex-kit:compile-regex "(\\\\*)([\\[\\]]|\\z)") t)
+   path
+   (lambda (match text)
+     (let ((slashes (cl-regex-kit:match-group-string match 1 text))
+           (suffix (cl-regex-kit:match-group-string match 2 text)))
+       (concatenate 'string slashes slashes
+                    (if (plusp (length suffix)) "\\" "")
+                    suffix)))))
+
+(defun edit-clocktable-link-description (title)
+  (let* ((without-cookies
+           (cl-regex-kit:replace-all *clocktable-statistics-cookie-regex*
+                                     title ""))
+         (description
+           (string-trim
+            '(#\Space #\Tab)
+            (cl-regex-kit:replace-all
+             (load-time-value
+              (cl-regex-kit:compile-regex
+               (concatenate 'string "\\[\\["
+                            "((?:[^\\[\\]\\\\]|\\\\(?:\\\\\\\\)*[\\[\\]]|\\\\+[^\\[\\]])+)"
+                            "\\](?:\\[(.+?)\\])?\\]"))
+              t)
+             without-cookies
+             (lambda (match text)
+               (or (cl-regex-kit:match-group-string match 2 text)
+                   (cl-regex-kit:match-group-string match 1 text)))))))
+    ;; Keep a closing bracket from being mistaken for a link delimiter.
+    (cl-regex-kit:replace-all
+     (load-time-value (cl-regex-kit:compile-regex "\\]\\]") t)
+     (cl-regex-kit:replace-all
+      (load-time-value (cl-regex-kit:compile-regex "\\]\\z") t)
+      description (format nil "]~C" (code-char #x200B)))
+     (format nil "]~C]" (code-char #x200B)))))
+
+(defun edit-clocktable-link (title prefix)
+  (let* ((target
+           (string-trim
+            " "
+            (cl-regex-kit:replace-all
+             (load-time-value (cl-regex-kit:compile-regex "[ \\t]+") t)
+             (cl-regex-kit:replace-all *clocktable-statistics-cookie-regex*
+                                       title " ")
+             " ")))
+         (path (edit-clocktable-link-target (format nil "~A*~A" prefix target)))
+         (description (edit-clocktable-link-description title)))
+    (if (zerop (length description))
+        (format nil "[[~A]]" path)
+        (format nil "[[~A][~A]]" path description))))
+
+(defun clocktable-document-path (document base)
+  (let ((source-name (document-source-name document)))
+    (when (or (stringp source-name) (pathnamep source-name))
+      (uiop:merge-pathnames* (uiop:parse-unix-namestring source-name) base))))
+
+(defun clocktable-link-prefix (target-document source-document)
+  (let* ((base (uiop:getcwd))
+         (source (clocktable-document-path source-document base))
+         (target (clocktable-document-path target-document base)))
+    (if (or (null source) (equal source target))
+        ""
+        (let ((from (cdr (pathname-directory (or target base))))
+              (to (cdr (pathname-directory source))))
+          (loop while (and from to (equal (first from) (first to)))
+                do (pop from) (pop to))
+          (format nil "file:~{../~*~}~{~A/~}~A::"
+                  from to
+                  (sb-ext:native-namestring
+                   (make-pathname :directory nil :defaults source)))))))
+
+(defun edit-clocktable-headline (row &optional emphasize-p link-prefix)
+  (let* ((level (clocktable-row-level row))
+         (title (clocktable-row-title row))
+         (display-title
+           (edit-clocktable-emphasize
+            (if link-prefix
+                (edit-clocktable-link title link-prefix)
+                (multiple-value-bind (end shortened-p)
+                    (edit-clocktable-title-range title)
+                  (if shortened-p
+                      (concatenate 'string (subseq title 0 end) "...")
+                      title)))
+            level emphasize-p)))
+    (if (> level 1)
+        (concatenate 'string "\\_"
+                     (make-string (* 2 (1- level)) :initial-element #\Space)
+                     display-title)
+        display-title)))
 
 (defun edit-clocktable-check-character-lower-bound (document characters)
   (let ((limits (document-limits document)))
@@ -134,11 +213,12 @@
 (defun edit-clocktable-time-columns (rows)
   (if (some (lambda (row) (> (clocktable-row-level row) 1)) rows) 2 1))
 
-(defun edit-clocktable-table-columns (rows time-columns tags-p percent-p)
+(defun edit-clocktable-table-columns (rows time-columns tags-p percent-p
+                                     &optional link-prefix)
   (loop with columns = (+ 1 time-columns (if tags-p 1 0)
                          (if percent-p 1 0))
         for row in rows
-        for headline = (edit-clocktable-headline row)
+        for headline = (edit-clocktable-headline row nil link-prefix)
         for row-columns = (+ time-columns
                              (if tags-p 1 0)
                              (if percent-p 1 0)
@@ -172,7 +252,7 @@
   (write-string newline stream))
 
 (defun edit-clocktable-body-text (result rows time-columns column-count newline
-                                  &key tags-p emphasize-p percent-p)
+                                  &key tags-p emphasize-p percent-p link-prefix)
   (let* ((header (if (and (not tags-p) (not percent-p))
                      (edit-clocktable-fixed-cells
                       column-count "Headline" "Time")
@@ -210,7 +290,7 @@
           (edit-clocktable-write-row
            stream
            (edit-clocktable-data-cells
-            row (edit-clocktable-headline row emphasize-p)
+            row (edit-clocktable-headline row emphasize-p link-prefix)
             (edit-clocktable-time-text (clocktable-row-minutes row))
             time-columns tags-p emphasize-p percent-p total-minutes)
            newline))))))
@@ -244,7 +324,7 @@
     (check-limit (document-limits document) :max-node-count minimum-node-count)))
 
 (defun edit-clocktable-render-body (document result newline
-                                   &key tags-p emphasize-p formula target)
+                                   &key tags-p emphasize-p formula target link-prefix)
   (let ((rows (%clocktable-result-rows result))
         (percent-p (and formula (string= formula "%"))))
     (edit-clocktable-check-time-size
@@ -258,11 +338,13 @@
                            "Clocktable headline contains a line break")))
     (let* ((time-columns (edit-clocktable-time-columns rows))
            (column-count
-             (edit-clocktable-table-columns rows time-columns tags-p percent-p))
+             (edit-clocktable-table-columns
+              rows time-columns tags-p percent-p link-prefix))
            (raw-body
              (edit-clocktable-body-text
               result rows time-columns column-count newline
-              :tags-p tags-p :emphasize-p emphasize-p :percent-p percent-p))
+              :tags-p tags-p :emphasize-p emphasize-p :percent-p percent-p
+              :link-prefix link-prefix))
            (raw-body
              (if (and formula (not percent-p))
                  (concatenate 'string raw-body
@@ -357,7 +439,7 @@
 
 (defun clocktable-validate-parameters (parameters)
   (let ((allowed '(:scope :maxlevel :block :tstart :tend :step :match :tags
-                   :formula :fileskip0 :emphasize)))
+                   :formula :fileskip0 :emphasize :link)))
     (loop for tail on parameters by #'cddr
           for key = (first tail)
           for value = (second tail)
@@ -408,7 +490,7 @@
                            (not (find #\Newline formula))
                            (not (find #\Return formula)))))
         (clocktable-parameter-error :invalid-value :formula formula))
-      (dolist (key '(:tags :fileskip0 :emphasize))
+      (dolist (key '(:tags :fileskip0 :emphasize :link))
         (let ((value (clocktable-parameter-value parameters key)))
           (when (and (clocktable-parameter-present-p parameters key)
                      (not (or (null value) (eq value t)
@@ -875,8 +957,8 @@
     (concatenate 'string label date-label)))
 
 (defun clocktable-render-section
-    (target-document dynamic-block result newline parameters range-label file-label
-     show-range-p show-file-p)
+    (target-document source-document dynamic-block result newline parameters
+     range-label file-label show-range-p show-file-p)
   (with-output-to-string (stream)
     (when show-file-p
       (format stream "File: ~A~A" (or file-label "") newline))
@@ -888,6 +970,8 @@
       :tags-p (clocktable-flag parameters :tags)
       :emphasize-p (clocktable-flag parameters :emphasize)
       :formula (clocktable-parameter-value parameters :formula)
+      :link-prefix (when (clocktable-flag parameters :link)
+                     (clocktable-link-prefix target-document source-document))
       :target dynamic-block)
      stream)))
 
@@ -936,7 +1020,8 @@
                           (write-bounded
                            stream
                            (clocktable-render-section
-                            document block result newline parameters
+                            document source-document block result newline
+                             parameters
                             (and step-name
                                  (clocktable-step-name subrange step-name))
                             file-label show-ranges-p show-files-p)
@@ -948,4 +1033,4 @@
                                   #'clocktable-dynamic-block-handler
                                   :parameters '(:scope :maxlevel :block :tstart
                                                 :tend :step :match :tags :formula
-                                                :fileskip0 :emphasize)))
+                                                :fileskip0 :emphasize :link)))
