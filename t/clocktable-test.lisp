@@ -321,8 +321,8 @@
         (clocktable-test-expect-type-error invalid-result-range nil
                                            'org-time-range))))
 
-  (it "reports malformed match and parsed CLOCK conditions with their details"
-    (let* ((document (parse-org "* Scope"))
+  (it "reports malformed matches and skips invalid CLOCK ranges"
+    (let* ((document (parse-org (format nil "* Scope~%CLOCK: [2026-13-99 Mon 09:00]--[2026-13-99 Mon 10:00] => 0:10~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 1:0")))
            (heading (clocktable-test-heading-path document '("Scope")))
            (from (make-org-time-value "2026-10-12T09:00:00"))
            (to (make-org-time-value "2026-10-12T10:00:00"))
@@ -331,46 +331,23 @@
                                        :zone (make-fixed-time-zone 0)
                                        :dst-policy :compatible))
            (match-query "+")
-           (match-error
-             (clocktable-test-capture-condition
-              (lambda ()
-                (clocktable-data document heading :range range :match match-query
-                                 :time-context context))))
-           (invalid-clock-line "CLOCK: [2026-13-99 Mon 09:00]")
-           (clock-document
-             (parse-org (format nil "* Scope~%~A" invalid-clock-line)))
-           (clock-heading
-             (clocktable-test-heading-path clock-document '("Scope")))
-           (clock-error
-             (clocktable-test-capture-condition
-              (lambda ()
-                (clocktable-data clock-document clock-heading :range range
-                                 :time-context context))))
-           (malformed-clock-line "CLOCK: => x:10")
-           (malformed-clock-document
-             (parse-org (format nil "* Scope~%~A" malformed-clock-line)))
-           (malformed-clock-heading
-             (clocktable-test-heading-path malformed-clock-document '("Scope")))
-           (malformed-clock-error
-             (clocktable-test-capture-condition
-              (lambda ()
-                (clocktable-data malformed-clock-document
-                                 malformed-clock-heading :range range
-                                 :time-context context)))))
+           (match-error (clocktable-test-capture-condition
+                         (lambda () (clocktable-data document heading :range range :match match-query
+                                                     :time-context context))))
+           (warnings nil)
+           (result (handler-bind ((warning (lambda (condition)
+                                             (push (princ-to-string condition) warnings)
+                                             (muffle-warning condition))))
+                     (clocktable-data document heading :range range :time-context context))))
       (with-soft-assertions
         (expect (typep match-error 'org-query-error) :to-be t)
         (when (typep match-error 'org-query-error)
-          (expect (org-kit-error-message match-error)
-                  :to-equal "Sign must be followed by a term")
+          (expect (org-kit-error-message match-error) :to-equal "Sign must be followed by a term")
           (expect (org-query-error-query match-error) :to-equal match-query)
           (expect (org-query-error-position match-error) :to-be 1))
-        (clocktable-test-expect-time-error clock-error :invalid-time
-                                           "timestamp has no valid start"
-                                           "Invalid date or time")
-        (clocktable-test-expect-clock-error malformed-clock-error
-                                            :malformed-clock
-                                            malformed-clock-line
-                                            "Malformed CLOCK entry"))))
+        (expect (clocktable-result-total-minutes result) :to-be 30)
+        (expect (length warnings) :to-be 1)
+        (expect (search "line 2" (first warnings)) :to-be-truthy))))
 
   (it "does not inspect malformed CLOCK rows below unmatched headings"
     (let* ((document

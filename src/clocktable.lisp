@@ -168,8 +168,7 @@ reference. Running CLOCK rows are excluded."
       (multiple-value-bind (children matching-p)
           (clocktable-heading-relations headings matching-headings)
         (multiple-value-bind (summary direct-minutes)
-            (clock-collect-range heading
-                                 (org-time-range-start range)
+            (clock-collect-range document heading (org-time-range-start range)
                                  (org-time-range-end range)
                                  time-context nil t matching-p)
           (declare (ignore summary))
