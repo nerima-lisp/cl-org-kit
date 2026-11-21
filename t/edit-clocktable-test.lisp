@@ -1263,6 +1263,8 @@
                     "../tasks/notes.org")
                    ("/reports/journal/month.org" "/reports/notes.org"
                     "../notes.org")
+                   ("reports/month.org" "reports/sub/notes.org"
+                    "sub/notes.org")
                    ("reports/journal/month.org" "reports/tasks/notes.org"
                     "../tasks/notes.org")
                    ("reports/journal/month.org" "../other/notes.org"
