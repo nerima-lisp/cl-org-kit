@@ -209,7 +209,7 @@ selected subtree; an inherited property is not counted repeatedly.
 `sum-clocks` totals a heading and its descendants over the half-open interval
 `[FROM, TO)`. It requires `:time-context`. The default excludes running clocks.
 It includes a duration-only CLOCK row's full duration by default because the row
-has no dates to clip; it does so only when `[FROM, TO)` has positive length.
+has no dates to clip.
 
 ~~~lisp
 (require :asdf)
@@ -253,6 +253,10 @@ duration-only rows. `sum-clocks` accepts optional `:as-of` as an assertion for
 callers that already carry a separate time value. It verifies that the value
 resolves to the same instant as the context's reference time; it does not set a
 cutoff.
+
+`sum-clocks` and `clocktable-data` leave a CLOCK row they cannot parse out of
+the totals and signal an `org-clock-warning` that carries the line number and
+the row text. The consistency check still signals `org-clock-error`.
 
 ## Generate a clocktable
 
