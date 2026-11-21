@@ -89,25 +89,47 @@
         (format nil "[[~A]]" path)
         (format nil "[[~A][~A]]" path description))))
 
-(defun clocktable-document-path (document base)
-  (let ((source-name (document-source-name document)))
-    (when (or (stringp source-name) (pathnamep source-name))
-      (uiop:merge-pathnames* (uiop:parse-unix-namestring source-name) base))))
+(defun clocktable-document-path (document)
+  (typecase (document-source-name document)
+    (string (sb-ext:parse-native-namestring (document-source-name document)))
+    (pathname (document-source-name document))
+    (t nil)))
 
 (defun clocktable-link-prefix (target-document source-document)
-  (let* ((base (uiop:getcwd))
-         (source (clocktable-document-path source-document base))
-         (target (clocktable-document-path target-document base)))
-    (if (or (null source) (equal source target))
+  (let* ((source (clocktable-document-path source-document))
+         (target (clocktable-document-path target-document)))
+    (when (and source (not (eq target-document source-document))
+               (or (null target)
+                   (not (eq (or (first (pathname-directory source)) :relative)
+                            (or (first (pathname-directory target)) :relative)))))
+      (clocktable-parameter-error :invalid-value :link
+                                  "source names need matching path types"))
+    (if (or (null source) (eq target-document source-document))
         ""
-        (let ((from (cdr (pathname-directory (or target base))))
-              (to (cdr (pathname-directory source))))
-          (loop while (and from to (equal (first from) (first to)))
-                do (pop from) (pop to))
-          (format nil "file:~{../~*~}~{~A/~}~A::"
-                  from to
-                  (sb-ext:native-namestring
-                   (make-pathname :directory nil :defaults source)))))))
+        (labels ((components (path)
+                   (let ((result nil))
+                     (dolist (part (cdr (pathname-directory path)))
+                       (cond ((and (eq part :up) (stringp (first result)))
+                              (pop result))
+                             (t (push part result))))
+                     (nreverse result))))
+          (let ((from (components target))
+                (to (components source)))
+            (loop while (and from to (equal (first from) (first to)))
+                  do (pop from) (pop to))
+            (when (member :up from)
+              (clocktable-parameter-error :invalid-value :link
+                                          "source names do not determine a relative path"))
+            (if (and (null from) (null to)
+                     (equal (pathname-name source) (pathname-name target))
+                     (equal (pathname-type source) (pathname-type target)))
+                ""
+                (format nil "file:~{../~*~}~{~A/~}~A::"
+                        from (mapcar (lambda (part)
+                                       (if (eq part :up) ".." part))
+                                     to)
+                        (sb-ext:native-namestring
+                         (make-pathname :directory nil :defaults source)))))))))
 
 (defun edit-clocktable-headline (row &optional emphasize-p link-prefix)
   (let* ((level (clocktable-row-level row))

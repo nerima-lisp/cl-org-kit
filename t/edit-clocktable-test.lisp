@@ -1263,7 +1263,10 @@
                     "../tasks/notes.org")
                    ("/reports/journal/month.org" "/reports/notes.org"
                     "../notes.org")
-                   (nil "notes.org" "notes.org")))
+                   ("reports/journal/month.org" "reports/tasks/notes.org"
+                    "../tasks/notes.org")
+                   ("reports/journal/month.org" "../other/notes.org"
+                    "../../../other/notes.org")))
       (destructuring-bind (block-path source-path relative-path) case
         (let* ((document
                  (parse-org
@@ -1364,3 +1367,28 @@
           (expect (render " :link nil") :to-equal without-flag)
           (expect (search "| Tracked" without-flag) :to-be-truthy)
           (expect (search "[[" without-flag) :to-be nil))))))
+
+(describe "linked dynamic clocktables path errors"
+  (it "rejects missing report names and incompatible path types"
+    (dolist (case '((nil "notes.org")
+                    ("/reports/month.org" "notes.org")
+                    ("reports/month.org" "/notes.org")
+                    ("../reports/month.org" "notes.org")))
+      (destructuring-bind (report-name source-name) case
+        (let* ((report (parse-org
+                        (format nil "#+BEGIN: clocktable :scope agenda :link t~%#+END:~%")
+                        :source-name report-name))
+               (source (parse-org
+                        (format nil "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
+                        :source-name source-name))
+               (condition
+                 (handler-case
+                     (progn
+                       (update-dynamic-block
+                        report (edit-clocktable-test-dynamic-block report "clocktable")
+                        :document-resolver (lambda (selector)
+                                             (declare (ignore selector))
+                                             source))
+                       nil)
+                   (org-clocktable-parameter-error (error) error))))
+          (expect condition :to-be-truthy))))))

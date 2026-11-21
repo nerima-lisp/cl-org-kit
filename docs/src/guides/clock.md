@@ -369,8 +369,14 @@ includes clocks from all dates and can be updated without a time context. Clock
 timestamps without an explicit offset use UTC when no `:time-context` is
 provided; pass `:time-context` to choose another zone. `:step` splits the range
 into `day`, `week`, `semimonth`, `month`, `quarter`, or `year` sections. `:match`
-filters headings. `:tags`, `:emphasize`, and `:fileskip0` control table
-formatting. `:formula` accepts a table formula or `%` for time percentages.
+filters headings. `:tags`, `:emphasize`, `:fileskip0`, and `:link` control table
+formatting. With `:link t`, headings in another file use a relative file link,
+while headings in the same file use a link of the form `[[*Heading][Heading]]`.
+For links to a different document, pass `:source-name` to `parse-org` for both
+the block document and the resolved document, using either absolute paths for
+both or relative paths for both. Relative file links are calculated from the
+block document’s directory. `:formula` accepts a table formula or `%` for time
+percentages.
 Unsupported or invalid clocktable parameters signal
 `org-clocktable-parameter-error` with the parameter name and reason.
 For `org-dynamic-block-error` conditions, `org-dynamic-block-error-value`
