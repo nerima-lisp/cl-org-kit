@@ -285,7 +285,7 @@ REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
   (:report (lambda (condition stream)
              (format stream "Ignoring CLOCK at line ~D: ~A"
                      (org-clock-warning-line condition)
-                     (org-clock-warning-source condition))))
+                     (bounded-text (org-clock-warning-source condition)))))
   (:documentation "A CLOCK line omitted from aggregation."))
 
 (defun org-time-error-reason (condition)

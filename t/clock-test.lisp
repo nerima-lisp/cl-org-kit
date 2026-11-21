@@ -496,6 +496,23 @@
       (with-soft-assertions
         (expect (clock-summary-total-minutes summary) :to-be 0)
         (expect (length warnings) :to-be 3))))
+  (it "bounds the CLOCK line in the warning report but keeps it raw in the slot"
+    (let* ((context (clock-test-context "2026-10-12T12:00:00"))
+           (line (format nil "CLOCK: ~A" (make-string 200 :initial-element #\x)))
+           (warnings nil))
+      (handler-bind ((org-clock-warning
+                       (lambda (condition)
+                         (push condition warnings)
+                         (muffle-warning condition))))
+        (clock-test-sum (format nil "* Scope~%~A" line) "Scope"
+                        "2026-10-12T09:00:00" "2026-10-12T10:00:00" context))
+      (with-soft-assertions
+        (expect (length warnings) :to-be 1)
+        (when warnings
+          (expect (org-clock-warning-source (first warnings)) :to-equal line)
+          (expect (princ-to-string (first warnings))
+                  :to-equal (format nil "Ignoring CLOCK at line 2: ~A..."
+                                    (subseq line 0 org-kit::*condition-text-limit*)))))))
   (it "preserves strict CLOCK parsing in consistency checks"
     (let ((context (clock-test-context "2026-10-12T12:00:00")))
       (flet ((check-line (line)
