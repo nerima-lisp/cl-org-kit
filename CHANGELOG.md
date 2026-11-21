@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.3.2]
+
+### Added
+
+- Clocktable blocks accept `:link t`. Headings in another file use a relative
+  file link, and headings in the same file use a link of the form
+  `[[*Heading][Heading]]`. Pass `:source-name` to `parse-org` for the block
+  document and the resolved document, using absolute paths for both or relative
+  paths for both. The clocktable signals `org-clocktable-parameter-error` when
+  either name is missing, when one name is absolute and the other relative, or
+  when `..` components prevent computing a relative path. See the
+  [clock guide](docs/src/guides/clock.md).
+- Export the `org-clock-warning` condition, with `org-clock-warning-line` and
+  `org-clock-warning-source`. `sum-clocks` and `clocktable-data` signal it for a
+  CLOCK row they cannot parse and leave that row out of the totals.
+
+### Changed
+
+- `sum-clocks`, `clocktable-data`, and clocktable blocks total clock time the way
+  Emacs `org-clock-sum` does. A closed CLOCK range is computed from the
+  timestamps at both ends and clipped to the requested period. A row with a
+  duration of zero or less adds nothing, and overflowing hour, minute, and day
+  fields carry into the next unit. A duration-only row (`CLOCK: => 1:30`) is
+  counted even when the requested period has zero length. A row that pairs a
+  diary, active, or single timestamp with a `=>` duration, such as
+  `CLOCK: <%(diary-float t 4 2)> => 0:10`, no longer adds that duration. Totals
+  can differ from 0.3.1 for rows like these.
+- A CLOCK row that `sum-clocks` or `clocktable-data` cannot parse no longer
+  signals `org-clock-error`. It signals `org-clock-warning` and is left out of
+  the totals; code that handled `org-clock-error` for these functions must
+  handle the warning instead. The clock consistency check and clock editing
+  still parse CLOCK rows strictly and signal `org-clock-error`.
+- `capture-into-target` with a `:file+olp+datetree` target writes day headings
+  with the full weekday name, as Emacs does (`2024-02-19 Monday`, not
+  `2024-02-19 Mon`). Callers that look for the abbreviated form in the updated
+  text must match the full name.
+
+### Fixed
+
+- `capture-into-target` with a `:file+olp+datetree` target matches existing year,
+  month, and day headings by date, so existing headings that spell the weekday
+  differently (for example `2024-02-19 Mon`) are reused.
+
+Version 0.3.2 removes no names exported in 0.3.1.
+
 ## [0.3.1]
 
 ### Fixed
