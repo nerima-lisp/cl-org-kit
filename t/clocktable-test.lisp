@@ -322,7 +322,7 @@
                                            'org-time-range))))
 
   (it "reports malformed matches and skips invalid CLOCK ranges"
-    (let* ((document (parse-org (format nil "* Scope~%CLOCK: [2026-13-99 Mon 09:00]--[2026-13-99 Mon 10:00] => 0:10~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 1:0")))
+    (let* ((document (parse-org (format nil "* Scope~%CLOCK: [2026-10-12 Mon]--[2026-10-13 Tue] => 0:10~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 1:0")))
            (heading (clocktable-test-heading-path document '("Scope")))
            (from (make-org-time-value "2026-10-12T09:00:00"))
            (to (make-org-time-value "2026-10-12T10:00:00"))

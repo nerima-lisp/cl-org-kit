@@ -28,6 +28,7 @@
    #:org-store-link-error-context
    ;; Clock aggregation
    #:org-clock-error #:org-clock-error-reason #:org-clock-error-context
+   #:org-clock-warning #:org-clock-warning-line #:org-clock-warning-source
    #:clock-summary #:make-clock-summary #:clock-summary-p
    #:clock-summary-scoped-minutes #:clock-summary-unscoped-minutes
    #:clock-summary-total-minutes #:clock-summary-clipped-interval-count

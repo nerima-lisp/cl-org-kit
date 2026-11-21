@@ -362,9 +362,10 @@
            (context (clock-test-context "2026-10-12T12:00:00"))
            (warnings nil)
            (summary
-             (handler-bind ((warning (lambda (condition)
-                                       (push (princ-to-string condition) warnings)
-                                       (muffle-warning condition))))
+             (handler-bind ((org-clock-warning
+                              (lambda (condition)
+                                (push condition warnings)
+                                (muffle-warning condition))))
                (clock-test-sum source "Scope" "2026-10-12T09:00:00"
                                "2026-10-12T10:00:00" context))))
       (with-soft-assertions
@@ -372,8 +373,11 @@
         (expect (clock-summary-unscoped-minutes summary) :to-be 180)
         (expect (clock-summary-total-minutes summary) :to-be 230)
         (expect (clock-summary-clipped-interval-count summary) :to-be 2)
-        (expect (length warnings) :to-be 2)
-        (expect (mapcar (lambda (warning) (not (null (search "line 10" warning)))) warnings) :to-equal (list nil t)))))
+        (expect (length warnings) :to-be 1)
+        (when warnings
+          (expect (org-clock-warning-line (first warnings)) :to-be 11)
+          (expect (org-clock-warning-source (first warnings))
+                  :to-equal "CLOCK: [2026-10-12 Mon]--[2026-10-13 Tue]")))))
   (it "normalizes extended hours before clipping intervals"
     (let ((context (clock-test-context "2026-10-12T12:00:00")))
       (dolist (case '(("CLOCK: [2026-10-11 Sun 24:00]--[2026-10-12 Mon 01:00]"
@@ -423,7 +427,7 @@
         (destructuring-bind (line from to expected) case
           (let ((warnings nil)
                 (summary nil))
-            (handler-bind ((warning
+            (handler-bind ((org-clock-warning
                              (lambda (condition)
                                (push condition warnings)
                                (muffle-warning condition))))
@@ -435,11 +439,23 @@
   (it "ignores active, diary and incomplete timestamps with durations"
     (let* ((context (clock-test-context "2026-10-12T12:00:00"))
            (source (format nil "* Scope~%CLOCK: <%%(diary-float t 4 2)> => 0:10~%CLOCK: [2026-10-12 Mon 09:00] => 1:00~%CLOCK:=>1:00~%CLOCK: <2026-10-12 Mon 09:00>--<2026-10-12 Mon 10:00> => 1:00"))
-           (summary (handler-bind ((warning #'muffle-warning))
+           (warnings nil)
+           (summary (handler-bind ((org-clock-warning
+                                     (lambda (condition)
+                                       (push condition warnings)
+                                       (muffle-warning condition))))
                       (clock-test-sum source "Scope" "2026-10-12T09:00:00"
-                                      "2026-10-12T10:00:00" context))))
-      (expect (clock-summary-total-minutes summary) :to-be 0)))
-
+                                      "2026-10-12T10:00:00" context)))
+           (diary-document (parse-org (format nil "* Scope~%CLOCK: <%%(diary-float t 4 2)> => 0:10")))
+           (diary (node-property (clock-test-first-clock-node diary-document) :value))
+           (invalid-document (parse-org (format nil "* Scope~%CLOCK: [2026-13-99 Mon 09:00]--[2026-13-99 Mon 10:00]")))
+           (invalid (node-property (clock-test-first-clock-node invalid-document) :value)))
+      (with-soft-assertions
+        (expect (clock-summary-total-minutes summary) :to-be 0)
+        (expect (length warnings) :to-be 1)
+        (expect (and (node-p diary) (eq (node-type diary) :timestamp)
+                     (eq (node-property diary :type) :diary)) :to-be t)
+        (expect (and (node-p invalid) (eq (node-type invalid) :timestamp)) :to-be t))))
   (it "reads naked durations like org-clock-sum"
     (let ((context (clock-test-context "2026-10-12T12:00:00")))
       (dolist (case '(("CLOCK: => 1:30" 90)
@@ -450,6 +466,24 @@
                                          "Scope" "2026-10-12T09:00:00"
                                          "2026-10-12T10:00:00" context)))
             (expect (clock-summary-unscoped-minutes summary) :to-be expected))))))
+  (it "does not treat single timestamps with durations as running clocks"
+    (let ((context (clock-test-context "2026-10-12T12:00:00")))
+      (dolist (line-count '(1 2))
+        (let* ((line "CLOCK: [2026-10-12 Mon 09:00] => 1:00")
+               (source (format nil "* Scope~%~{~A~%~}"
+                               (make-list line-count :initial-element line)))
+               (warnings nil)
+               (summary
+                 (handler-bind ((org-clock-warning
+                                  (lambda (condition)
+                                    (push condition warnings)
+                                    (muffle-warning condition))))
+                   (clock-test-sum source "Scope" "2026-10-12T09:00:00"
+                                   "2026-10-12T10:00:00" context
+                                   :include-running-p t))))
+          (expect (clock-summary-total-minutes summary) :to-be 0)
+          (expect warnings :to-equal nil)))))
+
   (it "warns and skips invalid CLOCK data"
     (let* ((context (clock-test-context "2026-10-12T12:00:00"))
            (source (format nil "* Scope~%CLOCK: => x:10~%CLOCK: invalid~%CLOCK:"))

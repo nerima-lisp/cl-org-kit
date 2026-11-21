@@ -279,6 +279,15 @@ REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
   (:documentation "Signalled when a CLOCK entry or clock summary request is invalid.
 REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
 
+(define-condition org-clock-warning (warning)
+  ((line :initarg :line)
+   (source :initarg :source))
+  (:report (lambda (condition stream)
+             (format stream "Ignoring CLOCK at line ~D: ~A"
+                     (org-clock-warning-line condition)
+                     (org-clock-warning-source condition))))
+  (:documentation "A CLOCK line omitted from aggregation."))
+
 (defun org-time-error-reason (condition)
   "Return the keyword classifying the time failure CONDITION reports."
   (slot-value condition 'reason))
@@ -294,6 +303,14 @@ REASON classifies the failure and CONTEXT is a bounded, escaped excerpt."))
 (defun org-clock-error-context (condition)
   "Return the bounded, escaped CLOCK line or option excerpt, or NIL."
   (slot-value condition 'context))
+
+(defun org-clock-warning-line (condition)
+  "Return the one-based source line of CONDITION."
+  (slot-value condition 'line))
+
+(defun org-clock-warning-source (condition)
+  "Return the CLOCK source line of CONDITION."
+  (slot-value condition 'source))
 
 (define-condition org-agenda-error (org-kit-error)
   ((reason :initarg :reason :initform nil)

@@ -522,6 +522,9 @@ instant supplies the timer's current time."
                      (incf clipped-interval-count)
                      (incf scoped-minutes minutes)
                      (add-heading-minutes owner minutes)))))
+             (warn-clock (node line)
+               (warn 'org-clock-warning
+                     :line (clock-consistency-line document node) :source line))
              (naked-duration (line)
                (let* ((clock (search "CLOCK:" line :test #'char-equal))
                       (arrow (clock-skip-horizontal-space line (+ clock 6))))
@@ -555,31 +558,36 @@ instant supplies the timer's current time."
              (collect-clock (node owner)
                (let* ((timestamp (node-property node :value))
                       (type (and timestamp (node-property timestamp :type)))
-                      (range-p (eq type :inactive-range))
                       (line (clock-row-source-line node)))
                  (cond
-                   (range-p
-                    (let ((start (range-endpoint timestamp nil)) (end (range-endpoint timestamp t))) (unless (and start end (node-property timestamp :hour-start) (node-property timestamp :hour-end)) (%org-clock-error :malformed-clock line))
-                      (add-interval owner
-                                    (clock-context-instant-seconds
-                                     (%time-value-from-local-value start) time-context)
-                                    (clock-context-instant-seconds
-                                     (%time-value-from-local-value end) time-context))))
-                   ((naked-duration line)
+                   ((eq type :inactive-range)
+                    (let ((start (range-endpoint timestamp nil))
+                          (end (range-endpoint timestamp t)))
+                      (if (and start end)
+                          (add-interval owner
+                                        (clock-context-instant-seconds
+                                         (%time-value-from-local-value start) time-context)
+                                        (clock-context-instant-seconds
+                                         (%time-value-from-local-value end) time-context))
+                          (warn-clock node line))))
+                   (t
                     (let ((duration (naked-duration line)))
-                      (incf unscoped-minutes duration)
-                      (add-heading-minutes owner duration)))
-                   ((and timestamp (member type '(:active :inactive)))
-                    (when include-running-p
-                      (let ((start (timestamp-start timestamp)))
-                        (unless start (%org-clock-error :malformed-clock line))
-                        (let ((start-seconds
-                                (clock-context-instant-seconds
-                                 (%time-value-from-local-value start) time-context)))
-                          (when (> start-seconds as-of-seconds)
-                            (%org-clock-error :invalid-range line))
-                          (add-interval owner start-seconds as-of-seconds)))))
-                   (t (unless timestamp (%org-clock-error :malformed-clock line)))))))
+                      (cond
+                        (duration
+                         (incf unscoped-minutes duration)
+                         (add-heading-minutes owner duration))
+                        ((and timestamp (member type '(:active :inactive)))
+                         (when (and include-running-p (not (search "=>" line)))
+                           (let ((start (timestamp-start timestamp)))
+                             (if start
+                                 (let ((start-seconds
+                                         (clock-context-instant-seconds
+                                          (%time-value-from-local-value start) time-context)))
+                                   (when (> start-seconds as-of-seconds)
+                                     (%org-clock-error :invalid-range line))
+                                   (add-interval owner start-seconds as-of-seconds))
+                                 (warn-clock node line)))))
+                        ((null timestamp) (warn-clock node line)))))))))
       (map-nodes
        (lambda (node)
          (when (eq (node-type node) :clock)
@@ -587,12 +595,7 @@ instant supplies the timer's current time."
                              (query-nearest-headline node))))
              (when (or (null included-headings)
                        (gethash owner included-headings))
-               (handler-case (collect-clock node owner)
-                 (org-clock-error (condition)
-                   (if (eq (org-clock-error-reason condition) :malformed-clock)
-                       (warn "Ignoring CLOCK at line ~D: ~A"
-                             (clock-consistency-line document node) condition)
-                       (error condition))))))))
+               (collect-clock node owner)))))
        heading))
     (values (make-clock-summary
              :scoped-minutes scoped-minutes
