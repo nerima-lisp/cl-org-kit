@@ -1,0 +1,7 @@
+emacs-major=31
+org=9.8.10
+generator=scripts/generate-clocktable-oracle.el
+manifest-sha256=cab2e3424eb92742116f2f27e0dc7455836065796690ec0af0d55c834e3fbdb5
+corpus/empty.org-sha256=4a20df286eadd370aae68224c00221873532ac31eeb13ed4f4413dd993f015e5
+corpus/home.org-sha256=3688f347287073c524f9675025a83f65aa0e6cdac3842e79206901b17869d97f
+corpus/work.org-sha256=a73b09dbe2b4ab2c3f5199b87d5f960e196eef32ad1f0552c21be95240d583b0

@@ -1,0 +1,20 @@
+#+TITLE: No clocks here
+* Idea
+** Sub idea
+* Another idea
+#+BEGIN: clocktable :scope agenda :link t :tstart "2026-11-02" :tend "2026-11-06"
+#+CAPTION: Clock summary at [2026-11-22 Sun 10:00]
+| File     | Headline         | Time       |      |
+|----------+------------------+------------+------|
+|          | ALL *Total time* | *1d 13:20* |      |
+|----------+------------------+------------+------|
+| work.org | *File time*      | *1d 12:10* |      |
+|          | [[file:@DIR@/work.org::*Alpha][Alpha]]            | 4:45       |      |
+|          | \_  [[file:@DIR@/work.org::*Design][Design]]       |            | 1:15 |
+|          | \_  [[file:@DIR@/work.org::*Build][Build]]        |            | 2:00 |
+|          | [[file:@DIR@/work.org::*Gamma][Gamma]]            | 1d 7:25    |      |
+|----------+------------------+------------+------|
+| home.org | *File time*      | *1:10*     |      |
+|          | [[file:@DIR@/home.org::*Chores][Chores]]           | 1:10       |      |
+|          | \_  [[file:@DIR@/home.org::*Kitchen][Kitchen]]      |            | 0:30 |
+#+END:

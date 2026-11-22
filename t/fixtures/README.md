@@ -203,3 +203,27 @@ inline-task TODO states do not contribute to the parent heading's TODO count. Th
 produces `[0/1]` when an inline task precedes regular child headings. The kit excludes that inline
 task and counts the two regular children, one DONE, as `[1/2]`. Keep this policy expectation
 `[1/2]`; do not regenerate it from Org.
+
+## Clocktable oracle fixtures
+
+`clocktable/oracle/corpus/` holds Org files with CLOCK rows, and `clocktable/oracle/manifest.tsv`
+lists one dynamic clocktable block per case: the host file, the agenda files, the time zone, the
+reference time, and the block arguments. `clocktable/oracle/expected/` holds each host file after
+Emacs ran `org-update-dblock` on it, and `clocktable/oracle/provenance.meta` records the Org
+version and the SHA-256 of every input. The scratch directory that Emacs used is written as `@DIR@`.
+
+Regenerate the expected files from the repository root with:
+
+```sh
+emacs --batch -Q --script scripts/generate-clocktable-oracle.el t/fixtures/clocktable/oracle
+```
+
+The script stops unless Org 9.8.10 is loaded. It rebinds `current-time` and `format-time-string`
+to the manifest's reference time, so the caption and relative `:block` values do not read the wall
+clock, and sets the time zone for each case.
+
+The kit test compares every case byte for byte. Its one normalization is the target of a `:link t`
+link: Emacs writes the absolute path of its scratch copy, and the kit writes a path relative to the
+block document, so the test turns `file:@DIR@/<host>::` into nothing and `file:@DIR@/` into
+`file:`. The link cases use periods that exclude headings longer than 40 characters, because Emacs
+shortens a link description to 40 characters and the kit keeps it whole.

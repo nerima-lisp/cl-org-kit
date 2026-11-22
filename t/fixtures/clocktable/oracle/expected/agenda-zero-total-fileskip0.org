@@ -1,0 +1,10 @@
+#+TITLE: No clocks here
+* Idea
+** Sub idea
+* Another idea
+#+BEGIN: clocktable :scope agenda :block 2026-12-25 :fileskip0 t
+#+CAPTION: Clock summary at [2026-11-22 Sun 10:00], for Friday, December 25, 2026.
+| File | Headline         | Time   |
+|------+------------------+--------|
+|      | ALL *Total time* | *0:00* |
+#+END:

@@ -1,0 +1,19 @@
+#+TITLE: No clocks here
+* Idea
+** Sub idea
+* Another idea
+#+BEGIN: clocktable :scope agenda :match "proj|house"
+#+CAPTION: Clock summary at [2026-11-22 Sun 10:00]
+| File     | Headline         | Time   |      |
+|----------+------------------+--------+------|
+|          | ALL *Total time* | *5:15* |      |
+|----------+------------------+--------+------|
+| work.org | *File time*      | *4:45* |      |
+|          | Alpha            | 4:45   |      |
+|          | \_  Design       |        | 1:15 |
+|          | \_  Build        |        | 2:00 |
+|----------+------------------+--------+------|
+| home.org | *File time*      | *0:30* |      |
+|          | Chores           | 0:30   |      |
+|          | \_  Kitchen      |        | 0:30 |
+#+END:

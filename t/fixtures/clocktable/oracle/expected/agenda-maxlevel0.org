@@ -1,0 +1,14 @@
+#+TITLE: No clocks here
+* Idea
+** Sub idea
+* Another idea
+#+BEGIN: clocktable :scope agenda :maxlevel 0
+#+CAPTION: Clock summary at [2026-11-22 Sun 10:00]
+| File     | Headline         | Time       |
+|----------+------------------+------------|
+|          | ALL *Total time* | *1d 16:00* |
+|----------+------------------+------------|
+| work.org | *File time*      | *1d 13:45* |
+|----------+------------------+------------|
+| home.org | *File time*      | *2:15*     |
+#+END:

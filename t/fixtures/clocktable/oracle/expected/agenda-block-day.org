@@ -1,0 +1,18 @@
+#+TITLE: No clocks here
+* Idea
+** Sub idea
+* Another idea
+#+BEGIN: clocktable :scope agenda :block 2026-11-10
+#+CAPTION: Clock summary at [2026-11-22 Sun 10:00], for Tuesday, November 10, 2026.
+| File      | Headline                            | Time   |
+|-----------+-------------------------------------+--------|
+|           | ALL *Total time*                    | *1:35* |
+|-----------+-------------------------------------+--------|
+| work.org  | *File time*                         | *1:35* |
+|           | Beta                                | 1:15   |
+|           | Delta with a considerably longer... | 0:20   |
+|-----------+-------------------------------------+--------|
+| home.org  | *File time*                         | *0:00* |
+|-----------+-------------------------------------+--------|
+| empty.org | *File time*                         | *0:00* |
+#+END:

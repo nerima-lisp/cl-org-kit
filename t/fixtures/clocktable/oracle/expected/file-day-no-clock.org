@@ -1,0 +1,19 @@
+#+TITLE: Home log
+* Chores
+:LOGBOOK:
+CLOCK: [2026-11-03 Tue 18:00]--[2026-11-03 Tue 18:40] =>  0:40
+:END:
+** Kitchen :house:
+:LOGBOOK:
+CLOCK: [2026-11-04 Wed 19:00]--[2026-11-04 Wed 19:30] =>  0:30
+:END:
+* Reading :leisure:
+:LOGBOOK:
+CLOCK: [2026-11-12 Thu 21:00]--[2026-11-12 Thu 22:05] =>  1:05
+:END:
+#+BEGIN: clocktable :scope file :block 2026-11-10
+#+CAPTION: Clock summary at [2026-11-22 Sun 10:00], for Tuesday, November 10, 2026.
+| Headline     | Time   |
+|--------------+--------|
+| *Total time* | *0:00* |
+#+END:

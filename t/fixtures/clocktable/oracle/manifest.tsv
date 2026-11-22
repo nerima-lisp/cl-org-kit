@@ -1,0 +1,49 @@
+# Clocktable oracle cases are literal tab-separated data, never read as Lisp.
+case	host	agenda-files	zone	now	arguments
+agenda-multi	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda
+agenda-multi-maxlevel1	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :maxlevel 1
+agenda-multi-maxlevel3	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :maxlevel 3
+agenda-single	work.org	work.org	UTC	2026-11-22 10:00	:scope agenda
+agenda-single-maxlevel3	work.org	work.org	UTC	2026-11-22 10:00	:scope agenda :maxlevel 3
+agenda-fileskip0-block-day	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :block 2026-11-10 :fileskip0 t
+agenda-block-day	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :block 2026-11-10
+agenda-zero-total	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :block 2026-12-25
+agenda-zero-total-fileskip0	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :block 2026-12-25 :fileskip0 t
+agenda-tags	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :tags t :maxlevel 3
+agenda-link	empty.org	work.org,home.org	UTC	2026-11-22 10:00	:scope agenda :link t :tstart "2026-11-02" :tend "2026-11-06"
+agenda-percent	empty.org	work.org,home.org	UTC	2026-11-22 10:00	:scope agenda :formula %
+agenda-emphasize	empty.org	work.org,home.org	UTC	2026-11-22 10:00	:scope agenda :emphasize t :maxlevel 3
+agenda-match	empty.org	work.org,home.org	UTC	2026-11-22 10:00	:scope agenda :match "proj|house"
+agenda-block-month	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :block 2026-11
+agenda-block-thismonth	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :block thismonth
+agenda-step-day	empty.org	work.org,home.org,empty.org	UTC	2026-11-22 10:00	:scope agenda :tstart "2026-11-02" :tend "2026-11-05" :step day
+agenda-no-range-tokyo	empty.org	work.org,home.org,empty.org	Asia/Tokyo	2026-11-22 10:00	:scope agenda
+agenda-no-range-new-york	empty.org	work.org,home.org,empty.org	America/New_York	2026-11-22 10:00	:scope agenda
+file-default	work.org	-	UTC	2026-11-22 10:00	:scope file
+file-maxlevel1	work.org	-	UTC	2026-11-22 10:00	:scope file :maxlevel 1
+file-maxlevel2	work.org	-	UTC	2026-11-22 10:00	:scope file :maxlevel 2
+file-maxlevel3	work.org	-	UTC	2026-11-22 10:00	:scope file :maxlevel 3
+file-maxlevel4	work.org	-	UTC	2026-11-22 10:00	:scope file :maxlevel 4
+file-no-scope	work.org	-	UTC	2026-11-22 10:00	:maxlevel 3
+file-zero-total	work.org	-	UTC	2026-11-22 10:00	:scope file :block 2026-12-25
+file-zero-total-fileskip0	work.org	-	UTC	2026-11-22 10:00	:scope file :block 2026-12-25 :fileskip0 t
+file-day-no-clock	home.org	-	UTC	2026-11-22 10:00	:scope file :block 2026-11-10
+file-day-with-clock	work.org	-	UTC	2026-11-22 10:00	:scope file :block 2026-11-10
+file-tags	work.org	-	UTC	2026-11-22 10:00	:scope file :tags t :maxlevel 3
+file-link	work.org	-	UTC	2026-11-22 10:00	:scope file :link t :maxlevel 3 :tstart "2026-11-02" :tend "2026-11-06"
+file-percent	work.org	-	UTC	2026-11-22 10:00	:scope file :formula %
+file-no-range-tokyo	work.org	-	Asia/Tokyo	2026-11-22 10:00	:scope file
+file-no-range-new-york	work.org	-	America/New_York	2026-11-22 20:30	:scope file :maxlevel 3
+file-block-thismonth	work.org	-	UTC	2026-11-22 10:00	:scope file :block thismonth
+file-step-day	work.org	-	UTC	2026-11-22 10:00	:scope file :tstart "2026-11-02" :tend "2026-11-05" :step day
+agenda-maxlevel0	empty.org	work.org,home.org	UTC	2026-11-22 10:00	:scope agenda :maxlevel 0
+file-maxlevel0	work.org	-	UTC	2026-11-22 10:00	:scope file :maxlevel 0
+file-with-archives	work.org	-	UTC	2026-11-22 10:00	:scope file-with-archives :maxlevel 3
+file-block-year	work.org	-	UTC	2026-11-22 10:00	:scope file :block 2026
+file-block-week	work.org	-	UTC	2026-11-22 10:00	:scope file :block 2026-W45
+file-block-quarter	work.org	-	UTC	2026-11-22 10:00	:scope file :block 2026-Q4
+file-block-yesterday	work.org	-	UTC	2026-11-22 10:00	:scope file :block yesterday
+file-block-thisweek	work.org	-	UTC	2026-11-22 10:00	:scope file :block thisweek
+file-block-untilnow	work.org	-	UTC	2026-11-22 10:00	:scope file :block untilnow
+file-block-lastmonth	work.org	-	UTC	2026-11-22 10:00	:scope file :block lastmonth
+file-block-today-3	work.org	-	UTC	2026-11-22 10:00	:scope file :block today-3
