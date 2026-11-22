@@ -322,10 +322,7 @@
   (assoc kind +org-planning-keywords+))
 
 (defun edit-properties-planning-label (kind)
-  (let ((entry (assoc kind +org-planning-keywords+)))
-    (unless entry
-      (error "Unknown planning kind ~S" kind))
-    (cdr entry)))
+  (cdr (assoc kind +org-planning-keywords+)))
 
 (defun edit-properties-planning-node (document kind timestamp-text target)
   (let* ((source (format nil "* Temporary~%~A: ~A~%"

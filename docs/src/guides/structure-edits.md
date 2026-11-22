@@ -142,9 +142,18 @@ signals `:target-not-found`.
 The edits follow `org-add-planning-info`, the Emacs function that writes planning
 lines. A keyword that is set is written before the keywords already on the
 planning line, so `transition-heading-todo` writes `CLOSED:` first when it
-completes a heading. Setting a keyword that is already on the line moves it to the front. Removing one keyword
-leaves the others in place. Removing the last keyword deletes the planning
-line and keeps the blank lines after it.
+completes a heading. Setting a keyword that is already on the line moves it to
+the front. Removing one keyword leaves the others in place. Removing the last
+keyword deletes the planning line and keeps the blank lines after it.
+
+`set-planning` changes only the keyword it is given. The Emacs commands
+`org-deadline` and `org-schedule` also delete `CLOSED:` when they set a
+keyword; `set-planning` keeps it. Starting from `** DONE x` with the planning
+line `CLOSED: [2026-11-20 Fri 10:00]`, `(org-deadline nil "2026-11-30")` leaves
+`DEADLINE: <2026-11-30 Mon>`, and `set-planning` with `:deadline` and
+`"<2026-11-30 Mon>"` leaves
+`DEADLINE: <2026-11-30 Mon> CLOSED: [2026-11-20 Fri 10:00]`. To match Emacs,
+call `remove-planning` with `:closed` as well.
 
 A property drawer directly under a planning line is the headline's property
 drawer, whether the line starts with `CLOSED:`, `SCHEDULED:`, or `DEADLINE:`.

@@ -308,9 +308,6 @@
 
 (defun edit-relocate-property-drawer-location (headline raw target)
   (let ((drawers (edit-relocate-root-property-drawers headline)))
-    (when (> (length drawers) 1)
-      (edit-signal-error target :uneditable-structure
-                         "Headline has multiple property drawers"))
     (if drawers
         (values (first drawers) nil)
         (let* ((section (find :section (node-children headline)

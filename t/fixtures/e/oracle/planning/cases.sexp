@@ -190,6 +190,31 @@ DEADLINE: <2026-11-25 Wed> SCHEDULED: <2026-11-21 Sat>
 ** TODO one
 SCHEDULED: <2026-11-30 Mon> DEADLINE: <2026-11-25 Wed>
 ")
+                        (:name "set-deadline-indented-planning"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** TODO one
+  SCHEDULED: <2026-11-21 Sat>
+"
+                               :operation
+                               (:set :deadline "2026-11-30")
+                               :timestamp "<2026-11-30 Mon>" :expected "* Cat
+** TODO one
+  DEADLINE: <2026-11-30 Mon> SCHEDULED: <2026-11-21 Sat>
+")
+                        (:name "set-closed-indented-planning"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** DONE one
+  SCHEDULED: <2026-11-21 Sat>
+"
+                               :operation
+                               (:set :closed "2026-11-20 10:00")
+                               :timestamp "[2026-11-20 Fri 10:00]"
+                               :expected "* Cat
+** DONE one
+  CLOSED: [2026-11-20 Fri 10:00] SCHEDULED: <2026-11-21 Sat>
+")
                         (:name "set-scheduled-before-property-drawer"
                                :emacs-version "31.1.90" :org-version
                                "9.8.10" :source-input "* Cat
@@ -306,6 +331,45 @@ SCHEDULED: <2026-11-21 Sat>
 
 ** Next
 ")
+                        (:name
+                         "remove-only-no-blank-before-next-heading"
+                         :emacs-version "31.1.90" :org-version
+                         "9.8.10" :source-input "* Cat
+** TODO one
+SCHEDULED: <2026-11-21 Sat>
+** Next
+"
+                         :operation (:remove :scheduled) :timestamp
+                         nil :expected "* Cat
+** TODO one
+** Next
+")
+                        (:name
+                         "remove-only-blank-before-child-heading"
+                         :emacs-version "31.1.90" :org-version
+                         "9.8.10" :source-input "* Cat
+** TODO one
+SCHEDULED: <2026-11-21 Sat>
+
+*** Child
+"
+                         :operation (:remove :scheduled) :timestamp
+                         nil :expected "* Cat
+** TODO one
+
+*** Child
+")
+                        (:name
+                         "remove-only-blank-line-at-end-without-newline"
+                         :emacs-version "31.1.90" :org-version
+                         "9.8.10" :source-input "* Cat
+** TODO one
+SCHEDULED: <2026-11-21 Sat>
+  "
+                         :operation (:remove :scheduled) :timestamp
+                         nil :expected "* Cat
+** TODO one
+  ")
                         (:name "remove-only-before-property-drawer"
                                :emacs-version "31.1.90" :org-version
                                "9.8.10" :source-input "* Cat

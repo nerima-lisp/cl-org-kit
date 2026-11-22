@@ -14,6 +14,12 @@
   `remove-planning` on the last keyword deletes only the planning line and keeps
   the blank lines after it; 0.3.2 deleted those blank lines too. See the
   [structure edits guide](docs/src/guides/structure-edits.md#planning-lines).
+- `set-planning` keeps an existing `CLOSED:` timestamp when it sets `DEADLINE:`
+  or `SCHEDULED:`. Emacs `org-deadline` and `org-schedule` delete `CLOSED:` in
+  that case: on `CLOSED: [2026-11-20 Fri 10:00]`, `(org-deadline nil
+  "2026-11-30")` leaves `DEADLINE: <2026-11-30 Mon>`, while `set-planning` with
+  `:deadline` leaves `DEADLINE: <2026-11-30 Mon> CLOSED: [2026-11-20 Fri
+  10:00]`. Call `remove-planning` with `:closed` as well to match Emacs.
 
 ### Fixed
 

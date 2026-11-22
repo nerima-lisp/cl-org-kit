@@ -68,6 +68,12 @@
     (:name "set-scheduled-existing-last"
      :source "* Cat\n** TODO one\nDEADLINE: <2026-11-25 Wed> SCHEDULED: <2026-11-21 Sat>\n"
      :op (:set :scheduled "2026-11-30"))
+    (:name "set-deadline-indented-planning"
+     :source "* Cat\n** TODO one\n  SCHEDULED: <2026-11-21 Sat>\n"
+     :op (:set :deadline "2026-11-30"))
+    (:name "set-closed-indented-planning"
+     :source "* Cat\n** DONE one\n  SCHEDULED: <2026-11-21 Sat>\n"
+     :op (:set :closed "2026-11-20 10:00"))
     (:name "set-scheduled-before-property-drawer"
      :source "* Cat\n** TODO one\n:PROPERTIES:\n:A: b\n:END:\n"
      :op (:set :scheduled "2026-11-30"))
@@ -92,6 +98,15 @@
      :op (:remove :scheduled))
     (:name "remove-only-before-next-heading"
      :source "* Cat\n** TODO one\nSCHEDULED: <2026-11-21 Sat>\n\n** Next\n"
+     :op (:remove :scheduled))
+    (:name "remove-only-no-blank-before-next-heading"
+     :source "* Cat\n** TODO one\nSCHEDULED: <2026-11-21 Sat>\n** Next\n"
+     :op (:remove :scheduled))
+    (:name "remove-only-blank-before-child-heading"
+     :source "* Cat\n** TODO one\nSCHEDULED: <2026-11-21 Sat>\n\n*** Child\n"
+     :op (:remove :scheduled))
+    (:name "remove-only-blank-line-at-end-without-newline"
+     :source "* Cat\n** TODO one\nSCHEDULED: <2026-11-21 Sat>\n  "
      :op (:remove :scheduled))
     (:name "remove-only-before-property-drawer"
      :source "* Cat\n** TODO one\nSCHEDULED: <2026-11-21 Sat>\n:PROPERTIES:\n:A: b\n:END:\nbody\n"

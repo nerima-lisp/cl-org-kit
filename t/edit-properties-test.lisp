@@ -510,6 +510,24 @@
                                 (edit-properties-test-headline removed)) :deadline)
                 :to-be-truthy))))
 
+  (it "writes a new field after the indentation of an indented planning line"
+    ;; The expected text is what org-add-planning-info writes for the same input.
+    (let* ((source (format nil "* Task~%  SCHEDULED: <2026-10-11 Sun>~%"))
+           (document (parse-org source))
+           (closed (set-planning document
+                                 (edit-properties-test-headline document)
+                                 :closed "[2026-10-10 Sat 09:00]"))
+           (deadline (set-planning document
+                                   (edit-properties-test-headline document)
+                                   :deadline "<2026-10-12 Mon>")))
+      (with-soft-assertions
+        (expect (document-text closed)
+                :to-equal
+                (format nil "* Task~%  CLOSED: [2026-10-10 Sat 09:00] SCHEDULED: <2026-10-11 Sun>~%"))
+        (expect (document-text deadline)
+                :to-equal
+                (format nil "* Task~%  DEADLINE: <2026-10-12 Mon> SCHEDULED: <2026-10-11 Sun>~%")))))
+
   (it "removes the last field from the end of a shared planning line"
     (let* ((source (format nil "* Task~%CLOSED: <2026-10-13 Tue> DEADLINE: <2026-10-14 Wed>~%"))
            (document (parse-org source))
