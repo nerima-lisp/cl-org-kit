@@ -432,7 +432,6 @@
                  (and (< (1+ zero) length)
                       (char= (char value zero) #\0)
                       (find (char value (1+ zero)) "xX")
-                      (< (+ zero 2) length)
                       (run-p (+ zero 2) length
                              (lambda (character)
                                (or (digit-p character) (char= character #\.)
@@ -540,28 +539,25 @@
 
 (defun edit-clocktable-align-document-text (document newline)
   "Return DOCUMENT's text with its first table aligned as `org-table-align' does."
-  (let ((table (edit-clocktable-find-table document))
-        (source (document-text document)))
-    (if (null (and table (node-children table)))
-        source
-        (let* ((rows (node-children table))
-               (lines
-                 (edit-clocktable-aligned-lines
-                  (mapcar (lambda (row)
-                            (if (eq (node-property row :type) :standard)
-                                (mapcar (lambda (cell) (node-property cell :value))
-                                        (node-children row))
-                                :rule))
-                          rows)))
-               (start (node-begin (first rows)))
-               (end (table-row-content-end source (car (last rows)))))
-          (with-output-to-string (stream)
-            (write-string source stream :end start)
-            (loop for line in lines
-                  for first-p = t then nil
-                  do (unless first-p (write-string newline stream))
-                     (write-string line stream))
-            (write-string source stream :start end))))))
+  (let* ((source (document-text document))
+         (rows (node-children (edit-clocktable-find-table document)))
+         (lines
+           (edit-clocktable-aligned-lines
+            (mapcar (lambda (row)
+                      (if (eq (node-property row :type) :standard)
+                          (mapcar (lambda (cell) (node-property cell :value))
+                                  (node-children row))
+                          :rule))
+                    rows)))
+         (start (node-begin (first rows)))
+         (end (table-row-content-end source (car (last rows)))))
+    (with-output-to-string (stream)
+      (write-string source stream :end start)
+      (loop for line in lines
+            for first-p = t then nil
+            do (unless first-p (write-string newline stream))
+               (write-string line stream))
+      (write-string source stream :start end))))
 
 (defun edit-clocktable-report-time-columns (rows maxlevel)
   (if (< maxlevel 2)
@@ -595,15 +591,11 @@ that returns the link prefix for its headings or NIL."
         (edit-clocktable-check-character-lower-bound
          document (length (first entry)))
         (when (or (find #\Newline (first entry)) (find #\Return (first entry)))
-          (edit-signal-error (or target (document-root document)) :invalid-value
+          (edit-signal-error target :invalid-value
                              "Clocktable file name contains a line break"))))
     (dolist (row all-rows)
       (edit-clocktable-check-time-size document (clocktable-row-minutes row) nil)
-      (edit-clocktable-check-indentation-size document row)
-      (when (or (find #\Newline (clocktable-row-title row))
-                (find #\Return (clocktable-row-title row)))
-        (edit-signal-error (or target row) :invalid-value
-                           "Clocktable headline contains a line break")))
+      (edit-clocktable-check-indentation-size document row))
     (labels ((time-cell (minutes)
                (concatenate 'string "*" (edit-clocktable-time-text minutes) "*"))
              (fixed-row (file tags label minutes percent)
@@ -667,24 +659,21 @@ that returns the link prefix for its headings or NIL."
                    (check-limit limits :max-output-length (length raw-body))
                    (parse-org raw-body :limits limits
                                        :settings (document-settings document)))))
-          (when (and formula (not percent-p)
-                     (edit-clocktable-find-table parsed))
-            (let* ((aligned
-                     (edit-result-updated-document
-                      (table-align parsed (edit-clocktable-find-table parsed))))
-                   (table (edit-clocktable-find-table aligned)))
+          (when (and formula (not percent-p))
+            (let ((aligned
+                    (edit-result-updated-document
+                     (table-align parsed (edit-clocktable-find-table parsed)))))
               (setf parsed
-                    (if table
-                        (handler-case
-                            (edit-result-updated-document
-                             (table-recalculate aligned table))
-                          (org-table-error ()
-                            (clocktable-parameter-error
-                             :invalid-value :formula formula))
-                          (org-table-unsupported-syntax ()
-                            (clocktable-parameter-error
-                             :invalid-value :formula formula)))
-                        aligned))))
+                    (handler-case
+                        (edit-result-updated-document
+                         (table-recalculate
+                          aligned (edit-clocktable-find-table aligned)))
+                      (org-table-error ()
+                        (clocktable-parameter-error
+                         :invalid-value :formula formula))
+                      (org-table-unsupported-syntax ()
+                        (clocktable-parameter-error
+                         :invalid-value :formula formula))))))
           (let ((text (edit-clocktable-align-document-text parsed newline)))
             (check-limit limits :max-output-length (length text))
             text))))))

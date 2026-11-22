@@ -1636,23 +1636,83 @@
           (expect (search "| *Total time* | *0:30* |" text) :to-be-truthy)))))
 
   (it "rejects a file name with a line break in a multi-file report"
-    (let* ((source (format nil "#+BEGIN: clocktable :scope agenda~%#+END:~%"))
-           (document (parse-org source))
-           (block (edit-clocktable-test-dynamic-block document "clocktable"))
-           (condition
-             (edit-clocktable-test-capture-condition
-              (lambda ()
-                (update-dynamic-block
-                 document block
-                 :document-resolver
-                 (lambda (selector)
-                   (declare (ignore selector))
-                   (parse-org
-                    (format nil "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
-                    :source-name (format nil "bad~%name.org")))
-                 :time-context nil)))))
-      (expect (typep condition 'org-edit-error) :to-be t)
-      (when (typep condition 'org-edit-error)
-        (expect (org-kit-error-message condition)
-                :to-equal "Clocktable file name contains a line break")
-        (expect (org-edit-error-reason condition) :to-be :invalid-value)))))
+    (dolist (name (list (format nil "bad~%name.org") (format nil "bad~Cname.org" #\Return)))
+      (let* ((source (format nil "#+BEGIN: clocktable :scope agenda~%#+END:~%"))
+             (document (parse-org source))
+             (block (edit-clocktable-test-dynamic-block document "clocktable"))
+             (condition
+               (edit-clocktable-test-capture-condition
+                (lambda ()
+                  (update-dynamic-block
+                   document block
+                   :document-resolver
+                   (lambda (selector)
+                     (declare (ignore selector))
+                     (parse-org
+                      (format nil "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
+                      :source-name name))
+                   :time-context nil)))))
+        (expect (typep condition 'org-edit-error) :to-be t)
+        (when (typep condition 'org-edit-error)
+          (expect (org-kit-error-message condition)
+                  :to-equal "Clocktable file name contains a line break")
+          (expect (org-edit-error-reason condition) :to-be :invalid-value))))))
+
+(describe "clocktable table alignment as in org-table-align"
+  (it "recognizes the numbers of org-table-number-regexp"
+    (dolist (value '("12" "4:45" "-3.5" "+1e5" "2.4e-08" ">3.5" "100.0" "0.0"
+                     "0x1F" "-0xff" "0x1.fA" "16#ff" "+16#FF.a" "2#1.zZ"
+                     "nan" "inf" "-inf" "uinf"))
+      (expect (org-kit::edit-clocktable-org-number-p value) :to-be-truthy))
+    (dolist (value '("" "Time" "*1:15*" "1d 7:25" "abc" "-" "0xZZ" "#ff" "16#"
+                     "16#!" "xinf" "infx" "ab inf" "0a" "a1" "a#b" "ab"))
+      (expect (org-kit::edit-clocktable-org-number-p value) :to-be nil)))
+
+  (it "reads alignment cookies"
+    (expect (org-kit::edit-clocktable-alignment-cookie "<r>") :to-be #\r)
+    (expect (org-kit::edit-clocktable-alignment-cookie "<c12>") :to-be #\c)
+    (dolist (value '("" "ab" "r>" "<x>" "<r1a>" "<r1"))
+      (expect (org-kit::edit-clocktable-alignment-cookie value) :to-be nil)))
+
+  (it "right-aligns mostly numeric columns, honors cookies, and pads ragged rows"
+    (expect (org-kit::edit-clocktable-aligned-lines
+             '(("Time" "k") :rule ("4:45" "v") ("1d 7:25") ("1:15" "w")))
+            :to-equal '("|    Time | k |"
+                        "|---------+---|"
+                        "|    4:45 | v |"
+                        "| 1d 7:25 |   |"
+                        "|    1:15 | w |"))
+    (expect (org-kit::edit-clocktable-aligned-lines
+             '(("<c>" "x") ("abcd" "y")))
+            :to-equal '("| <c>  | x |" "| abcd | y |"))
+    (expect (org-kit::edit-clocktable-aligned-lines '(("<c>") ("abcdef")))
+            :to-equal '("|  <c>   |" "| abcdef |"))
+    (expect (org-kit::edit-clocktable-aligned-lines '(("<r5>") ("12")))
+            :to-equal '("| <r5> |" "|   12 |"))))
+
+(describe "write-clocktable formatting options"
+  (it "adds a tags column, recalculates a formula, and names formula failures"
+    (let* ((range (edit-clocktable-test-range))
+           (result (make-clocktable-result
+                    :total-minutes 30 :range range
+                    :rows (list (make-clocktable-row
+                                 :level 1 :title "Work" :tags '("a" "b")
+                                 :range range :minutes 30))))
+           (source (format nil "#+BEGIN: clocktable~%stale~%#+END:~%")))
+      (flet ((write-with (&rest options)
+               (let* ((document (parse-org source))
+                      (target (edit-clocktable-test-dynamic-block
+                               document "clocktable")))
+                 (document-text
+                  (edit-result-updated-document
+                   (apply #'write-clocktable document target result options))))))
+        (let ((tagged (write-with :tags-p t))
+              (calculated (write-with :formula "$2=0")))
+          (expect (search "| Tags" tagged) :to-be-truthy)
+          (expect (search "a, b" tagged) :to-be-truthy)
+          (expect (search "#+TBLFM: $2=0" calculated) :to-be-truthy))
+        (dolist (formula '("$2=vsum(1)" "$2=1/0"))
+          (edit-clocktable-test-expect-parameter-error
+           (edit-clocktable-test-capture-condition
+            (lambda () (write-with :formula formula)))
+           :invalid-value "formula" formula))))))
