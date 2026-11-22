@@ -630,6 +630,42 @@
         (expect (list (first case) updated)
                 :to-equal (list (first case) (second case))))))
 
+  (it "does not take a paragraph after a property drawer for a SCHEDULED line unless it has the SCHEDULED shape"
+    ;; In Org these lines are plain paragraphs. Unscheduling leaves them alone,
+    ;; and scheduling writes a new planning line under the heading, as
+    ;; org-schedule does.
+    (dolist (line '("SCHEDULED:<2025-03-01 Sat> Keep."
+                    "SCHEDULED: extra <2025-03-01 Sat> Keep."
+                    "<2025-03-01 Sat> SCHEDULED: Keep."
+                    "Meet at <2025-03-01 Sat>"
+                    "Meeting tomorrow at <2025-03-01 Sat>"
+                    "No timestamp here."))
+      (let* ((source-text
+               (format nil "* Task~%:PROPERTIES:~%:ID: a~%:END:~%~A~%" line))
+             (document (parse-org source-text))
+             (unscheduled
+               (cdr (assoc document
+                           (agenda-bulk-action
+                            (agenda-bulk-test-entries document '("Task"))
+                            :schedule :schedule-date nil)
+                           :test #'eq)))
+             (scheduled
+               (cdr (assoc document
+                           (agenda-bulk-action
+                            (agenda-bulk-test-entries document '("Task"))
+                            :schedule :schedule-date "2025-03-02")
+                           :test #'eq))))
+        (with-soft-assertions
+          (expect (list line
+                        (document-text (edit-result-updated-document unscheduled))
+                        (edit-result-spans unscheduled))
+                  :to-equal (list line source-text nil))
+          (expect (list line
+                        (document-text (edit-result-updated-document scheduled)))
+                  :to-equal
+                  (list line
+                        (format nil "* Task~%SCHEDULED: <2025-03-02 Sun>~%:PROPERTIES:~%:ID: a~%:END:~%~A~%" line)))))))
+
   (it "checks archive headers, local archive targets, and refile cycles"
     (let* ((source (parse-org (format nil "* Task~%")
                               :source-name "source.org"))
