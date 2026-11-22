@@ -13,6 +13,16 @@
     ("TAGS" . :tag-alist)
     ("TODO-KEYWORDS" . :todo-keywords)))
 
+(defparameter +org-planning-keywords+
+  '((:closed . "CLOSED") (:deadline . "DEADLINE") (:scheduled . "SCHEDULED"))
+  "Planning keyword kinds with their Org labels.
+The reader, the property-drawer detector, and the editors all take the keyword
+set from here, so a line that one of them treats as planning is planning for
+all of them.")
+
+(defun org-planning-kinds ()
+  (mapcar #'car +org-planning-keywords+))
+
 (defun org-setting-todo-declaration-prefix (name)
   (loop for (base . kind) in '(("TODO" . :todo)
                                ("SEQ_TODO" . :seq-todo)

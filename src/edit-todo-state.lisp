@@ -600,7 +600,7 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
       (dolist (title-node (node-property heading :title))
         (when (node-p title-node)
           (collect title-node)))
-      (dolist (kind '(:closed :deadline :scheduled))
+      (dolist (kind (org-planning-kinds))
         (let ((timestamp (node-property heading kind)))
           (when (node-p timestamp)
             (collect timestamp))))
@@ -659,7 +659,8 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
        (edit-properties-canonical-insert-child
         expected heading-path 0
         (list :type :section :post-blank 0 :properties nil
-              :children (list (edit-properties-canonical-planning kind value))))))
+              :children (list (edit-properties-canonical-planning kind value))))
+       (edit-properties-canonical-absorb-blank-lines expected heading-path)))
     expected))
 
 (defun edit-todo-canonical-remove-planning
@@ -675,7 +676,7 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
                (edit-canonical-node-at-path expected planning-path))
              (properties (getf canonical-planning :properties)))
         (when (notany (lambda (candidate) (getf properties candidate))
-                      '(:closed :deadline :scheduled))
+                      (org-planning-kinds))
           (let* ((section-index (edit-properties-index section
                                                        (node-children heading)))
                  (section-path (append heading-path (list section-index)))
@@ -686,7 +687,9 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
             (when (null (getf (edit-canonical-node-at-path expected section-path)
                              :children))
               (edit-properties-canonical-remove-child
-               expected heading-path section-index))))))
+               expected heading-path section-index)
+              (edit-properties-canonical-reclaim-blank-lines
+               expected heading-path (document-text document) planning))))))
     expected))
 
 (defun edit-todo-property-patches (document heading key value target)
@@ -1088,7 +1091,7 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
                                         (node-begin planning-node))
                                      (= (node-end node)
                                         (node-end planning-node)))))
-                             '(:scheduled :deadline :closed)))))
+                             (org-planning-kinds)))))
         (setf (getf replacement :post-blank) (node-post-blank node))
         (if planning-kind
             (let ((planning-path (edit-node-path document planning))
@@ -1243,21 +1246,9 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
            (setf patches
                  (append patches
                          (cond
-                           (old-value
-                            (list (edit-make-patch
-                                   (node-begin old-value) (node-end old-value)
-                                   new-value target)))
                            (planning
-                            (multiple-value-bind (line-end after-line)
-                                (edit-properties-line-bounds source
-                                                             (node-begin planning))
-                              (declare (ignore after-line))
-                              (list (edit-make-patch
-                                     line-end line-end
-                                     (format nil " ~A: ~A"
-                                             (edit-properties-planning-label kind)
-                                             new-value)
-                                     target))))
+                            (edit-properties-planning-set-patches
+                             source planning kind new-value target))
                            (t
                             (let* ((offset
                                      (edit-properties-line-after
@@ -1277,7 +1268,7 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
                              (and (not (eq other kind))
                                   (edit-todo-final-planning-present-p
                                    planning changes other)))
-                           '(:closed :deadline :scheduled))))
+                           (org-planning-kinds))))
                (multiple-value-bind (start end)
                    (edit-properties-planning-removal-range
                     source planning
@@ -1294,48 +1285,6 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
                             (edit-patch-replacement right)))))
      planning section)))
 
-(defun edit-todo-canonical-close-property-drawer
-    (expected document heading timestamp)
-  (let* ((section (edit-properties-headline-section heading))
-         (planning (edit-properties-section-planning section))
-         (drawer (and (null planning)
-                      section
-                      (find :property-drawer (node-children section)
-                            :key #'node-type))))
-    (when drawer
-      (let* ((source (document-text document))
-             (drawer-source (subseq source (node-begin drawer) (node-end drawer)))
-             (fragment-document
-               (parse-org
-                (format nil "* Temporary~%CLOSED: ~A~%~A"
-                        timestamp drawer-source)
-                :limits (document-limits document)))
-             (fragment-heading
-               (find :headline
-                     (node-children (document-root fragment-document))
-                     :key #'node-type))
-             (fragment-section (edit-properties-headline-section
-                                fragment-heading))
-             (fragment-drawer
-               (and fragment-section
-                    (find-if
-                     (lambda (candidate)
-                       (and (eq (node-type candidate) :drawer)
-                            (string-equal
-                             (node-property candidate :drawer-name)
-                             "PROPERTIES")))
-                     (node-children fragment-section))))
-             (section-path (edit-node-path document section))
-             (canonical-section
-               (edit-canonical-node-at-path expected section-path))
-             (children (getf canonical-section :children))
-             (drawer-index
-               (position :property-drawer children
-                         :key (lambda (child) (getf child :type)))))
-        (setf (nth drawer-index children) (edit-canonical-node fragment-drawer)
-              (getf canonical-section :children) children)))
-    expected))
-
 (defun edit-todo-canonical-planning-changes
     (expected document heading changes target)
   (declare (ignore target))
@@ -1346,10 +1295,7 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
       (ecase action
         (:set
          (edit-todo-canonical-set-planning
-          expected document heading kind (getf data :canonical-value))
-         (when (eq kind :closed)
-           (edit-todo-canonical-close-property-drawer
-            expected document heading (getf data :value))))
+          expected document heading kind (getf data :canonical-value)))
         (:remove
          (let* ((section (edit-properties-headline-section heading))
                 (planning (edit-properties-section-planning section))
@@ -1358,7 +1304,7 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
                             (and (not (eq other kind))
                                  (edit-todo-final-planning-present-p
                                   planning changes other)))
-                          '(:closed :deadline :scheduled))))
+                          (org-planning-kinds))))
            (edit-todo-canonical-remove-planning
             expected document heading kind remove-node-p)))))))
 

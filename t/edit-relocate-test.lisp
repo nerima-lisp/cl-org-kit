@@ -970,6 +970,39 @@
                         #\Return #\Newline #\Return #\Newline
                         #\Return #\Newline)))))
 
+  (it "archives a DONE heading whose planning line starts with CLOSED after ARCHIVE_TIME is set"
+    (dolist (planning-line '("CLOSED: [2026-11-20 Fri 10:00]"
+                             "CLOSED: [2026-11-20 Fri 10:00] SCHEDULED: <2026-11-21 Sat>"))
+      (let* ((source-text (format nil "#+TODO: TODO | DONE~%* Cat~%** DONE one~%~A~%"
+                                  planning-line))
+             (source (parse-org source-text :source-name "tasks.org"))
+             (stamped (set-property
+                       source (edit-relocate-test-headline source "one")
+                       "ARCHIVE_TIME" "2026-11-22 Sun 10:00"))
+             (target (parse-org (format nil "* Archive~%")))
+             (result
+               (archive-subtree-to
+                stamped (edit-relocate-test-headline stamped "one") target
+                :target-heading (edit-relocate-test-headline target "Archive")))
+             (updated-target (edit-result-updated-document
+                              (relocation-result-target-edit result))))
+        (with-soft-assertions
+          (expect (list planning-line
+                        (document-text
+                         (edit-result-updated-document
+                          (relocation-result-source-edit result))))
+                  :to-equal
+                  (list planning-line
+                        (format nil "#+TODO: TODO | DONE~%* Cat~%")))
+          (expect (list planning-line
+                        (edit-relocate-test-property-value
+                         (document-text updated-target) "ARCHIVE_TIME"))
+                  :to-equal (list planning-line "2026-11-22 Sun 10:00"))
+          (expect (list planning-line
+                        (edit-relocate-test-property-value
+                         (document-text updated-target) "ARCHIVE_OLPATH"))
+                  :to-equal (list planning-line "Cat"))))))
+
   (it "uses the target line ending for refiled archive content and properties"
     (let* ((crlf (format nil "~C~C" #\Return #\Newline))
            (source-text (format nil "* Work~Abody~A" crlf crlf))
@@ -1216,7 +1249,7 @@
         (expect (search "old.org" updated-text) :to-be nil)
         (expect (document-text source) :to-equal source-text))))
 
-  (it "rejects duplicated archive metadata and ambiguous drawers"
+  (it "rejects duplicated archive metadata and an unclosed property drawer"
     (let* ((duplicate-text
              (format nil "* Task~%:PROPERTIES:~%:ARCHIVE_FILE: old~%:ARCHIVE_FILE: older~%:END:~%"))
            (duplicate-source
@@ -1229,18 +1262,6 @@
                  duplicate-source
                  (edit-relocate-test-headline duplicate-source "Task")
                  duplicate-target))))
-           (multiple-text
-             (format nil "* Task~%:PROPERTIES:~%:CUSTOM: one~%:END:~%DEADLINE: <2025-01-01 Wed>~%:PROPERTIES:~%:CUSTOM: two~%:END:~%"))
-           (multiple-source
-             (parse-org multiple-text :source-name "tasks.org"))
-           (multiple-target (parse-org ""))
-           (multiple-error
-             (edit-relocate-test-edit-error
-              (lambda ()
-                (archive-subtree-to
-                 multiple-source
-                 (edit-relocate-test-headline multiple-source "Task")
-                 multiple-target))))
            (unclosed-text
              (format nil "* Task~%:PROPERTIES:~%:CUSTOM: keep~%"))
            (unclosed-source
@@ -1258,20 +1279,30 @@
                 :to-be :uneditable-structure)
         (expect (org-kit-error-message duplicate-error)
                 :to-equal "Archive metadata property is duplicated")
-        (expect (org-edit-error-reason multiple-error)
-                :to-be :uneditable-structure)
-        (expect (org-kit-error-message multiple-error)
-                :to-equal "Headline has multiple property drawers")
         (expect (org-edit-error-reason unclosed-error)
                 :to-be :uneditable-structure)
         (expect (org-kit-error-message unclosed-error)
                 :to-equal "Property drawer has no closing marker")
         (expect (document-text duplicate-source) :to-equal duplicate-text)
         (expect (document-text duplicate-target) :to-equal "")
-        (expect (document-text multiple-source) :to-equal multiple-text)
-        (expect (document-text multiple-target) :to-equal "")
         (expect (document-text unclosed-source) :to-equal unclosed-text)
         (expect (document-text unclosed-target) :to-equal ""))))
+
+  (it "treats a PROPERTIES drawer after a later planning-looking line as an ordinary drawer"
+    (let* ((source-text
+             (format nil "* Task~%:PROPERTIES:~%:CUSTOM: one~%:END:~%DEADLINE: <2025-01-01 Wed>~%:PROPERTIES:~%:CUSTOM: two~%:END:~%"))
+           (source (parse-org source-text :source-name "tasks.org"))
+           (target (parse-org ""))
+           (result (archive-subtree-to
+                    source (edit-relocate-test-headline source "Task") target))
+           (updated-text (document-text
+                          (edit-result-updated-document
+                           (relocation-result-target-edit result)))))
+      (with-soft-assertions
+        (expect (document-text source) :to-equal source-text)
+        (expect updated-text
+                :to-equal
+                (format nil "* Task~%:PROPERTIES:~%:CUSTOM: one~%:ARCHIVE_FILE: tasks.org~%:ARCHIVE_CATEGORY: tasks~%:END:~%DEADLINE: <2025-01-01 Wed>~%:PROPERTIES:~%:CUSTOM: two~%:END:~%")))))
 
   (it "preserves an existing archive tag when setting it again"
     (let* ((source-text (format nil "* Task :ARCHIVE:~%"))

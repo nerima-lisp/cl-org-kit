@@ -319,13 +319,13 @@
          :target target :expected expected)))))
 
 (defun edit-properties-planning-kind-p (kind)
-  (member kind '(:scheduled :deadline :closed)))
+  (assoc kind +org-planning-keywords+))
 
 (defun edit-properties-planning-label (kind)
-  (ecase kind
-    (:scheduled "SCHEDULED")
-    (:deadline "DEADLINE")
-    (:closed "CLOSED")))
+  (let ((entry (assoc kind +org-planning-keywords+)))
+    (unless entry
+      (error "Unknown planning kind ~S" kind))
+    (cdr entry)))
 
 (defun edit-properties-planning-node (document kind timestamp-text target)
   (let* ((source (format nil "* Temporary~%~A: ~A~%"
@@ -347,7 +347,7 @@
 
 (defun edit-properties-canonical-planning (kind value)
   (list :type :planning :post-blank 0
-        :properties (loop for candidate in '(:closed :deadline :scheduled)
+        :properties (loop for candidate in (org-planning-kinds)
                           append (list candidate
                                        (if (eq candidate kind) value nil)))
         :children nil))
@@ -369,10 +369,13 @@
                 (edit-properties-canonical-insert-child
                  expected (append headline-path (list section-index)) 0
                  planning-canonical))
-              (edit-properties-canonical-insert-child
-               expected headline-path 0
-               (list :type :section :post-blank 0 :properties nil
-                     :children (list planning-canonical))))))
+              (progn
+                (edit-properties-canonical-insert-child
+                 expected headline-path 0
+                 (list :type :section :post-blank 0 :properties nil
+                       :children (list planning-canonical)))
+                (edit-properties-canonical-absorb-blank-lines
+                 expected headline-path)))))
     expected))
 
 (defun set-planning (document target kind timestamp-text)
@@ -386,30 +389,15 @@
            (planning (edit-properties-section-planning section))
            (value (edit-properties-planning-value
                    document kind timestamp-text target))
-           (range (let ((timestamp (and planning
-                                        (node-property planning kind))))
-                    (and timestamp
-                         (cons (node-begin timestamp)
-                               (node-end timestamp)))))
            (expected (edit-properties-set-planning-expected
                       document headline section planning kind value)))
       (cond
-        ((and planning (node-property planning kind))
+        (planning
          (edit-apply-patches
           document
-          (list (edit-make-patch (car range) (cdr range) timestamp-text target))
+          (edit-properties-planning-set-patches
+           source planning kind timestamp-text target)
           :target target :expected expected))
-        (planning
-         (let* ((line-start (node-begin planning))
-                (line-end (nth-value 0
-                                     (edit-properties-line-bounds source line-start)))
-                (insert (format nil " ~A: ~A"
-                                (edit-properties-planning-label kind)
-                                timestamp-text)))
-           (edit-apply-patches
-            document
-            (list (edit-make-patch line-end line-end insert target))
-            :target target :expected expected)))
         (t
          (let* ((heading-start (node-post-affiliated headline))
                 (insertion-offset
@@ -443,7 +431,10 @@
          (value-end (cdr range))
          (field-start (edit-properties-planning-field-start source range kind)))
     (if sole-field-p
-        (values line-start (node-end planning))
+        ;; Only the planning line goes; the blank lines that the planning node
+        ;; absorbs stay, as they do after org-add-planning-info removes the line.
+        (values line-start
+                (nth-value 1 (edit-properties-line-bounds source line-start)))
         (let ((end value-end)
               (start field-start))
           (loop while (and (< end line-end)
@@ -454,6 +445,57 @@
                          (char source (1- start)))
                   do (decf start)))
           (values start end)))))
+
+(defun edit-properties-planning-set-patches
+    (source planning kind timestamp-text target)
+  "Return patches that put the KIND field first on PLANNING's line.
+This is what org-add-planning-info does: it drops any existing KIND field and
+writes the new one before the fields that remain, so the order records which
+keyword was set last. A KIND field that is already first is replaced in place."
+  (let* ((old (node-property planning kind))
+         (range (and old (cons (node-begin old) (node-end old))))
+         (first-start
+           (let ((offset (node-begin planning)))
+             (loop while (edit-properties-horizontal-space-p
+                          (char source offset))
+                   do (incf offset))
+             offset)))
+    (if (and range
+             (= (edit-properties-planning-field-start source range kind)
+                first-start))
+        (list (edit-make-patch (car range) (cdr range) timestamp-text target))
+        (cons (edit-make-patch
+               first-start first-start
+               (format nil "~A: ~A "
+                       (edit-properties-planning-label kind) timestamp-text)
+               target)
+              (when range
+                (multiple-value-bind (start end)
+                    (edit-properties-planning-removal-range
+                     source planning range kind nil)
+                  (list (edit-make-patch start end "" target))))))))
+
+(defun edit-properties-canonical-reclaim-blank-lines
+    (expected headline-path source planning)
+  "Give a headline left with no contents the blank lines its planning absorbed.
+A headline with contents keeps them in the first element, which the canonical
+tree does not record, but an empty one counts them in its own post-blank."
+  (let ((headline (edit-canonical-node-at-path expected headline-path))
+        (start (edit-properties-line-after source (node-begin planning)))
+        (end (node-end planning)))
+    (when (null (getf headline :children))
+      (setf (getf headline :post-blank)
+            (+ (count #\Newline source :start start :end end)
+               (if (and (< start end)
+                        (char/= (char source (1- end)) #\Newline))
+                   1
+                   0))))))
+
+(defun edit-properties-canonical-absorb-blank-lines (expected headline-path)
+  "Mark a headline that has gained contents as having no blank lines of its own.
+Its blank lines now follow the planning line, which absorbs them."
+  (let ((headline (edit-canonical-node-at-path expected headline-path)))
+    (setf (getf headline :post-blank) 0)))
 
 (defun edit-properties-remove-planning-expected
     (document headline section planning kind has-other-p)
@@ -472,7 +514,9 @@
            expected section-path planning-index)
           (when (null (cdr (node-children section)))
             (edit-properties-canonical-remove-child
-             expected headline-path section-index))))
+             expected headline-path section-index)
+            (edit-properties-canonical-reclaim-blank-lines
+             expected headline-path (document-text document) planning))))
     expected))
 
 (defun remove-planning (document target kind)
@@ -488,7 +532,7 @@
         (edit-signal-error target :target-not-found
                            "Planning timestamp was not found"))
       (let* ((range (cons (node-begin value) (node-end value)))
-             (other-kinds (remove kind '(:scheduled :deadline :closed)))
+             (other-kinds (remove kind (org-planning-kinds)))
              (has-other-p (some (lambda (candidate)
                                   (node-property planning candidate))
                                 other-kinds))

@@ -1048,6 +1048,17 @@
                         :depth
                         depth))))
 
+(defun reader-planning-keyword-at (text position line-end)
+  "Return (KIND . OFFSET-AFTER-COLON) when a planning keyword such as CLOSED:
+starts at POSITION on a line that ends at LINE-END, else NIL."
+  (loop for (kind . label) in +org-planning-keywords+
+        for keyword-end = (+ position (length label) 1)
+        when (and (<= keyword-end line-end)
+                  (string-equal label text :start2 position
+                                           :end2 (1- keyword-end))
+                  (char= (char text (1- keyword-end)) #\:))
+          return (cons kind keyword-end)))
+
 (defun reader-heading-children (context contents-begin
                                         contents-end
                                         star-count
@@ -1067,23 +1078,8 @@
                    (when (= position line-end)
                      (return (nreverse ranges)))
                    (let* ((entry
-                           (find-if
-                            (lambda (candidate)
-                              (let* ((keyword (car candidate))
-                                     (keyword-end (+ position
-                                                    (length keyword))))
-                                (and (<= keyword-end line-end)
-                                     (string-equal keyword
-                                                   text
-                                                   :start2
-                                                   position
-                                                   :end2
-                                                   keyword-end))))
-                            '(("CLOSED:" . :closed)
-                              ("DEADLINE:" . :deadline)
-                              ("SCHEDULED:" . :scheduled))))
-                          (keyword-end
-                           (and entry (+ position (length (car entry)))))
+                           (reader-planning-keyword-at text position line-end))
+                          (keyword-end (and entry (cdr entry)))
                           (value-start
                            (and keyword-end
                                 (reader-heading-skip-horizontal-space
@@ -1096,9 +1092,9 @@
                          (%parse-single-timestamp text value-start line-end)
                        (unless fields
                          (return nil))
-                       (when (assoc (cdr entry) ranges)
+                       (when (assoc (car entry) ranges)
                          (return nil))
-                       (push (cons (cdr entry)
+                       (push (cons (car entry)
                                    (cons value-start timestamp-end))
                              ranges)
                        (setf position timestamp-end))))))

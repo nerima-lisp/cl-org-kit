@@ -127,6 +127,41 @@ are described in the [clock guide](clock.md#start-and-stop-a-clock).
 uses `:uneditable-structure`. [Resource limits](../reference/node-model.md#resource-limits)
 apply to all structural edits.
 
+## Planning lines
+
+`(set-planning document headline kind timestamp-text)` and
+`(remove-planning document headline kind)` edit one `:scheduled`, `:deadline`,
+or `:closed` timestamp of a headline. Unlike the other operations in this guide,
+they return the updated document, not an `edit-result`. The timestamp passed to
+`set-planning` is complete Org timestamp text, such as `<2026-11-30 Mon>`; it is
+written as given, so the caller supplies the weekday.
+An unknown kind or an invalid timestamp signals `org-edit-error` with
+`:invalid-value`, and `remove-planning` on a keyword the headline does not have
+signals `:target-not-found`.
+
+The edits follow `org-add-planning-info`, the Emacs function that writes planning
+lines. A keyword that is set is written before the keywords already on the
+planning line, so `transition-heading-todo` writes `CLOSED:` first when it
+completes a heading. Setting a keyword that is already on the line moves it to the front. Removing one keyword
+leaves the others in place. Removing the last keyword deletes the planning
+line and keeps the blank lines after it.
+
+A property drawer directly under a planning line is the headline's property
+drawer, whether the line starts with `CLOSED:`, `SCHEDULED:`, or `DEADLINE:`.
+`set-property` and `remove-property` therefore edit it. Only the line directly
+under the headline counts as planning: a `DEADLINE:` line that follows a
+`SCHEDULED:` line is an ordinary paragraph, and a `:PROPERTIES:` drawer after it
+is an ordinary drawer, as in Org.
+
+```lisp
+(let* ((document (org-kit:parse-org (format nil "* DONE Task~%CLOSED: [2026-11-20 Fri 10:00]~%")))
+       (headline (first-node-of-type document :headline)))
+  (org-kit:write-org
+   (org-kit:set-planning document headline :scheduled "<2026-11-30 Mon>")))
+```
+
+The example writes `SCHEDULED: <2026-11-30 Mon> CLOSED: [2026-11-20 Fri 10:00]`.
+
 ## Subtree clones
 
 `clone-subtree-with-time-shift` inserts copies of a headline subtree as

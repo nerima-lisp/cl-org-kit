@@ -242,6 +242,7 @@
                (:file "dynamic-blocks-test")
                (:file "columnview-test")
                (:file "edit-todo-state-test")
+               (:file "edit-planning-oracle-test")
                (:file "agenda-test")
                (:file "agenda-category-test")
                (:file "agenda-sort-test")

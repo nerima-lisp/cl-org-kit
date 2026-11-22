@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `set-planning`, `remove-planning`, and the CLOSED timestamp that
+  `transition-heading-todo` writes now follow Org's `org-add-planning-info`.
+  A keyword that is set goes before the keywords already on the planning line,
+  so completing a heading that has `SCHEDULED:` with `:preserve-scheduled-p t`
+  produces `CLOSED: [...] SCHEDULED: <...>`, where 0.3.2 wrote `SCHEDULED: <...>
+  CLOSED: [...]`.
+  Setting a keyword that is already on the line moves it to the front.
+  `remove-planning` on the last keyword deletes only the planning line and keeps
+  the blank lines after it; 0.3.2 deleted those blank lines too. See the
+  [structure edits guide](docs/src/guides/structure-edits.md#planning-lines).
+
+### Fixed
+
+- A `:PROPERTIES:` drawer after a planning line that starts with `CLOSED:` is
+  parsed as the heading's property drawer. It was parsed as an ordinary drawer,
+  so `set-property` and `archive-subtree-to` signalled `org-edit-error` with
+  reason `:unexpected-diff` on any heading completed in Emacs, and
+  `remove-property` and the property queries did not see its properties.
+- A second line that looks like planning, such as `DEADLINE:` after a
+  `SCHEDULED:` line, is an ordinary paragraph, and the drawer after it is an
+  ordinary drawer, as in Org. It was parsed as a property drawer.
+- A planning line that is indented now also introduces a property drawer.
+- `set-planning` and `transition-heading-todo` no longer signal
+  `org-edit-error` with reason `:unexpected-diff` on a heading that has no body
+  and is followed by a blank line.
+
 ## [0.3.2]
 
 ### Added

@@ -183,7 +183,7 @@
               (expect (node-property (second footnotes) :label)
                       :to-equal
                       "next"))))
-          (it "parses heading property drawers and treats drawers after CLOSED as ordinary"
+          (it "parses heading property drawers and treats drawers after a second planning line as ordinary"
               (let* ((source
                       (reader-blocks-test-lines "* Has properties"
                                                 ":PROPERTIES:"
@@ -193,6 +193,7 @@
                                                 ":END:"
                                                 "After properties."
                                                 "* Ordinary drawer"
+                                                "DEADLINE: <2026-10-13 Tue>"
                                                 "CLOSED: [2026-10-10 Sat]"
                                                 ":PROPERTIES:"
                                                 ":ID: ordinary-id"
@@ -497,6 +498,50 @@
                                :value)
                 :to-equal
                 ""))))
+
+  (it "parses the property drawer after a planning line whatever keyword starts it"
+    (flet ((section-types (planning-line)
+             (let* ((document
+                      (parse-org (reader-blocks-test-lines
+                                  "* Planned" planning-line
+                                  ":PROPERTIES:" ":ID: x" ":END:")))
+                    (headline
+                      (first (reader-blocks-test-elements document :headline)))
+                    (section (find :section (node-children headline)
+                                   :key #'node-type)))
+               (mapcar #'node-type (node-children section)))))
+      (with-soft-assertions
+        (dolist (planning-line
+                 '("CLOSED: [2026-10-10 Sat]"
+                   "CLOSED: [2026-10-10 Sat] SCHEDULED: <2026-10-11 Sun>"
+                   "  CLOSED: [2026-10-10 Sat]"
+                   "SCHEDULED: <2026-10-11 Sun> CLOSED: [2026-10-10 Sat]"
+                   "DEADLINE: <2026-10-12 Mon> SCHEDULED: <2026-10-11 Sun>"
+                   "  SCHEDULED: <2026-10-11 Sun>"))
+          (expect (list planning-line (section-types planning-line))
+                  :to-equal
+                  (list planning-line '(:planning :property-drawer)))))))
+
+  (it "keeps a drawer after a second planning-looking line ordinary, as Org does"
+    (flet ((section-types (&rest planning-lines)
+             (let* ((document
+                      (parse-org (apply #'reader-blocks-test-lines
+                                        "* Planned"
+                                        (append planning-lines
+                                                '(":PROPERTIES:" ":ID: x"
+                                                  ":END:")))))
+                    (headline
+                      (first (reader-blocks-test-elements document :headline)))
+                    (section (find :section (node-children headline)
+                                   :key #'node-type)))
+               (mapcar #'node-type (node-children section)))))
+      (with-soft-assertions
+        (expect (section-types "DEADLINE: <2026-10-13 Tue>"
+                               "CLOSED: [2026-10-10 Sat]")
+                :to-equal '(:planning :paragraph :drawer))
+        (expect (section-types "SCHEDULED: <2026-10-11 Sun>"
+                               "DEADLINE: <2026-10-12 Mon>")
+                :to-equal '(:planning :paragraph :drawer)))))
 
   (it "checks empty fixed-width and example escapes, preserves #+HEADERS spelling"
     (let* ((fixed-document (parse-org ":"))

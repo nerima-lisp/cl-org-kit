@@ -148,6 +148,26 @@ The coverage check reads the generated trees and reports every `org-element` ele
 type. It also counts plain-text string leaves as `:plain-text`; plain text is not an Org object
 type.
 
+## Planning edit oracle fixtures
+
+`e/oracle/planning/cases.sexp` records what Org does to a planning line. Each case names one command
+(`org-todo`, `org-schedule`, `org-deadline`, or `org-add-planning-info`) run on the heading titled
+`one`, the source text, and the resulting buffer text. `t/edit-planning-oracle-test.lisp` replays the
+same operation with `transition-heading-todo`, `set-planning`, or `remove-planning` and compares the
+text. The cases cover where a keyword lands on the line, which keyword moves when one is set again, and
+which blank lines survive removing the last keyword. Regenerate them from the repository root, with Org 9.8.10 on the load path, using:
+
+```sh
+emacs --batch -Q --script scripts/generate-planning-oracle.el \
+  t/fixtures/e/oracle/planning/cases.sexp
+```
+
+The generator requires Org 9.8.10, fixes the current time at 2026-11-22 14:20 UTC, and records the
+Emacs version that ran it. The checked-in file was generated with Emacs 31.1.90. `org-schedule` and
+`org-deadline` also delete CLOSED, which the kit's `set-planning` does not, so no case sets SCHEDULED
+or DEADLINE on a heading that has CLOSED. The kit's `transition-heading-todo` removes SCHEDULED unless
+`:preserve-scheduled-p t` is passed, so the test passes it.
+
 ## Tree format and normalization
 
 Each output begins with comments recording the Emacs and Org versions, then one tree rooted at

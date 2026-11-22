@@ -453,10 +453,11 @@
            (section (edit-properties-test-section headline))
            (planning (edit-properties-test-planning headline))
            (start (node-begin planning))
-           (end (node-end planning))
+           (end (1+ (position #\Newline source :start start)))
            (edited (remove-planning document headline :scheduled)))
       (with-soft-assertions
-        (expect (length (node-children section)) :to-be 1))
+        (expect (length (node-children section)) :to-be 1)
+        (expect (node-end planning) :to-be (1+ end)))
       (edit-properties-test-check-patch document edited source start end "")
       (with-soft-assertions
         (expect (edit-properties-test-section
@@ -478,12 +479,12 @@
            (updated-headline (edit-properties-test-headline updated))
            (new-source (document-text updated))
            (planning-line-start (search "SCHEDULED:" new-source))
-           (line-end (position #\Newline new-source :start planning-line-start))
-           (deadline-text " DEADLINE: <2026-10-15 Thu>")
+           (deadline-text "DEADLINE: <2026-10-15 Thu> ")
            (added (set-planning updated updated-headline :deadline
                                 "<2026-10-15 Thu>"))
            (added-source (edit-properties-test-replace-span
-                          new-source line-end line-end deadline-text))
+                          new-source planning-line-start planning-line-start
+                          deadline-text))
            (added-headline (edit-properties-test-headline added))
            (scheduled-start (search "SCHEDULED:" added-source))
            (timestamp-start (search "<2026-10-14 Wed>" added-source))
@@ -491,12 +492,14 @@
       (edit-properties-test-check-patch document updated source old-start
                                         (+ old-start (length "<2026-10-13 Tue>"))
                                         "<2026-10-14 Wed>")
-      (edit-properties-test-check-patch updated added new-source line-end line-end
+      (edit-properties-test-check-patch updated added new-source
+                                        planning-line-start planning-line-start
                                         deadline-text)
       (edit-properties-test-check-patch
-       added removed added-source scheduled-start
-       (+ timestamp-start (length "<2026-10-14 Wed>") 1) "")
+       added removed added-source (1- scheduled-start)
+       (+ timestamp-start (length "<2026-10-14 Wed>")) "")
       (with-soft-assertions
+        (expect updated-source :to-equal new-source)
         (expect (node-property (edit-properties-test-planning
                                 (edit-properties-test-headline added)) :deadline)
                 :to-be-truthy)
@@ -576,6 +579,32 @@
       (edit-properties-test-check-error
        (lambda () (set-planning document headline :planning "<2026-10-13 Tue>"))
        :invalid-value document source))))
+
+(describe "property edits next to a planning line"
+  (it "adds and removes a property on a heading whose planning line starts with CLOSED"
+    (dolist (planning-line '("CLOSED: [2026-11-20 Fri 10:00]"
+                             "CLOSED: [2026-11-20 Fri 10:00] SCHEDULED: <2026-11-21 Sat>"
+                             "SCHEDULED: <2026-11-21 Sat> CLOSED: [2026-11-20 Fri 10:00]"))
+      (let* ((source (format nil "* DONE one~%~A~%" planning-line))
+             (document (parse-org source))
+             (headline (edit-properties-test-headline document))
+             (edited (set-property document headline "ARCHIVE_TIME" "x"))
+             (edited-headline (edit-properties-test-headline edited))
+             (removed (remove-property edited edited-headline "ARCHIVE_TIME")))
+        (with-soft-assertions
+          (expect (list planning-line (document-text edited))
+                  :to-equal
+                  (list planning-line
+                        (format nil "* DONE one~%~A~%:PROPERTIES:~%:ARCHIVE_TIME: x~%:END:~%"
+                                planning-line)))
+          (expect (list planning-line
+                        (node-property
+                         (edit-properties-test-property edited-headline
+                                                        "ARCHIVE_TIME")
+                         :value))
+                  :to-equal (list planning-line "x"))
+          (expect (list planning-line (document-text removed))
+                  :to-equal (list planning-line source)))))))
 
 (describe "document keyword edits"
   (it "updates a keyword value while preserving UTF-8 BOM, CRLF and surrounding bytes"

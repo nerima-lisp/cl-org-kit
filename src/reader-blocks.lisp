@@ -92,10 +92,13 @@
             (1+ previous-newline)
             0)))))
 
-(defun reader-blocks-planning-line-p (line)
-  "Return true when LINE is a scheduled or deadline planning line."
-  (or (reader-blocks-prefix-p line "SCHEDULED:")
-      (reader-blocks-prefix-p line "DEADLINE:")))
+(defun reader-blocks-planning-line-p (context line-start)
+  "Return true when the line at LINE-START starts with a planning keyword."
+  (let* ((text (reader-context-text context))
+         (line-end (nth-value 0 (reader-line-bounds context line-start)))
+         (keyword-start (reader-heading-skip-horizontal-space
+                         text line-start line-end)))
+    (and (reader-planning-keyword-at text keyword-start line-end) t)))
 
 (defun reader-blocks-node-property-fields (line)
   "Return the key and value from a property drawer line."
@@ -113,12 +116,19 @@
                 (reader-blocks-trim (subseq line (1+ separator))))))))
 
 (defun reader-blocks-property-drawer-p (context start)
-  "Return true for a property drawer after a heading or planning line."
+  "Return true for a drawer at START that follows a heading, or the planning
+line directly under a heading. A later line that looks like planning is
+paragraph text, so a drawer after it is an ordinary drawer."
   (let ((previous-start (reader-blocks-previous-line-start context start)))
     (when previous-start
       (or (reader-heading-level context previous-start start)
-          (reader-blocks-planning-line-p
-           (reader-line-text context previous-start))))))
+          (and (reader-blocks-planning-line-p context previous-start)
+               (let ((heading-start
+                       (reader-blocks-previous-line-start
+                        context previous-start)))
+                 (and heading-start
+                      (reader-heading-level
+                       context heading-start previous-start))))))))
 
 (defun reader-blocks-example-escape-p (line)
   (and (> (length line) 1)
