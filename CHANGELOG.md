@@ -23,9 +23,15 @@
   `:fileskip0` over a period without clock data no longer leaves the block
   empty. In a report with clocked time, `:fileskip0` leaves out the files that
   have none.
-- Numeric time and percentage columns are right-aligned as Emacs aligns them,
-  and a link counts as its visible text when columns are padded. Percentages
-  round as Emacs does. `write-clocktable` keeps its previous layout.
+- Numeric time and percentage columns written by `update-dynamic-block` are
+  right-aligned as Emacs aligns them, and a link counts as its visible text
+  when columns are padded. `write-clocktable` keeps its alignment, its limit of
+  two time columns, and its lack of a caption.
+- `:formula %` percentages, in `update-dynamic-block` and in `write-clocktable`,
+  are computed in double-float arithmetic and rounded as Emacs's `%.1f` does.
+  Before, single-float arithmetic and `~,1F` rounded a share that falls exactly
+  on a rounding boundary upward: 1 minute of 16 printed `6.3` and now prints
+  `6.2`. Shares away from a rounding boundary print as before.
 
 ### Fixed
 
