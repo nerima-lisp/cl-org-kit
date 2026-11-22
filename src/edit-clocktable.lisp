@@ -975,17 +975,13 @@ that returns the link prefix for its headings or NIL."
 
 (defun clocktable-block-kind (block)
   "Return the kind of the already validated :block value BLOCK."
-  (let ((length (length block)))
-    (cond
-      ((and (= length 4) (clocktable-string-digits-p block 0 4)) :year)
-      ((and (= length 7) (clocktable-string-digits-p block 0 4)
-            (char= (char block 4) #\-)
-            (clocktable-string-digits-p block 5 7))
-       :month)
-      ((and (= length 10) (clocktable-string-digits-p block 0 4)) :day)
-      ((and (= length 8) (clocktable-string-digits-p block 0 4)) :week)
-      ((and (= length 7) (clocktable-string-digits-p block 0 4)) :quarter)
-      (t (clocktable-relative-block-kind block)))))
+  (if (char<= #\0 (char block 0) #\9)
+      (case (length block)
+        (4 :year)
+        (10 :day)
+        (8 :week)
+        (t (if (char= (char block 5) #\Q) :quarter :month)))
+      (clocktable-relative-block-kind block)))
 
 (defun clocktable-block-description (block range)
   "Describe BLOCK the way `org-clock-special-range' words its caption text."
