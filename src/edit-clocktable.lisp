@@ -206,18 +206,28 @@
              (return)))
     (coerce (nreverse cells) 'vector)))
 
+(defun edit-clocktable-percent-text (minutes total-minutes)
+  "Format MINUTES as a percentage of TOTAL-MINUTES the way C printf rounds a double."
+  (if (zerop total-minutes)
+      "0.0"
+      (let* ((percent (* 100d0 (/ (float minutes 1d0) (float total-minutes 1d0))))
+             (tenths (round (* 10 (rational percent)))))
+        (format nil "~D.~D" (floor tenths 10) (mod tenths 10)))))
+
 (defun edit-clocktable-data-cells (row headline minutes time-columns
-                                   tags-p emphasize-p percent-p total-minutes)
+                                   tags-p emphasize-p percent-p total-minutes
+                                   &optional file-p)
   (let* ((headline-cells (edit-clocktable-headline-cells headline))
          (headline-count (length headline-cells))
-         (headline-offset (if tags-p 1 0))
+         (tags-offset (if file-p 1 0))
+         (headline-offset (+ tags-offset (if tags-p 1 0)))
          (time-offset (+ headline-count headline-offset))
          (cells (make-array (+ headline-count headline-offset time-columns
                                (if percent-p 1 0))
                             :initial-element "")))
     (replace cells headline-cells :start1 headline-offset)
     (when tags-p
-      (setf (aref cells 0)
+      (setf (aref cells tags-offset)
             (let ((tags (clocktable-row-tags row)))
               (if tags (format nil "~{~A~^, ~}" tags) ""))))
     (setf (aref cells (+ time-offset
@@ -226,11 +236,8 @@
                                      emphasize-p))
     (when percent-p
       (setf (aref cells (1- (length cells)))
-            (if (zerop total-minutes)
-                "0.0"
-                (format nil "~,1F"
-                        (* 100.0 (/ (clocktable-row-minutes row)
-                                    total-minutes))))))
+            (edit-clocktable-percent-text (clocktable-row-minutes row)
+                                          total-minutes)))
     cells))
 
 (defun edit-clocktable-time-columns (rows)
@@ -398,6 +405,289 @@
                       (clocktable-parameter-error
                        :invalid-value :formula formula)))))))
       (document-text aligned-document))))
+
+(defun edit-clocktable-org-number-p (value)
+  "Return true when VALUE matches Emacs' `org-table-number-regexp'."
+  (let* ((length (length value))
+         (start (if (and (plusp length) (find (char value 0) "<>")) 1 0)))
+    (labels ((digit-p (character) (char<= #\0 character #\9))
+             (run-p (from to predicate)
+               (loop for index from from below to
+                     always (funcall predicate (char value index))))
+             (sign-end (from)
+               (if (and (< from length) (find (char value from) "+-"))
+                   (1+ from)
+                   from))
+             (decimal-p ()
+               (let ((digit (position-if #'digit-p value :start start)))
+                 (and digit
+                      (run-p start digit
+                             (lambda (character) (find character "-+^.")))
+                      (run-p digit length
+                             (lambda (character)
+                               (or (digit-p character)
+                                   (find character "-+^.eEdDx()%:")))))))
+             (hexadecimal-p ()
+               (let ((zero (sign-end start)))
+                 (and (< (1+ zero) length)
+                      (char= (char value zero) #\0)
+                      (find (char value (1+ zero)) "xX")
+                      (< (+ zero 2) length)
+                      (run-p (+ zero 2) length
+                             (lambda (character)
+                               (or (digit-p character) (char= character #\.)
+                                   (char<= #\a character #\f)
+                                   (char<= #\A character #\F)))))))
+             (radix-p ()
+               (let* ((from (sign-end start))
+                      (hash (position #\# value :start from)))
+                 (and hash (< from hash) (< (1+ hash) length)
+                      (run-p from hash #'digit-p)
+                      (run-p (1+ hash) length
+                             (lambda (character)
+                               (or (digit-p character) (char= character #\.)
+                                   (char<= #\a character #\z)
+                                   (char<= #\A character #\Z))))))))
+      (or (decimal-p) (hexadecimal-p) (radix-p)
+          (string= value "nan")
+          (and (>= length 3) (string= value "inf" :start1 (- length 3))
+               (or (= length 3)
+                   (and (= length 4) (find (char value 0) "-+u"))))))))
+
+(defun edit-clocktable-alignment-cookie (value)
+  "Return the alignment letter of a cell like <r> or <c12>, or NIL."
+  (let ((length (length value)))
+    (when (and (>= length 3)
+               (char= (char value 0) #\<)
+               (find (char value 1) "lrc")
+               (char= (char value (1- length)) #\>)
+               (loop for index from 2 below (1- length)
+                     always (char<= #\0 (char value index) #\9)))
+      (char value 1))))
+
+(defun edit-clocktable-display-width (value)
+  "Return VALUE's width with a bracket link counted as its visible text."
+  (table-string-width
+   (if (search "[[" value)
+       (cl-regex-kit:replace-all
+        (load-time-value
+         (cl-regex-kit:compile-regex
+          (concatenate 'string "\\[\\["
+                       "((?:[^\\[\\]\\\\]|\\\\(?:\\\\\\\\)*[\\[\\]]|\\\\+[^\\[\\]])+)"
+                       "\\](?:\\[(.+?)\\])?\\]"))
+         t)
+        value
+        (lambda (match text)
+          (or (cl-regex-kit:match-group-string match 2 text)
+              (cl-regex-kit:match-group-string match 1 text))))
+       value)))
+
+(defun edit-clocktable-column-alignments (rows column-count)
+  "Return one alignment letter per column, chosen as `org-table-align' does."
+  (loop for column below column-count
+        collect (let ((fixed nil) (numbers 0) (non-empty 0))
+                  (dolist (row rows)
+                    (let ((cell (or (nth column row) "")))
+                      (cond (fixed)
+                            ((string= cell ""))
+                            ((edit-clocktable-alignment-cookie cell)
+                             (setf fixed (edit-clocktable-alignment-cookie cell)))
+                            (t (incf non-empty)
+                               (when (edit-clocktable-org-number-p cell)
+                                 (incf numbers))))))
+                  (cond (fixed)
+                        ((>= (* 2 numbers) non-empty) #\r)
+                        (t #\l)))))
+
+(defun edit-clocktable-align-cell (value width alignment)
+  (let* ((spaces (- width (edit-clocktable-display-width value)))
+         (before (case alignment
+                   (#\r spaces)
+                   (#\c (floor spaces 2))
+                   (t 0))))
+    (concatenate 'string " "
+                 (make-string before :initial-element #\Space)
+                 value
+                 (make-string (- spaces before) :initial-element #\Space)
+                 " ")))
+
+(defun edit-clocktable-aligned-lines (cell-rows)
+  "Format CELL-ROWS, lists of cell strings or :RULE, as Emacs aligns a table."
+  (let* ((rows (remove :rule cell-rows))
+         (column-count (reduce #'max rows :key #'length :initial-value 1))
+         (widths
+           (loop for column below column-count
+                 collect (reduce #'max rows
+                                 :key (lambda (row)
+                                        (edit-clocktable-display-width
+                                         (or (nth column row) "")))
+                                 :initial-value 1)))
+         (alignments (edit-clocktable-column-alignments rows column-count)))
+    (loop for row in cell-rows
+          collect (if (eq row :rule)
+                      (format nil "|~{~A~^+~}|"
+                              (mapcar (lambda (width)
+                                        (make-string (+ 2 width)
+                                                     :initial-element #\-))
+                                      widths))
+                      (format nil "|~{~A~^|~}|"
+                              (loop for width in widths
+                                    for alignment in alignments
+                                    for column from 0
+                                    collect (edit-clocktable-align-cell
+                                             (or (nth column row) "")
+                                             width alignment)))))))
+
+(defun edit-clocktable-align-document-text (document newline)
+  "Return DOCUMENT's text with its first table aligned as `org-table-align' does."
+  (let ((table (edit-clocktable-find-table document))
+        (source (document-text document)))
+    (if (null (and table (node-children table)))
+        source
+        (let* ((rows (node-children table))
+               (lines
+                 (edit-clocktable-aligned-lines
+                  (mapcar (lambda (row)
+                            (if (eq (node-property row :type) :standard)
+                                (mapcar (lambda (cell) (node-property cell :value))
+                                        (node-children row))
+                                :rule))
+                          rows)))
+               (start (node-begin (first rows)))
+               (end (table-row-content-end source (car (last rows)))))
+          (with-output-to-string (stream)
+            (write-string source stream :end start)
+            (loop for line in lines
+                  for first-p = t then nil
+                  do (unless first-p (write-string newline stream))
+                     (write-string line stream))
+            (write-string source stream :start end))))))
+
+(defun edit-clocktable-report-time-columns (rows maxlevel)
+  (if (< maxlevel 2)
+      1
+      (min maxlevel 100
+           (reduce #'max rows :key #'clocktable-row-level :initial-value 1))))
+
+(defun edit-clocktable-render-report
+    (document entries newline
+     &key multifile-p tags-p emphasize-p formula fileskip0-p maxlevel caption
+          target)
+  "Render ENTRIES as one clocktable the way `org-clocktable-write-default' does.
+Each entry is a list of a file label, a CLOCKTABLE-RESULT, and a function
+that returns the link prefix for its headings or NIL."
+  (let* ((percent-p (and formula (string= formula "%")))
+         (results (mapcar #'second entries))
+         (total (reduce #'+ results :key #'clocktable-result-total-minutes))
+         (all-rows (loop for result in results
+                         append (%clocktable-result-rows result)))
+         (time-columns (edit-clocktable-report-time-columns all-rows maxlevel))
+         (file-offset (if multifile-p 1 0))
+         (headline-offset (+ file-offset (if tags-p 1 0)))
+         (time-offset (1+ headline-offset))
+         (width (+ time-offset time-columns (if percent-p 1 0)))
+         (limits (document-limits document)))
+    (edit-clocktable-check-time-size document total t)
+    (when multifile-p
+      (dolist (entry entries)
+        (edit-clocktable-check-time-size
+         document (clocktable-result-total-minutes (second entry)) t)
+        (edit-clocktable-check-character-lower-bound
+         document (length (first entry)))
+        (when (or (find #\Newline (first entry)) (find #\Return (first entry)))
+          (edit-signal-error (or target (document-root document)) :invalid-value
+                             "Clocktable file name contains a line break"))))
+    (dolist (row all-rows)
+      (edit-clocktable-check-time-size document (clocktable-row-minutes row) nil)
+      (edit-clocktable-check-indentation-size document row)
+      (when (or (find #\Newline (clocktable-row-title row))
+                (find #\Return (clocktable-row-title row)))
+        (edit-signal-error (or target row) :invalid-value
+                           "Clocktable headline contains a line break")))
+    (labels ((time-cell (minutes)
+               (concatenate 'string "*" (edit-clocktable-time-text minutes) "*"))
+             (fixed-row (file tags label minutes percent)
+               (let ((cells (make-array width :initial-element "")))
+                 (when file (setf (aref cells 0) file))
+                 (when tags (setf (aref cells file-offset) tags))
+                 (setf (aref cells headline-offset) label
+                       (aref cells time-offset) minutes)
+                 (when percent-p (setf (aref cells (1- width)) percent))
+                 cells))
+             (total-percent ()
+               (if (zerop total) "0.0" "100.0"))
+             (header-row ()
+               (fixed-row (and multifile-p "File") (and tags-p "Tags")
+                          "Headline" "Time" "%"))
+             (total-row ()
+               (cond ((and multifile-p tags-p)
+                      (fixed-row "" "ALL" "*Total time*" (time-cell total)
+                                 (total-percent)))
+                     (multifile-p
+                      (fixed-row "" nil "ALL *Total time*" (time-cell total)
+                                 (total-percent)))
+                     (t
+                      (fixed-row nil nil "*Total time*" (time-cell total)
+                                 (total-percent)))))
+             (file-row (label file-total)
+               (fixed-row label nil "*File time*" (time-cell file-total)
+                          (edit-clocktable-percent-text file-total total)))
+             (entry-rows (result prefix-function)
+               (let ((prefix (and prefix-function (funcall prefix-function))))
+                 (mapcar (lambda (row)
+                           (edit-clocktable-data-cells
+                            row (edit-clocktable-headline row emphasize-p prefix)
+                            (edit-clocktable-time-text (clocktable-row-minutes row))
+                            time-columns tags-p emphasize-p percent-p total
+                            multifile-p))
+                         (%clocktable-result-rows result)))))
+      (let ((rows (list (header-row) :rule (total-row))))
+        (when (plusp total)
+          (dolist (entry entries)
+            (destructuring-bind (label result prefix-function) entry
+              (let ((file-total (clocktable-result-total-minutes result)))
+                (when (or (plusp file-total) (not fileskip0-p))
+                  (setf rows (append rows (list :rule)))
+                  (when multifile-p
+                    (setf rows (append rows (list (file-row label file-total)))))
+                  (when (plusp maxlevel)
+                    (setf rows (append rows
+                                       (entry-rows result prefix-function)))))))))
+        (let* ((raw-body
+                 (with-output-to-string (stream)
+                   (when caption (write-string caption stream))
+                   (dolist (row rows)
+                     (if (eq row :rule)
+                         (edit-clocktable-write-rule stream 1 newline)
+                         (edit-clocktable-write-row stream row newline)))
+                   (when (and formula (not percent-p))
+                     (format stream "#+TBLFM: ~A~A" formula newline))))
+               (parsed
+                 (progn
+                   (check-limit limits :max-output-length (length raw-body))
+                   (parse-org raw-body :limits limits
+                                       :settings (document-settings document)))))
+          (when (and formula (not percent-p)
+                     (edit-clocktable-find-table parsed))
+            (let* ((aligned
+                     (edit-result-updated-document
+                      (table-align parsed (edit-clocktable-find-table parsed))))
+                   (table (edit-clocktable-find-table aligned)))
+              (setf parsed
+                    (if table
+                        (handler-case
+                            (edit-result-updated-document
+                             (table-recalculate aligned table))
+                          (org-table-error ()
+                            (clocktable-parameter-error
+                             :invalid-value :formula formula))
+                          (org-table-unsupported-syntax ()
+                            (clocktable-parameter-error
+                             :invalid-value :formula formula)))
+                        aligned))))
+          (let ((text (edit-clocktable-align-document-text parsed newline)))
+            (check-limit limits :max-output-length (length text))
+            text))))))
 
 (defun write-clocktable (document dynamic-block clocktable-result
                          &key tags-p emphasize-p formula)
@@ -624,71 +914,122 @@
          (clocktable-date-range start (clocktable-next-month-start start 3))))
       (t nil))))
 
+(defun clocktable-block-offset-after (block prefix)
+  "Return the shift of BLOCK written as PREFIX or PREFIX-N, or NIL."
+  (cond
+    ((string-equal block prefix) 0)
+    ((and (> (length block) (length prefix))
+          (string-equal block prefix
+                        :end1 (length prefix)
+                        :end2 (length prefix))
+          (char= (char block (length prefix)) #\-)
+          (clocktable-string-digits-p
+           block (1+ (length prefix)) (length block)))
+     (- (parse-integer block :start (1+ (length prefix)))))
+    (t nil)))
+
+(defun clocktable-relative-block-kind (block)
+  (or (cond ((clocktable-block-offset-after block "today") :day)
+            ((clocktable-block-offset-after block "thisweek") :week)
+            ((clocktable-block-offset-after block "thismonth") :month)
+            ((clocktable-block-offset-after block "thisyear") :year))
+      (cond ((string-equal block "yesterday") :day)
+            ((string-equal block "lastweek") :week)
+            ((string-equal block "lastmonth") :month)
+            ((string-equal block "lastyear") :year)
+            ((string-equal block "untilnow") :untilnow))))
+
 (defun clocktable-relative-block-range (block time-context)
-  (labels ((offset-after (prefix)
-             (cond
-               ((string-equal block prefix) 0)
-               ((and (> (length block) (length prefix))
-                     (string-equal block prefix
-                                   :end1 (length prefix)
-                                   :end2 (length prefix))
-                     (char= (char block (length prefix)) #\-)
-                     (clocktable-string-digits-p
-                      block (1+ (length prefix)) (length block)))
-                (- (parse-integer block :start (1+ (length prefix)))))
-               (t nil))))
-    (let ((relative-kind
-            (or (cond ((offset-after "today") :day)
-                      ((offset-after "thisweek") :week)
-                      ((offset-after "thismonth") :month)
-                      ((offset-after "thisyear") :year))
-                (cond ((string-equal block "yesterday") :day)
-                      ((string-equal block "lastweek") :week)
-                      ((string-equal block "lastmonth") :month)
-                      ((string-equal block "lastyear") :year)
-                      ((string-equal block "untilnow") :untilnow)))))
-      (when (and relative-kind (null time-context))
-        (clocktable-parameter-error :invalid-value :block
-                                    "relative block requires :time-context"))
-      (when relative-kind
-        (let* ((today (clocktable-current-date time-context))
-               (day-offset (offset-after "today"))
-               (week-offset (offset-after "thisweek"))
-               (month-offset (offset-after "thismonth"))
-               (year-offset (offset-after "thisyear"))
-               (base relative-kind)
-               (amount
-                 (cond ((string-equal block "yesterday") -1)
-                       ((string-equal block "lastweek") -1)
-                       ((string-equal block "lastmonth") -1)
-                       ((string-equal block "lastyear") -1)
-                       ((eq base :day) day-offset)
-                       ((eq base :week) week-offset)
-                       ((eq base :month) month-offset)
-                       ((eq base :year) year-offset)
-                       (t 0))))
-          (case base
-            (:day
-             (let ((start (cl-date-kit:local-date-plus-days today amount)))
-               (clocktable-date-range
-                start (cl-date-kit:local-date-plus-days start 1))))
-            (:week
-             (let ((start (cl-date-kit:local-date-plus-weeks
-                           (clocktable-week-start today) amount)))
-               (clocktable-date-range
-                start (cl-date-kit:local-date-plus-days start 7))))
-            (:month
-             (let ((start (clocktable-next-month-start today amount)))
-               (clocktable-date-range start
-                                      (clocktable-next-month-start start 1))))
-            (:year
-             (let ((start (clocktable-next-year-start today amount)))
-               (clocktable-date-range start
-                                      (clocktable-next-year-start start 1))))
-            (:untilnow
-             (let ((start (cl-date-kit:make-local-date 2003 1 1))
-                   (end (org-time-context-reference-time time-context)))
-               (make-time-range (clocktable-date-value start) end)))))))))
+  (let ((relative-kind (clocktable-relative-block-kind block)))
+    (when (and relative-kind (null time-context))
+      (clocktable-parameter-error :invalid-value :block
+                                  "relative block requires :time-context"))
+    (when relative-kind
+      (let* ((today (clocktable-current-date time-context))
+             (day-offset (clocktable-block-offset-after block "today"))
+             (week-offset (clocktable-block-offset-after block "thisweek"))
+             (month-offset (clocktable-block-offset-after block "thismonth"))
+             (year-offset (clocktable-block-offset-after block "thisyear"))
+             (base relative-kind)
+             (amount
+               (cond ((string-equal block "yesterday") -1)
+                     ((string-equal block "lastweek") -1)
+                     ((string-equal block "lastmonth") -1)
+                     ((string-equal block "lastyear") -1)
+                     ((eq base :day) day-offset)
+                     ((eq base :week) week-offset)
+                     ((eq base :month) month-offset)
+                     ((eq base :year) year-offset)
+                     (t 0))))
+        (case base
+          (:day
+           (let ((start (cl-date-kit:local-date-plus-days today amount)))
+             (clocktable-date-range
+              start (cl-date-kit:local-date-plus-days start 1))))
+          (:week
+           (let ((start (cl-date-kit:local-date-plus-weeks
+                         (clocktable-week-start today) amount)))
+             (clocktable-date-range
+              start (cl-date-kit:local-date-plus-days start 7))))
+          (:month
+           (let ((start (clocktable-next-month-start today amount)))
+             (clocktable-date-range start
+                                    (clocktable-next-month-start start 1))))
+          (:year
+           (let ((start (clocktable-next-year-start today amount)))
+             (clocktable-date-range start
+                                    (clocktable-next-year-start start 1))))
+          (:untilnow
+           (let ((start (cl-date-kit:make-local-date 2003 1 1))
+                 (end (org-time-context-reference-time time-context)))
+             (make-time-range (clocktable-date-value start) end))))))))
+
+(defun clocktable-block-kind (block)
+  "Return the kind of the already validated :block value BLOCK."
+  (let ((length (length block)))
+    (cond
+      ((and (= length 4) (clocktable-string-digits-p block 0 4)) :year)
+      ((and (= length 7) (clocktable-string-digits-p block 0 4)
+            (char= (char block 4) #\-)
+            (clocktable-string-digits-p block 5 7))
+       :month)
+      ((and (= length 10) (clocktable-string-digits-p block 0 4)) :day)
+      ((and (= length 8) (clocktable-string-digits-p block 0 4)) :week)
+      ((and (= length 7) (clocktable-string-digits-p block 0 4)) :quarter)
+      (t (clocktable-relative-block-kind block)))))
+
+(defun clocktable-block-description (block range)
+  "Describe BLOCK the way `org-clock-special-range' words its caption text."
+  (let* ((kind (clocktable-block-kind block))
+         (start (clocktable-value-date (org-time-range-start range)))
+         (year (cl-date-kit:local-date-year start))
+         (month (cl-date-kit:local-date-month start)))
+    (ecase kind
+      (:day
+       (format nil "~A, ~A ~2,'0D, ~D"
+               (nth (clocktable-weekday-index start)
+                    '("Monday" "Tuesday" "Wednesday" "Thursday" "Friday"
+                      "Saturday" "Sunday"))
+               (nth (1- month)
+                    '("January" "February" "March" "April" "May" "June" "July"
+                      "August" "September" "October" "November" "December"))
+               (cl-date-kit:local-date-day start) year))
+      (:week
+       (format nil "week ~D-W~2,'0D"
+               (cl-date-kit:local-date-week-based-year start)
+               (cl-date-kit:local-date-week-of-week-based-year start)))
+      (:month
+       (format nil "~A ~D"
+               (nth (1- month)
+                    '("January" "February" "March" "April" "May" "June" "July"
+                      "August" "September" "October" "November" "December"))
+               year))
+      (:year (format nil "the year ~D" year))
+      (:quarter
+       (format nil "~A quarter of ~D"
+               (nth (floor (1- month) 3) '("1st" "2nd" "3rd" "4th"))
+               year))
+      (:untilnow "now"))))
 
 (defun clocktable-parse-org-time-value (text time-context parameter)
   (let ((reference (and time-context
@@ -732,9 +1073,12 @@
             block time-context)
            (clocktable-parameter-error :invalid-value :block block)))
       (t
+       ;; Without an offset the bounds are local times in the context's zone.
+       ;; A fixed +00:00 offset makes a named zone reject them, because its
+       ;; offset at those dates is not zero.
        (make-time-range
-        (make-org-time-value "0001-01-01T00:00:00+00:00")
-        (make-org-time-value "9999-12-31T23:59:59+00:00"))))))
+        (make-org-time-value "0001-01-01T00:00:00")
+        (make-org-time-value "9999-12-31T23:59:59"))))))
 
 (defun clocktable-context-for-range (time-context range)
   (or time-context
@@ -979,24 +1323,37 @@
                       (t "Annual report starting on: "))))
     (concatenate 'string label date-label)))
 
-(defun clocktable-render-section
-    (target-document source-document dynamic-block result newline parameters
-     range-label file-label show-range-p show-file-p)
-  (with-output-to-string (stream)
-    (when show-file-p
-      (format stream "File: ~A~A" (or file-label "") newline))
-    (when show-range-p
-      (format stream "~A~A" range-label newline))
-    (write-string
-     (edit-clocktable-render-body
-      target-document result newline
-      :tags-p (clocktable-flag parameters :tags)
-      :emphasize-p (clocktable-flag parameters :emphasize)
-      :formula (clocktable-parameter-value parameters :formula)
-      :link-prefix (when (clocktable-flag parameters :link)
-                     (clocktable-link-prefix target-document source-document))
-      :target dynamic-block)
-     stream)))
+(defun clocktable-file-label (label)
+  "Return the file name part of LABEL, as `file-name-nondirectory' does."
+  (let ((text (typecase label
+                (string label)
+                (pathname (sb-ext:native-namestring label))
+                (t ""))))
+    (subseq text (let ((slash (position #\/ text :from-end t)))
+                   (if slash (1+ slash) 0)))))
+
+(defun clocktable-multifile-p (parameters sections)
+  "Return true when the report has a File column and per-file rows.
+Emacs treats `file-with-archives' as one extended file."
+  (let ((scope (clocktable-parameter-value parameters :scope)))
+    (and (some #'fourth sections)
+         (not (and (stringp scope) (string-equal scope "file-with-archives"))))))
+
+(defun clocktable-caption (parameters range time-context newline)
+  "Return the caption line, or NIL when no reference time was supplied.
+The time comes from TIME-CONTEXT, never from the wall clock."
+  (when time-context
+    (let ((block-value (clocktable-parameter-value parameters :block)))
+      (format nil "#+CAPTION: Clock summary at ~A~@[, for ~A.~]~A"
+              (edit-clock-timestamp
+               (org-time-context-reference-time time-context) time-context)
+              (when block-value
+                (clocktable-block-description
+                 (if (integerp block-value)
+                     (write-to-string block-value)
+                     block-value)
+                 range))
+              newline))))
 
 (defun clocktable-dynamic-block-handler
     (document block parameters &key document-resolver time-context)
@@ -1010,50 +1367,92 @@
          (ranges (if step-name
                      (clocktable-step-ranges range step-name limits)
                      (list range)))
-         (show-files-p (or (> (length scope-sections) 1)
-                           (some (lambda (section) (fourth section))
-                                 scope-sections)))
-         (show-ranges-p (not (null step-name)))
+         (multifile-p (clocktable-multifile-p parameters scope-sections))
          (newline (dynamic-block-newline (document-text document) block))
          (match (clocktable-parameter-value parameters :match))
          (maxlevel (or (clocktable-parameter-value parameters :maxlevel) 2))
-         (fileskip0-p (clocktable-flag parameters :fileskip0)))
-    (labels ((write-bounded (stream text written)
-               (let ((next (+ written (length text))))
-                 (check-limit limits :max-output-length next)
-                 (write-string text stream)
-                 next)))
-      (with-output-to-string (stream)
-        (let ((written 0)
-              (written-p nil))
-          (when show-ranges-p
-            (setf written (write-bounded stream newline written)))
-          (dolist (section scope-sections)
-            (destructuring-bind (file-label source-document headings file-p) section
-              (declare (ignore file-p))
-              (dolist (subrange ranges)
-                (let ((result
-                        (clocktable-result-for-headings
-                         source-document headings subrange context match maxlevel)))
-                  (unless (and show-files-p fileskip0-p
-                               (zerop (clocktable-result-total-minutes result)))
-                    (when written-p
-                      (setf written (write-bounded stream newline written)))
-                    (setf written
-                          (write-bounded
-                           stream
-                           (clocktable-render-section
-                            document source-document block result newline
-                             parameters
-                            (and step-name
-                                 (clocktable-step-name subrange step-name))
-                            file-label show-ranges-p show-files-p)
-                           written)
-                          written-p t)))))))))))
+         (link-p (clocktable-flag parameters :link)))
+    (flet ((report (subrange caption)
+             (edit-clocktable-render-report
+              document
+              (loop for (label source-document headings) in scope-sections
+                    collect (let ((source source-document))
+                              ;; LOOP reuses its variables, so the closure
+                              ;; needs its own binding.
+                              (list (clocktable-file-label label)
+                                    (clocktable-result-for-headings
+                                     source headings subrange context
+                                     match maxlevel)
+                                    (and link-p
+                                         (lambda ()
+                                           (clocktable-link-prefix
+                                            document source))))))
+              newline
+              :multifile-p multifile-p
+              :tags-p (clocktable-flag parameters :tags)
+              :emphasize-p (clocktable-flag parameters :emphasize)
+              :formula (clocktable-parameter-value parameters :formula)
+              :fileskip0-p (clocktable-flag parameters :fileskip0)
+              :maxlevel maxlevel
+              :caption caption
+              :target block)))
+      (labels ((write-bounded (stream text written)
+                 (let ((next (+ written (length text))))
+                   (check-limit limits :max-output-length next)
+                   (write-string text stream)
+                   next)))
+        (with-output-to-string (stream)
+          (if (null step-name)
+              (write-bounded stream
+                             (report range
+                                     (clocktable-caption
+                                      parameters range time-context newline))
+                             0)
+              ;; Each step table carries no caption, as in Emacs.
+              (let ((written (write-bounded stream newline 0)))
+                (loop for subrange in ranges
+                      for first-p = t then nil
+                      do (unless first-p
+                           (setf written (write-bounded stream newline written)))
+                         (setf written
+                               (write-bounded
+                                stream
+                                (format nil "~A~A~A"
+                                        (clocktable-step-name subrange step-name)
+                                        newline (report subrange nil))
+                                written))))))))))
+
+(defun clocktable-update-body (document block body)
+  "Replace BLOCK's body with BODY, which is already aligned.
+`update-dynamic-block' left-aligns any table a handler returns as text, which
+would undo the right alignment of numeric columns that Emacs applies."
+  (let* ((body (dynamic-block-normalize-body
+                body (dynamic-block-newline (document-text document) block)
+                (document-limits document)))
+         (temporary (parse-org body :limits (document-limits document)
+                                    :settings (document-settings document))))
+    (multiple-value-bind (start end) (dynamic-block-body-span document block)
+      (let ((expected (edit-canonical-copy (edit-canonical-document document))))
+        (edit-canonical-set-children
+         expected (edit-node-path document block)
+         (mapcar #'edit-canonical-node
+                 (dynamic-block-document-children temporary)))
+        (edit-apply-patches-result
+         document
+         (list (edit-make-patch start end body block))
+         :target block :expected expected)))))
+
+(defun clocktable-dynamic-block-update
+    (document block parameters &key document-resolver time-context)
+  (clocktable-update-body
+   document block
+   (clocktable-dynamic-block-handler
+    document block parameters
+    :document-resolver document-resolver :time-context time-context)))
 
 (eval-when (:load-toplevel :execute)
   (register-dynamic-block-handler "clocktable"
-                                  #'clocktable-dynamic-block-handler
+                                  #'clocktable-dynamic-block-update
                                   :parameters '(:scope :maxlevel :block :tstart
                                                 :tend :step :match :tags :formula
                                                 :fileskip0 :emphasize :link)))

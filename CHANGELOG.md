@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `update-dynamic-block` writes the clocktable layout that Emacs writes with
+  Org 9.8.10. A report over several files (`:scope agenda`, `agenda-with-archives`, a
+  resolver selector, or a list of selectors) is one table with a `File` column,
+  an `ALL *Total time*` row, and a `*File time*` row for each file, instead of
+  a `File: <path>` line and a separate table per file. The same layout applies
+  to a single file in agenda scope. `file-with-archives` is one extended file
+  and has no file rows. The file label is the file name without its directory.
+  Callers that parse `File:` lines must read the `File` column instead.
+- A clocktable written with a `:time-context` starts with
+  `#+CAPTION: Clock summary at [<time>]`, using the context's reference time
+  in its zone, followed by `, for <period>.` when the block has `:block`. A block
+  updated without a time context has no caption, and `:step` tables have none.
+- Clocktable time columns follow `:maxlevel` up to the deepest level that has
+  time, so `:maxlevel 3` writes three time columns when level 3 has clocked
+  time. Earlier versions stopped at two.
+- A report with no clocked time writes only the header and the total row, so
+  `:fileskip0` over a period without clock data no longer leaves the block
+  empty. In a report with clocked time, `:fileskip0` leaves out the files that
+  have none.
+- Numeric time and percentage columns are right-aligned as Emacs aligns them,
+  and a link counts as its visible text when columns are padded. Percentages
+  round as Emacs does. `write-clocktable` keeps its previous layout.
+
+### Fixed
+
+- A clocktable block with no `:block`, `:tstart`, or `:tend` signaled
+  `org-time-error` when its `:time-context` used a time zone other than UTC. The
+  all-time range now uses local bounds that any zone resolves.
+
 ## [0.3.3]
 
 ### Changed

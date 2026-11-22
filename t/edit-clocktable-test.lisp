@@ -752,8 +752,9 @@
            (updated (document-text (edit-result-updated-document edit))))
       (with-soft-assertions
         (expect (nreverse selectors) :to-equal '("keep" "empty"))
-        (expect (search "File: keep.org" updated) :to-be-truthy)
-        (expect (search "File: empty.org" updated) :to-be nil)
+        (expect (search "| keep.org " updated) :to-be-truthy)
+        (expect (search "empty.org" updated) :to-be nil)
+        (expect (search "ALL *Total time*" updated) :to-be-truthy)
         (expect (search "*0:30*" updated) :to-be-truthy)
         (expect (document-text target-document) :to-equal source)
         (expect (write-org target-document :output-type :octets)
@@ -1088,14 +1089,16 @@
                   document block :document-resolver resolver)))))
         (with-soft-assertions
           (expect (nreverse selectors) :to-equal '("combined"))
-          (expect (search "File: tagged.org" updated) :to-be-truthy)
-          (expect (search "File: empty.org" updated) :to-be-truthy)
+          (expect (search "| tagged.org " updated) :to-be-truthy)
+          (expect (search "| empty.org " updated) :to-be-truthy)
           (expect (search "Tags" updated) :to-be-truthy)
           (expect (search "sample" updated) :to-be-truthy)
           (expect (search "*Tagged*" updated) :to-be nil)))))
 
   (it "maps named external scopes to caller-resolved documents"
-    (let ((resolved-document (parse-org "* Resolved")))
+    (let ((resolved-document
+            (parse-org
+             (format nil "* Resolved~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%"))))
       (dolist (case '(("agenda" :agenda)
                       ("agenda-with-archives" :agenda-with-archives)
                       ("file-with-archives" :file-with-archives)))
@@ -1118,9 +1121,17 @@
                         resolved-document))))))
             (with-soft-assertions
               (expect received :to-be selector)
-              (expect (search (format nil "File: ~A" (string-downcase (symbol-name selector)))
-                              updated)
-                      :to-be-truthy)))))))
+              (expect (search "*0:30*" updated) :to-be-truthy)
+              ;; A document without a source name is labelled by its selector;
+              ;; file-with-archives is one extended file without file rows.
+              (if (eq selector :file-with-archives)
+                  (progn
+                    (expect (search "*File time*" updated) :to-be nil)
+                    (expect (search "ALL" updated) :to-be nil))
+                  (expect (search (format nil "| ~A "
+                                          (string-downcase (symbol-name selector)))
+                                  updated)
+                          :to-be-truthy))))))))
 
   (it "rejects missing and invalid external document resolvers exactly"
     (dolist (case '((:missing "external scope requires :document-resolver")
@@ -1437,3 +1448,211 @@
                                         source)))))
           (expect (search "[[*Work][Work]]" (document-text updated))
                   :to-be-truthy))))))
+
+;;; Emacs oracle for dynamic clocktable blocks.
+;;;
+;;; The expected files come from `scripts/generate-clocktable-oracle.el`, run
+;;; with Emacs and Org 9.8.10; see t/fixtures/README.md. Only link targets are
+;;; normalized: Emacs writes the absolute path of its scratch copy, while the
+;;; kit writes a path relative to the block document.
+
+(defun edit-clocktable-oracle-read (relative-path)
+  (with-open-file (stream
+                   (asdf:system-relative-pathname
+                    "cl-org-kit"
+                    (format nil "t/fixtures/clocktable/oracle/~A" relative-path))
+                   :external-format :utf-8)
+    (let* ((text (make-string (file-length stream)))
+           (count (read-sequence text stream)))
+      (subseq text 0 count))))
+
+(defun edit-clocktable-oracle-split (character text)
+  (loop with start = 0
+        for end = (position character text :start start)
+        collect (subseq text start end)
+        while end do (setf start (1+ end))))
+
+(defun edit-clocktable-oracle-replace (text old new)
+  (with-output-to-string (stream)
+    (loop with start = 0
+          for hit = (search old text :start2 start)
+          do (write-string text stream :start start :end (or hit (length text)))
+          while hit
+          do (write-string new stream)
+             (setf start (+ hit (length old))))))
+
+(defun edit-clocktable-oracle-cases ()
+  (loop for line in (edit-clocktable-oracle-split
+                     #\Newline (edit-clocktable-oracle-read "manifest.tsv"))
+        for fields = (edit-clocktable-oracle-split #\Tab line)
+        when (and (= (length fields) 6) (string/= (first fields) "case"))
+          collect fields))
+
+(defun edit-clocktable-oracle-actual (case)
+  (destructuring-bind (id host files zone now arguments) case
+    (declare (ignore id))
+    (let* ((names (unless (string= files "-")
+                    (edit-clocktable-oracle-split #\, files)))
+           (host-text
+             (format nil "~A#+BEGIN: clocktable ~A~%#+END:~%"
+                     (edit-clocktable-oracle-read (format nil "corpus/~A" host))
+                     arguments))
+           (make-source
+             (lambda (name)
+               (parse-org (if (string= name host)
+                              host-text
+                              (edit-clocktable-oracle-read
+                               (format nil "corpus/~A" name)))
+                          :source-name (format nil "/scratch/~A" name))))
+           (document (funcall make-source host))
+           (time-context
+             (make-time-context
+              :reference-time
+              (make-org-time-value
+               (format nil "~AT~A:00" (subseq now 0 10) (subseq now 11)))
+              :zone (resolve-time-zone zone))))
+      (document-text
+       (edit-result-updated-document
+        (update-dynamic-block
+         document (edit-clocktable-test-dynamic-block document "clocktable")
+         :document-resolver
+         (lambda (selector)
+           (if (eq selector :file-with-archives)
+               (list document)
+               (mapcar make-source names)))
+         :time-context time-context))))))
+
+(defun edit-clocktable-oracle-expected (case)
+  (destructuring-bind (id host &rest rest) case
+    (declare (ignore rest))
+    (edit-clocktable-oracle-replace
+     (edit-clocktable-oracle-replace
+      (edit-clocktable-oracle-read (format nil "expected/~A.org" id))
+      (format nil "file:@DIR@/~A::" host) "")
+     "file:@DIR@/" "file:")))
+
+(describe "dynamic clocktable blocks compared with Emacs"
+  (it "writes the output of Org 9.8.10 for every oracle case"
+    (let* ((cases (edit-clocktable-oracle-cases))
+           (expected-files
+             (remove-if-not
+              (lambda (path) (equal (pathname-type path) "org"))
+              (uiop:directory-files
+               (asdf:system-relative-pathname
+                "cl-org-kit" "t/fixtures/clocktable/oracle/expected/"))))
+           (mismatches
+             (loop for case in cases
+                   unless (string= (edit-clocktable-oracle-actual case)
+                                   (edit-clocktable-oracle-expected case))
+                     collect (first case))))
+      (expect (plusp (length cases)) :to-be t)
+      (expect (length cases) :to-be (length expected-files))
+      (expect mismatches :to-equal nil)))
+
+  (it "covers the layouts that differed from Emacs before"
+    (let ((ids (mapcar #'first (edit-clocktable-oracle-cases))))
+      (dolist (id '("agenda-multi" "agenda-single" "file-default"
+                    "agenda-multi-maxlevel3" "agenda-zero-total"
+                    "agenda-zero-total-fileskip0" "file-zero-total"
+                    "agenda-block-day" "file-day-no-clock"
+                    "agenda-no-range-tokyo" "agenda-no-range-new-york"
+                    "file-no-range-tokyo" "file-no-range-new-york"
+                    "agenda-link" "agenda-tags"))
+        (expect (member id ids :test #'string=) :to-be-truthy)))))
+
+(describe "dynamic clocktable captions and default range"
+  (it "takes the caption time from the reference time of the time context"
+    (let* ((source
+             (format nil "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable~%#+END:~%"))
+           (document (parse-org source))
+           (block (edit-clocktable-test-dynamic-block document "clocktable")))
+      (flet ((update (reference zone-offset)
+               (document-text
+                (edit-result-updated-document
+                 (update-dynamic-block
+                  document block
+                  :time-context
+                  (make-time-context
+                   :reference-time (make-org-time-value reference)
+                   :zone (make-fixed-time-zone zone-offset)))))))
+        (with-soft-assertions
+          (expect (search "#+CAPTION: Clock summary at [2030-02-03 Sun 04:05]"
+                          (update "2030-02-03T04:05:00" 0))
+                  :to-be-truthy)
+          (expect (search "#+CAPTION: Clock summary at [2026-11-22 Sun 23:30]"
+                          (update "2026-11-22T23:30:00+09:00" 540))
+                  :to-be-truthy)
+          (expect (search "#+CAPTION: Clock summary at [2026-11-22 Sun 23:30]"
+                          (update "2026-11-22T23:30:00" 540))
+                  :to-be-truthy)))))
+
+  (it "words the period like Emacs after the caption time"
+    (let ((now (make-time-context
+                :reference-time (make-org-time-value "2026-11-22T10:00:00")
+                :zone (make-fixed-time-zone 0))))
+      (dolist (case '(("2026-12-25" "Friday, December 25, 2026")
+                      ("2026-11-02" "Monday, November 02, 2026")
+                      ("2026-11" "November 2026")
+                      ("2026" "the year 2026")
+                      ("2026-W47" "week 2026-W47")
+                      ("2026-Q3" "3rd quarter of 2026")
+                      ("thisweek" "week 2026-W47")
+                      ("yesterday" "Saturday, November 21, 2026")
+                      ("untilnow" "now")))
+        (destructuring-bind (block expected) case
+          (expect (search (format nil ", for ~A." expected)
+                          (edit-clocktable-test-update-arguments
+                           (format nil ":block ~A" block)
+                           :time-context now))
+                  :to-be-truthy)))))
+
+  (it "writes no caption without a time context or inside a step"
+    (let ((now (make-time-context
+                :reference-time (make-org-time-value "2026-11-22T10:00:00")
+                :zone (make-fixed-time-zone 0))))
+      (expect (search "#+CAPTION"
+                      (edit-clocktable-test-update-arguments ":scope file"))
+              :to-be nil)
+      (expect (search "#+CAPTION"
+                      (edit-clocktable-test-update-arguments
+                       ":tstart 2026-10-12 :tend 2026-10-14 :step day"
+                       :time-context now))
+              :to-be nil)))
+
+  (it "resolves a block without a range in named and fixed zones"
+    (let ((source
+            (format nil "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%#+BEGIN: clocktable~%#+END:~%")))
+      (dolist (zone (list (resolve-time-zone "UTC")
+                          (resolve-time-zone "Asia/Tokyo")
+                          (resolve-time-zone "America/New_York")
+                          (make-fixed-time-zone 540)
+                          (make-fixed-time-zone -300)))
+        (let ((text (edit-clocktable-test-dynamic-update
+                     source
+                     :time-context
+                     (make-time-context
+                      :reference-time (make-org-time-value "2026-11-22T10:00:00")
+                      :zone zone))))
+          (expect (search "| *Total time* | *0:30* |" text) :to-be-truthy)))))
+
+  (it "rejects a file name with a line break in a multi-file report"
+    (let* ((source (format nil "#+BEGIN: clocktable :scope agenda~%#+END:~%"))
+           (document (parse-org source))
+           (block (edit-clocktable-test-dynamic-block document "clocktable"))
+           (condition
+             (edit-clocktable-test-capture-condition
+              (lambda ()
+                (update-dynamic-block
+                 document block
+                 :document-resolver
+                 (lambda (selector)
+                   (declare (ignore selector))
+                   (parse-org
+                    (format nil "* Work~%CLOCK: [2026-10-12 Mon 09:00]--[2026-10-12 Mon 09:30] => 0:30~%")
+                    :source-name (format nil "bad~%name.org")))
+                 :time-context nil)))))
+      (expect (typep condition 'org-edit-error) :to-be t)
+      (when (typep condition 'org-edit-error)
+        (expect (org-kit-error-message condition)
+                :to-equal "Clocktable file name contains a line break")
+        (expect (org-edit-error-reason condition) :to-be :invalid-value)))))
