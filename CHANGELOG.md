@@ -42,6 +42,11 @@
 
 ### Fixed
 
+- Completing a heading with `transition-heading-todo` when its only planning
+  entry is a non-repeating `SCHEDULED:`, which the kit removes by default, now
+  leaves exactly `CLOSED: [...]` on the planning line, with no space after it.
+  0.3.2 left ` CLOSED: [...]` with a space before it, and for an indented
+  planning line it dropped the indentation; the line now keeps its indentation.
 - Setting a planning field with `set-planning` no longer signals
   `org-edit-error` with reason `:unexpected-diff` on a heading whose planning
   line is malformed, such as `SCHEDULED: junk`, when a `:PROPERTIES:` drawer

@@ -33,6 +33,10 @@
     (:name "todo-done-bare"
      :source ,(concat planning-oracle--todo-header "* Cat\n** TODO one\n")
      :op (:todo "DONE"))
+    (:name "todo-done-indented-scheduled"
+     :source ,(concat planning-oracle--todo-header
+                      "* Cat\n** TODO one\n  SCHEDULED: <2026-11-21 Sat>\n")
+     :op (:todo "DONE"))
     (:name "todo-done-property-drawer"
      :source ,(concat planning-oracle--todo-header
                       "* Cat\n** TODO one\n:PROPERTIES:\n:A: b\n:END:\n")

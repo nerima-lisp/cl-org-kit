@@ -1228,6 +1228,30 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
           ((and change (eq (getf (cdr change) :action) :remove)) nil)
           (t (and planning (node-property planning kind))))))
 
+(defun edit-todo-trim-stray-separator (source planning patches target)
+  "Drop the separator of a field written at the start of PLANNING's line when
+the other patches remove everything after it, so the line ends with that field
+and no space."
+  (let ((line-end (nth-value 0 (edit-properties-line-bounds
+                                source (node-begin planning)))))
+    (mapcar
+     (lambda (patch)
+       (if (and (= (edit-patch-start patch) (edit-patch-end patch))
+                (loop for index from (edit-patch-start patch) below line-end
+                      always (or (edit-properties-horizontal-space-p
+                                  (char source index))
+                                 (some (lambda (other)
+                                         (and (< (edit-patch-start other)
+                                                 (edit-patch-end other))
+                                              (<= (edit-patch-start other) index)
+                                              (< index (edit-patch-end other))))
+                                       patches))))
+           (edit-make-patch (edit-patch-start patch) (edit-patch-end patch)
+                            (string-right-trim " " (edit-patch-replacement patch))
+                            target)
+           patch))
+     patches)))
+
 (defun edit-todo-planning-patches (document heading changes target)
   (let* ((source (document-text document))
          (section (edit-properties-headline-section heading))
@@ -1275,15 +1299,18 @@ org-local-logging, LOGGING turns off every logging setting it does not name."
                     (cons (node-begin old-value) (node-end old-value))
                     kind (not other-p))
                  (push (edit-make-patch start end "" target) patches))))))))
-    (values
-     (remove-duplicates
-      (nreverse patches)
-      :test (lambda (left right)
-              (and (= (edit-patch-start left) (edit-patch-start right))
-                   (= (edit-patch-end left) (edit-patch-end right))
-                   (string= (edit-patch-replacement left)
-                            (edit-patch-replacement right)))))
-     planning section)))
+    (let ((unique
+            (remove-duplicates
+             (nreverse patches)
+             :test (lambda (left right)
+                     (and (= (edit-patch-start left) (edit-patch-start right))
+                          (= (edit-patch-end left) (edit-patch-end right))
+                          (string= (edit-patch-replacement left)
+                                   (edit-patch-replacement right)))))))
+      (values (if planning
+                  (edit-todo-trim-stray-separator source planning unique target)
+                  unique)
+              planning section))))
 
 (defun edit-todo-canonical-planning-changes
     (expected document heading changes target)

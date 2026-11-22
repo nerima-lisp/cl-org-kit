@@ -428,6 +428,13 @@
                         :end2 value-start :test #'char-equal :from-end t)))
     start))
 
+(defun edit-properties-planning-first-start (source planning)
+  "Return the offset of the first field on PLANNING's line, past its indentation."
+  (let ((offset (node-begin planning)))
+    (loop while (edit-properties-horizontal-space-p (char source offset))
+          do (incf offset))
+    offset))
+
 (defun edit-properties-planning-removal-range (source planning range kind sole-field-p)
   (let* ((line-start (node-begin planning))
          (line-end (nth-value 0 (edit-properties-line-bounds source line-start)))
@@ -443,9 +450,13 @@
           (loop while (and (< end line-end)
                            (edit-properties-horizontal-space-p (char source end)))
                 do (incf end))
+          ;; Keep the indentation: a field written at the start of the line
+          ;; goes after it, so the removal must not reach back past it.
           (when (= end value-end)
-            (loop while (edit-properties-horizontal-space-p
-                         (char source (1- start)))
+            (loop while (and (> start (edit-properties-planning-first-start
+                                       source planning))
+                             (edit-properties-horizontal-space-p
+                              (char source (1- start))))
                   do (decf start)))
           (values start end)))))
 
@@ -457,12 +468,7 @@ writes the new one before the fields that remain, so the order records which
 keyword was set last. A KIND field that is already first is replaced in place."
   (let* ((old (node-property planning kind))
          (range (and old (cons (node-begin old) (node-end old))))
-         (first-start
-           (let ((offset (node-begin planning)))
-             (loop while (edit-properties-horizontal-space-p
-                          (char source offset))
-                   do (incf offset))
-             offset)))
+         (first-start (edit-properties-planning-first-start source planning)))
     (if (and range
              (= (edit-properties-planning-field-start source range kind)
                 first-start))

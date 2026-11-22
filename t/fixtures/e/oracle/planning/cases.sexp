@@ -45,6 +45,21 @@ CLOSED: [2026-11-22 Sun 14:20] DEADLINE: <2026-11-25 Wed> SCHEDULED: <2026-11-21
 ** DONE one
 CLOSED: [2026-11-22 Sun 14:20]
 ")
+                        (:name "todo-done-indented-scheduled"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "#+TODO: TODO | DONE
+#+STARTUP: logdone
+* Cat
+** TODO one
+  SCHEDULED: <2026-11-21 Sat>
+"
+                               :operation (:todo "DONE") :timestamp
+                               nil :expected "#+TODO: TODO | DONE
+#+STARTUP: logdone
+* Cat
+** DONE one
+  CLOSED: [2026-11-22 Sun 14:20] SCHEDULED: <2026-11-21 Sat>
+")
                         (:name "todo-done-property-drawer"
                                :emacs-version "31.1.90" :org-version
                                "9.8.10" :source-input "#+TODO: TODO | DONE

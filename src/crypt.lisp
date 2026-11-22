@@ -34,13 +34,6 @@
 (defun crypt-trim-horizontal (line)
   (string-trim '(#\Space #\Tab) line))
 
-(defun crypt-planning-line-p (line)
-  (let ((line (string-left-trim '(#\Space #\Tab) line)))
-    (some (lambda (prefix)
-            (and (>= (length line) (length prefix))
-                 (string-equal line prefix :end1 (length prefix))))
-          '("DEADLINE:" "SCHEDULED:" "CLOSED:"))))
-
 (defun crypt-clock-line-p (line)
   (let ((line (string-left-trim '(#\Space #\Tab) line)))
     (and (>= (length line) 6)
@@ -69,7 +62,7 @@
     (when (< position limit)
       (multiple-value-bind (line-end next)
           (crypt-line-bounds source position limit)
-        (when (crypt-planning-line-p (subseq source position line-end))
+        (when (reader-planning-line-p source position line-end)
           (setf position next))))
     (when (< position limit)
       (multiple-value-bind (line-end next)

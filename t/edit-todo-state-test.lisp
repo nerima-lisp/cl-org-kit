@@ -1806,6 +1806,63 @@
             (expect (search "Body repeater <2025-03-10 Mon +1w>" updated)
                     :to-be-truthy))))))
 
+  (it "writes the CLOSED field with no stray space when it replaces or joins the planning fields"
+    (flet ((transition (body state &rest arguments)
+             (let* ((document
+                      (parse-org
+                       (format nil "#+TODO: TODO | DONE~%#+STARTUP: logdone~%~A" body)))
+                    (at "2026-11-22T14:20:00")
+                    (text
+                      (document-text
+                       (edit-result-updated-document
+                        (apply #'transition-heading-todo
+                               document
+                               (edit-todo-state-test-first-heading document)
+                               state :at (make-org-time-value at)
+                               :time-context
+                               (make-time-context
+                                :reference-time (make-org-time-value at)
+                                :zone (resolve-time-zone "UTC"))
+                               arguments)))))
+               (subseq text (length (format nil "#+TODO: TODO | DONE~%#+STARTUP: logdone~%"))))))
+      (with-soft-assertions
+        ;; The kit drops a non-repeating SCHEDULED on completion by default,
+        ;; and CLOSED then takes its place: exactly CLOSED, no space after it.
+        (expect (transition (format nil "* TODO H~%SCHEDULED: <2026-11-20 Fri>~%")
+                            "DONE")
+                :to-equal (format nil "* DONE H~%CLOSED: [2026-11-22 Sun 14:20]~%"))
+        (expect (transition (format nil "* TODO H~%  SCHEDULED: <2026-11-20 Fri>~%")
+                            "DONE")
+                :to-equal (format nil "* DONE H~%  CLOSED: [2026-11-22 Sun 14:20]~%"))
+        (expect (transition (format nil "* TODO H~%SCHEDULED: <2026-11-20 Fri>~%:PROPERTIES:~%:ID: x~%:END:~%")
+                            "DONE")
+                :to-equal
+                (format nil "* DONE H~%CLOSED: [2026-11-22 Sun 14:20]~%:PROPERTIES:~%:ID: x~%:END:~%"))
+        ;; With SCHEDULED kept, as org-todo does, CLOSED goes in front of it.
+        (expect (transition (format nil "* TODO H~%SCHEDULED: <2026-11-20 Fri>~%")
+                            "DONE" :preserve-scheduled-p t)
+                :to-equal
+                (format nil "* DONE H~%CLOSED: [2026-11-22 Sun 14:20] SCHEDULED: <2026-11-20 Fri>~%"))
+        ;; A remaining DEADLINE follows CLOSED after one space.
+        (expect (transition (format nil "* TODO H~%SCHEDULED: <2026-11-20 Fri> DEADLINE: <2026-11-25 Wed>~%")
+                            "DONE")
+                :to-equal
+                (format nil "* DONE H~%CLOSED: [2026-11-22 Sun 14:20] DEADLINE: <2026-11-25 Wed>~%"))
+        (expect (transition (format nil "* TODO H~%DEADLINE: <2026-11-25 Wed> SCHEDULED: <2026-11-20 Fri>~%")
+                            "DONE")
+                :to-equal
+                (format nil "* DONE H~%CLOSED: [2026-11-22 Sun 14:20] DEADLINE: <2026-11-25 Wed>~%"))
+        ;; Reopening removes CLOSED and keeps what else is on the line.
+        (expect (transition (format nil "* DONE H~%CLOSED: [2026-11-20 Fri 10:00]~%")
+                            "TODO")
+                :to-equal (format nil "* TODO H~%"))
+        (expect (transition (format nil "* DONE H~%CLOSED: [2026-11-20 Fri 10:00] DEADLINE: <2026-11-25 Wed>~%")
+                            "TODO")
+                :to-equal (format nil "* TODO H~%DEADLINE: <2026-11-25 Wed>~%"))
+        (expect (transition (format nil "* DONE H~%SCHEDULED: <2026-11-20 Fri> CLOSED: [2026-11-20 Fri 10:00]~%")
+                            "TODO")
+                :to-equal (format nil "* TODO H~%SCHEDULED: <2026-11-20 Fri>~%")))))
+
   (it "keeps a planning line with text outside its fields when the state changes"
     (let* ((done-source
              (format nil "#+TODO: TODO | DONE~%#+STARTUP: logdone~%* TODO Task~%SCHEDULED: <2025-03-02 Sun> trailing note~%"))
