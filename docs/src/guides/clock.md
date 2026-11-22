@@ -381,8 +381,9 @@ the block document and the resolved document, using either absolute paths for
 both or relative paths for both. Relative file links are calculated from the
 block document’s directory. `:formula` accepts a table formula or `%` for time
 percentages.
-`update-dynamic-block` writes the layout of Org's default clocktable formatter,
-and a test compares it with Emacs output. One table covers the whole report.
+
+`update-dynamic-block` writes the layout of Org's default clocktable formatter.
+One table covers the whole report.
 With the `agenda`, `agenda-with-archives`, resolver-selector, and list scopes
 it has a `File` column, an `ALL *Total time*` row, and a `*File time*` row
 before each file's headings; this also holds for a single file. The `File`
@@ -390,8 +391,8 @@ cell is the file name without its directory. The `file`, `subtree`, `tree`,
 `treeN`, and `file-with-archives` scopes write no file rows. The number of time
 columns is the smaller of `:maxlevel` and the deepest level that has time.
 A report with no clocked time has only the header and the total row.
-`:fileskip0` omits files without time when the report has some. Columns whose
-cells are mostly numbers are right-aligned.
+`:fileskip0` omits files without time when the report has some. Columns in which at
+least half of the non-empty cells are numbers are right-aligned.
 
 With a `:time-context`, the table starts with
 `#+CAPTION: Clock summary at [2026-10-12 Mon 09:30]`, taken from the context's
