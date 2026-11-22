@@ -218,9 +218,11 @@ Regenerate the expected files from the repository root with:
 emacs --batch -Q --script scripts/generate-clocktable-oracle.el t/fixtures/clocktable/oracle
 ```
 
-The script stops unless Org 9.8.10 is loaded. It rebinds `current-time` and `format-time-string`
-to the manifest's reference time, so the caption and relative `:block` values do not read the wall
-clock, and sets the time zone for each case.
+The script stops unless Org 9.8.10 is loaded. It rebinds `current-time`, `format-time-string`,
+`decode-time`, `float-time`, `current-time-string` and `current-time-zone` to the manifest's
+reference time, so the caption and relative `:block` values do not read the wall clock, and sets
+the time zone for each case. Regenerating under a different system date, for example with
+libfaketime, writes byte-identical files.
 
 The kit test compares every case byte for byte. Its one normalization is the target of a `:link t`
 link: Emacs writes the absolute path of its scratch copy, and the kit writes a path relative to the

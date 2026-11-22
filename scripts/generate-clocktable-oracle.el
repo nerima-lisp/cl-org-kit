@@ -19,7 +19,8 @@
 ;; ARGUMENTS is the text that follows `#+BEGIN: clocktable'.
 ;;
 ;; The clocktable caption and relative `:block' values read the wall clock, so
-;; the script rebinds `current-time' and `format-time-string' to NOW.
+;; the script rebinds `current-time', `format-time-string', `decode-time',
+;; `float-time', `current-time-string' and `current-time-zone' to NOW.
 
 (require 'cl-lib)
 (require 'subr-x)
@@ -77,13 +78,37 @@
                   (org-startup-folded nil)
                   (inhibit-message t)
                   (original-format-time-string
-                   (symbol-function 'format-time-string)))
+                   (symbol-function 'format-time-string))
+                  (original-decode-time (symbol-function 'decode-time))
+                  (original-float-time (symbol-function 'float-time))
+                  (original-current-time-string
+                   (symbol-function 'current-time-string))
+                  (original-current-time-zone
+                   (symbol-function 'current-time-zone)))
+              ;; Every reader of the wall clock that Org's clocktable code can
+              ;; reach takes an optional time argument that defaults to now.
+              ;; `org-clock-special-range' calls `(decode-time nil)'.
               (cl-letf (((symbol-function 'current-time)
                          (lambda () fixed-now))
                         ((symbol-function 'format-time-string)
                          (lambda (format &optional time &rest more)
                            (apply original-format-time-string
-                                  format (or time fixed-now) more))))
+                                  format (or time fixed-now) more)))
+                        ((symbol-function 'decode-time)
+                         (lambda (&optional time &rest more)
+                           (apply original-decode-time
+                                  (or time fixed-now) more)))
+                        ((symbol-function 'float-time)
+                         (lambda (&optional time)
+                           (funcall original-float-time (or time fixed-now))))
+                        ((symbol-function 'current-time-string)
+                         (lambda (&optional time &rest more)
+                           (apply original-current-time-string
+                                  (or time fixed-now) more)))
+                        ((symbol-function 'current-time-zone)
+                         (lambda (&optional time &rest more)
+                           (apply original-current-time-zone
+                                  (or time fixed-now) more))))
                 (with-current-buffer (find-file-noselect host-file)
                   (org-mode)
                   (goto-char (point-min))
