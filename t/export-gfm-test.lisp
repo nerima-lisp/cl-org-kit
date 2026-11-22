@@ -1570,7 +1570,11 @@
                         :to-be t))))
           (expect (< allocated (floor input-length 2)) :to-be t)))))
 
+  ;; Four 4 MiB exports plus full GCs cost about 2.5 s of CPU, with or without
+  ;; SB-COVER, so the shared 10 s wall budget leaves too little slack on a
+  ;; loaded host. Give this one spec its own budget.
   (it-sequential "checks GFM plain link output before concatenating its destination"
+    (:timeout-ms 60000)
     (let* ((path (make-string (* 4 1024 1024) :initial-element #\x))
            (source (concatenate 'string "https://budget.test/" path))
            (limits (make-limits :max-output-length 128))
