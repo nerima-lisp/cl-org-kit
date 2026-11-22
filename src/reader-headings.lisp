@@ -1059,6 +1059,82 @@ starts at POSITION on a line that ends at LINE-END, else NIL."
                   (char= (char text (1- keyword-end)) #\:))
           return (cons kind keyword-end)))
 
+(defun reader-planning-line-p (text line-start line-end)
+  "Return true when the line from LINE-START to LINE-END is a planning line.
+Like org-element-planning-line-re, this needs only a planning keyword after the
+indentation: the line is planning even when no timestamp follows. The reader
+and the property-drawer detector both ask this one question."
+  (let ((position (reader-heading-skip-horizontal-space
+                   text line-start line-end)))
+    (and (reader-planning-keyword-at text position line-end) t)))
+
+(defun reader-planning-timestamp-at (text start end)
+  "Parse the timestamp, or `<a>--<b>' range of timestamps, that starts at START.
+Return its fields and end offset, or NIL when no timestamp starts there."
+  (if (< start end)
+      (multiple-value-bind (fields timestamp-end)
+          (%parse-single-timestamp text start end)
+        (let ((range-start (and fields (+ timestamp-end 2))))
+          (if (and fields
+                   (< range-start end)
+                   (string= "--" text :start2 timestamp-end :end2 range-start)
+                   (char= (char text start) (char text range-start)))
+              (multiple-value-bind (range-fields range-end)
+                  (%parse-single-timestamp text range-start end)
+                (if range-fields
+                    (values fields range-end)
+                    (values fields timestamp-end)))
+              (values fields timestamp-end))))
+      (values nil nil)))
+
+(defun reader-planning-line-ranges (text line-start line-end)
+  "Return the planning fields on the line and whether it holds other text.
+The first value is a list of (KIND . (VALUE-START . VALUE-END)). As in
+org-element-planning-parser, a keyword may appear anywhere on the line, a
+keyword without a timestamp after it has no value, and a later valid keyword of
+the same kind replaces an earlier one. Unlike Org, a later keyword without a
+timestamp does not clear an earlier value, so a field that set-planning writes
+in front of such a keyword stays visible. The second value is true when some
+non-blank text lies outside the fields that count."
+  (let ((position line-start)
+        (ranges nil)
+        (spans nil))
+    (loop
+      (let* ((keyword-start
+               (loop for offset from position below line-end
+                     when (reader-planning-keyword-at text offset line-end)
+                       return offset))
+             (entry (and keyword-start
+                         (reader-planning-keyword-at
+                          text keyword-start line-end))))
+        (unless entry
+          (return
+            (values
+             ranges
+             (loop for index from line-start below line-end
+                   thereis (and (not (reader-heading-horizontal-space-p
+                                      (char text index)))
+                                (notany (lambda (span)
+                                          (<= (cadr span) index (cddr span)))
+                                        spans))))))
+        (let ((value-start (reader-heading-skip-horizontal-space
+                            text (cdr entry) line-end)))
+          (setf position (cdr entry))
+          (multiple-value-bind (fields timestamp-end)
+              ;; Unlike Org, the kit needs a space between the keyword and its
+              ;; timestamp, as it did before malformed lines were planning.
+              (if (< (cdr entry) value-start)
+                  (reader-planning-timestamp-at text value-start line-end)
+                  (values nil nil))
+            (when fields
+              (setf ranges (remove (car entry) ranges :key #'car)
+                    spans (remove (car entry) spans :key #'car))
+              (push (cons (car entry) (cons value-start timestamp-end))
+                    ranges)
+              (push (list* (car entry) keyword-start (1- timestamp-end))
+                    spans)
+              (setf position timestamp-end))))))))
+
 (defun reader-heading-children (context contents-begin
                                         contents-end
                                         star-count
@@ -1067,72 +1143,39 @@ starts at POSITION on a line that ends at LINE-END, else NIL."
                                         planning-node
                                         headline-properties)
   (let ((text (reader-context-text context)))
-    (labels ((planning-line-ranges (start line-end)
-               (let ((position start)
-                     (ranges nil))
-                 (loop
-                   (setf position
-                         (reader-heading-skip-horizontal-space text
-                                                               position
-                                                               line-end))
-                   (when (= position line-end)
-                     (return (nreverse ranges)))
-                   (let* ((entry
-                           (reader-planning-keyword-at text position line-end))
-                          (keyword-end (and entry (cdr entry)))
-                          (value-start
-                           (and keyword-end
-                                (reader-heading-skip-horizontal-space
-                                 text keyword-end line-end))))
-                     (unless (and entry
-                                  (< keyword-end value-start)
-                                  (< value-start line-end))
-                       (return nil))
-                     (multiple-value-bind (fields timestamp-end)
-                         (%parse-single-timestamp text value-start line-end)
-                       (unless fields
-                         (return nil))
-                       (when (assoc (car entry) ranges)
-                         (return nil))
-                       (push (cons (car entry)
-                                   (cons value-start timestamp-end))
-                             ranges)
-                       (setf position timestamp-end))))))
-             (planning-at (start end node-depth)
+    (labels ((planning-at (start end node-depth)
                (multiple-value-bind (raw-line-end after-line)
                    (reader-line-bounds context start)
-                 (let* ((line-end (min end raw-line-end))
-                        (ranges (planning-line-ranges start line-end)))
-                   (when ranges
-                     (let ((properties
-                            (append
-                             (list :closed nil :deadline nil :scheduled nil)
-                             (when (assoc :closed ranges)
-                               (list :reader-closed-range
-                                     (cdr (assoc :closed ranges))))
-                             (when (assoc :deadline ranges)
-                               (list :reader-deadline-range
-                                     (cdr (assoc :deadline ranges))))
-                             (when (assoc :scheduled ranges)
-                               (list :reader-scheduled-range
-                                     (cdr (assoc :scheduled ranges)))))))
-                       (multiple-value-bind (planning-end blank-count)
-                           (reader-heading-skip-blank-lines context
-                                                            (min end after-line)
-                                                            end)
-                         (declare (ignore blank-count))
-                         (values
-                          (make-reader-node context
-                                            :planning
-                                            :begin
-                                            start
-                                            :end
-                                            planning-end
-                                            :properties
-                                            properties
-                                            :depth
-                                            node-depth)
-                          planning-end))))))))
+                 (let ((line-end (min end raw-line-end)))
+                   (when (reader-planning-line-p text start line-end)
+                     (multiple-value-bind (ranges extra-text-p)
+                         (reader-planning-line-ranges text start line-end)
+                       (let* ((properties
+                                (append
+                                 (list :closed nil :deadline nil :scheduled nil)
+                                 (when extra-text-p
+                                   (list :reader-extra-text-p t))
+                                 (when (assoc :closed ranges)
+                                   (list :reader-closed-range
+                                         (cdr (assoc :closed ranges))))
+                                 (when (assoc :deadline ranges)
+                                   (list :reader-deadline-range
+                                         (cdr (assoc :deadline ranges))))
+                                 (when (assoc :scheduled ranges)
+                                   (list :reader-scheduled-range
+                                         (cdr (assoc :scheduled ranges)))))))
+                         (multiple-value-bind (planning-end blank-count)
+                             (reader-heading-skip-blank-lines
+                              context (min end after-line) end)
+                           (declare (ignore blank-count))
+                           (values
+                            (make-reader-node context
+                                              :planning
+                                              :begin start
+                                              :end planning-end
+                                              :properties properties
+                                              :depth node-depth)
+                            planning-end)))))))))
       (multiple-value-bind (found-planning)
           (if planning-node
               (values planning-node (node-end planning-node))

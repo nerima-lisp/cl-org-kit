@@ -847,6 +847,8 @@
                  (eq (node-type headline) :headline)
                  (eql (position node siblings :test #'eq) 0))
       (emitter-fail node "planning must be first in a headline section"))
+    (when (node-property node :reader-extra-text-p)
+      (emitter-fail node "planning line has text that is not a planning field"))
     (let ((fields '()))
       (dolist (entry '((:scheduled "SCHEDULED:")
                        (:deadline "DEADLINE:")

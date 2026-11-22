@@ -1806,6 +1806,34 @@
             (expect (search "Body repeater <2025-03-10 Mon +1w>" updated)
                     :to-be-truthy))))))
 
+  (it "keeps a planning line with text outside its fields when the state changes"
+    (let* ((done-source
+             (format nil "#+TODO: TODO | DONE~%#+STARTUP: logdone~%* TODO Task~%SCHEDULED: <2025-03-02 Sun> trailing note~%"))
+           (done-document (parse-org done-source))
+           (done-text
+             (document-text
+              (edit-result-updated-document
+               (transition-heading-todo
+                done-document (edit-todo-state-test-first-heading done-document)
+                "DONE" :at (make-org-time-value "2025-03-07T09:00:00")))))
+           (reopen-source
+             (format nil "#+TODO: TODO | DONE~%* DONE Task~%CLOSED: [2025-03-01 Sat] trailing note~%"))
+           (reopen-document (parse-org reopen-source))
+           (reopen-text
+             (document-text
+              (edit-result-updated-document
+               (transition-heading-todo
+                reopen-document
+                (edit-todo-state-test-first-heading reopen-document)
+                "TODO" :at (make-org-time-value "2025-03-07T09:00:00"))))))
+      (with-soft-assertions
+        (expect done-text
+                :to-equal
+                (format nil "#+TODO: TODO | DONE~%#+STARTUP: logdone~%* DONE Task~%CLOSED: [2025-03-07 Fri 09:00] SCHEDULED: <2025-03-02 Sun> trailing note~%"))
+        (expect reopen-text
+                :to-equal
+                (format nil "#+TODO: TODO | DONE~%* TODO Task~%CLOSED: [2025-03-01 Sat] trailing note~%")))))
+
   (it "inserts a drawerless done log at EOF without adding a final newline"
     (let* ((source (format nil "#+TODO: TODO | DONE(d!)~%* TODO Log at EOF"))
            (document (parse-org source))

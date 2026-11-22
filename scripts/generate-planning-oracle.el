@@ -120,6 +120,41 @@
     (:name "remove-deadline-keep-closed-before-property-drawer"
      :source "* Cat\n** DONE one\nCLOSED: [2026-11-20 Fri 10:00] DEADLINE: <2026-11-25 Wed>\n:PROPERTIES:\n:A: b\n:END:\n"
      :op (:remove :deadline))
+    (:name "remove-closed-at-end-of-line"
+     :source "* Cat\n** DONE one\nSCHEDULED: <2026-11-21 Sat> CLOSED: [2026-11-20 Fri 10:00]\n\nbody\n"
+     :op (:remove :closed))
+    (:name "set-closed-again-at-end-of-line"
+     :source "* Cat\n** DONE one\nSCHEDULED: <2026-11-21 Sat> CLOSED: [2026-11-20 Fri 10:00]\n"
+     :op (:set :closed "2026-11-22 09:00"))
+    ;; A line that starts with a planning keyword is a planning line even when
+    ;; no valid timestamp follows.
+    (:name "set-scheduled-on-closed-junk"
+     :source "* Cat\n** TODO one\nCLOSED: junk\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:set :scheduled "2026-11-30"))
+    (:name "set-scheduled-on-scheduled-junk"
+     :source "* Cat\n** TODO one\nSCHEDULED: junk\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:set :scheduled "2026-11-30"))
+    (:name "set-scheduled-on-keyword-only"
+     :source "* Cat\n** TODO one\nSCHEDULED:\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:set :scheduled "2026-11-30"))
+    (:name "set-closed-on-indented-closed-junk"
+     :source "* Cat\n** DONE one\n  CLOSED: junk\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:set :closed "2026-11-20 10:00"))
+    (:name "set-deadline-on-junk-deadline-then-scheduled"
+     :source "* Cat\n** TODO one\nDEADLINE: junk SCHEDULED: <2026-11-21 Sat>\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:set :deadline "2026-11-30"))
+    (:name "set-closed-on-scheduled-then-deadline-junk"
+     :source "* Cat\n** DONE one\nSCHEDULED: <2026-11-21 Sat> DEADLINE: junk\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:set :closed "2026-11-20 10:00"))
+    (:name "remove-scheduled-keep-deadline-junk"
+     :source "* Cat\n** TODO one\nSCHEDULED: <2026-11-21 Sat> DEADLINE: junk\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:remove :scheduled))
+    (:name "remove-scheduled-keep-trailing-text"
+     :source "* Cat\n** TODO one\nSCHEDULED: <2026-11-21 Sat> trailing text\n\nbody\n"
+     :op (:remove :scheduled))
+    (:name "set-closed-on-scheduled-with-trailing-text"
+     :source "* Cat\n** DONE one\nSCHEDULED: <2026-11-21 Sat> trailing text\n:PROPERTIES:\n:ID: x\n:END:\n"
+     :op (:set :closed "2026-11-20 10:00"))
     (:name "remove-closed-keep-scheduled"
      :source "* Cat\n** TODO one\nCLOSED: [2026-11-20 Fri 10:00] SCHEDULED: <2026-11-21 Sat>\n\nbody\n"
      :op (:remove :closed))))
@@ -142,10 +177,17 @@
     (_ (error "Unknown planning oracle operation %S" op))))
 
 (defun planning-oracle--timestamp (op)
-  "Return the timestamp text Org wrote for a :set OP, or nil for other ops."
+  "Return the timestamp text Org wrote for a :set OP, or nil for other ops.
+The new field goes first on the planning line, so the first match is it."
   (pcase op
     (`(:set ,kind ,_)
-     (org-entry-get nil (upcase (substring (symbol-name kind) 1))))))
+     (save-excursion
+       (forward-line)
+       (when (re-search-forward
+              (concat (upcase (substring (symbol-name kind) 1))
+                      ": \\([[<][^]>]+[]>]\\)")
+              (line-end-position) t)
+         (match-string-no-properties 1))))))
 
 (defun planning-oracle--run (case)
   (let ((op (plist-get case :op))

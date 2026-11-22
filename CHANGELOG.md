@@ -20,9 +20,32 @@
   "2026-11-30")` leaves `DEADLINE: <2026-11-30 Mon>`, while `set-planning` with
   `:deadline` leaves `DEADLINE: <2026-11-30 Mon> CLOSED: [2026-11-20 Fri
   10:00]`. Call `remove-planning` with `:closed` as well to match Emacs.
+- A line directly under a heading that starts with `CLOSED:`, `DEADLINE:`, or
+  `SCHEDULED:` is a planning line, as in Org, even when it is malformed. 0.3.2
+  read `SCHEDULED: junk` or `SCHEDULED: <2026-10-11 Sun> trailing` as a
+  paragraph. Now the line is a planning element: a field with no valid timestamp
+  has no value, text after a valid field stays on the line, and a range
+  `<a>--<b>` is one field. The kit still needs a space between the keyword and
+  its timestamp, and a later keyword without a timestamp does not clear an
+  earlier value. Effects, compared with 0.3.2:
+  - `set-planning` writes into the existing planning line (`SCHEDULED: junk`
+    becomes `SCHEDULED: <2026-11-30 Mon> SCHEDULED: junk`, as in Org), and
+    rejects timestamp text that has anything after the timestamp, including
+    another planning field.
+  - `remove-planning` removes only the field and leaves other text on the
+    line.
+  - `transition-heading-todo` writes `CLOSED:` into such a line but leaves its
+    other fields in place when it would remove them.
+  - `emit-org` signals `org-kit-error` for a parsed planning line that has text
+    outside its fields, where it used to emit the paragraph.
+  - Queries and agenda functions see the timestamps on such a line.
 
 ### Fixed
 
+- Setting a planning field with `set-planning` no longer signals
+  `org-edit-error` with reason `:unexpected-diff` on a heading whose planning
+  line is malformed, such as `SCHEDULED: junk`, when a `:PROPERTIES:` drawer
+  follows it.
 - A `:PROPERTIES:` drawer after a planning line that starts with `CLOSED:` is
   parsed as the heading's property drawer. It was parsed as an ordinary drawer,
   so `set-property` and `archive-subtree-to` signalled `org-edit-error` with

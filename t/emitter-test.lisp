@@ -1301,6 +1301,13 @@
         (emit-org (wrap (make-node :planning
                                    :properties (list :scheduled "not a timestamp")))))))
 
+  (it "refuses to emit a parsed planning line whose text would be lost"
+    (dolist (source '("* Task~%SCHEDULED: <2026-10-13> trailing note~%"
+                      "* Task~%SCHEDULED: junk~%"
+                      "* Task~%SCHEDULED: <2026-10-13> SCHEDULED: <2026-10-14>~%"))
+      (signals org-kit-error
+        (emit-org (document-root (parse-org (format nil source)))))))
+
   (it "rejects planning outside the first position in a headline section"
     (signals org-kit-error
       (emit-org (make-node :org-data

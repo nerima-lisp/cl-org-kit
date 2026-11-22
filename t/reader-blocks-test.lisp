@@ -522,6 +522,31 @@
                   :to-equal
                   (list planning-line '(:planning :property-drawer)))))))
 
+  (it "treats a line that starts with a planning keyword as planning even when a value is malformed"
+    (flet ((section-types (planning-line)
+             (let* ((document
+                      (parse-org (reader-blocks-test-lines
+                                  "* Planned" planning-line
+                                  ":PROPERTIES:" ":ID: x" ":END:")))
+                    (headline
+                      (first (reader-blocks-test-elements document :headline)))
+                    (section (find :section (node-children headline)
+                                   :key #'node-type)))
+               (mapcar #'node-type (node-children section)))))
+      (with-soft-assertions
+        (dolist (planning-line
+                 '("CLOSED: junk"
+                   "SCHEDULED: junk"
+                   "DEADLINE: junk"
+                   "SCHEDULED:"
+                   "  CLOSED: junk"
+                   "SCHEDULED: <2026-10-11 Sun> DEADLINE: junk"
+                   "DEADLINE: junk SCHEDULED: <2026-10-11 Sun>"
+                   "SCHEDULED: <2026-10-11 Sun> trailing"))
+          (expect (list planning-line (section-types planning-line))
+                  :to-equal
+                  (list planning-line '(:planning :property-drawer)))))))
+
   (it "keeps a drawer after a second planning-looking line ordinary, as Org does"
     (flet ((section-types (&rest planning-lines)
              (let* ((document

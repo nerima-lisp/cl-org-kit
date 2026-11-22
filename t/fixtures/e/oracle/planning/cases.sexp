@@ -436,6 +436,193 @@ CLOSED: [2026-11-20 Fri 10:00]
 :A: b
 :END:
 ")
+                        (:name "remove-closed-at-end-of-line"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** DONE one
+SCHEDULED: <2026-11-21 Sat> CLOSED: [2026-11-20 Fri 10:00]
+
+body
+"
+                               :operation (:remove :closed) :timestamp
+                               nil :expected "* Cat
+** DONE one
+SCHEDULED: <2026-11-21 Sat>
+
+body
+")
+                        (:name "set-closed-again-at-end-of-line"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** DONE one
+SCHEDULED: <2026-11-21 Sat> CLOSED: [2026-11-20 Fri 10:00]
+"
+                               :operation
+                               (:set :closed "2026-11-22 09:00")
+                               :timestamp "[2026-11-22 Sun 09:00]"
+                               :expected "* Cat
+** DONE one
+CLOSED: [2026-11-22 Sun 09:00] SCHEDULED: <2026-11-21 Sat>
+")
+                        (:name "set-scheduled-on-closed-junk"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** TODO one
+CLOSED: junk
+:PROPERTIES:
+:ID: x
+:END:
+"
+                               :operation
+                               (:set :scheduled "2026-11-30")
+                               :timestamp "<2026-11-30 Mon>" :expected "* Cat
+** TODO one
+SCHEDULED: <2026-11-30 Mon> CLOSED: junk
+:PROPERTIES:
+:ID: x
+:END:
+")
+                        (:name "set-scheduled-on-scheduled-junk"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** TODO one
+SCHEDULED: junk
+:PROPERTIES:
+:ID: x
+:END:
+"
+                               :operation
+                               (:set :scheduled "2026-11-30")
+                               :timestamp "<2026-11-30 Mon>" :expected "* Cat
+** TODO one
+SCHEDULED: <2026-11-30 Mon> SCHEDULED: junk
+:PROPERTIES:
+:ID: x
+:END:
+")
+                        (:name "set-scheduled-on-keyword-only"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** TODO one
+SCHEDULED:
+:PROPERTIES:
+:ID: x
+:END:
+"
+                               :operation
+                               (:set :scheduled "2026-11-30")
+                               :timestamp "<2026-11-30 Mon>" :expected "* Cat
+** TODO one
+SCHEDULED: <2026-11-30 Mon> SCHEDULED:
+:PROPERTIES:
+:ID: x
+:END:
+")
+                        (:name "set-closed-on-indented-closed-junk"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** DONE one
+  CLOSED: junk
+:PROPERTIES:
+:ID: x
+:END:
+"
+                               :operation
+                               (:set :closed "2026-11-20 10:00")
+                               :timestamp "[2026-11-20 Fri 10:00]"
+                               :expected "* Cat
+** DONE one
+  CLOSED: [2026-11-20 Fri 10:00] CLOSED: junk
+:PROPERTIES:
+:ID: x
+:END:
+")
+                        (:name
+                         "set-deadline-on-junk-deadline-then-scheduled"
+                         :emacs-version "31.1.90" :org-version
+                         "9.8.10" :source-input "* Cat
+** TODO one
+DEADLINE: junk SCHEDULED: <2026-11-21 Sat>
+:PROPERTIES:
+:ID: x
+:END:
+"
+                         :operation (:set :deadline "2026-11-30")
+                         :timestamp "<2026-11-30 Mon>" :expected "* Cat
+** TODO one
+DEADLINE: <2026-11-30 Mon> DEADLINE: junk SCHEDULED: <2026-11-21 Sat>
+:PROPERTIES:
+:ID: x
+:END:
+")
+                        (:name
+                         "set-closed-on-scheduled-then-deadline-junk"
+                         :emacs-version "31.1.90" :org-version
+                         "9.8.10" :source-input "* Cat
+** DONE one
+SCHEDULED: <2026-11-21 Sat> DEADLINE: junk
+:PROPERTIES:
+:ID: x
+:END:
+"
+                         :operation (:set :closed "2026-11-20 10:00")
+                         :timestamp "[2026-11-20 Fri 10:00]" :expected "* Cat
+** DONE one
+CLOSED: [2026-11-20 Fri 10:00] SCHEDULED: <2026-11-21 Sat> DEADLINE: junk
+:PROPERTIES:
+:ID: x
+:END:
+")
+                        (:name "remove-scheduled-keep-deadline-junk"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** TODO one
+SCHEDULED: <2026-11-21 Sat> DEADLINE: junk
+:PROPERTIES:
+:ID: x
+:END:
+"
+                               :operation (:remove :scheduled)
+                               :timestamp nil :expected "* Cat
+** TODO one
+DEADLINE: junk
+:PROPERTIES:
+:ID: x
+:END:
+")
+                        (:name "remove-scheduled-keep-trailing-text"
+                               :emacs-version "31.1.90" :org-version
+                               "9.8.10" :source-input "* Cat
+** TODO one
+SCHEDULED: <2026-11-21 Sat> trailing text
+
+body
+"
+                               :operation (:remove :scheduled)
+                               :timestamp nil :expected "* Cat
+** TODO one
+trailing text
+
+body
+")
+                        (:name
+                         "set-closed-on-scheduled-with-trailing-text"
+                         :emacs-version "31.1.90" :org-version
+                         "9.8.10" :source-input "* Cat
+** DONE one
+SCHEDULED: <2026-11-21 Sat> trailing text
+:PROPERTIES:
+:ID: x
+:END:
+"
+                         :operation (:set :closed "2026-11-20 10:00")
+                         :timestamp "[2026-11-20 Fri 10:00]" :expected "* Cat
+** DONE one
+CLOSED: [2026-11-20 Fri 10:00] SCHEDULED: <2026-11-21 Sat> trailing text
+:PROPERTIES:
+:ID: x
+:END:
+")
                         (:name "remove-closed-keep-scheduled"
                                :emacs-version "31.1.90" :org-version
                                "9.8.10" :source-input "* Cat

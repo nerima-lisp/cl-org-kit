@@ -333,7 +333,13 @@
                          :key #'node-type))
          (section (and headline (edit-properties-headline-section headline)))
          (planning (edit-properties-section-planning section)))
-    (unless (and planning (node-property planning kind))
+    (unless (let ((timestamp (and planning (node-property planning kind))))
+              ;; The reader accepts text after a timestamp on a planning line,
+              ;; but TIMESTAMP-TEXT must be one timestamp and nothing else.
+              (and timestamp
+                   (every #'edit-properties-horizontal-space-p
+                          (subseq source (node-end timestamp)
+                                  (1- (length source))))))
       (edit-signal-error target :invalid-value "Invalid Org planning timestamp"))
     planning))
 
@@ -419,7 +425,7 @@
          (line-start (or (position #\Newline source :end value-start :from-end t)
                          -1))
          (start (search label source :start2 (1+ line-start)
-                        :end2 value-start :test #'char-equal)))
+                        :end2 value-start :test #'char-equal :from-end t)))
     start))
 
 (defun edit-properties-planning-removal-range (source planning range kind sole-field-p)
@@ -494,6 +500,30 @@ Its blank lines now follow the planning line, which absorbs them."
   (let ((headline (edit-canonical-node-at-path expected headline-path)))
     (setf (getf headline :post-blank) 0)))
 
+(defun edit-properties-planning-line-other-text-p (source planning range kind)
+  "Return true when PLANNING's line holds anything besides the KIND field at RANGE.
+Text that is not a valid field, such as `DEADLINE: junk', counts."
+  (let ((line-start (node-begin planning)))
+    (notevery #'edit-properties-horizontal-space-p
+              (concatenate 'string
+                           (subseq source line-start
+                                   (edit-properties-planning-field-start
+                                    source range kind))
+                           (subseq source (cdr range)
+                                   (nth-value 0 (edit-properties-line-bounds
+                                                 source line-start)))))))
+
+(defun edit-properties-planning-remainder-p (source planning start end)
+  "Return true when PLANNING's line is still a planning line without START to END."
+  (let* ((line-start (node-begin planning))
+         (remainder (concatenate
+                     'string
+                     (subseq source line-start start)
+                     (subseq source end
+                             (nth-value 0 (edit-properties-line-bounds
+                                           source line-start))))))
+    (reader-planning-line-p remainder 0 (length remainder))))
+
 (defun edit-properties-remove-planning-expected
     (document headline section planning kind has-other-p)
   (let* ((expected (edit-canonical-copy (edit-canonical-document document)))
@@ -529,18 +559,27 @@ Its blank lines now follow the planning line, which absorbs them."
         (edit-signal-error target :target-not-found
                            "Planning timestamp was not found"))
       (let* ((range (cons (node-begin value) (node-end value)))
-             (other-kinds (remove kind (org-planning-kinds)))
-             (has-other-p (some (lambda (candidate)
-                                  (node-property planning candidate))
-                                other-kinds))
-             (expected (edit-properties-remove-planning-expected
-                        document headline section planning kind has-other-p)))
+             (has-other-p (edit-properties-planning-line-other-text-p
+                           source planning range kind)))
         (multiple-value-bind (start end)
             (edit-properties-planning-removal-range
              source planning range kind (not has-other-p))
-          (edit-apply-patches
-           document (list (edit-make-patch start end "" target))
-           :target target :expected expected))))))
+          (let* ((patch (edit-make-patch start end "" target))
+                 (expected
+                   (if (and has-other-p
+                            (not (edit-properties-planning-remainder-p
+                                  source planning start end)))
+                       ;; What stays on the line is no longer planning, so its
+                       ;; text joins the body; only a reparse can say how.
+                       (edit-canonical-document
+                        (edit-reparse-source
+                         document (edit-splice-source source (list patch))
+                         target))
+                       (edit-properties-remove-planning-expected
+                        document headline section planning kind
+                        has-other-p))))
+            (edit-apply-patches
+             document (list patch) :target target :expected expected)))))))
 
 (defun edit-properties-keyword-selector-p (target)
   (and (consp target) (eq (first target) :keyword-key)))

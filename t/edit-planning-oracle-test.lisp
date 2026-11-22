@@ -44,7 +44,7 @@
   (it "writes and removes planning keywords the way Org does"
     (let ((cases (edit-planning-oracle-test-cases)))
       (with-soft-assertions
-        (expect (>= (length cases) 31) :to-be t)
+        (expect (>= (length cases) 42) :to-be t)
         (dolist (case cases)
           (let ((name (getf case :name)))
             (expect (list name

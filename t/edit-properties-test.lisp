@@ -528,6 +528,72 @@
                 :to-equal
                 (format nil "* Task~%  DEADLINE: <2026-10-12 Mon> SCHEDULED: <2026-10-11 Sun>~%")))))
 
+  (it "sets planning fields on a heading whose planning line has malformed fields"
+    (dolist (planning-line '("CLOSED: junk"
+                             "SCHEDULED: junk"
+                             "DEADLINE: junk"
+                             "SCHEDULED: <2026-10-11 Sun> DEADLINE: junk"
+                             "DEADLINE: junk SCHEDULED: <2026-10-11 Sun>"
+                             "  CLOSED: junk"
+                             "SCHEDULED:"
+                             "SCHEDULED: <2026-10-11 Sun> trailing"))
+      (let* ((source (format nil "* H~%~A~%:PROPERTIES:~%:ID: x~%:END:~%"
+                             planning-line))
+             (document (parse-org source))
+             (edited (set-planning document
+                                   (edit-properties-test-headline document)
+                                   :scheduled "<2026-11-30 Mon>"))
+             (edited-headline (edit-properties-test-headline edited))
+             (property-edited (set-property document
+                                            (edit-properties-test-headline
+                                             document)
+                                            "NEW" "1")))
+        (with-soft-assertions
+          (expect (list planning-line
+                        (and (node-property
+                              (edit-properties-test-planning edited-headline)
+                              :scheduled)
+                             t)
+                        (and (edit-properties-test-property edited-headline
+                                                            "ID")
+                             t))
+                  :to-equal (list planning-line t t))
+          (expect (list planning-line
+                        (and (edit-properties-test-property
+                              (edit-properties-test-headline property-edited)
+                              "NEW")
+                             t))
+                  :to-equal (list planning-line t))))))
+
+  (it "rejects timestamp text that has anything after the timestamp"
+    (let* ((source (format nil "* Heading~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document)))
+      (edit-properties-test-check-error
+       (lambda ()
+         (set-planning document headline :scheduled "<2026-10-13 Tue> trailing"))
+       :invalid-value document source)
+      (edit-properties-test-check-error
+       (lambda ()
+         (set-planning document headline :scheduled
+                       "<2026-10-13 Tue> DEADLINE: <2026-10-14 Wed>"))
+       :invalid-value document source)))
+
+  (it "keeps an existing CLOSED when it sets DEADLINE or SCHEDULED, unlike org-deadline and org-schedule"
+    ;; Org's org-deadline and org-schedule would leave only the new keyword.
+    (let* ((source (format nil "** DONE x~%CLOSED: [2026-11-20 Fri 10:00]~%"))
+           (document (parse-org source))
+           (headline (edit-properties-test-headline document)))
+      (with-soft-assertions
+        (expect (document-text
+                 (set-planning document headline :deadline "<2026-11-30 Mon>"))
+                :to-equal
+                (format nil "** DONE x~%DEADLINE: <2026-11-30 Mon> CLOSED: [2026-11-20 Fri 10:00]~%"))
+        (expect (document-text
+                 (set-planning document headline :scheduled "<2026-11-30 Mon>"))
+                :to-equal
+                (format nil "** DONE x~%SCHEDULED: <2026-11-30 Mon> CLOSED: [2026-11-20 Fri 10:00]~%")))))
+
   (it "removes the last field from the end of a shared planning line"
     (let* ((source (format nil "* Task~%CLOSED: <2026-10-13 Tue> DEADLINE: <2026-10-14 Wed>~%"))
            (document (parse-org source))

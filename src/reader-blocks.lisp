@@ -92,14 +92,6 @@
             (1+ previous-newline)
             0)))))
 
-(defun reader-blocks-planning-line-p (context line-start)
-  "Return true when the line at LINE-START starts with a planning keyword."
-  (let* ((text (reader-context-text context))
-         (line-end (nth-value 0 (reader-line-bounds context line-start)))
-         (keyword-start (reader-heading-skip-horizontal-space
-                         text line-start line-end)))
-    (and (reader-planning-keyword-at text keyword-start line-end) t)))
-
 (defun reader-blocks-node-property-fields (line)
   "Return the key and value from a property drawer line."
   (when (and (> (length line) 2) (char= (char line 0) #\:))
@@ -122,7 +114,9 @@ paragraph text, so a drawer after it is an ordinary drawer."
   (let ((previous-start (reader-blocks-previous-line-start context start)))
     (when previous-start
       (or (reader-heading-level context previous-start start)
-          (and (reader-blocks-planning-line-p context previous-start)
+          (and (reader-planning-line-p
+                (reader-context-text context) previous-start
+                (nth-value 0 (reader-line-bounds context previous-start)))
                (let ((heading-start
                        (reader-blocks-previous-line-start
                         context previous-start)))

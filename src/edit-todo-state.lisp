@@ -1464,6 +1464,13 @@ unless a repeater fires."
                                    sequence previous-state new-state))))
              (closed-value (edit-todo-local-planning-value
                             document heading :closed))
+             ;; A planning line with text outside its fields keeps its fields
+             ;; when the TODO state changes: removing one would have to rewrite
+             ;; that text too.
+             (planning-extra-text-p
+               (let ((planning (edit-properties-section-planning
+                                (edit-properties-headline-section heading))))
+                 (and planning (node-property planning :reader-extra-text-p))))
              (closed-timestamp nil)
              (planning-changes nil)
              (log-lines nil)
@@ -1476,13 +1483,15 @@ unless a repeater fires."
           (push (cons :closed (list :action :set :value timestamp))
                 planning-changes)
           (setf closed-timestamp timestamp))
-        (when (and closed-value previous-done-p (not new-done-p))
+        (when (and closed-value previous-done-p (not new-done-p)
+                   (not planning-extra-text-p))
           (push (cons :closed (list :action :remove)) planning-changes)
           (setf closed-timestamp nil))
         (when (and (or repeating-p
                        (and (not preserve-scheduled-p)
                             state-changed-p
                             new-done-p))
+                   (not planning-extra-text-p)
                    (let* ((planning
                             (edit-properties-section-planning
                              (edit-properties-headline-section heading)))

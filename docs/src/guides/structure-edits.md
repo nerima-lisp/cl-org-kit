@@ -155,6 +155,21 @@ line `CLOSED: [2026-11-20 Fri 10:00]`, `(org-deadline nil "2026-11-30")` leaves
 `DEADLINE: <2026-11-30 Mon> CLOSED: [2026-11-20 Fri 10:00]`. To match Emacs,
 call `remove-planning` with `:closed` as well.
 
+As in Org, a line directly under a headline that starts with `CLOSED:`,
+`DEADLINE:`, or `SCHEDULED:` is a planning line even when it is malformed. A
+keyword with no timestamp after it, or with `junk` after it, is a planning line
+with no value for that field, and text after a valid timestamp stays on the line.
+A range such as `<2026-11-20 Fri>--<2026-11-22 Sun>` is one field. Unlike Org,
+the kit needs a space between the keyword and its timestamp, and a later keyword
+without a timestamp does not clear an earlier value of the same kind.
+`set-planning` writes into that line, so `SCHEDULED: junk` becomes
+`SCHEDULED: <2026-11-30 Mon> SCHEDULED: junk`, as `org-schedule` does.
+`remove-planning` removes only the field and leaves the other text.
+`set-planning` rejects timestamp text with anything after the timestamp.
+`transition-heading-todo` writes `CLOSED:` into such a line but does not remove
+its fields. `emit-org` signals `org-kit-error` for a parsed planning line that
+has text outside its fields, because the text would be lost.
+
 A property drawer directly under a planning line is the headline's property
 drawer, whether the line starts with `CLOSED:`, `SCHEDULED:`, or `DEADLINE:`.
 `set-property` and `remove-property` therefore edit it. Only the line directly

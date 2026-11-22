@@ -424,7 +424,7 @@
                           :to-equal (node-end planning-timestamp))
                   (expect (node-parent headline-timestamp) :to-be headline)
                   (expect (node-parent planning-timestamp) :to-be planning))))))
-          (it "does not treat prose or an invalid timestamp as planning"
+          (it "treats prose as a paragraph and a keyword line with an invalid timestamp as planning"
               (let* ((prose-document
                       (parse-org
                        (reader-headings-test-lines "* Prose"
@@ -466,13 +466,15 @@
                     (getf (node-properties prose-headline) property :missing)
                     :to-be
                     nil))
+                 ;; org-element parses `SCHEDULED: <not a date>' as a planning
+                 ;; element that has no scheduled value.
                  (expect
-                  (reader-headings-test-elements invalid-document :planning)
-                  :to-equal
-                  '())
+                  (length
+                   (reader-headings-test-elements invalid-document :planning))
+                  :to-be 1)
                  (expect (mapcar #'node-type (node-children invalid-section))
                          :to-equal
-                         '(:paragraph)))))
+                         '(:planning)))))
           (it "uses the default and explicit inlinetask thresholds"
               (let* ((default-document
                       (parse-org
@@ -717,7 +719,7 @@
                  (expect (node-type italic) :to-be :italic)
                  (expect (node-parent italic) :to-be styled))))
 
-          (it "rejects duplicate planning keywords on one line"
+          (it "keeps the last of duplicate planning keywords on one line, as Org does"
               (let* ((document
                       (parse-org
                        (reader-headings-test-lines
@@ -729,13 +731,19 @@
                      (section
                       (find :section (node-children headline) :key #'node-type)))
                 (with-soft-assertions
-                 (expect (find :planning (node-children section)
-                               :key #'node-type)
+                 (expect (node-type (first (node-children section)))
                          :to-be
-                         nil)
-                 (expect (getf (node-properties headline) :scheduled :missing)
+                         :planning)
+                 (expect (node-property
+                          (node-property (first (node-children section))
+                                         :scheduled)
+                          :day-start)
                          :to-be
-                         nil))))
+                         13)
+                 (expect (node-property (node-property headline :scheduled)
+                                        :day-start)
+                         :to-be
+                         13))))
 
           (it "ignores block-local inline END and leaves an unclosed task's body outside"
     (let* ((stars (make-string 15 :initial-element #\*))
@@ -848,3 +856,69 @@
                          (list :reader-closed-range nil
                                :reader-deadline-range nil
                                :reader-scheduled-range nil))))))
+
+(describe "planning line fields"
+  (it "keeps the timestamps that parse when other fields on the line are malformed"
+    (flet ((fields (planning-line)
+             (let* ((document (parse-org (format nil "* H~%~A~%" planning-line)))
+                    (headline (find :headline
+                                    (node-children (document-root document))
+                                    :key #'node-type))
+                    (section (find :section (node-children headline)
+                                   :key #'node-type))
+                    (planning (find :planning (node-children section)
+                                    :key #'node-type)))
+               (mapcar (lambda (kind) (and (node-property planning kind) t))
+                       '(:closed :deadline :scheduled)))))
+      (with-soft-assertions
+        (expect (fields "DEADLINE: junk SCHEDULED: <2026-10-11 Sun>")
+                :to-equal '(nil nil t))
+        (expect (fields "SCHEDULED: <2026-10-11 Sun> DEADLINE: junk")
+                :to-equal '(nil nil t))
+        (expect (fields "SCHEDULED: <2026-10-11 Sun> trailing")
+                :to-equal '(nil nil t))
+        (expect (fields "SCHEDULED: junk SCHEDULED: <2026-10-11 Sun>")
+                :to-equal '(nil nil t))
+        ;; A later valid keyword replaces an earlier one, as in Org. Unlike Org,
+        ;; a later keyword without a timestamp does not clear it: set-planning
+        ;; writes a new field in front of such a keyword and needs it to stay.
+        (expect (fields "SCHEDULED: <2026-10-11 Sun> SCHEDULED: junk")
+                :to-equal '(nil nil t))
+        (expect (fields "SCHEDULED:") :to-equal '(nil nil nil))
+        ;; Unlike Org, the kit needs a space between keyword and timestamp.
+        (expect (fields "SCHEDULED:<2026-10-11 Sun>") :to-equal '(nil nil nil))
+        (expect (fields "CLOSED: [2026-10-10 Sat] DEADLINE: <2026-10-12 Mon>")
+                :to-equal '(t t nil)))))
+
+  (it "flags a planning line that has text outside the fields it keeps"
+    (flet ((extra-text-p (planning-line)
+             (let* ((document (parse-org (format nil "* H~%~A~%" planning-line)))
+                    (headline (find :headline
+                                    (node-children (document-root document))
+                                    :key #'node-type))
+                    (section (find :section (node-children headline)
+                                   :key #'node-type)))
+               (and (node-property (first (node-children section))
+                                   :reader-extra-text-p)
+                    t))))
+      (with-soft-assertions
+        (expect (extra-text-p "CLOSED: [2026-10-10 Sat] DEADLINE: <2026-10-12 Mon>")
+                :to-be nil)
+        (expect (extra-text-p "  SCHEDULED: <2026-10-11 Sun>") :to-be nil)
+        (expect (extra-text-p "SCHEDULED: <2026-10-11 Sun> trailing") :to-be t)
+        (expect (extra-text-p "CLOSED: junk") :to-be t)
+        (expect (extra-text-p "SCHEDULED:<2026-10-11 Sun>") :to-be t)
+        (expect (extra-text-p "SCHEDULED:") :to-be t)
+        (expect (extra-text-p "SCHEDULED: <2026-10-11 Sun> DEADLINE: junk")
+                :to-be t)
+        ;; A range of two timestamps of one kind is one field.
+        (expect (extra-text-p "SCHEDULED: <2025-03-01 Sat +1w>--<2025-03-08 Sat>")
+                :to-be nil)
+        (expect (extra-text-p "SCHEDULED: <2025-03-01 Sat>--[2025-03-08 Sat]")
+                :to-be t)
+        (expect (extra-text-p "SCHEDULED: <2025-03-01 Sat>--<junk>")
+                :to-be t)
+        (expect (extra-text-p "SCHEDULED: <2025-03-01 Sat>-") :to-be t)
+        ;; The earlier of two valid fields of one kind is replaced.
+        (expect (extra-text-p "SCHEDULED: <2026-10-11 Sun> SCHEDULED: <2026-10-12 Mon>")
+                :to-be t)))))
