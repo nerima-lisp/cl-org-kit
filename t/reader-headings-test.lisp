@@ -885,6 +885,7 @@
         (expect (fields "SCHEDULED: <2026-10-11 Sun> SCHEDULED: junk")
                 :to-equal '(nil nil t))
         (expect (fields "SCHEDULED:") :to-equal '(nil nil nil))
+        (expect (fields "SCHEDULED: ") :to-equal '(nil nil nil))
         ;; Unlike Org, the kit needs a space between keyword and timestamp.
         (expect (fields "SCHEDULED:<2026-10-11 Sun>") :to-equal '(nil nil nil))
         (expect (fields "CLOSED: [2026-10-10 Sat] DEADLINE: <2026-10-12 Mon>")

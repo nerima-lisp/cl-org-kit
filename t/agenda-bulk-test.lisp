@@ -609,6 +609,27 @@
             (expect (document-text (edit-result-updated-document edit))
                     :to-equal source-text)
             (expect (edit-result-spans edit) :to-be nil))))))
+  (it "unschedules a SCHEDULED line that is not directly under the heading"
+    ;; After a property drawer the line is plain paragraph text, in Org and
+    ;; here, but a bulk unschedule still removes it.
+    (dolist (case
+             (list
+              (list (format nil "* Task~%:PROPERTIES:~%:ID: a~%:END:~%SCHEDULED: <2025-03-01 Sat>~%")
+                    (format nil "* Task~%:PROPERTIES:~%:ID: a~%:END:~%"))
+              (list (format nil "* Task~%:PROPERTIES:~%:ID: a~%:END:~%SCHEDULED: <2025-03-01 Sat> Keep this.~%")
+                    (format nil "* Task~%:PROPERTIES:~%:ID: a~%:END:~%Keep this.~%"))
+              (list (format nil "* Task~%:PROPERTIES:~%:ID: a~%:END:~%SCHEDULED: <2025-03-01 Sat>")
+                    (format nil "* Task~%:PROPERTIES:~%:ID: a~%:END:~%"))))
+      (let* ((document (parse-org (first case)))
+             (results (agenda-bulk-action
+                       (agenda-bulk-test-entries document '("Task"))
+                       :schedule :schedule-date nil))
+             (updated (document-text
+                       (edit-result-updated-document
+                        (cdr (assoc document results :test #'eq))))))
+        (expect (list (first case) updated)
+                :to-equal (list (first case) (second case))))))
+
   (it "checks archive headers, local archive targets, and refile cycles"
     (let* ((source (parse-org (format nil "* Task~%")
                               :source-name "source.org"))
