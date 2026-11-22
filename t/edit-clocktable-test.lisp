@@ -1691,7 +1691,7 @@
             :to-equal '("| <r5> |" "|   12 |"))))
 
 (describe "write-clocktable formatting options"
-  (it "adds a tags column, recalculates a formula, and names formula failures"
+  (it "adds a tags column, writes percentages, recalculates a formula, and names formula failures"
     (let* ((range (edit-clocktable-test-range))
            (result (make-clocktable-result
                     :total-minutes 30 :range range
@@ -1707,7 +1707,9 @@
                   (edit-result-updated-document
                    (apply #'write-clocktable document target result options))))))
         (let ((tagged (write-with :tags-p t))
-              (calculated (write-with :formula "$2=0")))
+              (calculated (write-with :formula "$2=0"))
+              (percent (write-with :formula "%")))
+          (expect (search "100.0" percent) :to-be-truthy)
           (expect (search "| Tags" tagged) :to-be-truthy)
           (expect (search "a, b" tagged) :to-be-truthy)
           (expect (search "#+TBLFM: $2=0" calculated) :to-be-truthy))
