@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.3]
 
 ### Changed
 
@@ -29,6 +29,8 @@
 - `set-planning` and `transition-heading-todo` no longer signal
   `org-edit-error` with reason `:unexpected-diff` on a heading that has no body
   and is followed by a blank line.
+
+Version 0.3.3 removes no names exported in 0.3.2.
 
 ## [0.3.2]
 
