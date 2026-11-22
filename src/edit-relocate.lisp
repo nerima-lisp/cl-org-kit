@@ -306,7 +306,7 @@
           finally (edit-signal-error target :uneditable-structure
                                      "Property drawer has no closing marker"))))
 
-(defun edit-relocate-property-drawer-location (headline raw target)
+(defun edit-relocate-property-drawer-location (headline raw)
   (let ((drawers (edit-relocate-root-property-drawers headline)))
     (if drawers
         (values (first drawers) nil)
@@ -352,8 +352,7 @@
                             patches))
                     (push entry missing))))
             (multiple-value-bind (drawer insertion-offset)
-                (edit-relocate-property-drawer-location headline raw
-                                                        target)
+                (edit-relocate-property-drawer-location headline raw)
               (if drawer
                   (when missing
                     (let ((offset (edit-relocate-drawer-close-offset raw drawer
