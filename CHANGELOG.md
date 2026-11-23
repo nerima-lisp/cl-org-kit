@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.4]
 
 ### Changed
 
@@ -38,6 +38,8 @@
 - A clocktable block with no `:block`, `:tstart`, or `:tend` signaled
   `org-time-error` when its `:time-context` used a time zone other than UTC. The
   all-time range now uses local bounds that any zone resolves.
+
+Version 0.3.4 removes no names exported in 0.3.3.
 
 ## [0.3.3]
 
